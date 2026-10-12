@@ -9,9 +9,10 @@ pytest_plugins = ("test_vendor_sdk",)
 
 
 @pytest.mark.asyncio
-async def test_indivisible_evidence_capacity_fails_before_expensive_suffix_reads(kb_dir):
-    from time import process_time
-
+async def test_indivisible_evidence_capacity_fails_before_expensive_suffix_reads(
+    kb_dir, monkeypatch
+):
+    from openkb.agent import compiler
     from openkb.agent.page_response import PageResponseError
     from openkb.agent.page_updates import PageUpdate
     from openkb.agent.source_windows import CompileSourceWindows
@@ -29,7 +30,28 @@ async def test_indivisible_evidence_capacity_fails_before_expensive_suffix_reads
         long=True,
     )
     before = page.read_bytes()
-    started = process_time()
+    projected_offsets, yielded_offsets = [], []
+    project, iterate = reader._window, reader.iter_selection
+    model_calls = []
+
+    def observe_projection(path, location, budget):
+        projected_offsets.append(location.get("offset", 0))
+        return project(path, location, budget)
+
+    def observe_selection(*args, **kwargs):
+        for window in iterate(*args, **kwargs):
+            yielded_offsets.append(window["selection_offset"])
+            yield window
+
+    async def unexpected_generation(*args, **kwargs):
+        model_calls.append((args, kwargs))
+        raise AssertionError("Capacity rejection must occur before model generation")
+
+    # Observe real reader work after prepare. Do not alter any returned window,
+    # continuation, capacity result, iteration count, or source bytes.
+    monkeypatch.setattr(reader, "_window", observe_projection)
+    monkeypatch.setattr(reader, "iter_selection", observe_selection)
+    monkeypatch.setattr(compiler, "_llm_call_page_async", unexpected_generation)
     with pytest.raises(PageResponseError, match="page_update_capacity_exceeded"):
         await generate_page_update(
             patch=PageUpdate(page.read_text()),
@@ -42,13 +64,21 @@ async def test_indivisible_evidence_capacity_fails_before_expensive_suffix_reads
             current_original=None,
             known_targets_message={"role": "user", "content": "rules"},
             task_message={"role": "user", "content": "Update the necessary rule"},
-            # The capacity seam represents indivisible evidence metadata that
-            # cannot fit, regardless of how little source body is included.
+            # Indivisible metadata cannot fit even when the body is subdivided.
             fits=lambda messages: "selection_length" not in json.dumps(messages),
         )
-    # CPU time excludes scheduler/I/O delays. The eager path takes seconds to
-    # project thousands of suffixes; a failed first window needs milliseconds.
-    assert process_time() - started < 2.0
+    # Every attempted subdivision must stop at its first rejected window.
+    # Inspect projections as well as yielded windows so eager work inside a
+    # reader cannot be hidden by yielding only its first result.
+    assert all(offset == 0 for offset in projected_offsets), {
+        "projected_count": len(projected_offsets),
+        "first_suffix": next(offset for offset in projected_offsets if offset > 0),
+    }
+    assert all(offset == 0 for offset in yielded_offsets), {
+        "yielded_count": len(yielded_offsets),
+        "first_suffix": next(offset for offset in yielded_offsets if offset > 0),
+    }
+    assert model_calls == []
     assert page.read_bytes() == before
 
 
