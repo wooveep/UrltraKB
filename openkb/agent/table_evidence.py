@@ -48,6 +48,28 @@ class _LiteralContext(HTMLParser):
         self.handle_starttag(tag, attrs)
 
 
+def plain_prose_blocks(tokens):
+    """Return unchanged plain paragraphs, excluding literal HTML across blocks.
+
+    Mixed formatting is deliberately conservative: do not reconstruct visible
+    text by joining children or promote link/image destinations into prose.
+    """
+    context = _LiteralContext()
+    for token in tokens:
+        if token.type == "html_block":
+            if len(token.content) > MAX_TABLE_CHARS:
+                return  # Later HTML context is unknown; do not guess.
+            context.feed(token.content)
+        elif token.type == "inline":
+            if not context.literal and all(
+                child.type in {"text", "softbreak", "hardbreak"} for child in token.children or []
+            ):
+                yield token.content
+            for child in token.children or []:
+                if child.type == "html_inline":
+                    context.feed(child.content)
+
+
 class _Parser(_LiteralContext):
     def __init__(self, text, base):
         super().__init__()

@@ -11,7 +11,7 @@ import re
 import unicodedata
 
 from openkb.agent.page_response import PageResponseError, parse_page, parse_summary
-from openkb.agent.table_evidence import table_layout
+from openkb.agent.table_evidence import plain_prose_blocks, table_layout
 from openkb.content_blocks import markdown_layout
 
 PROTOCOL = "original-excerpts-v3"
@@ -39,7 +39,17 @@ def _path_character(character: str) -> bool:
     )
 
 
-def _contains_path(source: str, path: str) -> bool:
+def _cjk_prose_prefix(source: str, start: int) -> bool:
+    end = start
+    while start and _path_character(source[start - 1]):
+        start -= 1
+    prefix = source[start:end]
+    return bool(prefix) and all(
+        unicodedata.name(character, "").startswith("CJK UNIFIED IDEOGRAPH-") for character in prefix
+    )
+
+
+def _contains_path(source: str, path: str, *, prose: bool = False) -> bool:
     start = source.find(path)
     while start >= 0:
         end = start + len(path)
@@ -47,7 +57,10 @@ def _contains_path(source: str, path: str) -> bool:
         # A final sentence period is punctuation; a filename extension is not.
         if right == "." and not _path_character(source[end + 1 : end + 2]):
             right = ""
-        if not _path_character(left) and not _path_character(right):
+        # Native Chinese prose often has no space before an absolute path.
+        # Only prose may use this boundary; code and longer path prefixes may not.
+        left_boundary = not _path_character(left) or (prose and _cjk_prose_prefix(source, start))
+        if left_boundary and not _path_character(right):
             return True
         start = source.find(path, start + 1)
     return False
@@ -75,21 +88,25 @@ class SourceExcerpts:
         self.sources: list[dict] = []
         self.literal_bodies: set[str] = set()
         self.path_sources: list[str] = []
+        self.prose_path_sources: list[str] = []
         for number, text in enumerate(sources, 1):
             check_model_stop()
             tokens, offsets = markdown_layout(text)
             check_model_stop()
             self.path_sources.append(text)
+            self.prose_path_sources.extend(plain_prose_blocks(tokens))
             # Only visible, resolved table-cell text supplies decoded entities.
             # Attributes, comments and fenced table examples are not cell evidence.
             if "&" in text:
-                self.path_sources.extend(
+                cell_parts = [
                     part
                     for table in table_layout(text, (tokens, offsets))
                     for cell in table.get("cells", [])
                     if cell["kind"] != "unresolved"
                     for part in _plain_cell_parts(text, cell)
-                )
+                ]
+                self.path_sources.extend(cell_parts)
+                self.prose_path_sources.extend(cell_parts)
             protected: list[tuple[int, int]] = []
             for index, token in enumerate(tokens):
                 if index % 128 == 0:
@@ -245,7 +262,12 @@ class SourceExcerpts:
             for child in token.children or []:
                 if child.type != "code_inline" or not _standalone_path(child.content):
                     continue
-                if not any(_contains_path(source, child.content) for source in self.path_sources):
+                if not any(
+                    _contains_path(source, child.content) for source in self.path_sources
+                ) and not any(
+                    _contains_path(source, child.content, prose=True)
+                    for source in self.prose_path_sources
+                ):
                     raise PageResponseError(
                         "page_literal_conflict",
                         "An inline path does not occur verbatim in the supplied original. "

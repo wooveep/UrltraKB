@@ -105,6 +105,11 @@ def test_complete_path_next_to_a_native_cell_break_keeps_exact_unicode_spelling(
             "/systen/config/cluster/<节点>/state/",
         ),
         (
+            "查看/sys/kernel/config/cluster/<你自己的目录>/node/ 是否存在其他异常主机",
+            "/sys/kernel/config/cluster/<你自己的目录>/node/",
+            "/syk/kernel/config/cluster/<你自己的目录>/node/",
+        ),
+        (
             r"Inspect C:\Program Files\Cluster\state.ini on the recovery node.",
             r"C:\Program Files\Cluster\state.ini",
             r"C:\Program Flies\Cluster\state.ini",
@@ -164,12 +169,30 @@ async def test_long_summary_repairs_changed_inline_path_before_publication(
 
 
 @pytest.mark.asyncio
-async def test_repeated_path_corruption_keeps_the_previous_summary(kb_dir, monkeypatch):
+@pytest.mark.parametrize(
+    "original, proposed",
+    [
+        ("Inspect /system/config/state on the recovery node.", "/systen/config/state"),
+        ("读取/目录/system/config/state。", "/system/config/state"),
+        ("Read prefix/system/config/state.", "/system/config/state"),
+        ("```text\n目录/system/config/state\n```", "/system/config/state"),
+        ("Read `目录/system/config/state`.", "/system/config/state"),
+        ("Read cafe\u0301/system/config/state.", "/system/config/state"),
+        ("[manual](目录/system/config/state)", "/system/config/state"),
+        ("![manual](目录/system/config/state)", "/system/config/state"),
+        ("<code>\n\n目录/system/config/state\n\n</code>", "/system/config/state"),
+        ("<xmp>\n\n目录/system/config/state\n\n</xmp>", "/system/config/state"),
+        ("<title>\n\n目录/system/config/state\n\n</title>", "/system/config/state"),
+    ],
+)
+async def test_repeated_path_corruption_keeps_the_previous_summary(
+    kb_dir, monkeypatch, original, proposed
+):
     from openkb.agent.compiler import compile_long_doc
     from openkb.compilation_report import CompilationIncomplete
 
     wiki = kb_dir / "wiki"
-    (wiki / "sources/manual.md").write_text("Inspect /system/config/state on the recovery node.")
+    (wiki / "sources/manual.md").write_text(original)
     summary = wiki / "summaries/manual.md"
     summary.write_text("Previous successful knowledge.\n")
     old = summary.read_bytes()
@@ -185,7 +208,7 @@ async def test_repeated_path_corruption_keeps_the_previous_summary(kb_dir, monke
                 {
                     "description": "Recovery",
                     "sections": [
-                        {"id": section["id"], "content": "Read `/systen/config/state`."}
+                        {"id": section["id"], "content": f"Read `{proposed}`."}
                         for section in window["output_sections"]
                     ],
                 }
