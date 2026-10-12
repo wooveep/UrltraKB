@@ -155,6 +155,64 @@ async def test_unseparated_numbers_are_not_certified_as_headings(kb_dir, value):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("number", ["4.4.3.3", "4.4.3.3.", "1.2 \t\r"])
+async def test_standalone_number_stops_previous_sibling_scope(kb_dir, number):
+    first = "4.4.3 Management\n4.4.3.2 Network\ncapacity follows topology.\n"
+    body = (
+        first + number + "\nWinCenter specifications\n"
+        "<table><tr><td>capacity needs a disk.</td></tr></table>\n"
+        "4.4.3.4 Preparation\ncapacity requires two nodes."
+    )
+    pages(kb_dir, [body])
+    agent = agent_for(kb_dir)
+    result = json.loads(await invoke(agent, "search_originals", terms=["capacity"]))
+    first_scope, uncertain, next_scope = [
+        hit["source_context"]["regions"][0] for hit in result["hits"]
+    ]
+    assert "specifications" not in first_scope["nearby_original"]
+    assert uncertain["status"] == "unconfirmed" and not uncertain["headings"]
+    assert uncertain["unconfirmed_boundary"] == {
+        "unit": 1,
+        "offset": len(first),
+        "literal": number,
+    }
+    assert next_scope["headings"][-1]["literal"] == "4.4.3.4 Preparation"
+    read = await invoke(agent, "get_page_content", doc_name="manual", pages="1")
+    context = json.loads(read.split("\nSource context: ")[1].split("\n")[0])
+    assert context["regions"][1]["char_range"][1] == len(first)
+    ranges = [tuple(region["char_range"]) for region in context["regions"]]
+    assert len(ranges) == len(set(ranges))
+    assert body in json.loads(read.split("\n\n", 1)[1].split("\nSource context: ")[0])["content"]
+
+
+@pytest.mark.asyncio
+async def test_standalone_number_boundary_continues_across_physical_pages(kb_dir):
+    pages(kb_dir, ["4.4.3.2 Network\n4.4.3.3", "WinCenter specifications\ncapacity is listed."])
+    result = json.loads(await invoke(agent_for(kb_dir), "search_originals", terms=["capacity"]))
+    scope = result["hits"][0]["source_context"]["regions"][0]
+    assert scope["status"] == "unconfirmed" and not scope["headings"]
+    assert scope["unconfirmed_boundary"]["unit"] == 1
+    assert scope["unconfirmed_boundary"]["literal"] == "4.4.3.3"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "literal",
+    [
+        "```\n4.4.3.3\n```",
+        "    4.4.3.3",
+        "<pre>\n4.4.3.3\n</pre>",
+        "<table>\n<tr><td>\n4.4.3.3\n</td></tr>\n</table>",
+    ],
+)
+async def test_standalone_number_inside_literal_does_not_clear_scope(kb_dir, literal):
+    pages(kb_dir, ["# Confirmed scope\n\n" + literal, "capacity is listed."])
+    result = json.loads(await invoke(agent_for(kb_dir), "search_originals", terms=["capacity"]))
+    scope = result["hits"][0]["source_context"]["regions"][0]
+    assert [h["literal"] for h in scope["headings"]] == ["# Confirmed scope"]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "code",
     [

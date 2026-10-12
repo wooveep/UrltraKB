@@ -6,7 +6,10 @@ from functools import lru_cache
 from openkb.source_reading import reading_action
 
 _HEADING = re.compile(r"(?m)^(?:(#{1,6})[ \t]+|([0-9]+(?:\.[0-9]+)*)(?:\.)?[ \t]+)([^\n]+)$")
-_UNCERTAIN_HEADING = re.compile(r"(?m)^[0-9]+(?:\.[0-9]+)*\.?(?=[^\W\d_])[^\n]+$")
+_UNCERTAIN_HEADING = re.compile(
+    r"(?m)^(?:[0-9]+(?:\.[0-9]+)*\.?(?=[^\W\d_])[^\n]+"
+    r"|[0-9]+(?:\.[0-9]+)+\.?[ \t]*\r?)$"
+)
 
 
 @lru_cache(maxsize=8)
@@ -164,9 +167,11 @@ def original_context(
     base = 0
     headings = []
     for number, body in units:
-        matches = [(m, True) for m in _HEADING.finditer(body)]
-        matches.extend((m, False) for m in _UNCERTAIN_HEADING.finditer(body))
-        for m, confirmed in sorted(matches, key=lambda item: item[0].start()):
+        matches = {m.start(): (m, True) for m in _HEADING.finditer(body)}
+        # Trailing whitespace can also match an empty numbered title. Keep one
+        # boundary at that native offset, with uncertainty taking precedence.
+        matches.update((m.start(), (m, False)) for m in _UNCERTAIN_HEADING.finditer(body))
+        for _, (m, confirmed) in sorted(matches.items()):
             if any(start <= base + m.start() < end for start, end in literals):
                 continue
             title = m[3].strip().rstrip("#").strip() if confirmed else m[0]
@@ -194,8 +199,9 @@ def original_context(
     stack: list[dict] = []
     for h in headings:
         if h["level"] is None:
-            # A label such as "5.2Deployment" is lexically indistinguishable
-            # from a quantity/version. It stops ancestry without certifying one.
+            # Unseparated labels or standalone hierarchical numbers can be
+            # headings, quantities or versions. Stop ancestry without guessing
+            # a title, including when extraction split it onto another line.
             stack.clear()
             h["path"] = []
             continue
