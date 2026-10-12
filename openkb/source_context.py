@@ -10,28 +10,21 @@ if TYPE_CHECKING:
     from openkb.application.query_views import QueryView
 
 COMPILATION_FACT_RULES = """
-Compose summaries, concepts, entities and updates as source-grounded references.
-Organize description and body by named subject, applicable conditions and recorded
-facts or procedures. Let the evidence determine the page's breadth. Preserve original
-names and document titles unless sources supply aliases; translations may accompany
-them. Describe relationships only as specifically as the sources establish them.
-Navigation and generated pages locate originals; links do not verify their claims.
-Match the source's units, revision, scope and logical strength: requirements,
-recommendations, permissions and explicit exclusions are different facts. Independent
-facts do not establish causation, unchanged properties, guarantees or unstated defaults.
-Ordinary arithmetic and unit conversions are allowed: show premises and derivation;
-keep derived conclusions within the calculated bounds. Preserve conflicting source
-statements separately. Distinguish useful synthesis from recorded facts.
-Claims that a source omits, excludes or uniquely permits something require an explicit
-original statement or a complete, verifiable enumeration at that scope. Window coverage
-describes the supplied reading, not the document's subject coverage. When an unresolved
-detail affects use of a supported fact, attach that particular reading limit to the fact.
-External advice requires a separate label and is normally omitted from summaries.
-Revise an existing draft's organization and assertions together against the originals
-actually read, including earlier conclusions about missing information. Place newly
-established facts and their qualifications together. Preserve unrelated supported
-content, its conditions, calculations and labelled synthesis; missing windows do not
-refute old facts. Changed sources retain their old basis and pending refresh status.
+Write source-grounded summaries, concepts, entities and updates. Organize descriptions
+and bodies by subject, conditions and facts/procedures; evidence determines breadth.
+Keep original names/titles unless sources give aliases; translations may accompany.
+Navigation and generated pages locate originals, not verify claims. Match original
+relations, units, revision, scope and strength (requirements, advice, permissions,
+exclusions). Independent facts establish no causation, unchanged properties, guarantees
+or defaults. Show premises and derivation for arithmetic/unit conversions; stay within
+calculated bounds. Keep conflicting statements separate and distinguish synthesis
+from recorded facts. Absence, exclusion and uniqueness need explicit originals or
+complete verifiable scope enumeration. Window coverage proves reading, not subject
+coverage; attach necessary reading limits to affected facts. Label external advice;
+normally omit it from summaries. Reassess draft structure/assertions, including claimed
+absences, against originals read. Keep new facts qualified. Preserve unrelated supported
+facts, conditions, calculations and labelled synthesis: unread windows refute no old
+facts. Changed sources retain their old basis and pending refresh status.
 """
 
 ANSWER_SOURCE_RULES = """
