@@ -198,6 +198,84 @@ async def test_literal_context_continues_across_pages_then_confirmed_scope_resta
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("container", ["table", "div"])
+@pytest.mark.parametrize("title", ["4.4.3.4.2 Clock sync", "4.4.3.4.2Clock sync"])
+async def test_html_container_end_preserves_following_native_boundaries(kb_dir, container, title):
+    pages(
+        kb_dir,
+        [
+            "4.4.3 Management\n4.4.3.2 Network\n"
+            f"<{container}>\n9.2 Example cell\n5.2Literal cell\n</{container}>\n"
+            "4.4.3.4 Node preparation",
+            title + "\ncapacity must match.\n4.4.3.4.3 Disks\ncapacity needs a disk.",
+        ],
+    )
+    agent = agent_for(kb_dir)
+    result = json.loads(await invoke(agent, "search_originals", terms=["capacity"]))
+    assert len(result["hits"]) == 2
+    first, second = [hit["source_context"]["regions"][0] for hit in result["hits"]]
+    if "2 Clock" in title:
+        assert [h["literal"] for h in first["headings"]] == [
+            "4.4.3 Management",
+            "4.4.3.4 Node preparation",
+            title,
+        ]
+    else:
+        assert first["status"] == "unconfirmed" and not first["headings"]
+        assert first["unconfirmed_boundary"] == {"unit": 2, "offset": 0, "literal": title}
+    assert "needs a disk" not in first["nearby_original"]
+    assert second["headings"][-1]["literal"] == "4.4.3.4.3 Disks"
+    read = await invoke(agent, "get_page_content", doc_name="manual", pages="1")
+    context = json.loads(read.split("\nSource context: ")[1].split("\n")[0])
+    assert all(
+        h["literal"] not in {"9.2 Example cell", "5.2Literal cell"}
+        for region in context["regions"]
+        for h in region["headings"]
+    )
+    assert "9.2 Example cell" in read and "5.2Literal cell" in read
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "markup",
+    [
+        '<img alt="\n9.2 Example attribute\n5.2Literal attribute\n" src="figure.png">',
+        "<!--\n9.2 Example comment\n5.2Literal comment\n-->",
+        "<table>\n<tr><td>\n9.2 Example cell\n5.2Literal cell\n</td></tr>\n</table>",
+    ],
+)
+async def test_html_syntax_does_not_certify_headings_or_hide_following_scope(kb_dir, markup):
+    pages(kb_dir, ["# Real scope\n" + markup + "\ncapacity remains.\n3.2 Next\ncapacity changes."])
+    result = json.loads(await invoke(agent_for(kb_dir), "search_originals", terms=["capacity"]))
+    assert len(result["hits"]) == 2
+    scopes = [hit["source_context"]["regions"][0] for hit in result["hits"]]
+    assert [h["literal"] for h in scopes[0]["headings"]] == ["# Real scope"]
+    assert scopes[1]["headings"][-1]["literal"] == "3.2 Next"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("parameter", ["<vm>", "<snap-name>", "<hostname>"])
+async def test_native_command_parameters_do_not_open_html_containers(kb_dir, parameter):
+    pages(
+        kb_dir,
+        [
+            "4.4.3.4.5 Snapshots\nvirsh snapshot-create-as " + parameter,
+            "5.2Deployment modes\ncapacity belongs to this mode.\n"
+            "5.3Deployment steps\ncapacity belongs to these steps.",
+        ],
+    )
+    result = json.loads(await invoke(agent_for(kb_dir), "search_originals", terms=["capacity"]))
+    assert len(result["hits"]) == 2
+    scopes = [hit["source_context"]["regions"][0] for hit in result["hits"]]
+    assert all(s["status"] == "unconfirmed" and not s["headings"] for s in scopes)
+    assert [s["unconfirmed_boundary"]["literal"] for s in scopes] == [
+        "5.2Deployment modes",
+        "5.3Deployment steps",
+    ]
+    assert "these steps" not in scopes[0]["nearby_original"]
+
+
+@pytest.mark.asyncio
 async def test_each_retained_occurrence_has_its_own_location_without_pixel_actions(kb_dir):
     Image.new("RGB", (32, 32), "white").save(kb_dir / "wiki/sources/figure.png")
     pages(kb_dir, ["# First\nNative text", "# Second\nNative text"], ["sources/figure.png"])

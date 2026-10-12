@@ -18,7 +18,7 @@ def _literal_spans(text: str) -> tuple[tuple[int, int], ...]:
     spans = [
         (offsets[token.map[0]], offsets[token.map[1]])
         for token in tokens
-        if token.map and token.type in {"fence", "code_block", "html_block"}
+        if token.map and token.type in {"fence", "code_block"}
     ]
     # Feed only actual HTML markup to the shared literal parser. Escaped tags
     # and tags inside code examples must not open or close an HTML literal.
@@ -52,35 +52,71 @@ def _literal_spans(text: str) -> tuple[tuple[int, int], ...]:
 
 
 def _html_literal_spans(markup: str) -> list[tuple[int, int]]:
+    from markdown_it.common.html_blocks import block_names
+
     from openkb.html_images import HTMLLiteralContext
 
     offsets = [0, *(match.end() for match in re.finditer("\n", markup))]
-    spans = []
-    opening = None
+    visible = []
+    void = {
+        "area",
+        "base",
+        "basefont",
+        "br",
+        "col",
+        "embed",
+        "frame",
+        "hr",
+        "img",
+        "input",
+        "link",
+        "meta",
+        "param",
+        "source",
+        "track",
+        "wbr",
+    }
 
     class LocatedLiterals(HTMLLiteralContext):
+        def __init__(self):
+            super().__init__()
+            # Unescape would change data lengths and invalidate native offsets.
+            self.convert_charrefs = False
+            self.containers: list[str] = []
+
         def handle_starttag(self, tag, attrs):
-            nonlocal opening
-            was_literal = bool(self.literal)
             super().handle_starttag(tag, attrs)
-            if not was_literal and self.literal:
-                row, column = self.getpos()
-                opening = offsets[row - 1] + column
+            # Native commands use angle parameters such as <vm>/<snap-name>.
+            # A valid inline tag token alone does not prove a content container.
+            if not self.literal and tag in block_names and tag not in void:
+                self.containers.append(tag)
 
         def handle_endtag(self, tag):
-            nonlocal opening
+            was_literal = bool(self.literal)
             super().handle_endtag(tag)
-            if opening is not None and not self.literal:
+            if not was_literal and tag in self.containers:
+                index = len(self.containers) - 1 - self.containers[::-1].index(tag)
+                del self.containers[index:]
+
+        def handle_data(self, data):
+            if not self.literal and not self.containers:
                 row, column = self.getpos()
-                end = markup.index(">", offsets[row - 1] + column) + 1
-                spans.append((opening, end))
-                opening = None
+                start = offsets[row - 1] + column
+                visible.append((start, start + len(data)))
 
     parser = LocatedLiterals()
     parser.feed(markup)
     parser.close()
-    if opening is not None:
-        spans.append((opening, len(markup)))
+    # CommonMark HTML blocks may continue long after </table> or </div>.
+    # Exclude actual markup and container contents, not that whole block's tail.
+    spans = []
+    cursor = 0
+    for start, end in visible:
+        if cursor < start:
+            spans.append((cursor, start))
+        cursor = end
+    if cursor < len(markup):
+        spans.append((cursor, len(markup)))
     return spans
 
 
