@@ -443,7 +443,13 @@ class CompileSourceWindows:
                 )
                 sources.append(self._path(name) or path)
                 continue
-            metadata = frontmatter.parse(self._read(path).decode("utf-8"))
+            try:
+                metadata = frontmatter.parse(self._read(path).decode("utf-8"))
+            except FileNotFoundError:
+                # Pending summaries can be excluded while a newer page still
+                # links to them. Keep the unresolved association visible.
+                sources.append(path)
+                continue
             links = metadata.get("sources", [])
             if not isinstance(links, list) or any(not isinstance(n, str) for n in links):
                 raise ValueError("Invalid compile source associations")
@@ -680,7 +686,12 @@ class CompileSourceWindows:
                 if not long and path == self._path():
                     continue  # The dedicated short-original message already contains it in full.
                 location = {}
-                if path.endswith(".json") and not path.endswith(".content.json") and self.kb_dir:
+                if (
+                    path.endswith(".json")
+                    and not path.endswith(".content.json")
+                    and self.kb_dir
+                    and (self.wiki / path).is_file()
+                ):
                     from openkb.source_navigation import published_navigation
 
                     previous = published_navigation(self.kb_dir, self.view_id, Path(path).stem)
@@ -697,8 +708,9 @@ class CompileSourceWindows:
         windows: list[dict] = []
         remaining = MAX_EVIDENCE_CHARS
         for path, location in paths.items():
-            self.figure_source(path)
             try:
+                self._read(path)
+                self.figure_source(path)
                 selected_windows = (
                     list(self.iter_selection(path, location, allow_suffix=previous_page is None))
                     if previous_page or long
@@ -706,13 +718,18 @@ class CompileSourceWindows:
                     if remaining
                     else [{"path": path, "coverage": "unread", "content": ""}]
                 )
-            except FileNotFoundError:
+            except FileNotFoundError as error:
+                if error.filename != str((self.wiki / path).resolve()):
+                    raise
                 selected_windows = [
                     {
                         "path": path,
                         "coverage": "unread",
                         "content": "",
-                        "diagnostics": ["Linked original unavailable; do not infer absence"],
+                        "content_kind": "unavailable_source_association",
+                        "diagnostics": [
+                            "Linked source association unavailable; do not infer absence"
+                        ],
                     }
                 ]
             for window in selected_windows:
