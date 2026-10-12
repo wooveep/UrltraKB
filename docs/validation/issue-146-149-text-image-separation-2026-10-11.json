@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "status": "combined_v14_authorized_3500_build_running",
+  "status": "v15_real_build_running_semantic_acceptance_pending",
   "recorded_at": "2026-10-12T00:23:04.704482+00:00",
   "development_base": "b5f3f9049fe7d0baadaf72c3f05f7a9d7a13ff1c",
   "current_candidate_code": "5ce1dac44ee454715697bf42bed3cdc1929a7a00",
@@ -844,28 +844,28 @@
       "status": "failed_required_coverage",
       "reason": "Installation target pages omit necessary native prerequisites, steps or applicability conditions. New similarly named pages do not satisfy old required target coverage.",
       "validated_candidate": "v8",
-      "latest_candidate": "v14_pending_real_validation"
+      "latest_candidate": "v15_build_running_pending_real_validation"
     },
     "147": {
       "close": false,
       "status": "incomplete_required_refresh",
       "reason": "235-page reprocessing published, but required refresh remains incomplete; subsequent full refresh was interrupted at cumulative 371 sends without publication. Corpus reprocessing also exhausted available indexing budget.",
       "validated_candidate": "v8",
-      "latest_candidate": "v14_pending_real_validation"
+      "latest_candidate": "v15_build_running_pending_real_validation"
     },
     "148": {
       "close": false,
       "status": "failed_generated_semantics",
       "reason": "Confirmed changed commands/conditions, unsupported absence or uniqueness assertions, and incorrect figure associations remain in generated pages; API generated pages 7 pass / 1 fail.",
       "validated_candidate": "v8",
-      "latest_candidate": "v14_pending_real_validation"
+      "latest_candidate": "v15_build_running_pending_real_validation"
     },
     "149": {
       "close": false,
       "status": "failed_paired_qa",
       "reason": "v8 full answers 34/45 versus retained baseline 38/45 under the same preregistered rubric; 10 regressions and 6 improvements. Original historical 39/45 unchanged.",
       "validated_candidate": "v8",
-      "latest_candidate": "v14_pending_real_validation"
+      "latest_candidate": "v15_build_running_pending_real_validation"
     }
   },
   "limits": [
@@ -1359,6 +1359,20 @@
       "baseline_executed": false,
       "operations_independent_replay": "3 retained TOCs, all156 entries preserved each; only one saved same-heading/page verifier per tree; controlled replay not real inference",
       "whitepaper_replay_scope": "The 91-entry complete replay binds physical7c1bb34/page_indexce4a837 before numbered-identity filtering. Final v15 conservatively requires additional verification for conflicting model/native section numbers; those old responses do not exist, so whole-tree v15 replay remains a coverage gap."
+    },
+    "stopped_input_modality_audit": {
+      "path": ".scratch/text-image-repair-20261011/review/stopped-http-inputs-v14-actual.json",
+      "sha256": "6b23838824619623877a91c2896fdbdfb8c7cf1ebdc789f687f93d066c70798d",
+      "retained_requests": 480,
+      "responses": 477,
+      "findings": 0,
+      "charged_request_not_captured_not_audited": 1,
+      "evidence_unchanged": true,
+      "method_assessment": {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/stopped-http-v14-spec-assessment-r1.json",
+        "sha256": "add4a009d42f2610f27f150b1e82b7a9fa66a0ebe4ac2d8262c66b24bcf868fe"
+      },
+      "acceptance_scope": "input_modality_audit_only_not_build_or_semantic_acceptance"
     }
   },
   "current_v15": {
@@ -1439,6 +1453,21 @@
       }
     ],
     "process_receipt": ".scratch/text-image-repair-20261011/runs/build-final-v15-budget3500-process.json",
-    "started_at_utc": "2026-10-12T00:22:32.605409+00:00"
+    "started_at_utc": "2026-10-12T00:22:32.605409+00:00",
+    "evaluation_method_standards_reviews": {
+      "qa": {
+        "path": ".scratch/text-image-repair-20261011/review/combined-qa-retry-budget-standards-approval-r1.json",
+        "sha256": "963f6bd5f7687d0c9d739df141239ccb2ddabb155521e360bdd8e56e9e18b9b5"
+      },
+      "chat": {
+        "path": ".scratch/text-image-repair-20261011/review/combined-chat-retry-budget-standards-approval-r1.json",
+        "sha256": "0329bfa7b0930b98081cf2d70b0d2200260e4ddd81bf855cd3fe1781a9f45bc3"
+      },
+      "reader": {
+        "path": ".scratch/text-image-repair-20261011/review/combined-reader-retry-standards-approval-r1.json",
+        "sha256": "70975fd9136564b5a6dbf4decd255ad9208c238eeae0653eb6dbaeb1e3362162"
+      }
+    },
+    "evaluation_method_review_scope": "method only: full Agent loop, persisted sessions, original evaluation budget, reader gates; actual terminal build/head and final plan qualification still required"
   }
 }
