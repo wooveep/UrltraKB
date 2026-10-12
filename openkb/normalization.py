@@ -92,9 +92,11 @@ def normalization_fingerprint(
         *OFFICE_SOURCE_EXTENSIONS,
         *CNKI_SOURCE_EXTENSIONS,
     }:
+        from openkb.images import PDF_IMAGE_POLICY
         from openkb.pdf_layout import PDF_LAYOUT_POLICY
 
         pdf_policy["pdf_layout_policy"] = PDF_LAYOUT_POLICY
+        pdf_policy["pdf_image_policy"] = PDF_IMAGE_POLICY
 
     office_policy: dict = {}
     if source_revision and source_revision.source_format in {

@@ -29,6 +29,19 @@ _RELATIVE_RE = re.compile(r"!\[([^\]]*)\]\((?!https?://|data:)([^)]+)\)")
 
 # Minimum pixel dimension — skip icons, bullets, and tiny artifacts
 _MIN_IMAGE_DIM = 32
+PDF_IMAGE_POLICY = "pdf-block-soft-mask-v1"
+
+
+def _pdf_image_png(block: dict) -> bytes:
+    """Keep a PDF image's separately encoded opacity mask in its saved asset."""
+    pix = pymupdf.Pixmap(block["image"])
+    if pix.colorspace is not None and pix.colorspace.n > 3:
+        pix = pymupdf.Pixmap(pymupdf.csRGB, pix)
+    if mask := block.get("mask"):
+        if pix.alpha:
+            pix = pymupdf.Pixmap(pix, 0)
+        pix = pymupdf.Pixmap(pix, pymupdf.Pixmap(mask))
+    return pix.tobytes("png")
 
 
 def md_image_ref(alt: str, doc_name: str, filename: str) -> str:
@@ -79,14 +92,11 @@ def extract_pdf_images(pdf_path: Path, doc_name: str, images_dir: Path) -> dict[
                     continue
 
                 try:
-                    pix = pymupdf.Pixmap(image_bytes)
-                    if pix.n > 4:
-                        pix = pymupdf.Pixmap(pymupdf.csRGB, pix)
+                    image_png = _pdf_image_png(block)
                     img_counter += 1
                     filename = f"p{page_num}_img{img_counter}.png"
                     save_path = images_dir / filename
-                    atomic_write_bytes(save_path, pix.tobytes("png"))
-                    pix = None
+                    atomic_write_bytes(save_path, image_png)
                 except Exception:
                     logger.warning("Failed to save image block on page %d", page_num)
                     continue
@@ -138,13 +148,10 @@ def convert_pdf_to_pages(
                     if not image_bytes:
                         continue
                     try:
-                        pix = pymupdf.Pixmap(image_bytes)
-                        if pix.n > 4:
-                            pix = pymupdf.Pixmap(pymupdf.csRGB, pix)
+                        image_png = _pdf_image_png(block)
                         img_counter += 1
                         filename = f"p{page_num}_img{img_counter}.png"
-                        atomic_write_bytes(images_dir / filename, pix.tobytes("png"))
-                        pix = None
+                        atomic_write_bytes(images_dir / filename, image_png)
                         img_path = f"sources/images/{doc_name}/{filename}"
                         parts.append(f"\n![image]({img_path})\n")
                         page_images.append({"path": img_path})
@@ -213,13 +220,10 @@ def convert_pdf_with_images(
                     if not image_bytes:
                         continue
                     try:
-                        pix = pymupdf.Pixmap(image_bytes)
-                        if pix.n > 4:
-                            pix = pymupdf.Pixmap(pymupdf.csRGB, pix)
+                        image_png = _pdf_image_png(block)
                         img_counter += 1
                         filename = f"p{page_num}_img{img_counter}.png"
-                        atomic_write_bytes(images_dir / filename, pix.tobytes("png"))
-                        pix = None
+                        atomic_write_bytes(images_dir / filename, image_png)
                         parts.append(f"\n{md_image_ref('image', doc_name, filename)}\n")
                         image_path = f"sources/images/{doc_name}/{filename}"
                         page_images.append({"path": image_path})

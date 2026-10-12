@@ -9,8 +9,15 @@ pytest_plugins = ("test_pdf_readback",)
 
 
 @pytest.mark.parametrize("source_format", ["pdf", "docx", "pptx", "caj"])
-def test_pdf_based_normalization_identity_includes_native_layout_policy(
-    kb_dir, monkeypatch, source_format
+@pytest.mark.parametrize(
+    "policy, field",
+    [
+        ("openkb.pdf_layout.PDF_LAYOUT_POLICY", "pdf_layout_policy"),
+        ("openkb.images.PDF_IMAGE_POLICY", "pdf_image_policy"),
+    ],
+)
+def test_pdf_based_normalization_identity_includes_native_processing_policy(
+    kb_dir, monkeypatch, source_format, policy, field
 ):
     from openkb.normalization import normalization_fingerprint, normalization_id
 
@@ -20,19 +27,22 @@ def test_pdf_based_normalization_identity_includes_native_layout_policy(
     monkeypatch.setattr("openkb.cnki.runtime.processing_identity", lambda: {"fixture": "cnki"})
     revision = SimpleNamespace(source_format=source_format)
     current = normalization_fingerprint(kb_dir, source_revision=revision)
-    monkeypatch.setattr("openkb.pdf_layout.PDF_LAYOUT_POLICY", "previous-native-layout")
+    monkeypatch.setattr(policy, "previous-native-processing")
     previous = normalization_fingerprint(kb_dir, source_revision=revision)
 
     assert normalization_id("1" * 32, current) != normalization_id("1" * 32, previous)
-    assert json.loads(current)["pdf_layout_policy"] != json.loads(previous)["pdf_layout_policy"]
+    assert json.loads(current)[field] != json.loads(previous)[field]
 
 
-def test_native_text_normalization_does_not_change_with_pdf_layout_policy(kb_dir, monkeypatch):
+@pytest.mark.parametrize(
+    "policy", ["openkb.pdf_layout.PDF_LAYOUT_POLICY", "openkb.images.PDF_IMAGE_POLICY"]
+)
+def test_native_text_normalization_does_not_change_with_pdf_policy(kb_dir, monkeypatch, policy):
     from openkb.normalization import normalization_fingerprint
 
     revision = SimpleNamespace(source_format="md", digest="a" * 64, text_decoding=None, assets=[])
     current = normalization_fingerprint(kb_dir, source_revision=revision, doc_name="note")
-    monkeypatch.setattr("openkb.pdf_layout.PDF_LAYOUT_POLICY", "previous-native-layout")
+    monkeypatch.setattr(policy, "previous-native-processing")
     assert normalization_fingerprint(kb_dir, source_revision=revision, doc_name="note") == current
 
 
