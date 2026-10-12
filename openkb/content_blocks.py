@@ -5,6 +5,7 @@ from typing import Literal
 
 import regex
 from markdown_it import MarkdownIt
+from markdown_it.rules_inline import html_inline
 from markdown_it.token import Token
 from pydantic import Field, model_validator
 
@@ -38,7 +39,7 @@ class ContentBlock(Record):
         return self
 
 
-def markdown_layout(text: str) -> tuple[list[Token], list[int]]:
+def markdown_layout(text: str, *, locate_html: bool = False) -> tuple[list[Token], list[int]]:
     """CommonMark tokens with line offsets in the unchanged original text."""
     # CommonMark's line maps recognize CR/LF, not Python's broader splitlines
     # set (NEL, U+2028, U+2029, vertical tab). Keep offsets in the original bytes'
@@ -47,7 +48,18 @@ def markdown_layout(text: str) -> tuple[list[Token], list[int]]:
     offsets = [0]
     for line in lines:
         offsets.append(offsets[-1] + len(line))
-    tokens = MarkdownIt("commonmark").enable("table").parse(text)
+    parser = MarkdownIt("commonmark").enable("table")
+    if locate_html:
+
+        def positioned_html(state, silent):
+            start = state.pos
+            matched = html_inline(state, silent)
+            if matched and not silent:
+                state.tokens[-1].meta["original_markup_span"] = (start, state.pos)
+            return matched
+
+        parser.inline.ruler.at("html_inline", positioned_html)
+    tokens = parser.parse(text)
     return tokens, offsets
 
 

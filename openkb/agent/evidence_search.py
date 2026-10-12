@@ -65,8 +65,9 @@ def search_originals(
                 seen_scopes = set()
                 for first in positions or [0]:
                     context = original_context(source, raw, locator, match_offset=first)
+                    region = context["regions"][0] if context["regions"] else {}
                     scope = json.dumps(
-                        context["regions"][0]["headings"] if context["regions"] else []
+                        [region.get("headings", []), region.get("unconfirmed_boundary")]
                     )
                     if scope in seen_scopes:
                         continue

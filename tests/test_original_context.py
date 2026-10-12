@@ -110,6 +110,94 @@ async def test_markdown_heading_cannot_hide_a_mismatched_numbered_ancestor(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("title", ["5.2Deployment modes", "5.2部署模式"])
+async def test_uncertain_numbered_boundaries_separate_native_operations(kb_dir, title):
+    first = "capacity requires two managers.\n"
+    next_title = "5.3Deployment steps"
+    body = first + next_title + "\ncapacity is restricted to testing."
+    pages(kb_dir, ["5.1.3 Earlier topology", title, body])
+    agent = agent_for(kb_dir)
+    result = json.loads(await invoke(agent, "search_originals", terms=["capacity"]))
+    assert len(result["hits"]) == 2
+    scopes = [hit["source_context"]["regions"][0] for hit in result["hits"]]
+    assert all(scope["status"] == "unconfirmed" and not scope["headings"] for scope in scopes)
+    assert scopes[0]["unconfirmed_boundary"] == {"unit": 2, "offset": 0, "literal": title}
+    assert scopes[1]["unconfirmed_boundary"] == {
+        "unit": 3,
+        "offset": len(first),
+        "literal": next_title,
+    }
+    assert "testing" not in scopes[0]["nearby_original"]
+    assert "two managers" not in scopes[1]["nearby_original"]
+    for hit in result["hits"]:
+        assert hit["reading_action"]["arguments"]["pages"] == "3"
+    read = await invoke(agent, "get_page_content", doc_name="manual", pages="3")
+    context = json.loads(read.split("\nSource context: ")[1].split("\n")[0])
+    assert context["regions"][0]["char_range"] == [0, len(first)]
+    assert context["regions"][1]["char_range"] == [len(first), len(body)]
+    assert context["regions"][0]["unconfirmed_boundary"] == scopes[0]["unconfirmed_boundary"]
+    assert context["content_digest"] == result["hits"][0]["source_context"]["content_digest"]
+    assert body in json.loads(read.split("\n\n", 1)[1].split("\nSource context: ")[0])["content"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "value", ["2.5GHz", "192.168.1.2", "9.4.0Patch004", "9.4.0", "1.ssh command"]
+)
+async def test_unseparated_numbers_are_not_certified_as_headings(kb_dir, value):
+    pages(kb_dir, ["# Confirmed scope\n" + value + "\ncapacity is recorded."])
+    result = json.loads(await invoke(agent_for(kb_dir), "search_originals", terms=["capacity"]))
+    scope = result["hits"][0]["source_context"]["regions"][0]
+    assert all(h["literal"] == "# Confirmed scope" for h in scope["headings"])
+    if "unconfirmed_boundary" in scope:
+        assert scope["status"] == "unconfirmed"
+        assert scope["unconfirmed_boundary"]["literal"] == value
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "code",
+    [
+        "```text\n9.2 Example configuration\n5.2Literal value\n```",
+        "~~~text\n9.2 Example configuration\n5.2Literal value\n~~~",
+        "    9.2 Example configuration\n    5.2Literal value",
+        "<pre>\n9.2 Example configuration\n5.2Literal value\n</pre>",
+        "<code>\n9.2 Example configuration\n5.2Literal value\n</code>",
+        "<code>\n\n9.2 Example configuration\n\n5.2Literal value\n\n</code>",
+        "<xmp>\n\n9.2 Example configuration\n\n5.2Literal value\n\n</xmp>",
+        "<title>\n\n9.2 Example configuration\n\n5.2Literal value\n\n</title>",
+    ],
+)
+async def test_literal_blocks_do_not_change_original_scope(kb_dir, code):
+    pages(kb_dir, ["# Confirmed operation\n\n" + code, "capacity is recorded."])
+    agent = agent_for(kb_dir)
+    result = json.loads(await invoke(agent, "search_originals", terms=["capacity"]))
+    scope = result["hits"][0]["source_context"]["regions"][0]
+    assert [h["literal"] for h in scope["headings"]] == ["# Confirmed operation"]
+    assert "unconfirmed_boundary" not in scope
+    read = await invoke(agent, "get_page_content", doc_name="manual", pages="1")
+    assert "9.2 Example configuration" in read and "5.2Literal value" in read
+
+
+@pytest.mark.asyncio
+async def test_literal_context_continues_across_pages_then_confirmed_scope_restarts(kb_dir):
+    pages(
+        kb_dir,
+        [
+            "# Confirmed operation\n\n````text\n9.2 Example configuration",
+            "5.2Literal value\n```\n9.3 More literal text\n````\ncapacity remains in operation.",
+            "5.2Uncertain section\ncapacity has unknown scope.\n"
+            "5.3 Known section\ncapacity is known.",
+        ],
+    )
+    result = json.loads(await invoke(agent_for(kb_dir), "search_originals", terms=["capacity"]))
+    scopes = [hit["source_context"]["regions"][0] for hit in result["hits"]]
+    assert [h["literal"] for h in scopes[0]["headings"]] == ["# Confirmed operation"]
+    assert scopes[1]["status"] == "unconfirmed" and not scopes[1]["headings"]
+    assert [h["literal"] for h in scopes[2]["headings"]] == ["5.3 Known section"]
+
+
+@pytest.mark.asyncio
 async def test_each_retained_occurrence_has_its_own_location_without_pixel_actions(kb_dir):
     Image.new("RGB", (32, 32), "white").save(kb_dir / "wiki/sources/figure.png")
     pages(kb_dir, ["# First\nNative text", "# Second\nNative text"], ["sources/figure.png"])
