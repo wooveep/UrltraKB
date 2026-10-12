@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
-  "status": "v18_engineering_passed_continuation_method_review_not_accepted",
-  "recorded_at": "2026-10-12T05:46:58.435445+00:00",
+  "status": "v18_same_task_build_running_not_accepted",
+  "recorded_at": "2026-10-12T05:53:15.517988+00:00",
   "development_base": "b5f3f9049fe7d0baadaf72c3f05f7a9d7a13ff1c",
   "current_candidate_code": "5d4dd67f3ab84aad9673124f01ed29ad091cc1a5",
   "baseline": {
@@ -844,28 +844,28 @@
       "status": "failed_required_coverage",
       "reason": "Installation target pages omit necessary native prerequisites, steps or applicability conditions. New similarly named pages do not satisfy old required target coverage.",
       "validated_candidate": "v8",
-      "latest_candidate": "v17_build_running_final_agent_validation_pending"
+      "latest_candidate": "v18_build_running_final_agent_validation_pending"
     },
     "147": {
       "close": false,
       "status": "incomplete_required_refresh",
       "reason": "235-page reprocessing published, but required refresh remains incomplete; subsequent full refresh was interrupted at cumulative 371 sends without publication. Corpus reprocessing also exhausted available indexing budget.",
       "validated_candidate": "v8",
-      "latest_candidate": "v17_build_running_final_agent_validation_pending"
+      "latest_candidate": "v18_build_running_final_agent_validation_pending"
     },
     "148": {
       "close": false,
       "status": "failed_generated_semantics",
       "reason": "Confirmed changed commands/conditions, unsupported absence or uniqueness assertions, and incorrect figure associations remain in generated pages; API generated pages 7 pass / 1 fail.",
       "validated_candidate": "v8",
-      "latest_candidate": "v17_build_running_final_agent_validation_pending"
+      "latest_candidate": "v18_build_running_final_agent_validation_pending"
     },
     "149": {
       "close": false,
       "status": "failed_paired_qa",
       "reason": "v8 full answers 34/45 versus retained baseline 38/45 under the same preregistered rubric; 10 regressions and 6 improvements. Original historical 39/45 unchanged.",
       "validated_candidate": "v8",
-      "latest_candidate": "v17_build_running_final_agent_validation_pending"
+      "latest_candidate": "v18_build_running_final_agent_validation_pending"
     }
   },
   "limits": [
@@ -1999,7 +1999,7 @@
     }
   },
   "current_v18": {
-    "status": "production_approved_engineering_passed_continuation_method_review_pending",
+    "status": "same_task_build_running_not_accepted",
     "candidate_code": "5d4dd67f3ab84aad9673124f01ed29ad091cc1a5",
     "same_final_candidate_includes_product_version_cleanup": true,
     "original_baseline_executed": false,
@@ -2050,9 +2050,8 @@
       }
     ],
     "pending": [
-      "Complete R5 dual method review, bind exact actual plan and qualify wrapper read-only preflight",
-      "Execute same-task API retry, two explicit reprocesses and one public seven-input refresh within544 remaining calls",
-      "45 full Agent answers,12 persistent chat turns,12 reader views, HTTP audit and full semantic checks at one final head"
+      "Complete same-task API retry,two explicit reprocesses and one public seven-input refresh within544 remaining calls",
+      "45 full Agent answers,12 persistent chat turns,12 reader views,HTTP audit and full semantic checks at one final head"
     ],
     "table_reviews": [
       {
@@ -2139,6 +2138,52 @@
     "baseline_integrity": {
       "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/baseline-integrity-before-final-v18.json",
       "sha256": "d06519123ed8d435ea9d11fe64d92d1348af67662f4341ea963a3ae9797a8675"
-    }
+    },
+    "start": {
+      "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/build-final-v18-start.json",
+      "sha256": "7b4d4a64b2215583884515f0c2215458b33e08a5c437769cdca0deda75d1e8ae"
+    },
+    "plan": {
+      "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/final-candidate-preregistration-v18-budget3500.json",
+      "sha256": "9dce6051540e81b8a09eef8ceaec91430f4b98e0112dfb5836d422cd30a852d1"
+    },
+    "continuation_method_reviews": [
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/published-repair-method-spec-v18-r5.json",
+        "sha256": "6f85f29d4b5323eee47df4a140691182d75cce6f3199b6075ee83d174989ce1e"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/published-repair-method-standards-v18-r5.json",
+        "sha256": "3f81ec683d7d9055c5ea2deb1324aa0714c4cd4e6a6a0c8c5b72eb7967208367"
+      }
+    ],
+    "execution_qualifications": [
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/published-repair-actual-plan-spec-v18-r1.json",
+        "sha256": "26c5c14e9cf68e163829fdc338081b2d126415f7cac53587be9f770901cb58d5"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/published-repair-actual-applicability-standards-v18-r1.json",
+        "sha256": "7a6b6a06acb2aa1565eeaf8d35c3099ecc0888a2fd8dd4cf5b557c8461c92de0"
+      }
+    ],
+    "full_wrapper_readonly_preflight": {
+      "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/v18-wrapper-readonly-preflight-r1.json",
+      "sha256": "13dbaf888efee4d1594b97edc3f2d4c3654dd06bd311071b91f52771250e7700"
+    },
+    "budget_feasibility": {
+      "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/build-v18-budget-feasibility-spec-r1.json",
+      "sha256": "451a3f74bf99fcb995c147de5ff44286e3c45a04ce8787d9c4a981c64c714a3c"
+    },
+    "evaluation_plan_drafts": [
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/qa-final-v18-draft.json",
+        "sha256": "d5f739b70154756d20b2f36924787b0a3f640b38439b76d57a4d9d97e59e959e"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/chat-final-v18-draft.json",
+        "sha256": "95057dd8d8a2e1a59a7006c1a0e49660d5e69f0c1596b9f97954b88345b8c299"
+      }
+    ]
   }
 }
