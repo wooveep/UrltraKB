@@ -23,7 +23,7 @@ def heading(line):
         return None
     markdown = re.match(r"^#{1,6}\s+(.+?)(?:\s+#+)?$", stripped)
     body = markdown.group(1) if markdown else stripped
-    numbered = re.match(r"^(\d+(?:\.\d+)*)(?:[.、)]?\s+)(.+)$", body)
+    numbered = re.match(r"^(\d+(?:\.\d+)*)(?:[.、)](?=\D)\s*|\s+)(.+)$", body)
     if numbered:
         return numbered.group(2), numbered.group(1)
     if markdown:
@@ -65,8 +65,33 @@ def heading_candidates(item, page_list, start_index=1):
 
 
 def unique_heading(item, page_list, start_index=1):
+    if item.get('structure') is not None and not isinstance(item['structure'], str):
+        raise IndexQualityError('Physical structure must be a string or null')
     candidates = heading_candidates(item, page_list, start_index)
+    parsed = heading(item['title'])
+    sections = {value for value in (item.get('structure'), parsed[1] if parsed else None)
+                if value}
+    if len(sections) > 1:
+        return None
+    if sections:
+        section = next(iter(sections))
+        candidates = [anchor for anchor in candidates
+                      if not anchor['section'] or anchor['section'] == section]
     return candidates[0] if len(candidates) == 1 else None
+
+
+def title_line_positions(item, page_list, start_index=1):
+    """Locate literal title lines, without claiming that they are headings."""
+    parsed = heading(item['title'])
+    wanted = compact(parsed[0] if parsed else item['title'])
+    matches = []
+    for number, (text, *_) in enumerate(page_list, start_index):
+        offset = 0
+        for line in text.splitlines(keepends=True):
+            if wanted and compact(line) == wanted:
+                matches.append({'unit': number, 'range': [offset, offset + len(line.rstrip())]})
+            offset += len(line)
+    return matches
 
 
 @dataclass(frozen=True)
@@ -84,6 +109,21 @@ class SectionBoundary:
 
     def proves_membership(self, anchor):
         return self.start_confirmed and self.end_confirmed and self.contains(anchor)
+
+    def page_text(self, text, number):
+        """Project confirmed parent scope; keep original text for native anchors."""
+        start, end = 0, len(text)
+        if self.start_confirmed:
+            if number < self.start[0]:
+                return ''
+            if number == self.start[0]:
+                start = self.start[1]
+        if self.end_confirmed:
+            if number > self.end[0]:
+                return ''
+            if number == self.end[0]:
+                end = self.end[1]
+        return text[start:end]
 
     def is_parent_root(self, item, page_list, start_index=1):
         """Inherit a verified parent position; never treat it as its own child."""
@@ -147,6 +187,12 @@ def prepare_entries(entries, page_list, start_index=1, boundary=None, density=4)
             raise IndexQualityError('Physical navigation requires original heading titles')
         item = copy.deepcopy(original)
         anchor = unique_heading(item, page_list, start_index)
+        if not anchor and boundary and boundary.start_confirmed and boundary.end_confirmed:
+            positions = title_line_positions(item, page_list, start_index)
+            if positions and all(not boundary.contains(position) for position in positions):
+                # Every native occurrence is outside this parent. This is
+                # location evidence, not proof that a literal line is a heading.
+                continue
         if anchor:
             if boundary and not boundary.contains(anchor):
                 continue  # The untouched boundary page remains in original readers.

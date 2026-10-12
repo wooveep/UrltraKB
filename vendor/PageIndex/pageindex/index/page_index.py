@@ -16,6 +16,7 @@ from .block_policy import BlockContractError
 from .page_parts_policy import PagePartsContractError, PagePartsPolicy
 from .physical_sections import (
     SectionBoundary, SubtreeQualityError, merge_continuation, prepare_entries, unique_heading,
+    title_line_positions,
     validate_order as validate_physical_order,
 )
 
@@ -42,19 +43,29 @@ async def check_title_appearance(item, page_list, start_index=1, model=None, pol
     page_number = item['physical_index']
     if type(page_number) is not int or not start_index <= page_number < start_index + len(page_list):
         return {'list_index': item.get('list_index'), 'answer': 'no', 'title': title, 'page_number': None}
-    page_text = page_list[page_number-start_index][0]
+    def context_page(number):
+        text = page_list[number-start_index][0]
+        if boundary:
+            text = boundary.page_text(text, number)
+        return f'<physical_index_{number}>\n{text}\n<physical_index_{number}>'
+
+    page_text = context_page(page_number)
+    adjacent = '\n'.join(context_page(number) for number in range(
+        max(start_index, page_number - 1), min(start_index + len(page_list), page_number + 2)))
 
     
     prompt = f"""
     Your job is to check if the given section appears or starts in the given page_text.
 
     Note: do fuzzy matching, ignore any space inconsistency in the page_text.
+    The current physical page is {page_number}. Physical indices are the
+    one-based PDF page positions in the tags, never printed page labels in text.
 
     The given section title is {title}.
     The given page_text is {page_text}.
     Repeated headers, TOC references and ordinary word occurrences do not prove
     a section heading. Check heading context on adjacent pages as well:
-    {page_list[max(0, page_number-start_index-1):page_number-start_index+2]}
+    {adjacent}
     
     Reply format:
     {{
@@ -66,8 +77,9 @@ async def check_title_appearance(item, page_list, start_index=1, model=None, pol
 
     if boundary:
         prompt += (f'\nThis is a subtree of {boundary.title!r}, bounded by '
-                   f'{boundary.start} and {boundary.end} (page, character offset). '
-                   'Full boundary pages include neighboring chapters. Also return '
+                   f'{boundary.start} and {boundary.end} (physical page, native character offset). '
+                   'Text outside confirmed boundary offsets has been excluded; '
+                   'the offsets refer to the original, unchanged pages. Also return '
                    '"belongs_to_parent": true ONLY if source context places this heading '
                    'inside that parent section, not a neighboring operation or chapter.')
     response = await llm_acompletion(model=model, prompt=prompt, usage_stage="verification")
@@ -76,8 +88,19 @@ async def check_title_appearance(item, page_list, start_index=1, model=None, pol
         answer = response['answer']
     else:
         answer = 'no'
-    if boundary and response.get('belongs_to_parent') is not True:
-        answer = 'no'
+    if boundary:
+        # A model establishes heading role, not physical coordinates. Native
+        # positions plus confirmed parent bounds can prove membership even
+        # when printed page labels mislead the model's separate membership claim.
+        positions = title_line_positions(item, page_list, start_index)
+        current = [position for position in positions if position['unit'] == page_number]
+        proved = (boundary.start_confirmed and boundary.end_confirmed and len(current) == 1
+                  and all(boundary.contains(position) for position in positions))
+        if (positions and boundary.start_confirmed and boundary.end_confirmed
+                and not any(boundary.contains(position) for position in current)):
+            answer = 'no'
+        elif not proved and response.get('belongs_to_parent') is not True:
+            answer = 'no'
     return {'list_index': item['list_index'], 'answer': answer, 'title': title, 'page_number': page_number}
 
 
@@ -626,11 +649,14 @@ def generate_toc_init(part, model=None, policy=None):
     else:
         raise Exception(f'finish reason: {finish_reason}')
 
-def process_no_toc(page_list, start_index=1, model=None, logger=None, policy=None):
+def process_no_toc(page_list, start_index=1, model=None, logger=None, policy=None, boundary=None):
     page_contents=[]
     token_lengths=[]
     for page_index in range(start_index, start_index+len(page_list)):
-        page_text = f"<physical_index_{page_index}>\n{page_list[page_index-start_index][0]}\n<physical_index_{page_index}>\n\n"
+        source_text = page_list[page_index-start_index][0]
+        if boundary and not policy:
+            source_text = boundary.page_text(source_text, page_index)
+        page_text = f"<physical_index_{page_index}>\n{source_text}\n<physical_index_{page_index}>\n\n"
         page_contents.append(page_text)
         token_lengths.append(count_tokens(page_text, model))
     group_texts = page_list_to_group_text(page_contents, token_lengths)
@@ -1079,7 +1105,7 @@ async def _meta_processor_once(page_list, mode=None, toc_content=None, toc_page_
     elif mode == 'process_toc_no_page_numbers':
         toc_with_page_number = await run_sync(process_toc_no_page_numbers, toc_content, toc_page_list, page_list, model=opt.model, logger=logger)
     else:
-        toc_with_page_number = await run_sync(process_no_toc, page_list, start_index=start_index, model=opt.model, logger=logger, **({"policy": policy} if policy else {}))
+        toc_with_page_number = await run_sync(process_no_toc, page_list, start_index=start_index, model=opt.model, logger=logger, **({"policy": policy} if policy else {}), **({"boundary": boundary} if boundary and not policy else {}))
             
     if not policy:
         toc_with_page_number = prepare_entries(toc_with_page_number, page_list, start_index,

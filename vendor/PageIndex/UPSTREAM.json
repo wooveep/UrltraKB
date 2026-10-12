@@ -133,7 +133,7 @@
   ],
   "local_patch": {
     "date": "2026-10-09",
-    "purpose": "Audited local SDK source and packaging baseline (#107); injected IndexLLM, terminal propagation, single network retry owner, content-compatible SDK identity Explicit managed-input root, client close lifecycle, and sealed read-only guards before file or storage mutations. 本地 `.8` 将同步与异步并发门移到共享模型调用入口，使注入执行器和默认客户端都遵守 IndexConfig.max_concurrency；任务政策仍独立限流。成功树的内容策略继续兼容 `.5`。 Blocking stages run off-loop with cancellation drainage; saturated event-loop sync calls fail without bypassing the cap. Dedicated workers avoid starvation of the async SDK default executor. Physical subtree recovery and conservative local heading proof (#139), content policy v2.",
+    "purpose": "Audited local SDK source and packaging baseline (#107); injected IndexLLM, terminal propagation, single network retry owner, content-compatible SDK identity Explicit managed-input root, client close lifecycle, and sealed read-only guards before file or storage mutations. 本地 `.8` 将同步与异步并发门移到共享模型调用入口，使注入执行器和默认客户端都遵守 IndexConfig.max_concurrency；任务政策仍独立限流。成功树的内容策略继续兼容 `.5`。 Blocking stages run off-loop with cancellation drainage; saturated event-loop sync calls fail without bypassing the cap. Dedicated workers avoid starvation of the async SDK default executor. Physical subtree recovery and conservative local heading proof (#139), content policy v2. Preserve native physical subtree bounds and disambiguate same-title numbered headings without changing original offsets.",
     "modified": {
       "README.md": "d7fbdd7adf28b03a6b678bacefe84a81157e22b0f914850a23771906251a89d4",
       "pyproject.toml": "8d65eadec14d7cacb5e5a44bdff7a5a332cac9864cf159d27549f5715f53c21a",
@@ -153,7 +153,7 @@
       "tests/test_types.py": "ce1de2351e4e4231fb889e43b6f255e70257d312efa876ad9c23998d6b9686e8",
       "pageindex/backend/local.py": "5d61956a8de180eb5d7d1d8e3492e10d16d43cd34439093ddd3e332510abf14b",
       "pageindex/backend/protocol.py": "e91f0a47dc16af3bf9a3f5c71d61ca51db0abe5e0354f6fc2d578da9323323bf",
-      "pageindex/index/page_index.py": "42d2136f1f154722015efb76a8f9c4abbdb6e717bab25d6c5856e979ab837595",
+      "pageindex/index/page_index.py": "ce4a8378f366425c4a7d03f9f3db6bd8c858af361aa8813eb404d076bcd159a3",
       "pageindex/index/pipeline.py": "e01cd5dce1c3f55b542b45d677c86aec59b3cf25a680620609f8eef7ab22dbfa",
       "pageindex/index/utils.py": "67d1cfbdc3e4b649eff1d5e26277321a3c860d2aa35060bf5c7d62db3504e034",
       "pageindex/index/page_index_md.py": "ba4a3cfbfb3f8cb55d6d10b56a24a853fd89f920cac69f0d1317cf3240194ccb",
@@ -172,7 +172,7 @@
       "pageindex/index/toc_titles.py": "1dd28046aebc1ceb89935807c31d6d005ee86d383c7239f24ac6e7bb7d9c871c",
       "pageindex/index/block_policy.py": "48d3712ca7aa309c3add1fbe7386c65cf7d765831e1790630cbbb47180aba550",
       "pageindex/index/page_parts_policy.py": "dca3953ed5639cbe10dc4d674b59b45423e5e7e1214af5ab24e90127011da2ed",
-      "pageindex/index/physical_sections.py": "c6e0ab460eeb08129217bf39b782b31cb436aaec0792f57cc31c8fa6d404bfd2"
+      "pageindex/index/physical_sections.py": "dc8c22aaf5da0799d486c4f4d971d734287056416f2976b99ca6b686f30895e8"
     },
     "deleted": [
       "cookbook/README.md",
