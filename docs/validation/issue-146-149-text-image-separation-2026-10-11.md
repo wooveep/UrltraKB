@@ -1,5 +1,144 @@
 # 文本与图片分离修复：#146–#149 验证
 
+日期：2026-10-13。以下是 v23–v28 的当前记录；下方保留 v22 及更早报告。不同候选的问答成绩分别列出，不拼成一次完整验收。实现提交为 `d7bdc2e81de4caaa2230c6d5a824f91160bac0c6`，包含此前用户授权合并的产品／版本整理。
+
+## 本轮结论
+
+用户询问的 **v22 四组配对退步均属于模型质量**，不作为程序异常，也不因此重跑正常文档。后续实际验证发现的章节元数据缺陷另有确定的程序因果，已修复；不能把这些输入错误也归为模型能力。最新 v28 按来源结构资格统一处理，不对当前 IP 地址或命令名称打补丁。
+
+文本与图片分离的方案方向正确：程序保证原文、可靠结构、字面代码、出处和原图资产完整，主模型接收文字与图片定位记录，阅读器保留实际图片。它能修复输入、资产和保存错误，但不能保证模型不会添加无依据的断言。以下原始成绩和未发布状态保持如实记录，模型推理、措辞及协议遵循不足按用户口径单列，不继续用重编译或反复采样追分。
+
+## 已完成的修复与页面更新
+
+- v24 修复无关来源失败阻挡独立成功摘要的问题：只在来源、原发布字节和既有成功输出均可验证时恢复，未放开共享页的依赖检查。
+- v25 修复编号与标题之间没有空格时继承旧章节的问题。`5.2WinFabric` 等歧义边界清除未确认的祖先并截断附近摘录，原文和坐标保持不变。
+- v26 修复真实 HTML 表格已经闭合、CommonMark 块仍延续时吞掉后续原文标题的问题。只跟踪已知结构容器和字面量，命令里的 `<vm>`、`<snap-name>` 等参数不建立无界容器。开发中出现的占位符回归被独立审查拒绝，失败、撤回和修正记录均保留；该失败候选未进入实际 Agent 补测。
+
+- v27 修复原生层级编号与标题分行后继续继承旧同级标题的问题。裸编号仅建立未确认边界，保留文字与坐标；同一原文位置只生成一个边界，避免尾空格造成重复定位。开发中发现的重复范围反例先失败、修正后通过，失败候选未进入实际 Agent。
+
+- v28 将“文本候选边界”与“已证实标题”分开。PDF／幻灯片提取文本、TXT、旧文本及未声明格式的数字或 `#` 行，仅作为未确认边界，不建立章节祖先。显式 Markdown 只接受解析器确认的顶层标题（含 Setext）；HTML 还必须有已保存的原生 `h1`–`h6` 标签与精确位置映射。代码、引文、列表和 HTML 容器中的标题不向外传播。版本、日期、小数、编号、地址、命令均遵循同一规则。
+
+这会撤销无法从来源结构证实的纯文本章节归属，包括看起来像真实标题的编号；原文和位置仍完整，公开阅读工具可继续读取。没有拿生成的索引或模型判断充当原生结构证据。v27 实际 p147/p164 的命令标题与 p65 的数字串误识别均由这类缺陷产生；原文未缺失，也没有证据表明它们导致了当轮的模型附加断言。v28 开发中独立测试又发现明确 Markdown 的 HTML 容器逃逸，先保留失败记录，再复用既有字面范围解析修复。
+
+定向处理已更新 **40 个共享页**；v23 复用成功结果恢复2个摘要，v24又以 **0次模型调用**恢复功能列表931、安装931、API931和最佳实践940共4个摘要。正常文档的原件、规范化结果、索引和成功摘要没有重新导入、重索引或重编译。v25–v28仅改变问答的原文取证元数据，编译使用另一条原文装配路径，因此未再次刷新生成页。
+
+当前知识版本为 `4d9f1d264f774a8fa163332e282864ab`，generation **63**：
+
+| 页面状态 | 数量／说明 |
+| --- | --- |
+| 保存的生成页 | 93 |
+| 默认可见生成页 | **33**：27个共享页、6个摘要 |
+| 有明确待刷新记录的生成页 | **43**；另有index待刷新，head共44条 |
+| 无本页待刷新条目、仍因旧依赖不可见 | **17**：13个已更新共享页、4个较早页面 |
+| 默认可读原文 | **7份**全部可读 |
+| 22项必要主题在保存快照中的覆盖 | 20通过、2不足；实际默认视图仅I17完整、I10部分，其余20项映射不可见 |
+
+内容复核通过全文阅读或字节一致的既有审阅覆盖70/93个保存生成页及index，包含全部33个默认可见页；其余23页均隐藏，未宣称全文审完。仍保留19项模型生成质量记录，3项旧记录已在新内容中纠正。
+
+尚未全部刷新的原因包括安装940摘要的模型字面块协议结果未获接受、K3s模型输出被字面引用检查拒绝，以及保存页仍含旧输入依赖。已检查17个隐含依赖页面，未发现可以在不猜测来源、不放宽发布条件的前提下确定删除的依赖。不能把“页面已保存”或“模型问题不计异常”改写成“所有必要页已发布”。上述最终失败之后，这些来源未因模型质量再次重跑。
+
+## 实际 Agent 验证与原始基线
+
+所有脚本先评估合理性，再绑定精确代码、原知识快照、题目和预算执行。问答走生产 `ask_question` 的完整 Agent 工具循环；多轮走 `continue_conversation`，逐轮核对续接、保存答案和会话链。全文与所有额外断言逐条按原生证据做语义复核，脚本只核验身份、传输、账本和汇总，不用关键词替代语义判断。本轮执行前另修复了HTTP审计注册辅助器的脚本身份绑定缺口：注册前必须核对两路已批脚本、扫描器和依赖图均与当前字节一致；旧辅助器及反例保留，未用于v28实际审计。
+
+API来源格式另行区分：最初基线使用68页PDF，本轮沿用同一份68页PDF。早期83页DOCX候选的成绩保留在历史记录，未并入v28；不能把早期的PDF／DOCX差异误写成本轮仍存在的格式差异。
+
+会话按既有 [ADR-0018](../adr/0018-new-context-storage-compatibility-boundary.md) 续接用户意图与更正，完整用户和助手原文保存在会话中；历史助手答案不进入自动事实记忆。VersionCorrection 第3轮实际请求保留了此前两轮用户问题，未传入第2轮助手全文，因此回答所说“无法逐句复核上一轮原文”符合实际输入。这是当前生产会话的能力边界，不将它误判为保存丢失或模型忽略已收到的答案。
+
+| 验证批次 | 完整答案 | 核心标准 | 对照／边界 |
+| --- | --- | --- | --- |
+| v24全量45组，30个不同问题 | **34/45** | **157/157** | 保留最初基线同范围38/45；原历史39/45不改写。10组配对退步、6组改善、1组均不足；首轮20/30对27/30 |
+| v24持久会话4组×3轮 | **7/12** | **22/25** | 12轮执行、续接和保存正常；无历史配对会话基线 |
+| v25固定V01-r1 | **0/1** | **4/4** | 末尾排除三节点以下方案与已收到的“两台”原文矛盾，属模型质量。另行发现p65元数据缺陷，未冒称它导致末尾断言 |
+| v25固定VersionCorrection三轮 | **0/3** | **4/6** | 28次实际发送；范围扩大、图片角色和节点角色推断等单列模型质量 |
+| v26固定V01-r1 | **1/1** | **4/4** | 原始配对PASS→PASS；实际读取p86–87，未读取p65。独立发现p64分行编号缺口，正文与本题答案正确 |
+| v27固定V01-r1 | **0/1** | **4/4** | 原始配对PASS→FAIL；否认其他HA计数与已经收到并引用的5.2原文矛盾，属模型质量 |
+| v28全量45组，30个不同问题 | 37/45 | 155/157 | 原基线同范围38/45，原历史39/45保留；6组配对退步、5组改善、2组均不足；首轮25/30对27/30，各问题计划轮全部通过均为24/30 |
+| v26固定VersionCorrection三轮 | **1/3** | **6/6** | T1命中说明与命令页码有误，T2误认图片用途；T3通过。3项属模型质量 |
+| v27固定VersionCorrection三轮 | **1/3** | **6/6** | T1范围、命中描述及T2图片角色等4项模型质量记录；T3通过。另查明两类输入元数据缺陷 |
+| v28持久会话4组×3轮 | 6/12 | 21/25 | 12轮执行、保存和续接有效，114次实际发送；无历史配对会话基线。6轮全文不足均保留模型质量归因 |
+
+v24的11组全文不足中，V01包含随后修复的确定输入元数据问题，另外10组按模型质量记录。v25真实p86输入已验证歧义边界不再继承旧5.1.3；p65缺陷由其实际HTTP工具内容定位。v26在精确原文与公开阅读工具上验证p65和p86—87，实际单题读取了p86—87；v27另验证p64分行边界。v28按更严格的来源资格复核p64/p65/p86及p147/p164；原生提取文本保持未确认状态，真实Markdown/HTML结构由独立正控验证。实际 Agent 取证覆盖按本次真实工具输出记录，未强迫模型读取指定页，也未把限定补测变成新的45组总分。
+
+v28实际QA工具内容包含452组原文上下文、705个范围，均保留未确认章节状态；60次原文读取输出中的133段正文与原生字符范围一致。安装931的p64同时有直接读取与搜索证据，p65及p147只有搜索证据；该QA记录未观察到p86、p87或p164，不能把独立测试覆盖冒称为实际Agent读取。
+
+v28完整答案为37/45，低于同口径最初基线38/45，不能宣称原始全文成绩已达到“不差于基线”。8组QA全文不足均归为模型生成内容质量；N02关于版本条件的错误已存在于旧派生摘要，答案又扩大了其否定范围，不能笼统称为本轮首次新增。原计划API问题及重复轮共16组，全文12/16与同范围基线12/16相同，核心56/58；其余核心99/99。这些分项不能替代全范围结论。12轮会话全文6/12、核心21/25，没有历史配对会话基线。本轮真实工具输入未确认新的程序异常，仍不等于所有内容正确或所有必要页已发布。 模型质量按用户口径从程序异常中排除，原始分数、每组退步和额外断言仍保留。
+
+## 工程、图片与调用边界
+
+最终全量工程：**3019通过、54跳过**；Ruff、格式、mypy、diff全部通过。v28相关公开测试123项通过，独立Spec27项、Standards16项控制通过；v27相关公开测试71项通过；独立Spec49项、Standards9项控制通过，包含原失败重放和原生p64、p65、p86—87控制。v26工程2959项通过、54项跳过，相关测试73项通过，独立Spec37项、Standards21项通过。v25完整工程2935通过、68跳过，随后同版本本地原生运行时补测14通过、2跳过；保留这两次原始记录，不伪装成同一次完整测试结果。
+
+v26首次全量在 `/tmp` 仅剩9个空闲文件节点时失败：2495通过、54跳过、2失败、462条环境设置错误。两个失败均可回溯到Errno28，源码未变；保留该次日志，改用磁盘上的独立短临时目录及TMPDIR后完成v26全量复查，没有降低测试要求。
+
+原图验证沿用未变的generation63图片资产与阅读实现：7份原文、1052处原图出现位置、6073条当前／历史图集记录机械核对；12张实际Qt画面的像素与前轮一致。34个蒙版修复资产均机械校验，未宣称逐张人工看完。v25–v28未改变图片、图集或阅读器，不声称为后续代码另拍了12张图。
+
+| 真实请求审计 | 请求／响应 | 结论 |
+| --- | --- | --- |
+| v23定向页面刷新 | 46／46 | 原wrapper退出1与失败业务结果保留；只读核对完成，未追加构建 |
+| v24全量问答＋会话 | 423／423（314＋109） | 终态、账本、固定输入身份核对；未发现图片载荷或get_image |
+| v25限定问答＋会话 | 34／34（6＋28） | 同上 |
+| v26限定问答＋会话 | 34／34（9＋25） | 同上 |
+| v27限定问答＋会话 | 29／29（6＋23） | 终态、账本及固定输入身份核对；未发现图片载荷或get_image |
+| v28全量问答＋会话 | 426／426（312＋114） | 两条完成链、逐请求响应、账本及固定输入身份核对；未发现图片载荷或get_image |
+
+文字图注与图片路径不是像素理解证据。全量QA先逐组核验副本，外层封存再对全部副本生成完整哈希清单，存在可避免的重复读盘开销。本轮保持执行前登记的脚本完成核验；这段耗时属于验证开销，不作为产品问答性能或提速比例。
+
+构建累计 **3404/3500，剩余96**，既有1205次继续计入；9次历史未知响应仍计费。v23新增46次，摘要恢复及后续检索元数据修复新增构建0次。QA／会话按原有独立评测预算执行，没有借用或清零构建账本。最初基线仅比较已存原答案、评分和文件；最终 **15734/15734文件哈希一致，原冻结范围内无新增文件**，没有重新导入、构建或运行基线问答。
+
+## Issue 状态
+
+| Issue | 当前验证结论 | 完整目标是否全部达到 |
+| --- | --- | --- |
+| #146 内容遗漏 | 原生文字、可靠结构、原图和读取边界已验证；默认生成目标页仍有覆盖缺口 | 否 |
+| #147 必要更新 | 40共享页已定向更新、6成功摘要恢复；安装931成功处理保留；安装940当前目标摘要未获发布，旧原文仍可读；部分共享页仍待刷新或因旧依赖默认不可见 | 否；模型协议不足不记程序异常 |
+| #148 附加内容 | 本轮确认的程序输入缺陷已修；保存内容和答案中的无依据附加断言单列模型质量 | 不将模型质量改记为程序故障，也不声称所有内容正确 |
+| #149 完整回答 | 已进行完整Agent和持久多轮验证；原始分数、每组退步和取证范围全部保留 | 见本轮完整对照；不以核心项或总分代替全部内容及发布门槛 |
+
+## 当前证据入口
+
+- [最终工程](/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/engineering-final-v28-r1.json)。
+- [最终代码冻结](/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/code-freeze-final-v28.json)。
+- [通用来源结构双路审查](/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/native-structure-parent-assessment-v28-r2.json)。
+- [v27分行编号双路审查](/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/split-heading-parent-assessment-v27-r2.json)。
+- [v27真实命令及数字误认证诊断](/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/actual-native-syntax-heading-diagnosis-spec-v27-r1.json)。
+- [HTML边界双路审查](/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/html-tail-parent-assessment-v26-r2.json)。
+- [v25章节边界双路审查](/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/original-context-parent-assessment-v25-r2.json)。
+- [独立成功摘要实现审查](/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/summary-independence-implementation-spec-v24-r1.json)。
+- [执行前方法评估](/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/full-evaluation-parent-assessment-v28-r2.json)。
+- [最终实际计划核签](/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/full-evaluation-final-parent-v28-r2.json)。
+- [最终报告脚本与叙事双路审查](/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/validation-final-parent-v28-r1.json)。
+- [HTTP注册脚本身份检查修复](/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/http-registration-helper-method-standards-v28-r3.json)。
+- [40共享页处理及旧失败保留](/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/runs/build-final-v23-pages-reconciled/result.json)。
+- [独立成功摘要恢复](/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/runs/build-final-v24-summaries/completion.json)。
+- [完整生成内容及实际默认覆盖](/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/final-content-spec-v24-r1.json)。
+- [隐藏页面依赖诊断](/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/default-hidden-dependency-diagnosis-spec-v24-r1.json)。
+- [v24全量问答](/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/paired-qa-full-standards-v24-r1.json)。
+- [v24全部多轮会话](/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/persistent-chat-full-parent-v24-r1.json)。
+- [v25固定问答](/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/targeted-qa-full-standards-v25-r1.json)。
+- [v25固定三轮会话](/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/persistent-chat-version-correction-spec-v25-r1.json)。
+- [v26固定问答](/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/targeted-qa-full-standards-v26-r1.json)。
+- [v26固定三轮会话](/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/persistent-chat-version-correction-spec-v26-r1.json)。
+- [v27固定问答](/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/targeted-qa-full-standards-v27-r1.json)。
+- [v27固定三轮会话](/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/persistent-chat-version-correction-spec-v27-r1.json)。
+- [v28全量问答](/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/paired-qa-full-standards-v28-r1.json)。
+- [v28全部持久会话](/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/persistent-chat-full-spec-v28-r1.json)。
+- [v28会话父级复核](/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/persistent-chat-full-parent-v28-r1.json)。
+- [12轮可见会话答案阅读记录](/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/root-visible-answer-reading-v28-r4.json)。
+- [v28真实原文及章节元数据覆盖](/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/actual-native-context-coverage-standards-v28-r3.json)。
+- [N02既有摘要与答案归因更正](/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/paired-qa-attribution-adjudication-N02-standards-v28-r1.json)。
+- [v28实际HTTP输入审计](/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/completed-http-inputs-v28-qa-chat.json)。
+- [原图和阅读器](/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/reader-visual-review-v24-r1.json)。
+- [最初基线最终完整性](/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/baseline-integrity-after-final-v28.json)。
+- [基线只读核验脚本评估](/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/baseline-integrity-method-v28-r1.json)。
+- [工程环境失败与处理](/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/engineering-environment-diagnosis-v26-r1.json)。
+- [工程失败现场归档](/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/engineering-v26-r1-fixture-cleanup.json)。
+
+精确SHA、历史候选与每轮未通过项保存在配套JSON及上述收据中。
+
+以下v22及更早内容为原样保留的历史记录，其中“当前”“最终”仅指各自当时的候选。
+
+## v22 历史记录
+
 日期：2026-10-12。v22 的程序修复与本轮完整 Agent 验证已完成并封存。最终工程检查 **2903 通过、68 跳过**；Ruff、格式、mypy 和 diff 全部通过。冻结代码为 `ee844c2ad80583234f3d3883e1493b5a4fa83877`，主目录合入 `e2d2fe03497632357fe3f2b5c0ce6d4dd0039bc5`，包含用户授权合并的产品／版本整理。
 
 完整答案 **40/45** 通过，高于同口径保留基线 **38/45**；157 项范围内核心事实全部满足。但有 **4 组配对退步**，首轮不同问题为 **26/30 对 27/30**。所以本轮证明了问答总通过数不低于基线，不能宣称逐题无退步或整个知识库已完成刷新。
