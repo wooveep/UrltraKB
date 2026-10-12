@@ -21,6 +21,7 @@ class QueryView:
     validity: str = "current"
     source_revisions_by_path: dict[str, str] = field(default_factory=dict)
     retained_source_status: dict[str, dict] = field(default_factory=dict)
+    native_file_roots: dict[str, Path] = field(default_factory=dict)
 
     @property
     def view_id(self) -> str:
@@ -95,6 +96,9 @@ def _pin_view(kb_dir: Path, scope: KnowledgeScope | None = None) -> QueryView | 
     source_paths: set[str] = set()
     image_roots: list[str] = []
     image_revisions: dict[str, str] = {}
+    native_file_roots: dict[str, Path] = {}
+    retained_files: dict[str, str] = {}
+    native_inventories: dict[str, set[str]] = {}
     for identity in allowed:
         from openkb.knowledge_evidence import validated_input
 
@@ -107,7 +111,15 @@ def _pin_view(kb_dir: Path, scope: KnowledgeScope | None = None) -> QueryView | 
 
             saved = _snapshot_source(kb_dir, selected, named.unit_id)
             if saved and saved[1].source_map:
-                read_source_map(selected.wiki_dir, saved[1].source_map, named.doc_name)
+                if identity in retained or historical:
+                    from openkb.retained_reprocessing import retained_file_fallbacks
+
+                    roots, files, permitted = retained_file_fallbacks(kb_dir, selected, named)
+                    native_file_roots.update(roots)
+                    retained_files.update(files)
+                    native_inventories[named.doc_name] = permitted
+                else:
+                    read_source_map(selected.wiki_dir, saved[1].source_map, named.doc_name)
         source_paths.update((f"sources/{named.doc_name}.md", f"sources/{named.doc_name}.json"))
         source_paths.add(f"sources/{named.doc_name}.content.json")
         source_revisions_by_path.update(
@@ -122,6 +134,15 @@ def _pin_view(kb_dir: Path, scope: KnowledgeScope | None = None) -> QueryView | 
         image_roots.append(f"sources/images/{named.doc_name}/")
         image_revisions[image_roots[-1]] = unit.source_revision_id
     files = wiki_versions(kb_dir, selected.wiki_dir)
+    files.update(retained_files)
+    for doc_name, permitted in native_inventories.items():
+        aliases = {f"sources/{doc_name}{suffix}" for suffix in (".md", ".json", ".content.json")}
+        files = {
+            name: value
+            for name, value in files.items()
+            if name in permitted
+            or (name not in aliases and not name.startswith(f"sources/images/{doc_name}/"))
+        }
     if not historical:
         files = {
             name: digest
@@ -159,6 +180,7 @@ def _pin_view(kb_dir: Path, scope: KnowledgeScope | None = None) -> QueryView | 
         else "current",
         source_revisions_by_path=source_revisions_by_path,
         retained_source_status=retained_source_status,
+        native_file_roots=native_file_roots,
     )
 
 
@@ -204,7 +226,7 @@ def read_selected_file(view: QueryView, path: str) -> bytes:
     """Read and verify the exact bytes bound to this request, including catalog inputs."""
     import hashlib
 
-    root = view.scope.wiki_dir.resolve()
+    root = view.native_file_roots.get(path, view.scope.wiki_dir).resolve()
     target = (root / path).resolve()
     if Path(path).is_absolute() or not target.is_relative_to(root):
         raise ValueError("Access denied: path escapes wiki root. Use a path from index.md.")

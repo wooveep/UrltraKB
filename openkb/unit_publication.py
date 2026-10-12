@@ -352,7 +352,7 @@ def publish_unit_revision(
     from openkb.source_changes import retain_pending_pages
 
     with mutation_scope(kb_dir, [view.scope.wiki_dir], operation="retain-pending-knowledge"):
-        retain_pending_pages(kb_dir, view.scope.wiki_dir, view.head)
+        retain_pending_pages(kb_dir, view.scope.wiki_dir, view.head, replacing_unit_id=unit.unit_id)
     generated = wiki_versions(kb_dir, view.scope.wiki_dir)
     changed = {
         name

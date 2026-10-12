@@ -193,13 +193,15 @@ def filter_compile_context(kb_dir: Path, wiki: Path, head: KnowledgeHead) -> Non
         if effective_input(kb_dir, head.view_id, revision_id):
             continue
         unit = read_record(kb_dir, "units", unit_id, ImportUnit)
-        for suffix in ("md", "json"):
+        for suffix in ("md", "json", "content.json"):
             (wiki / "sources" / f"{unit.doc_name}.{suffix}").unlink(missing_ok=True)
     if head.needs_refresh:
         atomic_write_text(wiki / "index.md", INDEX_SEED)
 
 
-def retain_pending_pages(kb_dir: Path, wiki: Path, head: KnowledgeHead) -> None:
+def retain_pending_pages(
+    kb_dir: Path, wiki: Path, head: KnowledgeHead, *, replacing_unit_id: str | None = None
+) -> None:
     """Untouched stale results remain readable; only explicit refresh clears their reasons."""
     from openkb.knowledge_scope import live_scope
     from openkb.mutation import _copy_file_atomic
@@ -211,3 +213,6 @@ def retain_pending_pages(kb_dir: Path, wiki: Path, head: KnowledgeHead) -> None:
             from openkb.figure_publication import preserve_page_figures
 
             preserve_page_figures(kb_dir, wiki, head.inputs, source_wiki=live, pages=[page])
+    from openkb.retained_reprocessing import restore_retained_originals
+
+    restore_retained_originals(kb_dir, wiki, head, replacing_unit_id)

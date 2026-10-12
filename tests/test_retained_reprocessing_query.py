@@ -16,11 +16,18 @@ def write_original(path, text):
     if path.suffix == ".md":
         path.write_text(text)
     else:
-        import pymupdf
+        import io
 
+        import pymupdf
+        from PIL import Image
+
+        picture = io.BytesIO()
+        Image.new("RGB", (64, 64), "navy").save(picture, format="PNG")
         path.unlink(missing_ok=True)
         with pymupdf.open() as pdf:
-            pdf.new_page().insert_text((72, 72), text)
+            page = pdf.new_page()
+            page.insert_text((72, 72), text)
+            page.insert_image(pymupdf.Rect(72, 96, 120, 144), stream=picture.getvalue())
             pdf.save(path)
 
 
@@ -70,6 +77,170 @@ def test_failed_same_original_reprocess_keeps_labelled_native_reading(kb_dir, fa
         selected, retained["path"], view_id="legacy", strict=True
     )
     assert "summaries/operations.md" not in view.files
+
+
+def test_unrelated_publication_keeps_failed_reprocessing_original_readable(
+    kb_dir, failed_reprocess, tmp_path, monkeypatch
+):
+    first, failed, original, _, _, completion, acompletion = failed_reprocess
+    monkeypatch.setattr("litellm.completion", completion)
+    monkeypatch.setattr("litellm.acompletion", acompletion)
+    other = tmp_path / "other.md"
+    other.write_text("The unrelated compressor has a separate inspection schedule.")
+    assert import_document(kb_dir, other).status == "added"
+
+    selected = resolve_query_views(kb_dir)
+    view = selected.views[0]
+    sources = source_capabilities(view)
+    assert set(sources) == {"operations", "other"}
+    retained = sources["operations"]
+    assert retained["source_revision_id"] == first.source_revision_id
+    assert retained["target_source_revision_id"] == failed.source_revision_id
+    assert retained["processing_status"] == "retained_before_reprocessing"
+    assert (view.scope.wiki_dir / retained["path"]).read_bytes() == original
+    assert "inspection valve" in read_query_page(
+        selected, retained["path"], view_id="legacy", strict=True
+    )
+    assert "summaries/operations.md" in read_head(kb_dir).needs_refresh
+    assert "summaries/operations.md" not in view.files
+
+
+@pytest.mark.parametrize("historical", [False, True])
+def test_missing_retained_native_file_reads_exact_ancestor_without_repair(
+    kb_dir, failed_reprocess, tmp_path, monkeypatch, historical
+):
+    import asyncio
+
+    from agents import Agent
+    from test_answer_evidence_regression import invoke
+
+    from openkb.agent.query_evidence import restrict_query_agent
+    from openkb.application.query_views import read_selected_file
+    from openkb.application.views import view_scope
+
+    first, failed, original, original_path, _, completion, acompletion = failed_reprocess
+    monkeypatch.setattr("litellm.completion", completion)
+    monkeypatch.setattr("litellm.acompletion", acompletion)
+    other = tmp_path / "other.md"
+    other.write_text("The unrelated compressor has a separate inspection schedule.")
+    assert import_document(kb_dir, other).status == "added"
+    current = resolve_query_views(kb_dir).views[0]
+    original_images = {
+        name: read_selected_file(current, name)
+        for name in current.files
+        if name.startswith("sources/images/operations/")
+    }
+    if original_path.suffix == ".pdf":
+        assert original_images
+    # Reproduce an old publication that omitted only the retained native files.
+    for path in (current.scope.wiki_dir / "sources").glob("operations.*"):
+        path.unlink()
+    for name in original_images:
+        (current.scope.wiki_dir / name).unlink()
+    head = read_head(kb_dir)
+
+    scope = (
+        view_scope(kb_dir, "legacy", historical_revision=head.knowledge_revision_id)
+        if historical
+        else None
+    )
+    selected = resolve_query_views(kb_dir, scope=scope)
+    view = selected.views[0]
+    retained = source_capabilities(view)["operations"]
+    assert retained["source_revision_id"] == first.source_revision_id
+    if not historical:
+        assert retained["target_source_revision_id"] == failed.source_revision_id
+        assert retained["processing_status"] == "retained_before_reprocessing"
+    else:
+        assert view.validity == "historical"
+        assert "processing_status" not in retained
+    assert read_selected_file(view, retained["path"]) == original
+    assert ("summaries/operations.md" in view.files) is historical
+    action = retained["reading_action"]
+    agent = restrict_query_agent(Agent(name="retained-native-reader"), selected)
+    answer = asyncio.run(invoke(agent, action["tool"], **action["arguments"]))
+    assert "inspection valve" in answer
+    assert first.source_revision_id in answer
+    for name, data in original_images.items():
+        assert read_selected_file(view, name) == data
+        assert not (view.scope.wiki_dir / name).exists()
+    assert read_head(kb_dir) == head
+    assert not (view.scope.wiki_dir / retained["path"]).exists()
+
+
+@pytest.mark.parametrize("damage", ["map", "body", "image", "symlink", "ancestor_after_selection"])
+def test_retained_fallback_does_not_hide_tampering(
+    kb_dir, failed_reprocess, tmp_path, monkeypatch, damage
+):
+    from openkb.application.query_views import read_selected_file
+
+    _, _, _, path, _, completion, acompletion = failed_reprocess
+    if damage == "image" and path.suffix != ".pdf":
+        pytest.skip("Only the PDF fixture has a native image")
+    monkeypatch.setattr("litellm.completion", completion)
+    monkeypatch.setattr("litellm.acompletion", acompletion)
+    other = tmp_path / "other.md"
+    other.write_text("A separate source remains available.")
+    assert import_document(kb_dir, other).status == "added"
+    view = resolve_query_views(kb_dir).views[0]
+    native = source_capabilities(view)["operations"]["path"]
+    target = view.scope.wiki_dir / native
+    if damage == "image":
+        image = next(n for n in view.files if n.startswith("sources/images/operations/"))
+        (view.scope.wiki_dir / image).write_bytes(b"corrupted")
+    elif damage == "body":
+        (view.scope.wiki_dir / "sources/operations.md").write_bytes(b"corrupted")
+    elif damage == "map":
+        target.write_bytes(b"corrupted")
+    elif damage == "symlink":
+        target.unlink()
+        target.symlink_to(tmp_path / "missing-target")
+    else:
+        target.unlink()
+        selected = resolve_query_views(kb_dir).views[0]
+        (selected.native_file_roots[native] / native).write_bytes(b"corrupted")
+        with pytest.raises(ValueError, match="changed after selection"):
+            read_selected_file(selected, native)
+        return
+    with pytest.raises(ValueError):
+        resolve_query_views(kb_dir)
+
+
+@pytest.mark.parametrize("historical", [False, True])
+def test_retained_native_inventory_excludes_unregistered_same_name_files(
+    kb_dir, failed_reprocess, tmp_path, monkeypatch, historical
+):
+    import json
+
+    from openkb.application.query_views import read_selected_file
+    from openkb.application.views import view_scope
+
+    _, _, _, path, _, completion, acompletion = failed_reprocess
+    monkeypatch.setattr("litellm.completion", completion)
+    monkeypatch.setattr("litellm.acompletion", acompletion)
+    other = tmp_path / "other.md"
+    other.write_text("A separate source remains available.")
+    assert import_document(kb_dir, other).status == "added"
+    view = resolve_query_views(kb_dir).views[0]
+    native = source_capabilities(view)["operations"]["path"]
+    (view.scope.wiki_dir / native).unlink()
+    suffix = ".json" if path.suffix == ".md" else ".content.json"
+    shadow = "sources/operations" + suffix
+    (view.scope.wiki_dir / shadow).write_text(
+        json.dumps([{"page": 1, "unit_kind": "page", "content": "FORGED ORIGINAL", "images": []}])
+        if suffix == ".json"
+        else (view.scope.wiki_dir / "sources/other.content.json").read_text()
+    )
+    scope = (
+        view_scope(kb_dir, "legacy", historical_revision=view.knowledge_revision_id)
+        if historical
+        else None
+    )
+    selected = resolve_query_views(kb_dir, scope=scope).views[0]
+    assert shadow not in selected.files
+    assert source_capabilities(selected)["operations"]["path"] == native
+    with pytest.raises(ValueError, match="not found"):
+        read_selected_file(selected, shadow)
 
 
 @pytest.mark.parametrize("action", ["withdraw", "empty", "replace_original"])
