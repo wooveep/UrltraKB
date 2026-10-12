@@ -172,6 +172,80 @@ def test_selected_refresh_publishes_both_source_changes_together(kb_dir, model_s
     assert not refresh_status(kb_dir, scope=scope)["needs_refresh"]
 
 
+def test_selected_refresh_can_finish_pages_while_an_unrelated_source_is_incomplete(
+    kb_dir, model_service
+):
+    from openkb.application.documents import import_document
+    from openkb.application.query_views import read_query_page, resolve_query_views
+    from openkb.application.refresh import refresh_selected_sources, refresh_status
+
+    sources, scope = _prepared(kb_dir, model_service)
+    normal_summary = (scope.wiki_dir / "summaries/normal.md").read_bytes()
+    (kb_dir / "normal.md").write_text("An unrelated new policy requires review.")
+    _reply(model_service, {})
+    _reply(model_service, {})
+    failed = import_document(kb_dir, kb_dir / "normal.md")
+    assert failed.status == "failed"
+    pending = refresh_status(kb_dir, scope=scope)["needs_refresh"]
+    count = len(model_service.requests)
+    model_service.replies.append((200, _changed_reply))
+
+    result = asyncio.run(refresh_selected_sources(kb_dir, sources, scope=scope))
+
+    assert result.status == "partial", result.message
+    assert len(model_service.requests) == count + 1
+    assert "An unrelated new policy" not in json.dumps(model_service.requests[-1])
+    assert (scope.wiki_dir / "summaries/normal.md").read_bytes() == normal_summary
+    after = refresh_status(kb_dir, scope=scope)["needs_refresh"]
+    assert "concepts/shared.md" not in after
+    assert after["summaries/normal.md"] == pending["summaries/normal.md"]
+    selected = resolve_query_views(kb_dir)
+    answer = read_query_page(selected, "concepts/shared.md", view_id=scope.view_id, strict=True)
+    assert "The first policy requires review." in answer
+    assert "The second policy permits approved use." in answer
+    assert "summaries/normal.md" not in selected.views[0].files
+
+
+def test_selected_refresh_limits_work_to_requested_pages(kb_dir, model_service):
+    from openkb.application.refresh import refresh_selected_sources, refresh_status
+
+    sources, scope = _prepared(kb_dir, model_service)
+    before = refresh_status(kb_dir, scope=scope)["needs_refresh"]
+    shared = (scope.wiki_dir / "concepts/shared.md").read_bytes()
+    count = len(model_service.requests)
+
+    result = asyncio.run(
+        refresh_selected_sources(kb_dir, sources, scope=scope, page_paths=["summaries/first.md"])
+    )
+
+    assert result.status == "partial", result.message
+    assert len(model_service.requests) == count
+    assert (scope.wiki_dir / "concepts/shared.md").read_bytes() == shared
+    after = refresh_status(kb_dir, scope=scope)["needs_refresh"]
+    assert "summaries/first.md" not in after
+    assert after == {
+        page: reasons for page, reasons in before.items() if page != "summaries/first.md"
+    }
+
+
+@pytest.mark.parametrize(
+    "pages",
+    [[], ["../outside.md"], ["originals/first.md"], ["summaries/first.md", "summaries/first.md"]],
+)
+def test_selected_refresh_rejects_invalid_page_scope_before_sending(kb_dir, model_service, pages):
+    from openkb.application.refresh import refresh_selected_sources, refresh_status
+
+    sources, scope = _prepared(kb_dir, model_service)
+    before = refresh_status(kb_dir, scope=scope)
+    count = len(model_service.requests)
+
+    result = asyncio.run(refresh_selected_sources(kb_dir, sources, scope=scope, page_paths=pages))
+
+    assert result.status == "failed"
+    assert len(model_service.requests) == count
+    assert refresh_status(kb_dir, scope=scope) == before
+
+
 @pytest.mark.parametrize("late_change", [False, True])
 def test_selected_refresh_protects_manual_pages_and_delayed_acceptance(
     kb_dir, model_service, late_change

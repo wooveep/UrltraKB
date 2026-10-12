@@ -24,6 +24,7 @@ def retry_source(
     unit_id: str | None = None,
     context: ExecutionContext | None = None,
     scope: KnowledgeScope | None = None,
+    retry_failed_response: bool = False,
 ) -> IngestResult:
     from openkb.application.ingestion import import_prepared_source
 
@@ -56,7 +57,12 @@ def retry_source(
         with (
             context.begin(root) as credentials,
             collect_compile_report() as compilation,
-            explicit_compile_retry(root, source_id),
+            explicit_compile_retry(
+                root,
+                source_id,
+                retry_failed_response=retry_failed_response,
+                view_id=scope.view_id if scope else "legacy",
+            ),
         ):
             result = import_prepared_source(
                 root,

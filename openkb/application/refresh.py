@@ -309,7 +309,12 @@ def refresh_status(kb_dir: Path, *, scope: KnowledgeScope) -> dict:
 
 
 async def refresh_selected_sources(
-    kb_dir: Path, source_ids: list[str], *, scope: KnowledgeScope, context=None
+    kb_dir: Path,
+    source_ids: list[str],
+    *,
+    scope: KnowledgeScope,
+    context=None,
+    page_paths: list[str] | None = None,
 ):
     """Never invoke document conversion, indexing, summary generation or planning."""
     from openkb.application.execution import ExecutionContext
@@ -323,6 +328,7 @@ async def refresh_selected_sources(
     from openkb.selected_refresh_evidence import (
         current_page_inputs,
         retained_inputs,
+        selected_pages,
         selected_reasons,
         summary_owner,
     )
@@ -341,6 +347,7 @@ async def refresh_selected_sources(
                 prepare_compile_view(kb_dir, scope.view_id, retain_pending_context=True) as view,
             ):
                 reasons = selected_reasons(kb_dir, view.head, source_ids)
+                pages = selected_pages(reasons, page_paths)
                 retained = retained_inputs(kb_dir, view.head, view.scope.wiki_dir)
                 if set(source_ids) - {item.unit.source_id for item in retained.values()}:
                     raise ValueError("Selected source has no completed current input")
@@ -360,6 +367,8 @@ async def refresh_selected_sources(
                     copy_tree(scope.wiki_dir, view.scope.wiki_dir.parent / "base")
                     for page, pending in sorted(reasons.items()):
                         context.check_stop()
+                        if page not in pages:
+                            continue
                         if page.startswith("summaries/"):
                             owner = summary_owner(page, view.scope.wiki_dir, retained)
                             if owner:
@@ -401,6 +410,7 @@ async def refresh_selected_sources(
                     context.check_stop,
                     selection=RefreshSelection(
                         source_ids=tuple(source_ids),
+                        page_paths=tuple(page_paths) if page_paths is not None else None,
                         resolved=resolved,
                         summary_owners=owners,
                         reconciled_pages=reconciled,

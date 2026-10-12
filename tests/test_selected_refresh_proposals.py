@@ -75,7 +75,7 @@ def test_selected_proposal_preserves_manual_baseline_and_rejects_late_acceptance
 
 
 @pytest.mark.parametrize("superseded", [False, True])
-@pytest.mark.parametrize("mutation", ["drop_normal_input", "stamp_manual_baseline"])
+@pytest.mark.parametrize("mutation", ["drop_normal_input", "stamp_manual_baseline", "page_scope"])
 def test_selected_proposal_rejects_changed_retained_metadata_even_when_superseded(
     kb_dir, model_service, mutation, superseded
 ):
@@ -96,10 +96,12 @@ def test_selected_proposal_rejects_changed_retained_metadata_even_when_supersede
     if mutation == "drop_normal_input":
         removed = data["inputs"].pop(normal_unit)
         data["candidate_manifest"]["input_revisions"].remove(removed)
-    else:
+    elif mutation == "stamp_manual_baseline":
         data["candidate_manifest"]["generated_baselines"]["summaries/normal.md"] = data[
             "candidate_pages"
         ]["summaries/normal.md"]
+    else:
+        data["selection"]["page_paths"] = ["summaries/first.md"]
     # Corrupt only the disposable saved proposal. A fresh file digest must not
     # authorize altered source identity or silently claim manual bytes as generated.
     path.write_text(json.dumps(data))
@@ -109,13 +111,78 @@ def test_selected_proposal_rejects_changed_retained_metadata_even_when_supersede
     pages = wiki_versions(kb_dir, scope.wiki_dir)
     count = len(model_service.requests)
 
-    with pytest.raises(ValueError, match="retained inputs or generated baselines"):
+    error = (
+        "selected page scope"
+        if mutation == "page_scope"
+        else "retained inputs or generated baselines"
+    )
+    with pytest.raises(ValueError, match=error):
         read_refresh_proposal(kb_dir, result.proposal_id, scope=scope)
-    with pytest.raises(ValueError, match="retained inputs or generated baselines"):
+    with pytest.raises(ValueError, match=error):
         accept_refresh_proposal(
             kb_dir, result.proposal_id, version=HashRegistry.hash_file(path), scope=scope
         )
 
     assert read_head(kb_dir, scope.view_id) == before
     assert wiki_versions(kb_dir, scope.wiki_dir) == pages
+    assert len(model_service.requests) == count
+
+
+def test_scoped_proposal_cannot_modify_index_without_global_resolution(kb_dir, model_service):
+    from openkb.application.pages import read_page, save_page
+    from openkb.application.refresh import (
+        accept_refresh_proposal,
+        read_refresh_proposal,
+        refresh_selected_sources,
+    )
+    from openkb.ingest_records import KnowledgeHead
+    from openkb.refresh_publication import refresh_baselines
+    from openkb.state import HashRegistry
+    from openkb.unit_publication import read_head, wiki_versions
+
+    sources, scope = _prepared(kb_dir, model_service)
+    page = read_page(kb_dir, "concepts/shared", scope=scope)
+    save_page(
+        kb_dir, page.path, page.body + "\nHuman review note.\n", version=page.version, scope=scope
+    )
+    model_service.replies.append((200, _changed_reply))
+    result = asyncio.run(
+        refresh_selected_sources(
+            kb_dir,
+            sources,
+            scope=scope,
+            page_paths=["concepts/shared.md"],
+        )
+    )
+    assert result.status == "awaiting_confirmation", result.message
+    directory = kb_dir / ".openkb/refresh-proposals" / result.proposal_id
+    path = directory / "proposal.json"
+    proposal = json.loads(path.read_text())
+    assert proposal["selection"]["page_paths"] == ["concepts/shared.md"]
+    assert "index.md" not in proposal["selection"]["resolved"]
+    index = directory / "wiki/index.md"
+    index.write_text(index.read_text() + "\nUnselected injected index content.\n")
+    proposal["candidate_pages"]["index.md"] = HashRegistry.hash_file(index)
+    proposal["candidate_manifest"]["generated_baselines"] = refresh_baselines(
+        KnowledgeHead.model_validate_json(json.dumps(proposal["expected_head"])),
+        proposal["expected_pages"],
+        proposal["candidate_pages"],
+        retain_unchanged=True,
+    )
+    path.write_text(json.dumps(proposal))
+    before = read_head(kb_dir, scope.view_id)
+    old_files = wiki_versions(kb_dir, scope.wiki_dir)
+    count = len(model_service.requests)
+    # Fresh proposal bytes are not authority to expand the explicit page selection.
+    with pytest.raises(ValueError):
+        read_refresh_proposal(kb_dir, result.proposal_id, scope=scope)
+    with pytest.raises(ValueError):
+        accept_refresh_proposal(
+            kb_dir,
+            result.proposal_id,
+            version=HashRegistry.hash_file(path),
+            scope=scope,
+        )
+    assert read_head(kb_dir, scope.view_id) == before
+    assert wiki_versions(kb_dir, scope.wiki_dir) == old_files
     assert len(model_service.requests) == count

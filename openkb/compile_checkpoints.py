@@ -185,7 +185,7 @@ class CompileCheckpoints:
 
     def claim_generation(self, key: str, request_digest: str, *, stage: str):
         """Before a send, consume at most one explicit recovery of an unknown repair."""
-        from openkb.compile_recovery import interrupted_repair_request
+        from openkb.compile_recovery import failed_summary_request, interrupted_repair_request
         from openkb.llm_execution import check_model_stop
 
         with atomic_record_lock(self.directory / "checkpoint.lock"):
@@ -203,7 +203,26 @@ class CompileCheckpoints:
             ):
                 request = interrupted_repair_request(self.root, self.task_id, stage)
             if request is None:
-                self.require_generation(key, request_digest)
+                manual = None
+                if (
+                    path == self.path
+                    and entry.get("state") in {"repairing", "resuming"}
+                    and not entry.get("manual_retry_used")
+                ):
+                    manual = failed_summary_request(self.root, self.task_id, stage)
+                if manual is None:
+                    self.require_generation(key, request_digest)
+                    return
+                check_model_stop()
+                self._write_entry(
+                    key,
+                    {
+                        **entry,
+                        "state": "resuming",
+                        "manual_retry_used": True,
+                        "manual_retry": {**manual, "request_digest": request_digest},
+                    },
+                )
                 return
             check_model_stop()
             self._write_entry(

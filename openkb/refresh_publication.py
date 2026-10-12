@@ -45,6 +45,9 @@ class RefreshSelection(Record):
     """Exact pending reasons resolved by a bounded, source-selected operation."""
 
     source_ids: tuple[RecordId, ...]
+    page_paths: tuple[RelativePath, ...] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     resolved: dict[RelativePath, tuple[RefreshReason, ...]] = Field(default_factory=dict)
     summary_owners: dict[RelativePath, RecordId] = Field(default_factory=dict)
     reconciled_pages: dict[RelativePath, RefreshedPage] = Field(default_factory=dict)
@@ -69,6 +72,22 @@ def remaining_refresh(head: KnowledgeHead, selection: RefreshSelection | None):
         return {}
     if not selection.source_ids or len(set(selection.source_ids)) != len(selection.source_ids):
         raise ValueError("Selected refresh requires distinct sources")
+    from openkb.selected_refresh_evidence import selected_pages
+
+    pages = selected_pages(
+        {
+            page: reasons
+            for page, reasons in head.needs_refresh.items()
+            if any(reason.source_id in selection.source_ids for reason in reasons)
+        },
+        selection.page_paths,
+    )
+    if (
+        set(selection.resolved) - pages - {"index.md"}
+        or set(selection.summary_owners) - pages
+        or set(selection.reconciled_pages) - pages
+    ):
+        raise ValueError("Refresh outcome is outside selected page scope")
     for page, resolved in selection.resolved.items():
         if any(
             reason not in head.needs_refresh.get(page, ())

@@ -120,6 +120,12 @@ import_document(Path(sys.argv[1]), Path(sys.argv[2]),
         assert all(p.read_bytes() == value for p, value in old_ledger.items())
         assert (kb_dir / "wiki/summaries/normal.md").read_bytes() == retained
         assert not (kb_dir / "wiki/summaries/interrupted.md").exists()
+        model_service.replies.extend([reply(accepted), reply({})])
+        finished = retry_source(kb_dir, unknown[0].source_id, retry_failed_response=True)
+        assert finished.status == "added", finished
+        assert len(model_service.requests) == read_task(kb_dir, task_id).used == 7
+        assert all(p.read_bytes() == value for p, value in old_ledger.items())
+        assert (kb_dir / "wiki/summaries/normal.md").read_bytes() == retained
         return
     assert resumed.status == "added", resumed
     assert len(model_service.requests) == 6

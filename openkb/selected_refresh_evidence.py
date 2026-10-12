@@ -37,7 +37,7 @@ class RetainedInput:
 
 
 def retained_inputs(kb_dir: Path, head: KnowledgeHead, wiki: Path) -> dict[str, RetainedInput]:
-    """A completed current input must still own the exact normalized bytes being read."""
+    """Authenticate completed current contributors; unfinished sources remain pending."""
     from openkb.source_map import read_source_map
 
     result = {}
@@ -45,17 +45,21 @@ def retained_inputs(kb_dir: Path, head: KnowledgeHead, wiki: Path) -> dict[str, 
         revision, frozen = validated_input(kb_dir, identity, head.view_id)
         unit = read_record(kb_dir, "units", unit_id, ImportUnit)
         state = read_unit_publication(kb_dir, unit_id, head.view_id)
-        retained = _manifest(kb_dir, state)
+        if revision.unit_id != unit_id:
+            raise ValueError("Retained input belongs to another unit")
         if (
-            revision.unit_id != unit_id
-            or unit.target_revision_id != identity
+            unit.target_revision_id != identity
             or state.status != "completed"
             or state.target_revision_id != identity
             or state.successful_revision_id != identity
-            or retained is None
             or not effective_input(kb_dir, head.view_id, identity)
         ):
-            raise ValueError("Complete the current selected source import before refresh")
+            # Selection admission and per-page original ownership below still require
+            # complete inputs. An unrelated unfinished import must not block those pages.
+            continue
+        retained = _manifest(kb_dir, state)
+        if retained is None:
+            raise ValueError("Retained input has no published normalization")
         directory, manifest = retained
         if manifest.processing is None or manifest.normalized_source is None:
             raise ValueError("Retained input has no authenticated compilation contract")
@@ -139,6 +143,21 @@ def selected_reasons(kb_dir, head, source_ids):
         if chosen:
             result[page] = chosen
     return result
+
+
+def selected_pages(reasons, page_paths):
+    """A page limit narrows pending work without weakening its publication evidence."""
+    if page_paths is None:
+        return set(reasons)
+    pages = set(page_paths)
+    if (
+        not pages
+        or len(pages) != len(page_paths)
+        or pages - reasons.keys()
+        or any(not p.startswith(("summaries/", "concepts/", "entities/")) for p in pages)
+    ):
+        raise ValueError("Select distinct pending generated page paths")
+    return pages
 
 
 def current_page_inputs(kb_dir, head, previous, page, reasons, retained, wiki):
@@ -236,5 +255,8 @@ def validate_selection(kb_dir, proposal, wiki):
         for p in proposal.expected_pages.keys() | proposal.candidate_pages.keys()
         if proposal.expected_pages.get(p) != proposal.candidate_pages.get(p)
     }
-    if changed - {*selection.reconciled_pages, "index.md"}:
+    allowed_changes = set(selection.reconciled_pages)
+    if "index.md" in selection.resolved:
+        allowed_changes.add("index.md")
+    if changed - allowed_changes:
         raise ValueError("Selected refresh changed an unrelated retained page or asset")

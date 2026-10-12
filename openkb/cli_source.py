@@ -99,8 +99,13 @@ def reprocess(ctx, source_id, execute):
 
 @click.command("retry-source")
 @click.argument("source_id")
+@click.option(
+    "--retry-failed-response",
+    is_flag=True,
+    help="Permit one further response for the failed summary batch; retain the task budget.",
+)
 @click.pass_context
-def retry_source(ctx, source_id):
+def retry_source(ctx, source_id, retry_failed_response):
     """Resume unfinished units from the retained input of SOURCE_ID."""
     from dataclasses import asdict
 
@@ -110,7 +115,12 @@ def retry_source(ctx, source_id):
 
     root = _root(ctx)
     try:
-        result = retry(root, source_id, scope=_selected_scope(ctx, root))
+        result = retry(
+            root,
+            source_id,
+            scope=_selected_scope(ctx, root),
+            retry_failed_response=retry_failed_response,
+        )
     except (OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo(json.dumps(asdict(result), ensure_ascii=False, indent=2))

@@ -1,4 +1,4 @@
-"""Associate an explicit summary retry with one unobserved, already charged send."""
+"""Authenticate explicit summary continuation without resetting paid attempts."""
 
 from __future__ import annotations
 
@@ -11,19 +11,61 @@ from openkb.llm_usage_models import UsageExecution
 from openkb.model_task import read_task
 
 _RETRY: ContextVar[tuple[Path, str] | None] = ContextVar("interrupted_compile_retry", default=None)
+_FAILED: ContextVar[dict] = ContextVar("failed_summary_retry", default={})
+
+
+def _failed_publications(root: Path, source_id: str, view_id: str) -> dict:
+    from openkb.ingest_records import UnitPublication, UnitRevision
+    from openkb.source_catalog import read_record, read_source, record_path
+    from openkb.state import HashRegistry
+    from openkb.unit_publication import list_source_units, read_unit_publication
+
+    source = read_source(root, source_id)
+    result = {}
+    for unit in list_source_units(root, source_id):
+        state = read_unit_publication(root, unit.unit_id, view_id)
+        revision = read_record(root, "unit-revisions", unit.target_revision_id, UnitRevision)
+        attempt = read_record(root, "attempts", state.attempt_id, UnitPublication)
+        if (
+            state.status == "failed"
+            and state.stage == "compilation"
+            and "summary" in state.unfinished
+            and state.target_revision_id == unit.target_revision_id
+            and state == attempt
+            and state.job_id == revision.job_id
+            and revision.unit_id == unit.unit_id
+            and revision.source_revision_id == source.target_revision_id
+        ):
+            result[unit.unit_id] = {
+                "publication_id": state.publication_id,
+                "attempt_id": state.attempt_id,
+                "attempt_sha256": HashRegistry.hash_file(
+                    record_path(root, "attempts", state.attempt_id)
+                ),
+                "job_id": state.job_id,
+                "target_revision_id": state.target_revision_id,
+                "view_id": view_id,
+                "quality": list(state.quality),
+            }
+    return result
 
 
 @contextmanager
-def explicit_compile_retry(root: Path, source_id: str):
+def explicit_compile_retry(
+    root: Path, source_id: str, *, retry_failed_response: bool = False, view_id: str = "legacy"
+):
     """Only the public source retry may admit recovery; ordinary compilation cannot."""
+    failed = _failed_publications(root, source_id, view_id) if retry_failed_response else {}
     token = _RETRY.set((root.resolve(), source_id))
+    failed_token = _FAILED.set(failed)
     try:
         yield
     finally:
+        _FAILED.reset(failed_token)
         _RETRY.reset(token)
 
 
-def interrupted_repair_request(root: Path, task_id: str, stage: str) -> dict | None:
+def _retry_request(root: Path, task_id: str, stage: str):
     scope = active_scope()
     if (
         scope is None
@@ -61,7 +103,6 @@ def interrupted_repair_request(root: Path, task_id: str, stage: str) -> dict | N
         and item.unit_id == scope.unit_id
         and item.unit_revision_id == scope.unit_revision_id
         and item.stage == stage
-        and execution(item.execution_id).model_task_id == task_id
     ]
     if not records:
         return None
@@ -74,24 +115,69 @@ def interrupted_repair_request(root: Path, task_id: str, stage: str) -> dict | N
     if (
         request.execution_id == scope.execution_id
         or scope.source_id not in previous.source_ids
-        or previous.state == "completed"
+        or previous.model_task_id != task_id
         or request.operation != "compile"
         or request.policy_fingerprint != task.fingerprint
         or request.model != task.bindings["models"]["compile"]
-        or request.state != "started"
         or request.send_status != "sent"
-        or request.observation != "call"
-        or request.ended_at is not None
-        or request.business_state is not None
-        or request.provider_request_id is not None
         or not request.logical_call_id
     ):
         return None
-    # The legacy usage ledger has no prompt digest. The caller must also match
-    # the checkpoint's exact conditions/key/digest, and record this association.
+    return scope, request, previous
+
+
+def _receipt(request, stage: str) -> dict:
     return {
         "request_attempt_id": request.request_attempt_id,
         "logical_call_id": request.logical_call_id,
         "execution_id": request.execution_id,
         "stage": stage,
     }
+
+
+def interrupted_repair_request(root: Path, task_id: str, stage: str) -> dict | None:
+    match = _retry_request(root, task_id, stage)
+    if match is None:
+        return None
+    _, request, previous = match
+    if (
+        previous.state == "completed"
+        or request.observation != "call"
+        or request.state != "started"
+        or request.ended_at is not None
+        or request.business_state is not None
+        or request.provider_request_id is not None
+    ):
+        return None
+    # Legacy usage has no prompt digest. The caller also requires exact
+    # checkpoint conditions/key/digest and records this association atomically.
+    return _receipt(request, stage)
+
+
+def failed_summary_request(root: Path, task_id: str, stage: str) -> dict | None:
+    from openkb.source_catalog import record_path
+    from openkb.state import HashRegistry
+
+    if not _FAILED.get() or not (
+        stage == "compile.summary" or stage.startswith("compile.document-summary:")
+    ):
+        return None
+    match = _retry_request(root, task_id, stage)
+    if match is None:
+        return None
+    scope, request, previous = match
+    publication = _FAILED.get().get(scope.unit_id)
+    if (
+        publication is None
+        or publication["target_revision_id"] != scope.unit_revision_id
+        or publication["job_id"] != scope.attempt_id
+        or publication["job_id"] != request.attempt_id
+        or HashRegistry.hash_file(record_path(root, "attempts", publication["attempt_id"]))
+        != publication["attempt_sha256"]
+        or previous.state != "completed"
+        or request.state != "completed"
+        or request.ended_at is None
+        or request.business_state != "completed"
+    ):
+        return None
+    return {**_receipt(request, stage), "publication": publication}

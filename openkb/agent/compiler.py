@@ -624,7 +624,12 @@ async def _llm_call_page_async(
             if checkpoints:
                 from openkb.compile_checkpoints import digest
 
-                checkpoints.claim_repair(checkpoint_key, digest(messages))
+                try:
+                    checkpoints.claim_repair(checkpoint_key, digest(messages))
+                except PageResponseError:
+                    checkpoints.record_failure(checkpoint_key, digest(messages), code)
+                    report_compile_issue(code)
+                    raise
             correction = [
                 page_repair_message(
                     code,
