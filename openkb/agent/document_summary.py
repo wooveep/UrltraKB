@@ -240,7 +240,11 @@ async def build_document_summary(
         decoded = current.accepted
         if decoded is None:
             if checkpoints:
-                checkpoints.require_generation(f"summary:{current.key}", digest(messages))
+                checkpoints.claim_generation(
+                    f"summary:{current.key}",
+                    digest(messages),
+                    stage=f"compile.document-summary:{current.key}",
+                )
             try:
                 decoded = await generate(
                     messages,

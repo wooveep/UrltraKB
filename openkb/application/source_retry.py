@@ -6,6 +6,7 @@ from pathlib import Path
 from openkb.application.execution import ExecutionContext
 from openkb.application.retained_inputs import frozen_source_input
 from openkb.compilation_report import collect_compile_report
+from openkb.compile_recovery import explicit_compile_retry
 from openkb.ingest_records import UnitRevision
 from openkb.ingest_result import IngestResult
 from openkb.knowledge_scope import KnowledgeScope, resolve_scope
@@ -52,7 +53,11 @@ def retry_source(
 
         if context.executor is None and context.resume_model_task_id is None:
             context.resume_model_task_id = source_task(root, source_id, source.target_revision_id)
-        with context.begin(root) as credentials, collect_compile_report() as compilation:
+        with (
+            context.begin(root) as credentials,
+            collect_compile_report() as compilation,
+            explicit_compile_retry(root, source_id),
+        ):
             result = import_prepared_source(
                 root,
                 frozen_source_input(root, source, admission.revision),

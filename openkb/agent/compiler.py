@@ -2344,7 +2344,9 @@ async def compile_short_doc(
             summary_raw = checkpoints.load("short-summary", signature) if checkpoints else None
             if summary_raw is None:
                 if checkpoints:
-                    checkpoints.require_generation("short-summary", signature)
+                    checkpoints.claim_generation(
+                        "short-summary", signature, stage="compile.summary"
+                    )
                 initial_error = None
                 try:
                     summary_raw = _llm_call(

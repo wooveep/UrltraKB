@@ -183,6 +183,39 @@ class CompileCheckpoints:
                 "compile_repair_exhausted", "The retained response repair was already consumed"
             )
 
+    def claim_generation(self, key: str, request_digest: str, *, stage: str):
+        """Before a send, consume at most one explicit recovery of an unknown repair."""
+        from openkb.compile_recovery import interrupted_repair_request
+        from openkb.llm_execution import check_model_stop
+
+        with atomic_record_lock(self.directory / "checkpoint.lock"):
+            check_model_stop()
+            path, entry = self._entry(key, request_digest)
+            if not entry.get("repair_used"):
+                return
+            request = None
+            if (
+                path == self.path
+                and entry.get("state") == "repairing"
+                and entry.get("repair_used") is True
+                and entry.get("failure_code") is None
+                and not entry.get("recovery_used")
+            ):
+                request = interrupted_repair_request(self.root, self.task_id, stage)
+            if request is None:
+                self.require_generation(key, request_digest)
+                return
+            check_model_stop()
+            self._write_entry(
+                key,
+                {
+                    **entry,
+                    "state": "resuming",
+                    "recovery_used": True,
+                    "recovery": {**request, "request_digest": request_digest},
+                },
+            )
+
     def failure_code(self, key: str, request_digest: str) -> str | None:
         _, entry = self._entry(key, request_digest)
         return entry.get("failure_code")
