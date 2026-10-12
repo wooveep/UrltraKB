@@ -76,8 +76,10 @@ def original_context(
             stack[-1]["level"] >= h["level"]
             or (
                 h["number"]
-                and stack[-1]["number"]
-                and not h["number"].startswith(stack[-1]["number"] + ".")
+                and any(
+                    parent["number"] and not h["number"].startswith(parent["number"] + ".")
+                    for parent in stack
+                )
             )
         ):
             stack.pop()

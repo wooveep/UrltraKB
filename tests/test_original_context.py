@@ -82,6 +82,34 @@ async def test_numbered_scope_keeps_only_matching_ancestors_across_pages(kb_dir)
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("earlier", "target", "expected"),
+    [
+        ("3 Earlier chapter\n## Context", "4.4.1 Different chapter", ["4.4.1 Different chapter"]),
+        (
+            "3.2 Earlier section\n### Context",
+            "4.4.1.1 Different section",
+            ["4.4.1.1 Different section"],
+        ),
+        (
+            "3 Earlier chapter\n## Context",
+            "3.4.1 Matching section",
+            ["3 Earlier chapter", "## Context", "3.4.1 Matching section"],
+        ),
+    ],
+)
+async def test_markdown_heading_cannot_hide_a_mismatched_numbered_ancestor(
+    kb_dir, earlier, target, expected
+):
+    pages(kb_dir, [earlier, target + "\nNative target."])
+    result = await invoke(agent_for(kb_dir), "get_page_content", doc_name="manual", pages="2")
+    context = json.loads(result.split("\nSource context: ")[1].split("\n")[0])
+    assert [h["literal"] for h in context["regions"][-1]["headings"]] == expected
+    assert "Native target." in result
+    assert context["reading_action"]["arguments"]["pages"] == "2"
+
+
+@pytest.mark.asyncio
 async def test_each_retained_occurrence_has_its_own_location_without_pixel_actions(kb_dir):
     Image.new("RGB", (32, 32), "white").save(kb_dir / "wiki/sources/figure.png")
     pages(kb_dir, ["# First\nNative text", "# Second\nNative text"], ["sources/figure.png"])
