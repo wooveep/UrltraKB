@@ -33,9 +33,11 @@ async def test_same_field_keeps_distinct_original_operations(kb_dir):
     result = json.loads(await invoke(agent, "search_originals", terms=["capacity"]))
     assert len(result["hits"]) == 2
     scopes = [hit["source_context"]["regions"][0] for hit in result["hits"]]
-    assert scopes[0]["headings"][-1]["text"] == "Create orchard"
-    assert scopes[1]["headings"][-1]["text"] == "Extend irrigation"
-    assert all(scope["status"] == "source_heading" for scope in scopes)
+    assert scopes[0]["unconfirmed_boundary"]["literal"] == "# Create orchard"
+    assert scopes[1]["unconfirmed_boundary"]["literal"] == "# Extend irrigation"
+    assert all(scope["status"] == "unconfirmed" and not scope["headings"] for scope in scopes)
+    assert "required" not in scopes[0]["nearby_original"]
+    assert "optional" not in scopes[1]["nearby_original"]
     assert all(hit["source_context"]["content_digest"] for hit in result["hits"])
 
 
@@ -62,49 +64,48 @@ async def test_numbered_scope_does_not_inherit_an_unrelated_prefix(kb_dir, earli
     context = json.loads(result.split("\nSource context: ")[1].split("\n")[0])
     assert "Use three nodes." in result
     scope = context["regions"][-1]
-    assert [h["literal"] for h in scope["headings"]] == [
-        "4.4 Management",
-        "4.4.1 Availability",
-    ]
+    assert scope["status"] == "unconfirmed" and not scope["headings"]
+    assert scope["unconfirmed_boundary"]["literal"] == "4.4.1 Availability"
     assert context["reading_action"]["arguments"]["pages"] == "2"
 
 
 @pytest.mark.asyncio
-async def test_numbered_scope_keeps_only_matching_ancestors_across_pages(kb_dir):
+async def test_numbered_candidates_keep_native_locations_across_pages(kb_dir):
     pages(kb_dir, ["3 Features\n3.2 Storage", "3.6 Operations\n3.6.16 Clock\nUse five servers."])
     result = await invoke(agent_for(kb_dir), "get_page_content", doc_name="manual", pages="2")
     context = json.loads(result.split("\nSource context: ")[1].split("\n")[0])
-    assert [h["literal"] for h in context["regions"][-1]["headings"]] == [
-        "3 Features",
-        "3.6 Operations",
-        "3.6.16 Clock",
-    ]
+    scope = context["regions"][-1]
+    assert scope["status"] == "unconfirmed" and not scope["headings"]
+    assert scope["unconfirmed_boundary"] == {
+        "unit": 2,
+        "offset": len("3.6 Operations\n"),
+        "literal": "3.6.16 Clock",
+    }
+    assert "Use five servers." in result
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("earlier", "target", "expected"),
+    ("earlier", "target"),
     [
-        ("3 Earlier chapter\n## Context", "4.4.1 Different chapter", ["4.4.1 Different chapter"]),
+        ("3 Earlier chapter\n## Context", "4.4.1 Different chapter"),
         (
             "3.2 Earlier section\n### Context",
             "4.4.1.1 Different section",
-            ["4.4.1.1 Different section"],
         ),
         (
             "3 Earlier chapter\n## Context",
             "3.4.1 Matching section",
-            ["3 Earlier chapter", "## Context", "3.4.1 Matching section"],
         ),
     ],
 )
-async def test_markdown_heading_cannot_hide_a_mismatched_numbered_ancestor(
-    kb_dir, earlier, target, expected
-):
+async def test_unstructured_mixed_markers_do_not_establish_ancestry(kb_dir, earlier, target):
     pages(kb_dir, [earlier, target + "\nNative target."])
     result = await invoke(agent_for(kb_dir), "get_page_content", doc_name="manual", pages="2")
     context = json.loads(result.split("\nSource context: ")[1].split("\n")[0])
-    assert [h["literal"] for h in context["regions"][-1]["headings"]] == expected
+    scope = context["regions"][-1]
+    assert scope["status"] == "unconfirmed" and not scope["headings"]
+    assert scope["unconfirmed_boundary"]["literal"] == target
     assert "Native target." in result
     assert context["reading_action"]["arguments"]["pages"] == "2"
 
@@ -148,10 +149,8 @@ async def test_unseparated_numbers_are_not_certified_as_headings(kb_dir, value):
     pages(kb_dir, ["# Confirmed scope\n" + value + "\ncapacity is recorded."])
     result = json.loads(await invoke(agent_for(kb_dir), "search_originals", terms=["capacity"]))
     scope = result["hits"][0]["source_context"]["regions"][0]
-    assert all(h["literal"] == "# Confirmed scope" for h in scope["headings"])
-    if "unconfirmed_boundary" in scope:
-        assert scope["status"] == "unconfirmed"
-        assert scope["unconfirmed_boundary"]["literal"] == value
+    assert scope["status"] == "unconfirmed" and not scope["headings"]
+    assert scope["unconfirmed_boundary"]["literal"] == value
 
 
 @pytest.mark.asyncio
@@ -176,7 +175,8 @@ async def test_standalone_number_stops_previous_sibling_scope(kb_dir, number):
         "offset": len(first),
         "literal": number,
     }
-    assert next_scope["headings"][-1]["literal"] == "4.4.3.4 Preparation"
+    assert next_scope["unconfirmed_boundary"]["literal"] == "4.4.3.4 Preparation"
+    assert next_scope["status"] == "unconfirmed" and not next_scope["headings"]
     read = await invoke(agent, "get_page_content", doc_name="manual", pages="1")
     context = json.loads(read.split("\nSource context: ")[1].split("\n")[0])
     assert context["regions"][1]["char_range"][1] == len(first)
@@ -209,7 +209,8 @@ async def test_standalone_number_inside_literal_does_not_clear_scope(kb_dir, lit
     pages(kb_dir, ["# Confirmed scope\n\n" + literal, "capacity is listed."])
     result = json.loads(await invoke(agent_for(kb_dir), "search_originals", terms=["capacity"]))
     scope = result["hits"][0]["source_context"]["regions"][0]
-    assert [h["literal"] for h in scope["headings"]] == ["# Confirmed scope"]
+    assert scope["status"] == "unconfirmed" and not scope["headings"]
+    assert scope["unconfirmed_boundary"]["literal"] == "# Confirmed scope"
 
 
 @pytest.mark.asyncio
@@ -231,14 +232,14 @@ async def test_literal_blocks_do_not_change_original_scope(kb_dir, code):
     agent = agent_for(kb_dir)
     result = json.loads(await invoke(agent, "search_originals", terms=["capacity"]))
     scope = result["hits"][0]["source_context"]["regions"][0]
-    assert [h["literal"] for h in scope["headings"]] == ["# Confirmed operation"]
-    assert "unconfirmed_boundary" not in scope
+    assert scope["status"] == "unconfirmed" and not scope["headings"]
+    assert scope["unconfirmed_boundary"]["literal"] == "# Confirmed operation"
     read = await invoke(agent, "get_page_content", doc_name="manual", pages="1")
     assert "9.2 Example configuration" in read and "5.2Literal value" in read
 
 
 @pytest.mark.asyncio
-async def test_literal_context_continues_across_pages_then_confirmed_scope_restarts(kb_dir):
+async def test_literal_context_continues_across_pages_then_native_boundaries_restart(kb_dir):
     pages(
         kb_dir,
         [
@@ -250,9 +251,12 @@ async def test_literal_context_continues_across_pages_then_confirmed_scope_resta
     )
     result = json.loads(await invoke(agent_for(kb_dir), "search_originals", terms=["capacity"]))
     scopes = [hit["source_context"]["regions"][0] for hit in result["hits"]]
-    assert [h["literal"] for h in scopes[0]["headings"]] == ["# Confirmed operation"]
-    assert scopes[1]["status"] == "unconfirmed" and not scopes[1]["headings"]
-    assert [h["literal"] for h in scopes[2]["headings"]] == ["5.3 Known section"]
+    assert all(scope["status"] == "unconfirmed" and not scope["headings"] for scope in scopes)
+    assert [scope["unconfirmed_boundary"]["literal"] for scope in scopes] == [
+        "# Confirmed operation",
+        "5.2Uncertain section",
+        "5.3 Known section",
+    ]
 
 
 @pytest.mark.asyncio
@@ -272,23 +276,15 @@ async def test_html_container_end_preserves_following_native_boundaries(kb_dir, 
     result = json.loads(await invoke(agent, "search_originals", terms=["capacity"]))
     assert len(result["hits"]) == 2
     first, second = [hit["source_context"]["regions"][0] for hit in result["hits"]]
-    if "2 Clock" in title:
-        assert [h["literal"] for h in first["headings"]] == [
-            "4.4.3 Management",
-            "4.4.3.4 Node preparation",
-            title,
-        ]
-    else:
-        assert first["status"] == "unconfirmed" and not first["headings"]
-        assert first["unconfirmed_boundary"] == {"unit": 2, "offset": 0, "literal": title}
+    assert first["status"] == "unconfirmed" and not first["headings"]
+    assert first["unconfirmed_boundary"] == {"unit": 2, "offset": 0, "literal": title}
     assert "needs a disk" not in first["nearby_original"]
-    assert second["headings"][-1]["literal"] == "4.4.3.4.3 Disks"
+    assert second["unconfirmed_boundary"]["literal"] == "4.4.3.4.3 Disks"
     read = await invoke(agent, "get_page_content", doc_name="manual", pages="1")
     context = json.loads(read.split("\nSource context: ")[1].split("\n")[0])
     assert all(
-        h["literal"] not in {"9.2 Example cell", "5.2Literal cell"}
+        region["unconfirmed_boundary"]["literal"] not in {"9.2 Example cell", "5.2Literal cell"}
         for region in context["regions"]
-        for h in region["headings"]
     )
     assert "9.2 Example cell" in read and "5.2Literal cell" in read
 
@@ -307,8 +303,9 @@ async def test_html_syntax_does_not_certify_headings_or_hide_following_scope(kb_
     result = json.loads(await invoke(agent_for(kb_dir), "search_originals", terms=["capacity"]))
     assert len(result["hits"]) == 2
     scopes = [hit["source_context"]["regions"][0] for hit in result["hits"]]
-    assert [h["literal"] for h in scopes[0]["headings"]] == ["# Real scope"]
-    assert scopes[1]["headings"][-1]["literal"] == "3.2 Next"
+    assert scopes[0]["unconfirmed_boundary"]["literal"] == "# Real scope"
+    assert scopes[1]["unconfirmed_boundary"]["literal"] == "3.2 Next"
+    assert all(scope["status"] == "unconfirmed" and not scope["headings"] for scope in scopes)
 
 
 @pytest.mark.asyncio

@@ -156,73 +156,100 @@ def _bounds(raw, location, selected):
     return [(1, 0, len(text))]
 
 
+@lru_cache(maxsize=8)
+def _markup_headings(text: str) -> tuple[tuple[int, int, int, str], ...]:
+    from openkb.content_blocks import markdown_layout
+
+    tokens, offsets = markdown_layout(text)
+    literals = _literal_spans(text)
+    return tuple(
+        (offsets[token.map[0]], offsets[token.map[1]], int(token.tag[1:]), tokens[i + 1].content)
+        for i, token in enumerate(tokens)
+        if token.type == "heading_open"
+        and token.level == 0
+        and token.map
+        # CommonMark can emit top-level tokens after a blank line inside HTML.
+        # Source containers still own that text until their actual closing tag.
+        and not any(start <= offsets[token.map[0]] < end for start, end in literals)
+    )
+
+
+def _source_headings(raw, units) -> list[dict]:
+    """Separate recorded markup structure from ambiguous native text boundaries."""
+    from openkb.text_formats import text_normalization_policy
+    from openkb.text_source import NORMALIZATION_POLICY
+
+    policy = raw.get("normalization_policy") if isinstance(raw, dict) else None
+    markdown = policy == NORMALIZATION_POLICY
+    html = policy == text_normalization_policy("html")
+    if markdown or html:
+        text = raw["text"]
+        headings = []
+        for start, end, level, title in _markup_headings(text):
+            # HTML conversion records the native hN element and its mapped span.
+            # A generic block index or a Markdown-looking paragraph proves neither.
+            confirmed = markdown or any(
+                origin.get("kind") == "html"
+                and (origin.get("html") or {}).get("tag") == f"h{level}"
+                and origin["normalized_span"][0] <= start < end <= origin["normalized_span"][1]
+                for origin in raw.get("origins", [])
+            )
+            headings.append(
+                {
+                    "unit": 1,
+                    "offset": start,
+                    "text": title,
+                    "literal": text[start:end].rstrip("\r\n"),
+                    "level": level if confirmed else None,
+                }
+            )
+        return headings
+
+    # A page, slide, TXT, cell or legacy string does not attest Markdown syntax.
+    # Numbers/symbols can be chapters, commands, versions, quantities or examples.
+    # Keep candidate boundaries and native offsets without asserting any ancestry.
+    literals = _literal_spans("\n".join(body for _, body in units))
+    headings, base = [], 0
+    for number, body in units:
+        matches = {m.start(): m[0] for m in _HEADING.finditer(body)}
+        matches.update((m.start(), m[0]) for m in _UNCERTAIN_HEADING.finditer(body))
+        for offset, literal in sorted(matches.items()):
+            if any(start <= base + offset < end for start, end in literals):
+                continue
+            if len(literal) > 180 or re.search(r"\.{3,}|…{2,}", literal):
+                continue
+            headings.append(
+                {
+                    "unit": number,
+                    "offset": offset,
+                    "text": literal,
+                    "literal": literal,
+                    "level": None,
+                }
+            )
+        base += len(body) + 1
+    return headings
+
+
 def original_context(
     source: dict, raw, location: dict, *, match_offset: int | None = None, selected=None
 ) -> dict:
     """Report source spans and their evidenced heading path, with executable neighbors."""
     units = _units(raw, location.get("part"))
-    # Parse the whole source so a literal block cannot become a heading merely
-    # because a physical page ends inside it. The join never changes reader text.
-    literals = _literal_spans("\n".join(body for _, body in units))
-    base = 0
-    headings = []
-    for number, body in units:
-        matches = {m.start(): (m, True) for m in _HEADING.finditer(body)}
-        # Trailing whitespace can also match an empty numbered title. Keep one
-        # boundary at that native offset, with uncertainty taking precedence.
-        matches.update((m.start(), (m, False)) for m in _UNCERTAIN_HEADING.finditer(body))
-        for _, (m, confirmed) in sorted(matches.items()):
-            if any(start <= base + m.start() < end for start, end in literals):
-                continue
-            title = m[3].strip().rstrip("#").strip() if confirmed else m[0]
-            if len(title) > 180 or re.search(r"\.{3,}|…{2,}", title):
-                continue
-            headings.append(
-                {
-                    "unit": number,
-                    "offset": m.start(),
-                    "text": title,
-                    "literal": m[0],
-                    "level": (len(m[1]) if m[1] else len(m[2].split("."))) if confirmed else None,
-                    "number": m[2] if confirmed else None,
-                }
-            )
-        base += len(body) + 1
-    # Repeated running headers are not reliable section boundaries.
-    repeated = {
-        h["literal"]
-        for h in headings
-        if h["level"] is not None
-        and len({v["unit"] for v in headings if v["literal"] == h["literal"]}) > 1
-    }
-    headings = [h for h in headings if h["literal"] not in repeated]
+    headings = _source_headings(raw, units)
     stack: list[dict] = []
     for h in headings:
         if h["level"] is None:
-            # Unseparated labels or standalone hierarchical numbers can be
-            # headings, quantities or versions. Stop ancestry without guessing
-            # a title, including when extraction split it onto another line.
+            # Unknown source structure must not acquire a parent from an earlier
+            # regex match, including across physical pages or syntax families.
             stack.clear()
             h["path"] = []
             continue
-        # Depth alone cannot make an earlier numbered step or quantity the
-        # ancestor of a different chapter. Numbered parents must share a prefix.
-        while stack and (
-            stack[-1]["level"] >= h["level"]
-            or (
-                h["number"]
-                and any(
-                    parent["number"] and not h["number"].startswith(parent["number"] + ".")
-                    for parent in stack
-                )
-            )
-        ):
+        while stack and stack[-1]["level"] >= h["level"]:
             stack.pop()
         stack.append({k: v for k, v in h.items() if k != "path"})
         # Keep ancestry checks internal; expose literal source positions only.
-        h["path"] = [
-            {k: v for k, v in item.items() if k not in {"level", "number"}} for item in stack
-        ]
+        h["path"] = [{k: v for k, v in item.items() if k != "level"} for item in stack]
     regions, actions = [], []
     bodies = dict(units)
     for n, start, end in _bounds(raw, location, selected):
@@ -286,6 +313,7 @@ def original_context(
         "regions_omitted": max(0, len(regions) - 8),
         "adjacent_actions": actions[:4],
         "reading_action": reading_action(source, location),
-        "scope_rule": "Keep each heading's object, operation and conditions together; "
-        "unconfirmed ancestry is unknown.",
+        "scope_rule": "Heading ancestry requires recorded source structure. Unconfirmed "
+        "text boundaries do not mean missing original content; use the unchanged text "
+        "and native locations without assuming a parent chapter.",
     }
