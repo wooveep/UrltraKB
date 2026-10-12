@@ -2263,8 +2263,22 @@ async def _compile_concepts(
 
 def short_document_messages(doc_name: str, content: str, schema_md: str, language: str) -> list:
     """The same first request is used for capacity estimation and compilation."""
+    from openkb.agent.evidence_payload import project_evidence
     from openkb.agent.source_excerpts import SourceExcerpts
 
+    check_model_stop()
+    projected = project_evidence({"content": content}, fits=lambda payload: True)
+    structure = {
+        key: projected[key]
+        for key in ("native_tables", "table_interpretation", "figure_interpretation")
+        if key in projected
+    }
+    # Keep the complete original and its excerpt offsets unchanged. Planning
+    # reuses this message; the fixed protocol also identifies empty-input probes.
+    document = _SUMMARY_USER.format(doc_name=doc_name, content=content)
+    document += "\nOriginal structure (native-tables-v1):\n" + json.dumps(
+        structure, ensure_ascii=False
+    )
     return SourceExcerpts([content]).messages(
         [
             {
@@ -2273,7 +2287,7 @@ def short_document_messages(doc_name: str, content: str, schema_md: str, languag
             },
             {
                 "role": "user",
-                "content": _cached_text(_SUMMARY_USER.format(doc_name=doc_name, content=content)),
+                "content": _cached_text(document),
             },
         ]
     )

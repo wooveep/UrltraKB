@@ -306,3 +306,112 @@ def refresh_status(kb_dir: Path, *, scope: KnowledgeScope) -> dict:
                 if effective_input(scope.kb_dir, scope.view_id, identity)
             ),
         }
+
+
+async def refresh_selected_sources(
+    kb_dir: Path, source_ids: list[str], *, scope: KnowledgeScope, context=None
+):
+    """Never invoke document conversion, indexing, summary generation or planning."""
+    from openkb.application.execution import ExecutionContext
+    from openkb.compilation_report import collect_compile_report
+    from openkb.config import resolve_effective_config
+    from openkb.ingest_records import KnowledgeRevision
+    from openkb.locks import LockCancelled, async_kb_lock
+    from openkb.mutation import RecoveryRequired, mutation_scope
+    from openkb.refresh_publication import RefreshResult, RefreshSelection, publish_refresh
+    from openkb.selected_refresh import _reconcile_page, _refresh_index
+    from openkb.selected_refresh_evidence import (
+        current_page_inputs,
+        retained_inputs,
+        selected_reasons,
+        summary_owner,
+    )
+    from openkb.source_catalog import list_sources
+    from openkb.unit_publication import copy_tree, prepare_compile_view
+
+    scope = resolve_scope(kb_dir, scope, writable=True)
+    kb_dir = scope.kb_dir
+    context = context or ExecutionContext()
+    async with async_kb_lock(
+        kb_dir / ".openkb", exclusive=True, cancelled=context.cancelled, on_wait=context.waiting
+    ):
+        try:
+            with (
+                context.begin(kb_dir) as bundle,
+                prepare_compile_view(kb_dir, scope.view_id, retain_pending_context=True) as view,
+            ):
+                reasons = selected_reasons(kb_dir, view.head, source_ids)
+                retained = retained_inputs(kb_dir, view.head, view.scope.wiki_dir)
+                if set(source_ids) - {item.unit.source_id for item in retained.values()}:
+                    raise ValueError("Selected source has no completed current input")
+                root = kb_dir / ".openkb/knowledge" / scope.view_id / "revisions"
+                previous = KnowledgeRevision.model_validate_json(
+                    (root / str(view.head.knowledge_revision_id) / "manifest.json").read_text()
+                )
+                config = resolve_effective_config(kb_dir)[0]
+                resolved, owners, reconciled = {}, {}, {}
+                readers: dict = {}
+                with (
+                    mutation_scope(
+                        kb_dir, [view.scope.wiki_dir.parent], operation="refresh-selected-sources"
+                    ),
+                    collect_compile_report() as report,
+                ):
+                    copy_tree(scope.wiki_dir, view.scope.wiki_dir.parent / "base")
+                    for page, pending in sorted(reasons.items()):
+                        context.check_stop()
+                        if page.startswith("summaries/"):
+                            owner = summary_owner(page, view.scope.wiki_dir, retained)
+                            if owner:
+                                owners[page], resolved[page] = owner, pending
+                        elif page.startswith(("concepts/", "entities/")):
+                            identities = current_page_inputs(
+                                kb_dir,
+                                view.head,
+                                previous,
+                                page,
+                                pending,
+                                retained,
+                                view.scope.wiki_dir,
+                            )
+                            if identities and (view.scope.wiki_dir / page).is_file():
+                                reconciled[page] = await _reconcile_page(
+                                    kb_dir,
+                                    view,
+                                    page,
+                                    identities,
+                                    retained,
+                                    config,
+                                    bundle,
+                                    readers,
+                                )
+                                resolved[page] = pending
+                    if "index.md" in reasons and all(
+                        page in resolved for page in reasons if page != "index.md"
+                    ):
+                        _refresh_index(view.scope.wiki_dir)
+                        resolved["index.md"] = reasons["index.md"]
+                    report.require_complete()
+                return publish_refresh(
+                    kb_dir,
+                    view,
+                    dict(view.head.inputs),
+                    tuple(sorted({p for item in retained.values() for p in item.originals})),
+                    {s.source_id: s.target_generation for s in list_sources(kb_dir)},
+                    context.check_stop,
+                    selection=RefreshSelection(
+                        source_ids=tuple(source_ids),
+                        resolved=resolved,
+                        summary_owners=owners,
+                        reconciled_pages=reconciled,
+                    ),
+                )
+        except (RecoveryRequired, LockCancelled):
+            raise
+        except Exception as error:
+            from openkb.ingest_diagnostics import failure_reason
+
+            context.check_stop()
+            return RefreshResult(
+                "failed", scope.view_id, message=failure_reason(error), unfinished=("refresh",)
+            )

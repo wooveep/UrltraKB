@@ -1,24 +1,11 @@
 """Bounded structural observations of literal source HTML, without inferred headers."""
 
-from html.parser import HTMLParser
-
 from openkb.content_blocks import markdown_layout
+from openkb.html_images import _LITERAL_TAGS
+from openkb.html_images import HTMLLiteralContext as _LiteralContext
 
 MAX_TABLE_SLOTS = 16384
 MAX_TABLE_CHARS = 1_000_000
-_RAW_TEXT_TAGS = {
-    "script",
-    "style",
-    "xmp",
-    "iframe",
-    "noembed",
-    "noframes",
-    "noscript",
-    "textarea",
-    "title",
-    "plaintext",
-}
-_LITERAL_TAGS = {"pre", "code"} | _RAW_TEXT_TAGS
 _TABLE_TAGS = {"table", "thead", "tbody", "tfoot", "tr", "td", "th"}
 TABLE_INTERPRETATION = (
     "Rows and columns describe source layout, not counts of domain items. Repeated cell IDs "
@@ -26,26 +13,6 @@ TABLE_INTERPRETATION = (
     "unresolved slot. Unread cell values are not supplied; read their native positions before "
     "using them. Headers are not inferred from row order."
 )
-
-
-class _LiteralContext(HTMLParser):
-    def __init__(self):
-        super().__init__(convert_charrefs=True)
-        self.literal = []
-
-    def handle_starttag(self, tag, attrs):
-        if self.literal and self.literal[-1] in _RAW_TEXT_TAGS:
-            return
-        if tag in _LITERAL_TAGS:
-            self.literal.append(tag)
-
-    def handle_endtag(self, tag):
-        if self.literal and self.literal[-1] != "plaintext" and tag == self.literal[-1]:
-            self.literal.pop()
-
-    def handle_startendtag(self, tag, attrs):
-        # A self-closing flag does not close a non-void HTML literal element.
-        self.handle_starttag(tag, attrs)
 
 
 def plain_prose_blocks(tokens):

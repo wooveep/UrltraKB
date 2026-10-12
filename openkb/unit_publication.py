@@ -31,7 +31,6 @@ from openkb.source_catalog import (
     Admission,
     read_record,
     read_source,
-    read_source_revision,
     record_path,
     write_record,
 )
@@ -221,7 +220,9 @@ class CompileView:
 
 
 @contextmanager
-def prepare_compile_view(kb_dir: Path, view_id: str = "legacy") -> Iterator[CompileView]:
+def prepare_compile_view(
+    kb_dir: Path, view_id: str = "legacy", *, retain_pending_context: bool = False
+) -> Iterator[CompileView]:
     """Use the real KB environment with a private copy of its knowledge content."""
     from contextlib import ExitStack
 
@@ -240,7 +241,8 @@ def prepare_compile_view(kb_dir: Path, view_id: str = "legacy") -> Iterator[Comp
                 copy_tree(live.wiki_dir, view.scope.wiki_dir)
                 from openkb.figure_publication import preserve_page_figures
 
-                preserve_page_figures(kb_dir, view.scope.wiki_dir, view.head.inputs)
+                if not retain_pending_context:
+                    preserve_page_figures(kb_dir, view.scope.wiki_dir, view.head.inputs)
                 from openkb.compile_checkpoints import figure_projection_bases
 
                 # Capture before filtering or generation can change candidate content.
@@ -249,7 +251,8 @@ def prepare_compile_view(kb_dir: Path, view_id: str = "legacy") -> Iterator[Comp
                 )
                 from openkb.source_changes import filter_compile_context
 
-                filter_compile_context(kb_dir, view.scope.wiki_dir, view.head)
+                if not retain_pending_context:
+                    filter_compile_context(kb_dir, view.scope.wiki_dir, view.head)
             yield view
     except RecoveryRequired:
         preserve_evidence = True
@@ -377,18 +380,11 @@ def publish_unit_revision(
             baselines[name] = generated[name]
         else:
             baselines.pop(name, None)
-    originals = set()
-    referenced_inputs = set(inputs.values()) | {
-        identity for values in dependencies.values() for identity in values
-    }
-    from openkb.figure_publication import referenced_figure_inputs
+    from openkb.knowledge_evidence import publication_originals
 
-    referenced_inputs.update(referenced_figure_inputs(view.scope.wiki_dir, generated))
-    for input_id in referenced_inputs:
-        input_revision = read_record(kb_dir, "unit-revisions", input_id, UnitRevision)
-        source_revision = read_source_revision(kb_dir, input_revision.source_revision_id)
-        originals.add(source_revision.original)
-        originals.update(asset.artifact for asset in source_revision.assets if asset.artifact)
+    originals = publication_originals(
+        kb_dir, state.view_id, inputs.values(), dependencies, view.scope.wiki_dir, generated
+    )
     knowledge_id = uuid.uuid4().hex
     manifest = KnowledgeRevision(
         knowledge_revision_id=knowledge_id,

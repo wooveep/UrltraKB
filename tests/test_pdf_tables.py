@@ -127,6 +127,48 @@ def test_late_painted_image_stays_between_its_native_text_neighbors(tmp_path, mo
 
 
 @pytest.mark.parametrize("mode", ["pages", "markdown"])
+@pytest.mark.parametrize("overlap_text", [" ", "X"])
+def test_only_visible_text_can_block_geometric_image_placement(tmp_path, mode, overlap_text):
+    from figure_fixtures import png_bytes
+
+    path = tmp_path / "overlap.pdf"
+    image = pymupdf.Rect(60, 130, 250, 210)
+    with pymupdf.open() as doc:
+        page = doc.new_page()
+        page.insert_text((60, 800), "Footer painted first")
+        page.insert_text((60, 100), "Before the figure")
+        page.insert_text((60, 250), "After the figure")
+        page.insert_text((249.95, 212), overlap_text)
+        page.insert_image(image, stream=png_bytes(), keep_proportion=False)
+        native_blocks = page.get_text("dict")["blocks"]
+        expected_image = next(block["image"] for block in native_blocks if block["type"] == 1)
+        spans = [
+            span
+            for block in native_blocks
+            if block["type"] == 0
+            for line in block["lines"]
+            for span in line["spans"]
+            if span["text"] == overlap_text
+        ]
+        assert len(spans) == 1 and pymupdf.Rect(spans[0]["bbox"]).intersects(image)
+        doc.save(path)
+    original = path.read_bytes()
+
+    content, pages = convert(path, tmp_path, mode)
+
+    assert content.index("Footer painted first") < content.index("Before the figure")
+    assert content.index("Before the figure") < content.index("After the figure")
+    if overlap_text.strip():
+        assert content.index("After the figure") < content.index("X") < content.index("![image]")
+    else:
+        assert content.index("Before the figure") < content.index("![image]")
+        assert content.index("![image]") < content.index("After the figure")
+    assert len(pages[0]["images"]) == 1
+    assert (tmp_path / "images/p1_img1.png").read_bytes() == expected_image
+    assert path.read_bytes() == original
+
+
+@pytest.mark.parametrize("mode", ["pages", "markdown"])
 def test_image_can_split_two_lines_in_one_native_text_block(tmp_path, mode):
     from figure_fixtures import png_bytes
 

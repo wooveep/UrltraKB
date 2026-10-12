@@ -30,7 +30,12 @@ def expand_navigation_locations(locations: list[dict], key: str, navigation: lis
 def split_document_window(selected: dict, window: dict) -> list[dict]:
     """Divide once near the midpoint, retaining exact native coverage and context."""
     from openkb.agent.compile_messages import render_original_window
-    from openkb.agent.evidence_payload import following_evidence, preceding_evidence, slice_evidence
+    from openkb.agent.evidence_payload import (
+        following_evidence,
+        image_layout,
+        preceding_evidence,
+        slice_evidence,
+    )
     from openkb.agent.page_response import PageResponseError
     from openkb.agent.table_evidence import table_layout
     from openkb.content_blocks import markdown_layout
@@ -47,6 +52,7 @@ def split_document_window(selected: dict, window: dict) -> list[dict]:
         raise PageResponseError("page_truncated_response", "Original batch cannot be divided")
     layout = markdown_layout(text)
     tables = table_layout(text, layout)
+    images = image_layout(selected)
     tokens, offsets = layout
     boundaries = {
         offsets[token.map[1]]
@@ -63,14 +69,19 @@ def split_document_window(selected: dict, window: dict) -> list[dict]:
     for a, b in ((start, cut), (cut, end)):
         context = []
         if a:
-            context.append(preceding_evidence(selected, a, 1200, layout=layout, tables=tables))
+            context.append(
+                preceding_evidence(selected, a, 1200, layout=layout, tables=tables, images=images)
+            )
         if b < len(text):
-            context.append(following_evidence(selected, b, 1200, layout=layout, tables=tables))
+            context.append(
+                following_evidence(selected, b, 1200, layout=layout, tables=tables, images=images)
+            )
         children.append(
             {
                 **{key: window[key] for key in ("path", "sha256", "source_role")},
                 **render_original_window(
-                    slice_evidence(selected, a, b, layout=layout, tables=tables), selected
+                    slice_evidence(selected, a, b, layout=layout, tables=tables, images=images),
+                    selected,
                 ),
                 "selection_offset": a,
                 "supplementary_context": [render_original_window(c, selected) for c in context],
@@ -88,6 +99,7 @@ def iter_document_windows(reader, *, fits: Callable[[dict], bool]) -> Iterator[d
     from openkb.agent.compile_messages import render_original_window
     from openkb.agent.evidence_payload import (
         following_evidence,
+        image_layout,
         preceding_evidence,
         project_evidence,
     )
@@ -105,6 +117,7 @@ def iter_document_windows(reader, *, fits: Callable[[dict], bool]) -> Iterator[d
     digest = hashlib.sha256(reader._read(path)).hexdigest()
     layout = markdown_layout(selected["content"])
     tables = table_layout(selected["content"], layout)
+    images = image_layout(selected)
     offset = 0
     while offset < len(selected["content"]):
         from openkb.llm_execution import check_model_stop
@@ -115,7 +128,7 @@ def iter_document_windows(reader, *, fits: Callable[[dict], bool]) -> Iterator[d
             [
                 render_original_window(
                     preceding_evidence(
-                        selected, offset, context_chars, layout=layout, tables=tables
+                        selected, offset, context_chars, layout=layout, tables=tables, images=images
                     ),
                     selected,
                 )
@@ -137,7 +150,12 @@ def iter_document_windows(reader, *, fits: Callable[[dict], bool]) -> Iterator[d
                 [
                     render_original_window(
                         following_evidence(
-                            selected, end, context_chars, layout=layout, tables=tables
+                            selected,
+                            end,
+                            context_chars,
+                            layout=layout,
+                            tables=tables,
+                            images=images,
                         ),
                         selected,
                     )
@@ -161,6 +179,7 @@ def iter_document_windows(reader, *, fits: Callable[[dict], bool]) -> Iterator[d
                 allow_partial=True,
                 layout=layout,
                 tables=tables,
+                images=images,
             )
             if projected["content"] or context_chars <= 32:
                 break
@@ -169,7 +188,12 @@ def iter_document_windows(reader, *, fits: Callable[[dict], bool]) -> Iterator[d
                 context = [
                     render_original_window(
                         preceding_evidence(
-                            selected, offset, context_chars, layout=layout, tables=tables
+                            selected,
+                            offset,
+                            context_chars,
+                            layout=layout,
+                            tables=tables,
+                            images=images,
                         ),
                         selected,
                     )

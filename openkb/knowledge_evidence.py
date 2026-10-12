@@ -50,6 +50,20 @@ def publication_dependencies(kb_dir, head, pages, before, inputs, *, wiki=None):
     return dependencies
 
 
+def publication_originals(kb_dir, view_id, inputs, dependencies, wiki, pages) -> tuple[str, ...]:
+    """Retain the artifact closure of current inputs, older page bases and figures."""
+    from openkb.figure_publication import referenced_figure_inputs
+
+    referenced = set(inputs) | {identity for values in dependencies.values() for identity in values}
+    referenced.update(referenced_figure_inputs(wiki, pages))
+    originals = set()
+    for identity in referenced:
+        _, source = validated_input(kb_dir, identity, view_id)
+        originals.add(source.original)
+        originals.update(asset.artifact for asset in source.assets if asset.artifact)
+    return tuple(sorted(originals))
+
+
 def page_evidence(scope: KnowledgeScope, page: str) -> dict:
     head = read_head(scope.kb_dir, scope.view_id)
     directory = (

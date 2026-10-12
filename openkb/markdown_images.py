@@ -7,7 +7,7 @@ from urllib.parse import quote, unquote, urlsplit
 from markdown_it import MarkdownIt
 from markdown_it.rules_inline import html_inline, image
 
-from openkb.html_images import html_image_references
+from openkb.html_images import HTMLLiteralContext, html_image_references
 
 
 @dataclass(frozen=True)
@@ -61,15 +61,16 @@ def image_references(text: str) -> list[ImageReference]:
     parser.inline.ruler.at("html_inline", positioned_html)
     lines = [match for match in re.finditer(r"[^\r\n]*(?:\r\n|\r|\n|$)", text) if match.group()]
     result = []
+    context = HTMLLiteralContext()
     for block in parser.parse(text):
         references: list[tuple[int, int, str, str, str, bool]] = []
         if block.type == "html_block":
             references.extend(
                 (ref.start, ref.end, ref.source, ref.alt, ref.title, True)
-                for ref in html_image_references(block.content)
+                for ref in html_image_references(block.content, context=context)
             )
         for token in block.children or []:
-            if token.type == "image":
+            if token.type == "image" and not context.literal:
                 start, end = token.meta["original_markup_span"]
                 references.append(
                     (
@@ -85,7 +86,7 @@ def image_references(text: str) -> list[ImageReference]:
                 base = token.meta["original_markup_span"][0]
                 references.extend(
                     (base + ref.start, base + ref.end, ref.source, ref.alt, ref.title, True)
-                    for ref in html_image_references(token.content)
+                    for ref in html_image_references(token.content, context=context)
                 )
         if not references:
             continue

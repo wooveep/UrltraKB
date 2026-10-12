@@ -11,6 +11,10 @@ from openkb.content_blocks import markdown_layout
 from openkb.text_source import clip_text_origins
 
 MAX_PAYLOAD_CHARS = 48000
+FIGURE_INTERPRETATION = (
+    "Image references retain original assets, occurrence locations and any original captions. "
+    "Pixels have not been interpreted. An occurrence or filename does not establish visual content."
+)
 
 
 def _clean(value):
@@ -63,7 +67,16 @@ def _coordinates(source: dict, start: int, end: int) -> dict:
     }
 
 
-def _window(source: dict, start: int, end: int, layout=None, tables=None) -> dict:
+def image_layout(source: dict):
+    """Parse references in their complete literal context once per selection."""
+    from openkb.markdown_images import image_references
+
+    text = source["content"]
+    return image_references(text) if "![" in text or "<" in text else []
+
+
+def _window(source: dict, start: int, end: int, layout=None, tables=None, images=None) -> dict:
+    images = image_layout(source) if images is None else images
     coordinates = _coordinates(source, start, end)
     spans = coordinates.get("source_spans", [])
     origins = [
@@ -80,7 +93,7 @@ def _window(source: dict, start: int, end: int, layout=None, tables=None) -> dic
     }
     if "_page_segments" in source:
         result["units"] = [
-            _page_unit(unit, result["page_spans"])
+            _page_unit(unit, result["page_spans"], images, source["_page_segments"])
             for unit in source.get("units", [])
             if any(span["page"] == unit["page"] for span in result["page_spans"])
         ]
@@ -163,23 +176,29 @@ def _window(source: dict, start: int, end: int, layout=None, tables=None) -> dic
     if native_tables:
         result["native_tables"] = native_tables
         result["table_interpretation"] = TABLE_INTERPRETATION
+    if any(unit.get("images") for unit in result.get("units", [])) or any(
+        start <= ref.start and ref.end <= end for ref in images
+    ):
+        result["figure_interpretation"] = FIGURE_INTERPRETATION
     return result
 
 
-def _page_unit(unit: dict, spans: list[dict]) -> dict:
+def _page_unit(unit: dict, spans: list[dict], images, segments) -> dict:
     """Page inventory is not evidence that each figure belongs to an excerpt."""
-    from openkb.markdown_images import image_references
-
     selected = [span for span in spans if span["page"] == unit["page"]]
     complete = any(span["start"] == 0 and span["end"] == len(unit["content"]) for span in selected)
-    images = unit.get("images", [])
+    inventory = unit.get("images", [])
     if not complete:
+        left = next(left for left, _, page in segments if page == unit["page"])
         paths = {
             ref.local_path
-            for ref in image_references(unit["content"])
-            if any(span["start"] <= ref.start and ref.end <= span["end"] for span in selected)
+            for ref in images
+            if any(
+                left + span["start"] <= ref.start and ref.end <= left + span["end"]
+                for span in selected
+            )
         }
-        images = [item for item in images if item["path"] in paths]
+        inventory = [item for item in inventory if item["path"] in paths]
     return {
         **{
             key: value
@@ -187,12 +206,14 @@ def _page_unit(unit: dict, spans: list[dict]) -> dict:
             if key not in {"content", "parts", "origin_locators", "images"}
         },
         "text_coverage": "complete" if complete else "partial",
-        "images": images,
-        "omitted_page_images": len(unit.get("images", [])) - len(images),
+        "images": inventory,
+        "omitted_page_images": len(unit.get("images", [])) - len(inventory),
     }
 
 
-def slice_evidence(source: dict, start: int, end: int, *, layout=None, tables=None) -> dict:
+def slice_evidence(
+    source: dict, start: int, end: int, *, layout=None, tables=None, images=None
+) -> dict:
     """Retain native positions and partial-value metadata for one exact subrange."""
     if (
         type(start) is not int
@@ -200,7 +221,7 @@ def slice_evidence(source: dict, start: int, end: int, *, layout=None, tables=No
         or not 0 <= start < end <= len(source["content"])
     ):
         raise ValueError("Evidence subrange is outside its original selection")
-    return _window(source, start, end, layout, tables)
+    return _window(source, start, end, layout, tables, images)
 
 
 def _display_context(source: dict, offset: int, layout=None) -> list[dict]:
@@ -243,6 +264,7 @@ def project_evidence(
     allow_partial: bool = False,
     layout=None,
     tables=None,
+    images=None,
 ) -> dict:
     """Paginate after serialization, at paragraph boundaries outside cell values.
 
@@ -255,7 +277,8 @@ def project_evidence(
         raise ValueError("Continuation is outside this evidence selection")
     layout = layout or (markdown_layout(text) if offset else None)
     tables = table_layout(text, layout) if tables is None else tables
-    result = _window(source, offset, len(text), layout, tables)
+    images = image_layout(source) if images is None else images
+    result = _window(source, offset, len(text), layout, tables, images)
     fits = fits or (lambda payload: len(json.dumps(payload, ensure_ascii=False)) <= budget)
     if fits(result):
         return result
@@ -282,7 +305,7 @@ def project_evidence(
     low, high, best = 0, len(ends) - 1, None
     while low <= high:
         middle = (low + high) // 2
-        candidate = _window(source, offset, ends[middle], layout, tables)
+        candidate = _window(source, offset, ends[middle], layout, tables, images)
         if fits(candidate):
             best, low = candidate, middle + 1
         else:
@@ -294,7 +317,7 @@ def project_evidence(
             low, high = offset + 1, len(text)
             while low <= high:
                 middle = (low + high) // 2
-                candidate = _window(source, offset, middle, layout, tables)
+                candidate = _window(source, offset, middle, layout, tables, images)
                 if fits(candidate):
                     best, low = candidate, middle + 1
                 else:
@@ -314,7 +337,7 @@ def project_evidence(
 
 
 def preceding_evidence(
-    source: dict, offset: int, max_chars: int, *, layout=None, tables=None
+    source: dict, offset: int, max_chars: int, *, layout=None, tables=None, images=None
 ) -> dict:
     """Project preceding original context separately from the primary processed range."""
     if type(offset) is not int or not 0 <= offset <= len(source["content"]) or max_chars <= 0:
@@ -323,19 +346,19 @@ def preceding_evidence(
     floor = max(0, offset - max_chars)
     starts = [offsets[t.map[0]] for t in tokens if t.map and t.level == 0]
     start = next((n for n in starts if floor <= n < offset), floor)
-    context = _window(source, start, offset, (tokens, offsets), tables)
+    context = _window(source, start, offset, (tokens, offsets), tables, images)
     context.pop("continuation", None)
     return {**context, "primary": False}
 
 
 def following_evidence(
-    source: dict, offset: int, max_chars: int, *, layout=None, tables=None
+    source: dict, offset: int, max_chars: int, *, layout=None, tables=None, images=None
 ) -> dict:
     """Keep an adjacent qualification visible before generating the preceding rule."""
     tokens, offsets = layout or markdown_layout(source["content"])
     ceiling = min(len(source["content"]), offset + max_chars)
     ends = [offsets[t.map[1]] for t in tokens if t.map and t.level == 0]
     end = max((n for n in ends if offset < n <= ceiling), default=ceiling)
-    context = _window(source, offset, end, (tokens, offsets), tables)
+    context = _window(source, offset, end, (tokens, offsets), tables, images)
     context.pop("continuation", None)
     return {**context, "primary": False}

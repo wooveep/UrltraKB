@@ -6,7 +6,7 @@ from math import isfinite
 
 import pymupdf
 
-PDF_LAYOUT_POLICY = "native-tables-image-order-v3"
+PDF_LAYOUT_POLICY = "native-tables-image-order-v4"
 _MAX_TABLE_SLOTS = 16384
 
 
@@ -245,7 +245,10 @@ def _place_images(blocks: list[dict]) -> list[dict]:
         neighbors = [
             (i, pymupdf.Rect(block["bbox"]))
             for i, block in enumerate(text)
-            if block["type"] == 0 and block["bbox"][0] < bounds.x1 and block["bbox"][2] > bounds.x0
+            if block["type"] == 0
+            and any(span["text"].strip() for line in block["lines"] for span in line["spans"])
+            and block["bbox"][0] < bounds.x1
+            and block["bbox"][2] > bounds.x0
         ]
         position = original
         if neighbors and not any(rect.intersects(bounds) for _, rect in neighbors):

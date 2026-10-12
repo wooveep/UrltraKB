@@ -5,6 +5,40 @@ from html.parser import HTMLParser
 from urllib.parse import urljoin
 
 _ATTRIBUTE = re.compile(r"""\s+([^\s=/>]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?""")
+_RAW_TEXT_TAGS = {
+    "script",
+    "style",
+    "xmp",
+    "iframe",
+    "noembed",
+    "noframes",
+    "noscript",
+    "textarea",
+    "title",
+    "plaintext",
+}
+_LITERAL_TAGS = {"pre", "code"} | _RAW_TEXT_TAGS
+
+
+class HTMLLiteralContext(HTMLParser):
+    """Carry literal ancestry across CommonMark HTML blocks and inline tokens."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.literal = []
+
+    def handle_starttag(self, tag, attrs):
+        if self.literal and self.literal[-1] in _RAW_TEXT_TAGS:
+            return
+        if tag in _LITERAL_TAGS:
+            self.literal.append(tag)
+
+    def handle_endtag(self, tag):
+        if self.literal and self.literal[-1] != "plaintext" and tag == self.literal[-1]:
+            self.literal.pop()
+
+    def handle_startendtag(self, tag, attrs):
+        self.handle_starttag(tag, attrs)
 
 
 def _attribute_sources(
@@ -58,25 +92,58 @@ def html_link_targets(text: str) -> list[tuple[int, int, str]]:
     return _attribute_sources(text, {"a", "area"}, "href", resolve_base=True)
 
 
-def html_image_references(text: str):
+def html_image_references(text: str, *, context: HTMLLiteralContext | None = None):
     """HTML uses its own src grammar even when indented or containing Markdown text."""
     from openkb.markdown_images import ImageReference
 
-    captions = []
+    references = []
+    offsets = [0] + [match.end() for match in re.finditer("\n", text)]
+    base_url = None
 
-    class Captions(HTMLParser):
+    class References(HTMLLiteralContext):
         def handle_starttag(self, tag, attrs):
-            if tag.lower() == "img":
-                values = dict(attrs)
-                if values.get("src") is not None:
-                    captions.append((values.get("alt") or "", values.get("title") or ""))
+            nonlocal base_url
+            super().handle_starttag(tag, attrs)
+            if self.literal:
+                return
+            values = {}
+            for key, value in attrs:
+                values.setdefault(key, value)
+            if tag == "base" and base_url is None:
+                base_url = values.get("href")
+            if tag != "img" or values.get("src") is None:
+                return
+            matched = next(
+                match
+                for match in _ATTRIBUTE.finditer(self.get_starttag_text())
+                if match.group(1).lower() == "src"
+            )
+            group = next(index for index in range(2, 5) if matched.group(index) is not None)
+            row, column = self.getpos()
+            start, end = matched.span(group)
+            base = offsets[row - 1] + column
+            references.append(
+                ImageReference(
+                    base + start,
+                    base + end,
+                    values["src"],
+                    values.get("alt") or "",
+                    values.get("title") or "",
+                    True,
+                )
+            )
 
-    parser = Captions(convert_charrefs=True)
+    parser = References()
+    if context is not None:
+        parser.literal = list(context.literal)
     parser.feed(text)
     parser.close()
+    if context is not None:
+        context.reset()
+        context.literal = parser.literal
     return [
-        ImageReference(a, b, source, alt, title, True)
-        for (a, b, source), (alt, title) in zip(
-            html_image_sources(text, resolve_base=True), captions, strict=True
+        ImageReference(
+            ref.start, ref.end, urljoin(base_url or "", ref.source), ref.alt, ref.title, True
         )
+        for ref in references
     ]
