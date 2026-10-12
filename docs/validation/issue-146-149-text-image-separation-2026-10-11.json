@@ -1,9 +1,9 @@
 {
   "schema_version": 2,
   "status": "combined_v14_authorized_3500_build_running",
-  "recorded_at": "2026-10-11T16:30:33.384647+00:00",
+  "recorded_at": "2026-10-12T00:23:04.704482+00:00",
   "development_base": "b5f3f9049fe7d0baadaf72c3f05f7a9d7a13ff1c",
-  "current_candidate_code": "694086fa2b6c97001dc1b86e0a5473eecac62c8b",
+  "current_candidate_code": "5ce1dac44ee454715697bf42bed3cdc1929a7a00",
   "baseline": {
     "code": "45950287d4c59f9dc270250f84d56ba4faf350ce",
     "executed": false,
@@ -1357,11 +1357,12 @@
       "whitepaper_second_saved_tree_entries_passed": 91,
       "external_calls_in_replay": 0,
       "baseline_executed": false,
-      "operations_independent_replay": "3 retained TOCs, all156 entries preserved each; only one saved same-heading/page verifier per tree; controlled replay not real inference"
+      "operations_independent_replay": "3 retained TOCs, all156 entries preserved each; only one saved same-heading/page verifier per tree; controlled replay not real inference",
+      "whitepaper_replay_scope": "The 91-entry complete replay binds physical7c1bb34/page_indexce4a837 before numbered-identity filtering. Final v15 conservatively requires additional verification for conflicting model/native section numbers; those old responses do not exist, so whole-tree v15 replay remains a coverage gap."
     }
   },
   "current_v15": {
-    "status": "frozen_full_engineering_running",
+    "status": "real_build_running_after_script_assessment",
     "code": "5ce1dac44ee454715697bf42bed3cdc1929a7a00",
     "main_commit": "db3512e1f22c8cee2a44c854941fd983c52738db",
     "code_freeze": {
@@ -1383,15 +1384,61 @@
       "new_retained_http_responses": 477,
       "new_unresolved_charged_calls": 4,
       "historical_unresolved_charged_calls": 1,
-      "refund": 0
+      "refund": 0,
+      "snapshot": "sealed_start_of_v15_not_live_usage"
     },
     "new_real_results": {
-      "build_executed": false,
+      "build_executed": true,
       "qa_executed": false,
       "persistent_chat_executed": false,
       "reader_executed": false,
-      "semantic_acceptance": null
+      "semantic_acceptance": null,
+      "build_completed": false
     },
-    "no_worse_than_baseline": false
+    "no_worse_than_baseline": false,
+    "whitepaper_saved_replay_limit": "Two full-tree saved fixtures lack the extra verifier responses required by the new section-identity check. No responses were fabricated; real model validation is pending.",
+    "full_engineering": {
+      "passed": 2694,
+      "failed": 0,
+      "skipped": 67,
+      "warnings": 199,
+      "pytest_seconds": 549.41,
+      "all_five_checks_passed": true,
+      "source_unchanged": true,
+      "report": {
+        "path": ".scratch/text-image-repair-20261011/engineering-final-v15.json",
+        "sha256": "2749505fde14ca6ab2d3bd0022d70f99cfe6209a3e8180d1066623eb7026b421"
+      }
+    },
+    "baseline_integrity": {
+      "path": ".scratch/text-image-repair-20261011/baseline-integrity-before-final-v15.json",
+      "sha256": "f3d32cb5a6037553ad4095ac838d505590ee2df2da0920edc784640780371f57"
+    },
+    "build_plan": {
+      "path": ".scratch/text-image-repair-20261011/review/final-candidate-preregistration-v15-budget3500.json",
+      "sha256": "a3a1297279e35dd8508a6e6dc735c1e1d3bde975ac5a1cf841a47dedc923642e"
+    },
+    "build_method_reviews": [
+      {
+        "path": ".scratch/text-image-repair-20261011/review/retry-build-spec-approval-r2.json",
+        "sha256": "b7718729e0b02444f6d48152a241c800725d9a519f5f33f584ff2331e1d3d9c5"
+      },
+      {
+        "path": ".scratch/text-image-repair-20261011/review/retry-method-r2-standards.json",
+        "sha256": "aa66607016bc591451e19fc454b704f82a847c192eba495bed9603aa4d6732ab"
+      }
+    ],
+    "actual_plan_applicability": [
+      {
+        "path": ".scratch/text-image-repair-20261011/review/retry-plan-applicability-spec-v15.json",
+        "sha256": "fc8fcbb3afd11923f5592f74ce979b2738127e02521a03363e0cd99e5d5fe49d"
+      },
+      {
+        "path": ".scratch/text-image-repair-20261011/review/retry-plan-applicability-standards-v15-r1.json",
+        "sha256": "48f63c3f32834727737544a8a6af694838bfb26e1beeeb13944c08b9b38607fa"
+      }
+    ],
+    "process_receipt": ".scratch/text-image-repair-20261011/runs/build-final-v15-budget3500-process.json",
+    "started_at_utc": "2026-10-12T00:22:32.605409+00:00"
   }
 }
