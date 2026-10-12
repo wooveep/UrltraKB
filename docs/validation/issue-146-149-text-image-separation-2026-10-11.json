@@ -1,9 +1,9 @@
 {
   "schema_version": 2,
-  "status": "v17_same_task_build_running_not_accepted",
-  "recorded_at": "2026-10-12T04:31:07.116897+00:00",
+  "status": "v18_engineering_passed_continuation_method_review_not_accepted",
+  "recorded_at": "2026-10-12T05:46:58.435445+00:00",
   "development_base": "b5f3f9049fe7d0baadaf72c3f05f7a9d7a13ff1c",
-  "current_candidate_code": "88e55bec55e5b2d54d2661b915322afb7145b6ad",
+  "current_candidate_code": "5d4dd67f3ab84aad9673124f01ed29ad091cc1a5",
   "baseline": {
     "code": "45950287d4c59f9dc270250f84d56ba4faf350ce",
     "executed": false,
@@ -1810,9 +1810,9 @@
     }
   },
   "current_v17": {
-    "status": "same_task_build_running_not_accepted",
+    "status": "terminal_failed_api_compilation_six_publications",
     "baseline_executed": false,
-    "new_real_results": "build in progress; final QA/chat not started",
+    "new_real_results": "Six source publications, completed API index but failed concept compilation; no global refresh and no final QA/chat",
     "production_files": [
       "openkb/agent/source_windows.py"
     ],
@@ -1973,11 +1973,34 @@
     "install940_stage_semantics": {
       "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/install940-published-v17-preliminary-spec-r1.json",
       "sha256": "8f66718afc3d9c22de0199beacae6d508b06f9a576b733758635645f59885b80"
+    },
+    "terminal_observation": {
+      "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/build-final-v17-terminal-observation-r1.json",
+      "sha256": "eac5d69bf40571d053b463cb97e0467faad6dfbf803e8b8479674654875b3285"
+    },
+    "terminal_preservation": {
+      "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/build-final-v17-budget3500-terminal-freeze.json",
+      "sha256": "5d80e2f4bf328801e88d4e98898e51056810b2522c29276eb3928764d3e9eaac"
+    },
+    "precise_api_diagnosis": {
+      "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/api-compile-failure-v17-precise-diagnosis-r1.json",
+      "sha256": "440a2eb11fec51aa5d4c6df701f8ccc0f5968aab9cc6b323f024f0af200c9f6f"
+    },
+    "terminal_budget": {
+      "cumulative_used": 2956,
+      "task_used": 2585,
+      "prior_used": 371,
+      "remaining": 544,
+      "total": 3500,
+      "historical_unknown": 7,
+      "new_unknown": 0,
+      "new_sends": 672,
+      "stop_monitor_executed": false
     }
   },
   "current_v18": {
-    "status": "table_and_font_reviews_passed_path_actual_source_regression_pending_not_accepted",
-    "candidate_code": "ed8cad1a50e56e9631b8992bb2a7e1f13144179a",
+    "status": "production_approved_engineering_passed_continuation_method_review_pending",
+    "candidate_code": "5d4dd67f3ab84aad9673124f01ed29ad091cc1a5",
     "same_final_candidate_includes_product_version_cleanup": true,
     "original_baseline_executed": false,
     "latest_snapshot": {
@@ -2012,13 +2035,24 @@
       {
         "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/table-evidence-implementation-standards-v18-r2.json",
         "sha256": "20da28081e315d6d716089d0533f7d75a681dc9d3facbea9825e98f22b3fe710"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/inline-paths-implementation-spec-v18-r6.json",
+        "sha256": "cf6142b97462ae54d50798167b807b889af0616c00ea6f543685aea8f05997ef"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/published-repair-method-spec-v18-r4.json",
+        "sha256": "80b671f31bea8ddcd385e441b5d50b7f1a5700c3abe8543119ff022b231111eb"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/published-repair-method-standards-v18-r4.json",
+        "sha256": "e9cb11cc8d56ae45b8eea09ae874697650bc70ebb54f6a6c97576a311c283efe"
       }
     ],
     "pending": [
-      "Correct absolute paths adjacent to Chinese prose must not be rejected; exact HTTP 77 counterexample retained",
-      "Complete engineering and both-axis review on final code",
-      "Review and execute same-task public continuation, preserving terminal predecessor and cumulative charges",
-      "45 full Agent answers, 12 persistent chat turns, 12 reader views and full semantic checks at one final head"
+      "Complete R5 dual method review, bind exact actual plan and qualify wrapper read-only preflight",
+      "Execute same-task API retry, two explicit reprocesses and one public seven-input refresh within544 remaining calls",
+      "45 full Agent answers,12 persistent chat turns,12 reader views, HTTP audit and full semantic checks at one final head"
     ],
     "table_reviews": [
       {
@@ -2042,12 +2076,12 @@
     ],
     "path_reviews": [
       {
-        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/inline-paths-implementation-spec-v18-r5.json",
-        "sha256": "46bdb261597d9092ca42fe7de13b427fb64053860d7c2027fcbe2378c5a2afc6"
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/inline-paths-implementation-spec-v18-r7.json",
+        "sha256": "1f7334c0d41fe40f7326b414386a0934d9363424131d0dc7d3a7002287636d57"
       },
       {
-        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/inline-paths-implementation-standards-v18-r5.json",
-        "sha256": "b997e18ce6aefdabbbfa02994111e9275b5d6619e6e124fe685b6134d48caf1c"
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/inline-paths-implementation-standards-v18-r7.json",
+        "sha256": "7f5a9a9e68038444f5d4fab6d0dc163d881f0811a55c7aee297606962540eac1"
       }
     ],
     "real_install940_structure": {
@@ -2066,6 +2100,45 @@
       "matched_visual_original": "physical page 64: category cell spans rows 2..5; WinServer/other pairs 3/0,2/1,1/2,0/3; no candidate KB changed",
       "documentation": "https://pymupdf.readthedocs.io/en/latest/textpage.html#span-dictionary"
     },
-    "engineering_in_progress": "engineering-final-v18 on ed8cad1a; not final after the discovered Chinese-adjacent path bug"
+    "historical_path_reviews": [
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/inline-paths-implementation-spec-v18-r5.json",
+        "sha256": "46bdb261597d9092ca42fe7de13b427fb64053860d7c2027fcbe2378c5a2afc6"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/inline-paths-implementation-standards-v18-r5.json",
+        "sha256": "b997e18ce6aefdabbbfa02994111e9275b5d6619e6e124fe685b6134d48caf1c"
+      }
+    ],
+    "historical_engineering_note": "engineering-final-v18 on ed8cad1a; not final after the discovered Chinese-adjacent path bug",
+    "root_commit": "1724a7760e5c6c4903ed8c2b04c0e6f8c6bf81a2",
+    "freeze": {
+      "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/code-freeze-final-v18.json",
+      "sha256": "c825892f55a04cc826ef9f5cde7982fcea75a58b1b82f9ea4accfd59beb8a1d5"
+    },
+    "full_engineering": {
+      "receipt": {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/engineering-final-v18-r2.json",
+        "sha256": "19f0754fc1e5a91d40cea8cb08de276a3a3abd9e531821d312d4aebe5bfcbc61"
+      },
+      "passed": 2789,
+      "skipped": 67,
+      "warnings": 199,
+      "pytest_seconds": 540.86,
+      "all_checks_passed": true,
+      "source_unchanged": true
+    },
+    "continuation_method_snapshot": {
+      "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/published-repair-method-v18-r5-snapshot.json",
+      "sha256": "40fc6e5d70051469bac56a3ab9d623623ac08b284ab722c080a72231d30f385e"
+    },
+    "continuation_draft": {
+      "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/final-candidate-preregistration-v18-draft.json",
+      "sha256": "216987d8000aa4c5e7e8e3c5b81cf38d0e5e315c6d807b04c4c8facea11e14da"
+    },
+    "baseline_integrity": {
+      "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/baseline-integrity-before-final-v18.json",
+      "sha256": "d06519123ed8d435ea9d11fe64d92d1348af67662f4341ea963a3ae9797a8675"
+    }
   }
 }
