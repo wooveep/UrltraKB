@@ -5,15 +5,65 @@ turn a partial reader window into a complete procedure or authorize new claims.
 """
 
 import hashlib
+import html
 import json
 import re
+import unicodedata
 
 from openkb.agent.page_response import PageResponseError, parse_page, parse_summary
+from openkb.agent.table_evidence import table_layout
 from openkb.content_blocks import markdown_layout
 
-PROTOCOL = "original-excerpts-v2"
+PROTOCOL = "original-excerpts-v3"
 _MARKER = re.compile(r"^\[\[original:(x\d+\.\d+)\]\][ \t]*$", re.MULTILINE)
 _PREFIX = "[[original:"
+_ABSOLUTE_PATH = re.compile(r"(?:/(?!/)[^\s]+|[A-Za-z]:[\\/][^\r\n]+|\\\\[^\\\s]+\\[^\r\n]+)\Z")
+
+
+def _standalone_path(value: str) -> bool:
+    # This is a narrow transcription check, not a shell parser. Do not treat
+    # URLs, relative wiki links, numeric ratios or commands as path literals.
+    return bool(
+        _ABSOLUTE_PATH.fullmatch(value)
+        and any(character.isalpha() or character == "_" for character in value)
+        and not re.search(r"\s[-/<>|&;]|[\r\n]", value)
+        and not re.search(r"\.(?:exe|com|bat|cmd)\s+\S", value, re.IGNORECASE)
+    )
+
+
+def _path_character(character: str) -> bool:
+    return bool(character) and (
+        character.isalnum()
+        or unicodedata.category(character).startswith("M")
+        or character in "._/\\~:%+-"
+    )
+
+
+def _contains_path(source: str, path: str) -> bool:
+    start = source.find(path)
+    while start >= 0:
+        end = start + len(path)
+        left, right = source[max(0, start - 1) : start], source[end : end + 1]
+        # A final sentence period is punctuation; a filename extension is not.
+        if right == "." and not _path_character(source[end + 1 : end + 2]):
+            right = ""
+        if not _path_character(left) and not _path_character(right):
+            return True
+        start = source.find(path, start + 1)
+    return False
+
+
+def _plain_cell_parts(source: str, cell: dict) -> list[str]:
+    raw = source[cell["start"] : cell["end"]]
+    match = re.fullmatch(r"<(td|th)\b[^>]*>(.*?)</\1\s*>", raw, re.DOTALL | re.IGNORECASE)
+    if not match:
+        return []
+    parts = re.split(r"<br\s*/?>", match[2], flags=re.IGNORECASE)
+    if any("<" in part or ">" in part for part in parts):
+        return []
+    # Native cells contain escaped text and explicit line breaks. Never join
+    # those breaks or infer the visibility of arbitrary nested HTML elements.
+    return [html.unescape(part) for part in parts]
 
 
 class SourceExcerpts:
@@ -24,10 +74,22 @@ class SourceExcerpts:
         self.catalog: list[dict] = []
         self.sources: list[dict] = []
         self.literal_bodies: set[str] = set()
+        self.path_sources: list[str] = []
         for number, text in enumerate(sources, 1):
             check_model_stop()
             tokens, offsets = markdown_layout(text)
             check_model_stop()
+            self.path_sources.append(text)
+            # Only visible, resolved table-cell text supplies decoded entities.
+            # Attributes, comments and fenced table examples are not cell evidence.
+            if "&" in text:
+                self.path_sources.extend(
+                    part
+                    for table in table_layout(text, (tokens, offsets))
+                    for cell in table.get("cells", [])
+                    if cell["kind"] != "unresolved"
+                    for part in _plain_cell_parts(text, cell)
+                )
             protected: list[tuple[int, int]] = []
             for index, token in enumerate(tokens):
                 if index % 128 == 0:
@@ -99,6 +161,7 @@ class SourceExcerpts:
                         "Carry the selected occurrence's adjacent conditions and operation stage; "
                         "window-edge blocks may be partial. Do not reconstruct commands or table "
                         "alignment from extraction line breaks. Explain lost alignment locally. "
+                        "Standalone inline absolute paths must occur verbatim in supplied text. "
                         "Metadata stays ordinary prose."
                     ),
                     "blocks": self.catalog,
@@ -114,6 +177,7 @@ class SourceExcerpts:
 
     def render(self, content: str) -> str:
         tokens, offsets = markdown_layout(content)
+        self._check_paths(tokens)
         paragraphs = [
             (offsets[token.map[0]], offsets[token.map[1]])
             for index, token in enumerate(tokens)
@@ -176,7 +240,28 @@ class SourceExcerpts:
             rendered = "\n\n" + rendered.strip("\n") + "\n\n"
         return rendered
 
-    def response(self, raw: str, protocol: str, expected_sections=(), *, update=False) -> str:
+    def _check_paths(self, tokens) -> None:
+        for token in tokens:
+            for child in token.children or []:
+                if child.type != "code_inline" or not _standalone_path(child.content):
+                    continue
+                if not any(_contains_path(source, child.content) for source in self.path_sources):
+                    raise PageResponseError(
+                        "page_literal_conflict",
+                        "An inline path does not occur verbatim in the supplied original. "
+                        "Copy its exact spelling or select the original excerpt; "
+                        "do not reconstruct it across extraction line breaks.",
+                    )
+
+    def response(
+        self,
+        raw: str,
+        protocol: str,
+        expected_sections=(),
+        *,
+        update=False,
+        previous_description: str | None = None,
+    ) -> str:
         if protocol == "markdown":
             return self.render(raw)
         if update:
@@ -198,6 +283,10 @@ class SourceExcerpts:
         for field in ("description", "type", "reason"):
             if isinstance(value.get(field), str) and _PREFIX in value[field]:
                 raise PageResponseError("page_excerpt_invalid", "Metadata cannot contain excerpts")
+        if isinstance(value.get("description"), str) and not (
+            update and value["description"] == previous_description
+        ):
+            self._check_paths(markdown_layout(value["description"])[0])
         for item in bodies:
             if isinstance(item, dict) and isinstance(item.get("content"), str):
                 item["content"] = self.render(item["content"])

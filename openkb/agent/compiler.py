@@ -556,7 +556,13 @@ async def _llm_call_page_async(
             )
             if original_excerpts is not None:
                 raw = original_excerpts.response(
-                    raw, response_protocol, expected_sections, update=page_update is not None
+                    raw,
+                    response_protocol,
+                    expected_sections,
+                    update=page_update is not None,
+                    previous_description=(
+                        page_update.request()["description"] if page_update is not None else None
+                    ),
                 )
             if page_update is not None:
                 if read_current is None:

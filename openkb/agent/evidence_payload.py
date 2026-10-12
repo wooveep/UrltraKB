@@ -6,6 +6,7 @@ text, while continuation is an offset in this selection's displayed content.
 
 import json
 
+from openkb.agent.table_evidence import TABLE_INTERPRETATION, table_layout, table_metadata
 from openkb.content_blocks import markdown_layout
 from openkb.text_source import clip_text_origins
 
@@ -62,7 +63,7 @@ def _coordinates(source: dict, start: int, end: int) -> dict:
     }
 
 
-def _window(source: dict, start: int, end: int, layout=None) -> dict:
+def _window(source: dict, start: int, end: int, layout=None, tables=None) -> dict:
     coordinates = _coordinates(source, start, end)
     spans = coordinates.get("source_spans", [])
     origins = [
@@ -153,6 +154,15 @@ def _window(source: dict, start: int, end: int, layout=None) -> dict:
             )
     if blocks:
         result["blocks"] = blocks
+    native_tables = table_metadata(
+        table_layout(source["content"], layout) if tables is None else tables,
+        start,
+        end,
+        lambda a, b: _coordinates(source, a, b),
+    )
+    if native_tables:
+        result["native_tables"] = native_tables
+        result["table_interpretation"] = TABLE_INTERPRETATION
     return result
 
 
@@ -182,7 +192,7 @@ def _page_unit(unit: dict, spans: list[dict]) -> dict:
     }
 
 
-def slice_evidence(source: dict, start: int, end: int, *, layout=None) -> dict:
+def slice_evidence(source: dict, start: int, end: int, *, layout=None, tables=None) -> dict:
     """Retain native positions and partial-value metadata for one exact subrange."""
     if (
         type(start) is not int
@@ -190,7 +200,7 @@ def slice_evidence(source: dict, start: int, end: int, *, layout=None) -> dict:
         or not 0 <= start < end <= len(source["content"])
     ):
         raise ValueError("Evidence subrange is outside its original selection")
-    return _window(source, start, end, layout)
+    return _window(source, start, end, layout, tables)
 
 
 def _display_context(source: dict, offset: int, layout=None) -> list[dict]:
@@ -232,6 +242,7 @@ def project_evidence(
     fits=None,
     allow_partial: bool = False,
     layout=None,
+    tables=None,
 ) -> dict:
     """Paginate after serialization, at paragraph boundaries outside cell values.
 
@@ -243,7 +254,8 @@ def project_evidence(
     if type(offset) is not int or not 0 <= offset <= len(text):
         raise ValueError("Continuation is outside this evidence selection")
     layout = layout or (markdown_layout(text) if offset else None)
-    result = _window(source, offset, len(text), layout)
+    tables = table_layout(text, layout) if tables is None else tables
+    result = _window(source, offset, len(text), layout, tables)
     fits = fits or (lambda payload: len(json.dumps(payload, ensure_ascii=False)) <= budget)
     if fits(result):
         return result
@@ -270,7 +282,7 @@ def project_evidence(
     low, high, best = 0, len(ends) - 1, None
     while low <= high:
         middle = (low + high) // 2
-        candidate = _window(source, offset, ends[middle], layout)
+        candidate = _window(source, offset, ends[middle], layout, tables)
         if fits(candidate):
             best, low = candidate, middle + 1
         else:
@@ -282,7 +294,7 @@ def project_evidence(
             low, high = offset + 1, len(text)
             while low <= high:
                 middle = (low + high) // 2
-                candidate = _window(source, offset, middle, layout)
+                candidate = _window(source, offset, middle, layout, tables)
                 if fits(candidate):
                     best, low = candidate, middle + 1
                 else:
@@ -301,7 +313,9 @@ def project_evidence(
     return best
 
 
-def preceding_evidence(source: dict, offset: int, max_chars: int, *, layout=None) -> dict:
+def preceding_evidence(
+    source: dict, offset: int, max_chars: int, *, layout=None, tables=None
+) -> dict:
     """Project preceding original context separately from the primary processed range."""
     if type(offset) is not int or not 0 <= offset <= len(source["content"]) or max_chars <= 0:
         raise ValueError("Invalid preceding original range")
@@ -309,17 +323,19 @@ def preceding_evidence(source: dict, offset: int, max_chars: int, *, layout=None
     floor = max(0, offset - max_chars)
     starts = [offsets[t.map[0]] for t in tokens if t.map and t.level == 0]
     start = next((n for n in starts if floor <= n < offset), floor)
-    context = _window(source, start, offset, (tokens, offsets))
+    context = _window(source, start, offset, (tokens, offsets), tables)
     context.pop("continuation", None)
     return {**context, "primary": False}
 
 
-def following_evidence(source: dict, offset: int, max_chars: int, *, layout=None) -> dict:
+def following_evidence(
+    source: dict, offset: int, max_chars: int, *, layout=None, tables=None
+) -> dict:
     """Keep an adjacent qualification visible before generating the preceding rule."""
     tokens, offsets = layout or markdown_layout(source["content"])
     ceiling = min(len(source["content"]), offset + max_chars)
     ends = [offsets[t.map[1]] for t in tokens if t.map and t.level == 0]
     end = max((n for n in ends if offset < n <= ceiling), default=ceiling)
-    context = _window(source, offset, end, (tokens, offsets))
+    context = _window(source, offset, end, (tokens, offsets), tables)
     context.pop("continuation", None)
     return {**context, "primary": False}
