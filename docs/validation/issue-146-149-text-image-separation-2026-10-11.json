@@ -1065,8 +1065,8 @@
     }
   },
   "current_v14": {
-    "recorded_at_utc": "2026-10-11T23:35:33.485527+00:00",
-    "status": "authorized_3500_real_build_running",
+    "recorded_at_utc": "2026-10-11T23:57:41.643159+00:00",
+    "status": "interrupted_after_confirmed_index_defects",
     "code": "694086fa2b6c97001dc1b86e0a5473eecac62c8b",
     "code_freeze": {
       "path": ".scratch/text-image-repair-20261011/code-freeze-final-v14.json",
@@ -1251,7 +1251,7 @@
       "semantic_acceptance": null,
       "build_completed": false,
       "build_label": "build-final-v14-budget3500",
-      "build_status": "running",
+      "build_status": "interrupted",
       "build_process_receipt": ".scratch/text-image-repair-20261011/runs/build-final-v14-budget3500-process.json",
       "initial_continuation_observation": {
         "old_parent_task": "055b57e6718f42c1900bf918708286c3",
@@ -1262,6 +1262,37 @@
         "separate_prior_used": 371,
         "first_source_status": "skipped",
         "semantic_acceptance": null
+      },
+      "stopped_evidence": {
+        "path": ".scratch/text-image-repair-20261011/review/build-final-v14-budget3500-stopped-freeze.json",
+        "sha256": "18f4abe41ec558df442b87662c3185147e1ebbdfcd131bbfb8a591d43b15eb2b"
+      },
+      "defects": [
+        {
+          "source": "whitepaper184",
+          "calls": 219,
+          "error": "SubtreeQualityError: printed/physical page confusion and neighboring boundary text"
+        },
+        {
+          "source": "operations204",
+          "calls": 156,
+          "error": "IndexQualityError: same-title parent collapsed into child after missing unspaced numbered heading"
+        }
+      ],
+      "budget_at_stop": {
+        "cumulative_charged": 1686,
+        "cumulative_limit": 3500,
+        "remaining": 1814,
+        "task_id": "6e7bd841019b4268ad5ce93befe6760d",
+        "inherited_used": 834,
+        "new_charged_calls": 481,
+        "current_task_used": 1315,
+        "separate_prior_used": 371,
+        "new_retained_http_requests": 480,
+        "new_retained_http_responses": 477,
+        "new_unresolved_charged_calls": 4,
+        "historical_unresolved_charged_calls": 1,
+        "refund": 0
       }
     },
     "no_worse_than_baseline": false,
@@ -1319,6 +1350,48 @@
       "real_candidate_executed": false,
       "baseline_executed": false,
       "scope": "Method tests use local HTTP fixtures. Exact completed build/head binding is required before real45 Agent answers and12 persisted turns."
+    },
+    "ongoing_repairs": {
+      "status": "unfrozen_not_accepted",
+      "targeted_tests_passed": 38,
+      "whitepaper_second_saved_tree_entries_passed": 91,
+      "external_calls_in_replay": 0,
+      "baseline_executed": false,
+      "operations_independent_replay": "3 retained TOCs, all156 entries preserved each; only one saved same-heading/page verifier per tree; controlled replay not real inference"
     }
+  },
+  "current_v15": {
+    "status": "frozen_full_engineering_running",
+    "code": "5ce1dac44ee454715697bf42bed3cdc1929a7a00",
+    "main_commit": "db3512e1f22c8cee2a44c854941fd983c52738db",
+    "code_freeze": {
+      "path": ".scratch/text-image-repair-20261011/code-freeze-final-v15.json",
+      "sha256": "71f96dafb450367f14a812b627454ddd5edf0c3fc793978095f42780abf71956"
+    },
+    "targeted_tests_passed": 38,
+    "baseline_executed": false,
+    "budget": {
+      "cumulative_charged": 1686,
+      "cumulative_limit": 3500,
+      "remaining": 1814,
+      "task_id": "6e7bd841019b4268ad5ce93befe6760d",
+      "inherited_used": 834,
+      "new_charged_calls": 481,
+      "current_task_used": 1315,
+      "separate_prior_used": 371,
+      "new_retained_http_requests": 480,
+      "new_retained_http_responses": 477,
+      "new_unresolved_charged_calls": 4,
+      "historical_unresolved_charged_calls": 1,
+      "refund": 0
+    },
+    "new_real_results": {
+      "build_executed": false,
+      "qa_executed": false,
+      "persistent_chat_executed": false,
+      "reader_executed": false,
+      "semantic_acceptance": null
+    },
+    "no_worse_than_baseline": false
   }
 }
