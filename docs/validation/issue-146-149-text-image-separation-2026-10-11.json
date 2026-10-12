@@ -1,9 +1,9 @@
 {
   "schema_version": 2,
-  "status": "v16_all_engineering_passed_final_plan_qualification",
-  "recorded_at": "2026-10-12T02:09:55.512706+00:00",
+  "status": "v17_same_task_build_running_not_accepted",
+  "recorded_at": "2026-10-12T03:21:49.876766+00:00",
   "development_base": "b5f3f9049fe7d0baadaf72c3f05f7a9d7a13ff1c",
-  "current_candidate_code": "9e1216f1b4fdf58e619021e8a4e27b957a6f8447",
+  "current_candidate_code": "88e55bec55e5b2d54d2661b915322afb7145b6ad",
   "baseline": {
     "code": "45950287d4c59f9dc270250f84d56ba4faf350ce",
     "executed": false,
@@ -844,28 +844,28 @@
       "status": "failed_required_coverage",
       "reason": "Installation target pages omit necessary native prerequisites, steps or applicability conditions. New similarly named pages do not satisfy old required target coverage.",
       "validated_candidate": "v8",
-      "latest_candidate": "v16_repairs_pending_frozen_build_and_full_agent_validation"
+      "latest_candidate": "v17_build_running_final_agent_validation_pending"
     },
     "147": {
       "close": false,
       "status": "incomplete_required_refresh",
       "reason": "235-page reprocessing published, but required refresh remains incomplete; subsequent full refresh was interrupted at cumulative 371 sends without publication. Corpus reprocessing also exhausted available indexing budget.",
       "validated_candidate": "v8",
-      "latest_candidate": "v16_repairs_pending_frozen_build_and_full_agent_validation"
+      "latest_candidate": "v17_build_running_final_agent_validation_pending"
     },
     "148": {
       "close": false,
       "status": "failed_generated_semantics",
       "reason": "Confirmed changed commands/conditions, unsupported absence or uniqueness assertions, and incorrect figure associations remain in generated pages; API generated pages 7 pass / 1 fail.",
       "validated_candidate": "v8",
-      "latest_candidate": "v16_repairs_pending_frozen_build_and_full_agent_validation"
+      "latest_candidate": "v17_build_running_final_agent_validation_pending"
     },
     "149": {
       "close": false,
       "status": "failed_paired_qa",
       "reason": "v8 full answers 34/45 versus retained baseline 38/45 under the same preregistered rubric; 10 regressions and 6 improvements. Original historical 39/45 unchanged.",
       "validated_candidate": "v8",
-      "latest_candidate": "v16_repairs_pending_frozen_build_and_full_agent_validation"
+      "latest_candidate": "v17_build_running_final_agent_validation_pending"
     }
   },
   "limits": [
@@ -1524,10 +1524,10 @@
     }
   },
   "current_v16": {
-    "status": "final_plan_qualification_before_real_build",
+    "status": "interrupted_for_causal_repair",
     "baseline_executed": false,
     "new_real_results": {
-      "build_executed": false,
+      "build_executed": true,
       "qa_executed": false,
       "persistent_chat_executed": false,
       "reader_executed": false,
@@ -1544,7 +1544,6 @@
         "green_passed": 162
       }
     },
-    "remaining_build_calls": 1238,
     "evaluation_task_limit": 1129,
     "candidate_code": "9e1216f1b4fdf58e619021e8a4e27b957a6f8447",
     "root_implementation_commit": "55bb2274",
@@ -1706,6 +1705,242 @@
           "sha256": "c5b976ce5d3dd0d7f855a563a80f113d3dfe194f4cd3ca7345bf08469762ce72"
         }
       ]
+    },
+    "build_start": {
+      "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/build-final-v16-start.json",
+      "sha256": "bdc23ac8f5fb361c19f3793f7f77bbc608cb4ca1db8373c0082b7b01be0d5646"
+    },
+    "actual_plan_qualifications": [
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/repair-v16-actual-plan-applicability-spec-r1.json",
+        "sha256": "8887d4e15a6baed8d5f7a0989a5fa3453d3b33dde36babe1c818b3a287862e9e"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/repair-actual-final-standards-v16-r1.json",
+        "sha256": "d028e56f3d50f180527d69e80c367aadac84af77450d4dbc3749382809e67086"
+      }
+    ],
+    "budget_at_v16_start": {
+      "used": 2262,
+      "limit": 3500,
+      "remaining": 1238,
+      "unknown_charged": 6
+    },
+    "feature_stage": {
+      "evidence": {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/features-published-v16-preliminary-standards-r1.json",
+        "sha256": "60ce55bc7166040513518d01b3f959294e56e38f380d523ea0ecb635a50f7a40"
+      },
+      "selected_head": "ab5c8d823f45483496623269bc1cc36b",
+      "status": "not_passed_intermediate_semantic_review",
+      "current_originals": 2,
+      "model_sends": 13,
+      "reviewed_new_pages": 12,
+      "retained_core_fact_groups": 14,
+      "corrected": [
+        "native table module ownership",
+        "BMC spelling"
+      ],
+      "unsupported_assertions": [
+        "34 independent feature items counted from physical table rows",
+        "page 6 original PDF claimed to have no table header or table alignment",
+        "page 2 named feature column claimed empty"
+      ],
+      "required_followup": "Recheck all on final seven-source refresh head; this stage is not complete Agent QA."
+    },
+    "completed_http_audit_method": {
+      "spec": {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/completed-http-inputs-method-spec-r3.json",
+        "sha256": "1d5a13dfb83db7aaceb34770e4bacd9a598d3894ce26447256453b0c37151343"
+      },
+      "standards": {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/completed-http-inputs-method-standards-r1.json",
+        "sha256": "c68c864b2eef3cd0566de96de783f4e9a6f2ca87dbb77886c590551778bb789e"
+      },
+      "method_only": true,
+      "unique_local_cases_passed": 71,
+      "retained_sdk_http_pairs_readonly_checked": 165,
+      "actual_run_audited": false
+    },
+    "stop": {
+      "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/build-final-v16-budget3500-intentional-stop.json",
+      "sha256": "45545d6e4a58f7dc8764c514092094d8c1cbfcf362cba4e9fbdcdbb0cee12315"
+    },
+    "stopped_freeze": {
+      "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/build-final-v16-budget3500-stopped-freeze-r2.json",
+      "sha256": "3bad72b259299562655eca79378205edf61d90e23c5769293af17f509395b508"
+    },
+    "terminal_budget": {
+      "used": 2284,
+      "limit": 3500,
+      "remaining": 1216,
+      "new_calls": 22,
+      "prior_unknown_charged": 6,
+      "new_unknown_charged": 1,
+      "total_unknown_charged": 7
+    },
+    "failure": {
+      "operation": "recompile_document",
+      "document": "CNware-WinSphere-V9.4.0-产品白皮书.pdf",
+      "new_model_calls": 7,
+      "error_type": "FileNotFoundError",
+      "cause": "A retained concept links a summary excluded by pending-refresh compile projection; source-association traversal read it before the unread boundary. Ordinary import/retry share the same path.",
+      "old_successful_revision_preserved": true
+    },
+    "actual_stopped_http_audit": {
+      "assessment": {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/stopped-http-v16-standards-assessment-r1.json",
+        "sha256": "6e22c2eb8f4438a561ad5acc78605cb0485c69f095bc1aa047868d950fac8a50"
+      },
+      "audit": {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/stopped-http-inputs-v16-actual-standards-r1.json",
+        "sha256": "6586bffb15d1c4ead0aad60ffd9d87815fd7f5012db63f77d72d029b5a46faff"
+      },
+      "postflight": {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/stopped-http-v16-standards-postflight-r1.json",
+        "sha256": "2ee1b7b4f6eb73f213008ba69ffd64a1a411cd3f83292a6ceb85d15a267bca4b"
+      },
+      "requests": 22,
+      "responses": 21,
+      "unknown_charged": 1,
+      "media_findings": 0,
+      "literal_image_reference_strings": 16,
+      "evidence_unchanged": true,
+      "scope": "Retained v16 stopped-build HTTP inputs only; not semantic or final QA acceptance."
     }
+  },
+  "current_v17": {
+    "status": "same_task_build_running_not_accepted",
+    "baseline_executed": false,
+    "new_real_results": "build in progress; final QA/chat not started",
+    "production_files": [
+      "openkb/agent/source_windows.py"
+    ],
+    "test_files": [
+      "tests/test_compile_missing_associations.py"
+    ],
+    "public_seams": [
+      "import_document after same-original reprocessing",
+      "recompile_document after same-original reprocessing",
+      "compile_long_doc with unavailable linked original"
+    ],
+    "regression": {
+      "frozen_v16_failed": 3,
+      "current_passed": 3,
+      "frozen_red_log": {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/missing-associations-v17-frozen-red.log",
+        "sha256": "7ed3e9678877769da3ed8e30d2d2e2e91b8877e76068d8be4732a6726931fd53"
+      },
+      "green_log": {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/missing-associations-v17-green3.log",
+        "sha256": "f33570aa50a37c709278e115421cf67879c9b659b06b74fcf1208c589c35388f"
+      },
+      "targeted": {
+        "passed": 99,
+        "failed": 0,
+        "seconds": 36.15,
+        "log": {
+          "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/missing-associations-v17-targeted.log",
+          "sha256": "5a8b2f298cd14f6c07f755b1d07421c5ead87e69a5866886a9abecb097c6bebf"
+        }
+      }
+    },
+    "full_engineering": {
+      "receipt": {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/engineering-final-v17.json",
+        "sha256": "736032ff21be483041d4552a5485cad0204869a81c730cc9f0e0fc6b20aae735"
+      },
+      "passed": 2702,
+      "failed": 1,
+      "skipped": 67,
+      "failure": "test_indivisible_evidence_capacity_fails_before_expensive_suffix_reads",
+      "measured_cpu_seconds": 2.01005235,
+      "ceiling_seconds": 2.0,
+      "other_checks_passed": true,
+      "source_unchanged": true,
+      "narrow_rerun": {
+        "passed": 1,
+        "seconds": 1.21,
+        "log": {
+          "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/v17-capacity-timing-narrow.log",
+          "sha256": "070a0a1a384f8986bf91c5e6a28d1adb0cf8744a853fe1ce7e8ca4541698f8d4"
+        },
+        "seconds_metric": "pytest total wall-clock duration, not timed CPU interval"
+      },
+      "causal_diagnosis": "No direct workload regression: inputs, caches, timed call trace and reads identical. Exact process-wide timing cause unproven; initial failure retained.",
+      "confirmation_status": "one predeclared unchanged full run passed",
+      "confirmation": {
+        "receipt": {
+          "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/engineering-final-v17-r2.json",
+          "sha256": "68a1da3d406fdf3f731766f830d137b5ca0700f2d9c89f45e0ae3806c6cdf78a"
+        },
+        "passed": 2703,
+        "failed": 0,
+        "skipped": 67,
+        "warnings": 199,
+        "seconds": 554.89,
+        "source_unchanged": true,
+        "all_checks_passed": true
+      },
+      "causal_reviews": [
+        {
+          "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/capacity-boundary-causality-spec-v17-r1.json",
+          "sha256": "4a33995a69e49e524163aadc181cac290da4caedbd7857481852acf323d3b913"
+        },
+        {
+          "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/v17-capacity-timing-standards-assessment-r1.json",
+          "sha256": "7626415eeded585f9bd6ff0c4dcbaed0a1404eea76aa060d7001cac96822070a"
+        }
+      ]
+    },
+    "semantic_acceptance": null,
+    "root_commit": "436427f0290cb1a59958927790e92aa69c04dbb9",
+    "candidate_code": "88e55bec55e5b2d54d2661b915322afb7145b6ad",
+    "freeze": {
+      "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/code-freeze-final-v17.json",
+      "sha256": "54ed74ab6952016e1f03ae54fba7da32fc774fb23148153af834da004a675540"
+    },
+    "production_reviews": [
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/missing-associations-spec-v17-r1.json",
+        "sha256": "a1e2baf2ab1dc751eb0d3b35a78a989b66fa29ae8410b7da930d4b894e5ff876"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/missing-associations-standards-v17-r2.json",
+        "sha256": "7a87f311583b2b9107d591567590e2ffa1ee50e6cb20193b06b80dcd8efb56fa"
+      }
+    ],
+    "build_cumulative_used_before": 2284,
+    "build_limit": 3500,
+    "build_remaining": 1216,
+    "historical_unknown_charged": 7,
+    "plan": {
+      "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/final-candidate-preregistration-v17-budget3500.json",
+      "sha256": "a3cf3753e57c04b2250f281c8bd9756a0250933e2435f35c3098503d5e7888b6"
+    },
+    "start": {
+      "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/build-final-v17-start.json",
+      "sha256": "0ee6b8d6f3917e138d83ee761297d40dfd851246ca1523cc7951c83e5eccb531"
+    },
+    "execution_qualifications": [
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/repair-v17-actual-plan-applicability-spec-r1.json",
+        "sha256": "1b276efb16281ebe8c9f45e9dacab48736cf865686cc35363d0fb6d16344ea6d"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/repair-actual-final-standards-v17-r2.json",
+        "sha256": "960f47e3c1c003a819c1ab4d49b92c83e2033cb73721097cbed0ea01060fde5d"
+      }
+    ],
+    "evaluation_plan_drafts": [
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/qa-final-v17-draft.json",
+        "sha256": "36c2a9917f2244724353036bd74c8a103abe54fdb9507befa1f8b7a361a685fc"
+      },
+      {
+        "path": "/home/cloudyi/CodeWorkspace/UrltraKB/.scratch/text-image-repair-20261011/review/chat-final-v17-draft.json",
+        "sha256": "b8b848a215533b1b0392e809aaa98a15b65d937253b12fa847b93cfc0db8405a"
+      }
+    ]
   }
 }
