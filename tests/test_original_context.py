@@ -51,6 +51,37 @@ async def test_unknown_parent_is_explicit_and_adjacent_action_executes(kb_dir):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("earlier", ["6. Configure an earlier device", "2 172 billion bytes"])
+async def test_numbered_scope_does_not_inherit_an_unrelated_prefix(kb_dir, earlier):
+    pages(
+        kb_dir,
+        [earlier, "4.4 Management\n4.4.1 Availability\nUse three nodes."],
+    )
+    agent = agent_for(kb_dir)
+    result = await invoke(agent, "get_page_content", doc_name="manual", pages="2")
+    context = json.loads(result.split("\nSource context: ")[1].split("\n")[0])
+    assert "Use three nodes." in result
+    scope = context["regions"][-1]
+    assert [h["literal"] for h in scope["headings"]] == [
+        "4.4 Management",
+        "4.4.1 Availability",
+    ]
+    assert context["reading_action"]["arguments"]["pages"] == "2"
+
+
+@pytest.mark.asyncio
+async def test_numbered_scope_keeps_only_matching_ancestors_across_pages(kb_dir):
+    pages(kb_dir, ["3 Features\n3.2 Storage", "3.6 Operations\n3.6.16 Clock\nUse five servers."])
+    result = await invoke(agent_for(kb_dir), "get_page_content", doc_name="manual", pages="2")
+    context = json.loads(result.split("\nSource context: ")[1].split("\n")[0])
+    assert [h["literal"] for h in context["regions"][-1]["headings"]] == [
+        "3 Features",
+        "3.6 Operations",
+        "3.6.16 Clock",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_each_retained_occurrence_has_its_own_location_without_pixel_actions(kb_dir):
     Image.new("RGB", (32, 32), "white").save(kb_dir / "wiki/sources/figure.png")
     pages(kb_dir, ["# First\nNative text", "# Second\nNative text"], ["sources/figure.png"])

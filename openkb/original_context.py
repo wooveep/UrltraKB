@@ -58,6 +58,7 @@ def original_context(
                     "text": title,
                     "literal": m[0],
                     "level": len(m[1]) if m[1] else len(m[2].split(".")),
+                    "number": m[2],
                 }
             )
     # Repeated running headers are not reliable section boundaries.
@@ -69,12 +70,22 @@ def original_context(
     headings = [h for h in headings if h["literal"] not in repeated]
     stack: list[dict] = []
     for h in headings:
-        while stack and stack[-1]["level"] >= h["level"]:
+        # Depth alone cannot make an earlier numbered step or quantity the
+        # ancestor of a different chapter. Numbered parents must share a prefix.
+        while stack and (
+            stack[-1]["level"] >= h["level"]
+            or (
+                h["number"]
+                and stack[-1]["number"]
+                and not h["number"].startswith(stack[-1]["number"] + ".")
+            )
+        ):
             stack.pop()
-        stack.append({k: v for k, v in h.items() if k != "level"})
-        # Keep levels internally while returning only verified source positions.
-        stack[-1]["level"] = h["level"]
-        h["path"] = [{k: v for k, v in item.items() if k != "level"} for item in stack]
+        stack.append({k: v for k, v in h.items() if k != "path"})
+        # Keep ancestry checks internal; expose literal source positions only.
+        h["path"] = [
+            {k: v for k, v in item.items() if k not in {"level", "number"}} for item in stack
+        ]
     regions, actions = [], []
     bodies = dict(units)
     for n, start, end in _bounds(raw, location, selected):
