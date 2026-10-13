@@ -168,7 +168,7 @@ async def test_pdf_structure_and_async_verification_share_the_index_limit(model_
             opt=SimpleNamespace(model="openai/gpt-4o-mini"),
             logger=logging.getLogger(__name__),
         )
-        assert structure == [{"title": "Section", "physical_index": 1}]
+        assert structure == [{"title": "Section", "physical_index": 1, "title_origin": "generated"}]
         assert await verification == "ok"
     assert len(model_service.requests) == 3
     assert (

@@ -69,10 +69,31 @@ def _coordinates(source: dict, start: int, end: int) -> dict:
 
 def image_layout(source: dict):
     """Parse references in their complete literal context once per selection."""
-    from openkb.markdown_images import image_references
+    from openkb.markdown_images import ImageReference, image_references
 
     text = source["content"]
-    return image_references(text) if "![" in text or "<" in text else []
+    if "_page_segments" in source:
+        # A physical extraction does not declare Markdown syntax. Its recorded
+        # image inventory is independent of literal examples printed on a page.
+        paths = {
+            image["path"] for unit in source.get("units", []) for image in unit.get("images", [])
+        }
+        return [ref for ref in image_references(text) if ref.local_path in paths] if paths else []
+    result = []
+    for reference in source.get("_qualified_images", []):
+        for left, right, native, stop in _segments(source):
+            if native <= reference["start"] < reference["end"] <= stop:
+                result.append(
+                    ImageReference(
+                        **{
+                            **reference,
+                            "start": left + reference["start"] - native,
+                            "end": left + reference["end"] - native,
+                        }
+                    )
+                )
+                break
+    return result
 
 
 def _window(source: dict, start: int, end: int, layout=None, tables=None, images=None) -> dict:
@@ -147,6 +168,16 @@ def _window(source: dict, start: int, end: int, layout=None, tables=None, images
             ]
         )
     blocks = []
+    qualified = {
+        (heading["title"], tuple(heading["source_span"]))
+        for heading in source.get("_qualified_headings", [])
+    }
+    allowed_context = {
+        "heading_path": {span for _, span in qualified},
+        "table_header": {
+            tuple(header["header_span"]) for header in source.get("_qualified_table_headers", [])
+        },
+    }
     for unit in source.get("units", []):
         retained = [
             [max(a, c), min(b, d)]
@@ -160,19 +191,44 @@ def _window(source: dict, start: int, end: int, layout=None, tables=None, images
                     {
                         "ordinal": unit["ordinal"],
                         "source_spans": retained,
-                        "display_context": unit.get("display_context"),
-                        "headings": unit.get("headings"),
+                        "display_context": [
+                            context
+                            for context in unit.get("display_context", [])
+                            if context.get("kind") not in allowed_context
+                            or any(
+                                list(context.get("source_spans", [])) == [list(span)]
+                                for span in allowed_context[context["kind"]]
+                            )
+                        ],
+                        "headings": [
+                            heading
+                            for heading in unit.get("headings", [])
+                            if (heading["title"], tuple(heading["source_span"])) in qualified
+                        ],
                     }
                 )
             )
     if blocks:
         result["blocks"] = blocks
-    native_tables = table_metadata(
-        table_layout(source["content"], layout) if tables is None else tables,
-        start,
-        end,
-        lambda a, b: _coordinates(source, a, b),
-    )
+    if "_qualified_tables" in source:
+        native_tables = table_metadata(
+            source["_qualified_tables"],
+            start,
+            end,
+            lambda a, b: {"source_spans": [[a, b]]},
+            spans=spans,
+        )
+    elif "_page_segments" in source:
+        native_tables = table_metadata(
+            table_layout(source["content"], layout) if tables is None else tables,
+            start,
+            end,
+            lambda a, b: _coordinates(source, a, b),
+        )
+    else:
+        # A legacy string has no recorded syntax. Preserve its text without
+        # promoting literal markup to native cell evidence at any caller.
+        native_tables = []
     if native_tables:
         result["native_tables"] = native_tables
         result["table_interpretation"] = TABLE_INTERPRETATION
@@ -228,31 +284,53 @@ def _display_context(source: dict, offset: int, layout=None) -> list[dict]:
     if offset == 0:
         return []
     text = source["content"]
-    tokens, lines = layout or markdown_layout(text)
-    headings: list[tuple[int, int, int]] = []
+    segments = _segments(source)
+    native_offset = next(
+        (native + offset - left for left, right, native, _ in segments if left <= offset < right),
+        None,
+    )
+    if native_offset is None:
+        return []
+    path: list[dict] = []
     context: list[dict] = []
-    for index, token in enumerate(tokens):
-        if not token.map or lines[token.map[0]] >= offset:
+    for heading in source.get("_qualified_headings", []):
+        a, b = heading["source_span"]
+        if a >= native_offset:
+            break
+        path = [item for item in path if item["level"] < heading["level"]] + [heading]
+    for heading in path:
+        a, b = heading["source_span"]
+        located = next(
+            (
+                (left + a - native, left + b - native)
+                for left, right, native, stop in segments
+                if native <= a < b <= stop
+            ),
+            None,
+        )
+        if located is None:
             continue
-        start, end = (lines[n] for n in token.map)
-        # Extracted page text may contain literal shell/configuration comments.
-        # Markdown syntax alone does not establish a native page heading.
-        if token.type == "heading_open" and "_page_segments" not in source:
-            level = int(token.tag[1:])
-            headings = [item for item in headings if item[0] < level] + [(level, start, end)]
-        if token.type == "table_open" and start < offset < end:
-            header = lines[min(token.map[0] + 2, len(lines) - 1)]
-            context.append(
-                {
-                    "kind": "table_header",
-                    "text": text[start:header],
-                    **_coordinates(source, start, header),
-                }
-            )
-    return [
-        {"kind": "heading_path", "text": text[a:b], **_coordinates(source, a, b)}
-        for _, a, b in headings
-    ] + context
+        start, end = located
+        context.append(
+            {"kind": "heading_path", "text": text[start:end], **_coordinates(source, start, end)}
+        )
+    for table in source.get("_qualified_table_headers", []):
+        a, b = table["source_span"]
+        _, header = table["header_span"]
+        if not a < native_offset < b:
+            continue
+        for left, right, native, stop in segments:
+            if native <= a < header <= stop:
+                start = left + a - native
+                header_end = left + header - native
+                context.append(
+                    {
+                        "kind": "table_header",
+                        "text": text[start:header_end],
+                        **_coordinates(source, start, header_end),
+                    }
+                )
+    return context
 
 
 def project_evidence(
@@ -276,7 +354,12 @@ def project_evidence(
     if type(offset) is not int or not 0 <= offset <= len(text):
         raise ValueError("Continuation is outside this evidence selection")
     layout = layout or (markdown_layout(text) if offset else None)
-    tables = table_layout(text, layout) if tables is None else tables
+    if tables is None:
+        tables = (
+            table_layout(text, layout)
+            if "_page_segments" in source and "_qualified_tables" not in source
+            else []
+        )
     images = image_layout(source) if images is None else images
     result = _window(source, offset, len(text), layout, tables, images)
     fits = fits or (lambda payload: len(json.dumps(payload, ensure_ascii=False)) <= budget)

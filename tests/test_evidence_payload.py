@@ -92,9 +92,14 @@ def test_serialized_budget_is_enforced_with_explicit_continuation():
     assert "".join(parts) == content
 
 
-def test_continuation_context_uses_original_text_coordinates():
+def test_continuation_context_uses_original_text_coordinates(kb_dir):
+    from test_original_structure import frozen_text
+
+    from openkb.text_source import read_text_selection
+
     text = "# Under load\n\n| Object | Value |\n| --- | --- |\n| Unit | 20 ms |\n"
-    source = {"content": text, "source_spans": [[150, 150 + len(text)]]}
+    raw = frozen_text(kb_dir, "x" * 148 + "\n\n" + text)
+    source = read_text_selection(raw, f"150:{150 + len(text)}")
     result = project_evidence(source, offset=text.index("| Unit |"))
     heading, table = result["display_context"]
     assert heading["source_spans"] == [[150, 163]]
@@ -105,7 +110,10 @@ def test_continuation_context_uses_original_text_coordinates():
 def test_continuation_context_uses_physical_page_coordinates():
     from openkb.source_pages import read_page_selection
 
-    text = "# Under load\n\n| Object | Value |\n| --- | --- |\n| Unit | 20 ms |\n"
+    text = (
+        "# Under load\n\n<table>\n<tr><th>Object</th><th>Value</th></tr>\n"
+        "<tr><td>Unit</td><td>20 ms</td></tr>\n</table>\n"
+    )
     source = read_page_selection(
         [
             {"page": 1, "unit_kind": "page", "content": "Unrelated first page."},
@@ -113,7 +121,22 @@ def test_continuation_context_uses_physical_page_coordinates():
         ],
         "2",
     )
+    row_start = text.index("<tr><td>Unit")
+    result = project_evidence(source, offset=source["content"].index("<tr><td>Unit"))
+    (table,) = result["native_tables"]
+    assert table["native_location"] == {
+        "page_spans": [{"page": 2, "start": 14, "end": text.index("</table>") + 8}]
+    }
+    assert result["page_spans"] == [{"page": 2, "start": row_start, "end": len(text)}]
+    assert [cell["value"] for cell in table["cells"]] == ["Unit", "20 ms"]
+    assert not result.get("display_context")
+
+
+def test_physical_pipe_text_does_not_certify_a_markdown_table_header():
+    from openkb.source_pages import read_page_selection
+
+    text = "# Under load\n\n| Object | Value |\n| --- | --- |\n| Unit | 20 ms |\n"
+    source = read_page_selection([{"page": 1, "unit_kind": "page", "content": text}])
     result = project_evidence(source, offset=source["content"].index("| Unit |"))
-    (table,) = result["display_context"]
-    assert table["page_spans"] == [{"page": 2, "start": 14, "end": 47}]
-    assert "source_spans" not in table
+    assert not result.get("display_context") and not result.get("native_tables")
+    assert result["content"] == text[text.index("| Unit |") :]

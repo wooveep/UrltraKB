@@ -2266,13 +2266,26 @@ async def _compile_concepts(
     )
 
 
-def short_document_messages(doc_name: str, content: str, schema_md: str, language: str) -> list:
+def short_document_messages(
+    doc_name: str,
+    content: str,
+    schema_md: str,
+    language: str,
+    *,
+    original_evidence: dict | None = None,
+) -> list:
     """The same first request is used for capacity estimation and compilation."""
     from openkb.agent.evidence_payload import project_evidence
     from openkb.agent.source_excerpts import SourceExcerpts
 
     check_model_stop()
-    projected = project_evidence({"content": content}, fits=lambda payload: True)
+    projected = (
+        original_evidence
+        if original_evidence is not None
+        else project_evidence(
+            {"content": content, "_qualified_tables": []}, fits=lambda payload: True
+        )
+    )
     structure = {
         key: projected[key]
         for key in ("native_tables", "table_interpretation", "figure_interpretation")
@@ -2332,7 +2345,13 @@ async def compile_short_doc(
     current_original = windows.current_original_message(content)
     # Summary and planning reuse this prefix. Page writing receives a separate
     # original message without the summary task.
-    summary_messages = short_document_messages(doc_name, content, schema_md, language)
+    summary_messages = short_document_messages(
+        doc_name,
+        content,
+        schema_md,
+        language,
+        original_evidence=windows.current_original_evidence(content),
+    )
     system_msg, doc_msg = summary_messages[:2]
 
     # --- Step 1: Generate summary (v1, held in memory) ---

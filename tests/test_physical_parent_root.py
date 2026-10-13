@@ -154,6 +154,9 @@ async def test_rebuilt_subtree_can_succeed_after_an_unchanged_failed_correction(
                 self.entries = [
                     {"title": "Pruning", "structure": "1.1", "physical_index": "<physical_index_1>"}
                 ]
+            if stage == "verification" and self.entries[0]["title"] == "Pruning":
+                self.calls.append((stage, messages))
+                return IndexResponse('{"answer":"yes","belongs_to_parent":true}')
             return super().complete(messages, stage=stage)
 
     runtime = RebuildingModel(
@@ -175,6 +178,7 @@ async def test_rebuilt_subtree_can_succeed_after_an_unchanged_failed_correction(
         "verification",
         "correction",
         "structure",
+        "verification",
     ]
 
 

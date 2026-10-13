@@ -56,10 +56,19 @@ def test_short_import_projects_tables_into_summary_and_planning(kb_dir, model_se
         ("```html\n<img src='images/original.png'>\n```", False),
     ],
 )
-def test_short_source_projection_distinguishes_image_references_from_examples(original, has_figure):
-    from openkb.agent.compiler import short_document_messages
+def test_short_source_projection_distinguishes_image_references_from_examples(
+    kb_dir, original, has_figure
+):
+    from test_original_structure import frozen_text
 
-    content = short_document_messages("manual", original, "", "en")[1]["content"]
+    from openkb.agent.compiler import short_document_messages
+    from openkb.agent.evidence_payload import project_evidence
+    from openkb.text_source import read_text_selection
+
+    evidence = project_evidence(read_text_selection(frozen_text(kb_dir, original)))
+    content = short_document_messages("manual", original, "", "en", original_evidence=evidence)[1][
+        "content"
+    ]
     text = "".join(item["text"] for item in content)
     structure = json.loads(text.split("Original structure (native-tables-v1):\n", 1)[1])
     assert original in text

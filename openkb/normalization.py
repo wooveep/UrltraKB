@@ -128,14 +128,19 @@ def normalization_fingerprint(
         from openkb.cnki.runtime import processing_identity as cnki_processing_identity
 
         office_policy["cnki"] = cnki_processing_identity()
+    from pageindex.backend.input_package import INDEX_CONTENT_POLICY
+
+    from openkb.source_qualification import SOURCE_STRUCTURE_POLICY
+
     return json.dumps(
         {
             "pipeline": "pdf-physical-v3",
+            "source_structure_policy": SOURCE_STRUCTURE_POLICY,
             "pdf_recognition_policy": PDF_RECOGNITION_POLICY,
             "classification": config["pdf_limit"],
             "index_model": config.get("model"),
             "index_policy": {
-                "version": "content-based-physical-v3",
+                "version": INDEX_CONTENT_POLICY,
                 "navigation": config.get("index_navigation", {}),
             },
             # Runtime injection changed no successful tree content. Keep the

@@ -3,7 +3,7 @@
   "tag": "v0.3.0.dev3",
   "commit": "9ad54122bbd519cec8913198e2d63cff92781c1e",
   "retrieved": "2026-09-28",
-  "local_version": "0.3.0.dev3+urltrakb.11",
+  "local_version": "0.3.0.dev3+urltrakb.12",
   "license": "MIT",
   "upstream_files": {
     ".claude/commands/dedupe.md": "38436c9a5f05fa548aa4b18eaa559a33e564e2c1ac5419c0f56602fb35ab539d",
@@ -136,7 +136,7 @@
     "purpose": "Audited local SDK source and packaging baseline (#107); injected IndexLLM, terminal propagation, single network retry owner, content-compatible SDK identity Explicit managed-input root, client close lifecycle, and sealed read-only guards before file or storage mutations. 本地 `.8` 将同步与异步并发门移到共享模型调用入口，使注入执行器和默认客户端都遵守 IndexConfig.max_concurrency；任务政策仍独立限流。成功树的内容策略继续兼容 `.5`。 Blocking stages run off-loop with cancellation drainage; saturated event-loop sync calls fail without bypassing the cap. Dedicated workers avoid starvation of the async SDK default executor. Physical subtree recovery and conservative local heading proof (#139), content policy v2. Preserve native physical subtree bounds and disambiguate same-title numbered headings without changing original offsets.",
     "modified": {
       "README.md": "d7fbdd7adf28b03a6b678bacefe84a81157e22b0f914850a23771906251a89d4",
-      "pyproject.toml": "8d65eadec14d7cacb5e5a44bdff7a5a332cac9864cf159d27549f5715f53c21a",
+      "pyproject.toml": "9ee8b7b4659b98b77d928d51360014739c4d8bf87df8639d258e38262a89a23f",
       "pageindex/config.py": "75e073ac0dbbd98ad48a4719491ed997209c5a02c918f66a643e89aec80e90a9",
       "pageindex/errors.py": "21a519e8c8e6bb28c59ce6e8bb5675b21b63ac131edb1beb7abed93a95c1679f",
       "pageindex/types.py": "d4522438f97c6cc7301f34f8891ba98307efb39b0e4ab5996f40345158e76eac",
@@ -151,9 +151,9 @@
       "tests/test_review_fixes.py": "8885cbac97d50da7f24dbe7e767742e60ea681ab5ee679bd6f4403001cddaf7e",
       "tests/test_review_fixes_2.py": "881fc1627e461126f708ced652266b03be279816f1ec1ae60b7be8790939f1e8",
       "tests/test_types.py": "ce1de2351e4e4231fb889e43b6f255e70257d312efa876ad9c23998d6b9686e8",
-      "pageindex/backend/local.py": "5d61956a8de180eb5d7d1d8e3492e10d16d43cd34439093ddd3e332510abf14b",
+      "pageindex/backend/local.py": "c8778b2a3448cadfcfd0138cd666f41b978bb0fc6fca88e08b01ab6b84a33916",
       "pageindex/backend/protocol.py": "e91f0a47dc16af3bf9a3f5c71d61ca51db0abe5e0354f6fc2d578da9323323bf",
-      "pageindex/index/page_index.py": "ce4a8378f366425c4a7d03f9f3db6bd8c858af361aa8813eb404d076bcd159a3",
+      "pageindex/index/page_index.py": "d70a999066a0447e63046185288a00a2cf35da6b1244ff1dfae6e26f846c0c1d",
       "pageindex/index/pipeline.py": "e01cd5dce1c3f55b542b45d677c86aec59b3cf25a680620609f8eef7ab22dbfa",
       "pageindex/index/utils.py": "67d1cfbdc3e4b649eff1d5e26277321a3c860d2aa35060bf5c7d62db3504e034",
       "pageindex/index/page_index_md.py": "ba4a3cfbfb3f8cb55d6d10b56a24a853fd89f920cac69f0d1317cf3240194ccb",
@@ -163,16 +163,16 @@
       "pageindex/storage/sqlite.py": "8f5630df9a9b4784131fe820d7327fd7763f009d7dbbd346d47d2aaeec6e8b9d"
     },
     "added": {
-      "README.urltrakb.md": "8b9c7f12fc8a908e82b9429e1bbb733e6fb80ca49ab70ef2f57815cdc84cbc1c",
-      "pageindex/_urltrakb_source.json": "de9f54f61c71226f61596c1479e0a421759a7d7c4752e1e3513e2c7261cad443",
+      "README.urltrakb.md": "1b265459b779ffb9c1d2f9ae91bc93ec9b87e7c83060cdf25e9d0eb578ed7048",
+      "pageindex/_urltrakb_source.json": "337b529acf93e2d3c9d38364a728f7756bbd99c338edc47940db3de9227fa449",
       "pageindex/llm.py": "54d5b095a4467dbaab9ce16ab76edb803faf21045ad7fbf46defbc0ffaba3c22",
       "pageindex/default_llm.py": "f95550d10ffc1b05bacdcb990ab267b6a4c0cf5f329cf8f99879406105965d24",
       "tests/test_toc_body_titles.py": "e8ee446afb0b4ac305871246a481f2e3a7acb5420aec3ea8a738611ba1e808f4",
-      "pageindex/backend/input_package.py": "0daf9f82cf21eaa9551596e59ce58c7c8ec8c37aa583c9662ac3b1ee9df6a2ac",
+      "pageindex/backend/input_package.py": "73227c61f98b1a4b9bb32537688142c47db55357ff98ea3d46b0cd4bfc8724d5",
       "pageindex/index/toc_titles.py": "1dd28046aebc1ceb89935807c31d6d005ee86d383c7239f24ac6e7bb7d9c871c",
       "pageindex/index/block_policy.py": "48d3712ca7aa309c3add1fbe7386c65cf7d765831e1790630cbbb47180aba550",
       "pageindex/index/page_parts_policy.py": "dca3953ed5639cbe10dc4d674b59b45423e5e7e1214af5ab24e90127011da2ed",
-      "pageindex/index/physical_sections.py": "dc8c22aaf5da0799d486c4f4d971d734287056416f2976b99ca6b686f30895e8"
+      "pageindex/index/physical_sections.py": "8b7138a534f35a9b7e00c26cb56067c067cba433b8b7b7a5121b01e1c1516c8f"
     },
     "deleted": [
       "cookbook/README.md",
@@ -191,7 +191,7 @@
   "schema_version": 2,
   "distribution": "pageindex",
   "module": "pageindex",
-  "version": "0.3.0.dev3+urltrakb.11",
+  "version": "0.3.0.dev3+urltrakb.12",
   "included_files": [
     ".claude/commands/dedupe.md",
     ".gitattributes",

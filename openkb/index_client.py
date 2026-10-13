@@ -53,8 +53,11 @@ def create_index_client(
             index_config=index_config,
         )
         from openkb.block_package import FrozenBlockParser
+        from openkb.index_pdf import NativePdfParser
         from openkb.office.slide_package import FrozenSlideParser
 
+        client.register_parser(NativePdfParser())
+        client.register_parser(FrozenBlockParser(legacy=True))
         client.register_parser(FrozenBlockParser())
         client.register_parser(FrozenSlideParser())
         return client

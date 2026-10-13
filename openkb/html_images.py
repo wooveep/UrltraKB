@@ -17,7 +17,7 @@ _RAW_TEXT_TAGS = {
     "title",
     "plaintext",
 }
-_LITERAL_TAGS = {"pre", "code"} | _RAW_TEXT_TAGS
+_LITERAL_TAGS = {"pre", "code", "template"} | _RAW_TEXT_TAGS
 
 
 class HTMLLiteralContext(HTMLParser):

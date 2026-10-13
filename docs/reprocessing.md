@@ -5,6 +5,13 @@ execution mode governs the operation, including short documents that used
 segmented execution. It does not convert Office files, split worksheets, or
 reclassify the document using today's thresholds.
 
+Source-role qualification is shared by new index inputs, compilation and question
+evidence. New block inputs record `source-structure-v1` in their processing policy.
+Older retained inputs keep their exact bytes, fingerprint, units and recorded
+parser policy, including cache recovery. Reading rechecks source-role annotations
+against the complete retained source without rewriting its index. Missing format
+declarations remain unconfirmed; opening a library never upgrades them implicitly.
+
 Ordinary import retries keep the target's processing policy and completed units.
 If a missing normalization, missing workbook inventory, or changed index policy
 would require different processing, the retry is blocked with an explicit

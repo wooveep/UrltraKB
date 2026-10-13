@@ -32,12 +32,6 @@ async def check_title_appearance(item, page_list, start_index=1, model=None, pol
     if boundary and boundary.is_parent_root(item, page_list, start_index):
         return {'list_index': item.get('list_index'), 'answer': 'yes', 'title': title,
                 'page_number': item['physical_index']}
-    anchor = unique_heading(item, page_list, start_index)
-    if anchor and (boundary is None or boundary.proves_membership(anchor)):
-        return {'list_index': item.get('list_index'), 'title': title,
-                'page_number': item.get('physical_index'),
-                'answer': 'yes' if anchor['unit'] == item.get('physical_index') and
-                (boundary is None or boundary.contains(anchor)) else 'no'}
     
     
     page_number = item['physical_index']
@@ -158,7 +152,7 @@ async def check_title_appearance_in_start_concurrent(structure, page_list, model
             anchor = unique_heading(item, page_list)
             if anchor and anchor['unit'] == item['physical_index']:
                 item['anchor'] = anchor
-                item['title_origin'] = 'original'
+                item['title_origin'] = 'generated'
                 prefix = page_list[anchor['unit'] - 1][0][:anchor['range'][0]]
                 item['appear_start'] = 'no' if prefix.strip() else 'yes'
                 continue

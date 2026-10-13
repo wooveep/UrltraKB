@@ -56,9 +56,12 @@ def test_retrieval_fits_complementary_originals_and_reduces_navigation(kb_dir, m
     assert all(hit["coverage"] == "already_returned" for hit in repeated["hits"])
 
 
-def test_token_projection_preserves_table_rows_headers_and_continuation():
+def test_token_projection_preserves_table_rows_headers_and_continuation(kb_dir):
+    from test_original_structure import frozen_text
+
     from openkb.agent.evidence_payload import project_evidence
     from openkb.model_tokenizer import TokenMeasure
+    from openkb.text_source import read_text_selection
 
     measure = TokenMeasure(
         {"unknown_reason": None, "input_limit": 65536, "measurement_model": "gpt-4o-mini"}
@@ -67,7 +70,7 @@ def test_token_projection_preserves_table_rows_headers_and_continuation():
         "# Operation under load\n\n| Object | Condition | Value |\n| --- | --- | --- |\n"
         + "".join(f"| Unit {n} | full load only | {n + 17} ms |\n" for n in range(100))
     )
-    source = {"content": text, "source_spans": [[0, len(text)]]}
+    source = read_text_selection(frozen_text(kb_dir, text))
     offset, pieces = 0, []
     while True:
         hit = project_evidence(

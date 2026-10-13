@@ -31,14 +31,16 @@ def test_literal_fence_keeps_its_meaning_in_slices_and_continuations():
     assert "figure_interpretation" not in projected
 
 
-def test_document_pagination_parses_image_positions_once(tmp_path, monkeypatch):
+def test_document_pagination_parses_image_positions_once(kb_dir, monkeypatch):
+    from test_original_structure import frozen_text
+
     from openkb import markdown_images
     from openkb.agent.source_windows import CompileSourceWindows
+    from openkb.locks import atomic_write_json
 
     text = ("Ordinary source paragraph.\n\n" * 2000) + "![real](figure.png)\n"
-    wiki = tmp_path / "wiki"
-    (wiki / "sources").mkdir(parents=True)
-    (wiki / "sources/manual.md").write_text(text)
+    wiki = kb_dir / "wiki"
+    atomic_write_json(wiki / "sources/manual.content.json", frozen_text(kb_dir, text))
     calls = []
     original = markdown_images.image_references
 

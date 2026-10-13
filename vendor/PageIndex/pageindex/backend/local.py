@@ -15,7 +15,8 @@ from ..storage.protocol import StorageEngine
 from ..index.pipeline import build_index
 from ..index.utils import parse_pages, remove_fields
 from .input_package import (
-    digest, freeze_pages, materialize_pages, parser_identity, parser_policy, processing_key,
+    INDEX_CONTENT_POLICY, digest, freeze_pages, materialize_pages, parser_identity,
+    parser_policy, processing_key,
 )
 from ..backend.protocol import AgentTools
 from ..errors import (FileTypeError, DocumentNotFoundError, CollectionNotFoundError,
@@ -148,7 +149,7 @@ class LocalBackend:
                     "source_digest": digest(managed_path),
                     "processing_fingerprint": file_hash,
                     "sdk_version": version("pageindex"),
-                    "index_content_policy": "content-based-physical-v3",
+                    "index_content_policy": INDEX_CONTENT_POLICY,
                     "storage_format": "pageindex.document.v1",
                 },
             })
@@ -282,6 +283,14 @@ class LocalBackend:
         else:
             source = Path(doc["file_path"])
         parser = self._resolve_parser(str(source))
+        if metadata.get("parser_policy"):
+            # A newly registered parser must not reinterpret an older paid
+            # input cache. Recover with its recorded parser when still available.
+            parser = next((candidate for candidate in self._parsers
+                           if parser_identity(candidate) == metadata.get("parser")
+                           and parser_policy(candidate) == metadata["parser_policy"]), None)
+            if parser is None:
+                raise ValueError("The saved parser policy/parser is unavailable; cannot reconstruct its input")
         if metadata.get("parser_policy") and metadata["parser_policy"] != parser_policy(parser):
             raise ValueError("The saved parser policy cannot be reconstructed by this version")
         if metadata.get("parser_policy") and metadata.get("parser") != parser_identity(parser):

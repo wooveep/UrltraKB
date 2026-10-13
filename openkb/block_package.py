@@ -8,6 +8,7 @@ from typing import Literal
 
 from openkb.file_state import contained_paths
 from openkb.locks import atomic_write_bytes, atomic_write_text
+from openkb.source_qualification import SOURCE_STRUCTURE_POLICY
 from openkb.source_records import DocName, Record, RelativePath
 from openkb.text_source import FrozenText, read_text_selection, text_origins
 
@@ -27,12 +28,18 @@ def freeze_block_package(source: Path, doc_name: str) -> Path:
 
     wiki = source.parent.parent
     map_path = source.with_suffix(".content.json")
-    frozen = FrozenText.model_validate_json(map_path.read_text("utf-8"))
+    raw = json.loads(map_path.read_text("utf-8"))
+    frozen = FrozenText.model_validate_json(json.dumps(raw))
     frozen = FrozenText.model_validate(
         {
             **frozen.model_dump(),
             "unit_kind": "block",
-            "blocks": split_blocks(frozen.text),
+            "normalization_policy": raw.get("normalization_policy", "unconfirmed-source-format"),
+            "blocks": split_blocks(
+                frozen.text,
+                normalization_policy=raw.get("normalization_policy"),
+                origins=[origin.model_dump(mode="json") for origin in frozen.origins],
+            ),
             "block_policy": BLOCK_POLICY,
         }
     )
@@ -89,8 +96,12 @@ def read_block_selection(raw: dict, blocks: str | None = None) -> dict:
             ranges[-1][1] = end
         else:
             ranges.append([start, end])
+    from openkb.source_tables import select_tables
+
+    selection = read_text_selection(raw)
     return {
-        **read_text_selection(raw),
+        **selection,
+        "_qualified_tables": select_tables(selection["_qualified_tables"], ranges),
         "content": "".join(item["content"] for item in units),
         "char_range": None,
         "block_range": list(numbers),
@@ -103,7 +114,11 @@ def read_block_selection(raw: dict, blocks: str | None = None) -> dict:
 class FrozenBlockParser:
     """Adapt the frozen package only; never convert, split, or summarize its input."""
 
-    policy = PACKAGE_POLICY
+    policy = f"{PACKAGE_POLICY}:{SOURCE_STRUCTURE_POLICY}"
+
+    def __init__(self, *, legacy=False):
+        self.legacy = legacy
+        self.policy = PACKAGE_POLICY if legacy else type(self).policy
 
     def supported_extensions(self) -> list[str]:
         return [".okbi"]
@@ -114,6 +129,38 @@ class FrozenBlockParser:
 
         package = BlockPackage.model_validate_json(Path(file_path).read_text("utf-8"))
         frozen = package.source
+        from openkb.content_blocks import BLOCK_POLICY, LEGACY_BLOCK_POLICY
+
+        expected = LEGACY_BLOCK_POLICY if self.legacy else BLOCK_POLICY
+        if frozen.block_policy != expected:
+            raise ValueError("Block input requires its recorded parser/qualification policy")
+        if not self.legacy:
+            from openkb.source_qualification import source_headings, source_table_headers
+
+            qualified = {
+                (heading["title"], tuple(heading["source_span"]))
+                for heading in source_headings(frozen.model_dump(mode="json"))
+            }
+            if any(
+                (heading.title, heading.source_span) not in qualified
+                for block in frozen.blocks
+                for heading in block.headings
+            ):
+                raise ValueError("Block input contains unqualified original headings")
+            allowed_context = {
+                "heading_path": {(span,) for _, span in qualified},
+                "table_header": {
+                    (tuple(header["header_span"]),)
+                    for header in source_table_headers(frozen.model_dump(mode="json"))
+                },
+            }
+            if any(
+                context.kind in allowed_context
+                and context.source_spans not in allowed_context[context.kind]
+                for block in frozen.blocks
+                for context in block.display_context
+            ):
+                raise ValueError("Block input contains unqualified original display context")
         if frozen.unit_kind != "block" or set(package.assets) != set(frozen.assets):
             raise ValueError("Incomplete frozen block package")
         base = Path(kwargs["images_dir"]).parent

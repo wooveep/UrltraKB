@@ -125,6 +125,7 @@ def select_execution_mode(
     import litellm
 
     from openkb.agent.compiler import get_agents_md, short_document_messages
+    from openkb.agent.source_windows import CompileSourceWindows
     from openkb.config import resolve_credential_bundle, resolve_effective_config
     from openkb.config_state import active_values
     from openkb.knowledge_scope import resolve_scope
@@ -147,11 +148,16 @@ def select_execution_mode(
     reason = policy["unknown_reason"]
     if reason:
         return processing.model_copy(update={**updates, "capacity_reason": reason})
+    content = source_path.read_bytes().decode("utf-8")
+    original = CompileSourceWindows(source_path.parent.parent, doc_name).current_original_evidence(
+        content
+    )
     messages = short_document_messages(
         doc_name,
-        source_path.read_bytes().decode("utf-8"),
+        content,
         get_agents_md(resolve_scope(kb_dir, scope).wiki_dir),
         config.get("language", "en"),
+        original_evidence=original,
     )
     try:
         from openkb.model_tokenizer import TokenMeasure

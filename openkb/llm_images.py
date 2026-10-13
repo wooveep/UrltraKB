@@ -4,14 +4,7 @@ import base64
 import binascii
 import hashlib
 
-
-def is_image_block(value: dict) -> bool:
-    """Recognize typed image payloads, including invalid/empty ones, before serialization."""
-    return str(value.get("type")) in {"image_url", "input_image", "output_image", "image"} or any(
-        isinstance(value.get(key), dict)
-        and str(value[key].get("mime_type", value[key].get("mimeType", ""))).startswith("image/")
-        for key in ("inline_data", "inlineData")
-    )
+from openkb.source_qualification import is_image_payload as is_image_block
 
 
 def require_text_input(value, path: str = "request") -> None:
@@ -28,11 +21,6 @@ def require_text_input(value, path: str = "request") -> None:
     elif isinstance(value, list):
         for index, item in enumerate(value):
             require_text_input(item, f"{path}[{index}]")
-    elif isinstance(value, str) and "data:image/" in value:
-        from openkb.markdown_images import image_references
-
-        if any(ref.source.startswith("data:image/") for ref in image_references(value)):
-            raise ValueError(f"Main model requires text-only input: inline image at {path}")
 
 
 def image_digest(url: str) -> str | None:

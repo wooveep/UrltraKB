@@ -10,11 +10,18 @@ from pydantic import Field, model_validator
 
 from openkb.content_blocks import BLOCK_POLICY, ContentBlock, validate_blocks
 from openkb.source_pages import PageRangeError
+from openkb.source_qualification import (
+    MARKDOWN_POLICY,
+    source_headings,
+    source_images,
+    source_table_headers,
+    source_tables,
+)
 from openkb.source_records import Digest, EncodingDecision, Record, RelativePath
 from openkb.text_measurement import MEASUREMENT_FINGERPRINT, measure_markdown
 from openkb.workbooks.records import SheetCellLocation, SheetSnapshot
 
-NORMALIZATION_POLICY = "markdown-unicode-preserved-v1:markdown-it-py-4.2.0-commonmark-images"
+NORMALIZATION_POLICY = MARKDOWN_POLICY
 
 
 class CsvCell(Record):
@@ -126,7 +133,9 @@ class FrozenText(Record):
         if cursor != len(self.text) or original_cursor != self.original_characters:
             raise ValueError("Text map does not cover its complete source")
         if self.unit_kind == "block":
-            if self.block_policy != BLOCK_POLICY:
+            from openkb.content_blocks import LEGACY_BLOCK_POLICY
+
+            if self.block_policy not in {BLOCK_POLICY, LEGACY_BLOCK_POLICY}:
                 raise ValueError("Unsupported frozen block policy")
             validate_blocks(self.text, self.blocks)
         elif self.blocks or self.block_policy:
@@ -306,6 +315,10 @@ def read_text_selection(raw: dict, chars: str | None = None) -> dict:
     return {
         **({"sheet": frozen.sheet.model_dump(mode="json")} if frozen.sheet else {}),
         "unit_kind": frozen.unit_kind,
+        "_qualified_headings": source_headings(raw),
+        "_qualified_images": source_images(raw),
+        "_qualified_tables": source_tables(raw, [[start, end]]),
+        "_qualified_table_headers": source_table_headers(raw),
         "block_count": len(frozen.blocks) if frozen.blocks else None,
         "content": frozen.text[start:end],
         "pages": None,

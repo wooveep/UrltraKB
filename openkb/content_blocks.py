@@ -9,9 +9,17 @@ from markdown_it.rules_inline import html_inline
 from markdown_it.token import Token
 from pydantic import Field, model_validator
 
+from openkb.source_qualification import (
+    MARKDOWN_POLICY,
+    SOURCE_STRUCTURE_POLICY,
+    markup_source,
+    qualified_headings,
+    qualified_table_headers,
+)
 from openkb.source_records import Record
 
-BLOCK_POLICY = "commonmark-blocks-v1:target2000:regex-2026.5.9-graphemes:no-overlap"
+LEGACY_BLOCK_POLICY = "commonmark-blocks-v1:target2000:regex-2026.5.9-graphemes:no-overlap"
+BLOCK_POLICY = f"{LEGACY_BLOCK_POLICY}:{SOURCE_STRUCTURE_POLICY}"
 
 
 class DisplayContext(Record):
@@ -63,21 +71,30 @@ def markdown_layout(text: str, *, locate_html: bool = False) -> tuple[list[Token
     return tokens, offsets
 
 
-def split_blocks(text: str) -> tuple[ContentBlock, ...]:
+def split_blocks(
+    text: str, *, normalization_policy: str | None = MARKDOWN_POLICY, origins=()
+) -> tuple[ContentBlock, ...]:
     """Pack natural Markdown blocks, cutting oversized blocks only at grapheme ends."""
     tokens, offsets = markdown_layout(text)
     natural: dict[int, tuple[int, Token]] = {}
     structures: list[tuple[int, int, Token]] = []
-    headings = []
-    for index, token in enumerate(tokens):
+    headings = qualified_headings(text, normalization_policy, origins)
+    table_headers = {
+        (a, b): header
+        for a, b, header in qualified_table_headers(text, normalization_policy, origins)
+    }
+    for token in tokens:
         if token.map:
             start, end = (offsets[line] for line in token.map)
             if token.level == 0:
                 natural.setdefault(start, (end, token))
-            if token.type in {"fence", "table_open"}:
+            if (
+                token.type == "fence"
+                and markup_source(normalization_policy)
+                or token.type == "table_open"
+                and (start, end) in table_headers
+            ):
                 structures.append((start, end, token))
-            if token.type == "heading_open":
-                headings.append((start, end, int(token.tag[1:]), tokens[index + 1].content))
     starts = sorted({0, *natural, len(text)})
     # Structural boundaries and every grapheme end are deterministic coordinates
     # in the frozen text. A single giant grapheme stays intact even over target.
@@ -124,7 +141,7 @@ def split_blocks(text: str) -> tuple[ContentBlock, ...]:
                         DisplayContext(kind="fence_close", text="\n" + token.markup + "\n")
                     )
             if token.type == "table_open" and a < start < b:
-                header_end = offsets[min(token.map[0] + 2, len(offsets) - 1)]
+                header_end = table_headers[a, b]
                 context.append(
                     DisplayContext(
                         kind="table_header",

@@ -1,4 +1,4 @@
-"""Conservative source heading proof and parent bounds for physical-page subtrees."""
+"""Literal title locations and proved parent bounds for physical-page subtrees."""
 
 import copy
 import re
@@ -65,6 +65,7 @@ def heading_candidates(item, page_list, start_index=1):
 
 
 def unique_heading(item, page_list, start_index=1):
+    """Locate a unique title candidate; raw PDF syntax does not prove its role."""
     if item.get('structure') is not None and not isinstance(item['structure'], str):
         raise IndexQualityError('Physical structure must be a string or null')
     candidates = heading_candidates(item, page_list, start_index)
@@ -77,7 +78,7 @@ def unique_heading(item, page_list, start_index=1):
         section = next(iter(sections))
         candidates = [anchor for anchor in candidates
                       if not anchor['section'] or anchor['section'] == section]
-    return candidates[0] if len(candidates) == 1 else None
+    return {**candidates[0], 'evidence': 'text_match'} if len(candidates) == 1 else None
 
 
 def title_line_positions(item, page_list, start_index=1):
@@ -167,11 +168,16 @@ class SectionBoundary:
     @classmethod
     def from_node(cls, node):
         start, end = node.get('anchor'), node.get('end_anchor')
+        # Character coordinates prove where text occurs, not a chapter boundary.
+        # Legacy/unqualified anchors are also unknown source structure. Physical
+        # pages remain readable in full when native structural proof is absent.
+        start_confirmed = bool(start and start.get('evidence') == 'source_structure')
+        end_confirmed = bool(end and end.get('evidence') == 'source_structure')
         return cls(
             node['title'],
-            (start['unit'], start['range'][0]) if start else (node['start_index'], 0),
-            (end['unit'], end['range'][0]) if end else (node['end_index'] + 1, 0),
-            bool(start), bool(end),
+            (start['unit'], start['range'][0]) if start_confirmed else (node['start_index'], 0),
+            (end['unit'], end['range'][0]) if end_confirmed else (node['end_index'] + 1, 0),
+            start_confirmed, end_confirmed,
             node.get('structure'),
         )
 
@@ -186,6 +192,10 @@ def prepare_entries(entries, page_list, start_index=1, boundary=None, density=4)
         if not isinstance(original, dict) or not isinstance(original.get('title'), str):
             raise IndexQualityError('Physical navigation requires original heading titles')
         item = copy.deepcopy(original)
+        # Proposals cannot attest their own provenance or supply source offsets.
+        item.pop('anchor', None)
+        item.pop('end_anchor', None)
+        item['title_origin'] = 'generated'
         anchor = unique_heading(item, page_list, start_index)
         if not anchor and boundary and boundary.start_confirmed and boundary.end_confirmed:
             positions = title_line_positions(item, page_list, start_index)
@@ -196,7 +206,7 @@ def prepare_entries(entries, page_list, start_index=1, boundary=None, density=4)
         if anchor:
             if boundary and not boundary.contains(anchor):
                 continue  # The untouched boundary page remains in original readers.
-            item.update(physical_index=anchor['unit'], anchor=anchor, title_origin='original')
+            item.update(physical_index=anchor['unit'], anchor=anchor)
             if anchor['section']:
                 item['structure'] = anchor['section']
             identity = (anchor['unit'], anchor['range'][0], compact(item['title']))

@@ -156,8 +156,8 @@ class CompileSourceWindows:
             texts.insert(0, self._numeric_text[path])
         return texts
 
-    def current_original_message(self, text: str | None = None) -> dict | None:
-        """Provide the frozen short original independently of the summary task."""
+    def current_original_evidence(self, text: str | None = None) -> dict | None:
+        """Project the same qualified original for capacity, compilation and reading."""
         path = self._path()
         if path is None:
             return None
@@ -184,9 +184,17 @@ class CompileSourceWindows:
             "native_location": location,
             **projected,
         }
+        return window
+
+    def current_original_message(self, text: str | None = None) -> dict | None:
+        """Provide the frozen short original independently of the summary task."""
+        window = self.current_original_evidence(text)
+        if window is None:
+            return None
         return {
             "role": "user",
-            "content": f"Current original: {path}\n" + json.dumps(window, ensure_ascii=False),
+            "content": f"Current original: {window['path']}\n"
+            + json.dumps(window, ensure_ascii=False),
         }
 
     def validate_updates(self, plan, *, long: bool) -> str | None:

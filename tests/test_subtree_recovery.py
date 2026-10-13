@@ -7,19 +7,21 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_unique_numbered_heading_is_verified_locally_and_moves_wrong_anchor(monkeypatch):
+async def test_unique_numbered_heading_moves_anchor_and_requires_role_verification(monkeypatch):
     engine = importlib.import_module("pageindex.index.page_index")
     pages = [("See Pruning in chapter 2.\n", 10), ("2 Pruning\nCut above a bud.\n", 10)]
     entries = [{"title": "Pruning", "structure": "2", "physical_index": 1}]
+    verified = []
 
     def generated(*args, **kwargs):
         return entries
 
-    async def forbidden(**kwargs):
-        raise AssertionError("A unique original heading needs no paid verification")
+    async def verify(**kwargs):
+        verified.append(kwargs)
+        return '{"answer": "yes"}'
 
     monkeypatch.setattr(engine, "process_no_toc", generated)
-    monkeypatch.setattr(engine, "llm_acompletion", forbidden)
+    monkeypatch.setattr(engine, "llm_acompletion", verify)
     result = await engine.meta_processor(
         pages,
         mode="process_no_toc",
@@ -28,7 +30,10 @@ async def test_unique_numbered_heading_is_verified_locally_and_moves_wrong_ancho
     )
     assert result[0]["physical_index"] == 2
     assert result[0]["anchor"]["excerpt"] == "2 Pruning"
-    assert result[0]["title_origin"] == "original"
+    assert result[0]["anchor"]["evidence"] == "text_match"
+    assert result[0]["title_origin"] == "generated"
+    assert [call["usage_stage"] for call in verified] == ["verification"]
+    assert "<physical_index_2>\n2 Pruning" in verified[0]["prompt"]
 
 
 @pytest.mark.asyncio
@@ -64,7 +69,14 @@ async def test_shared_boundary_page_excludes_neighbor_chapter_before_paid_checks
             {"title": "Sauces", "structure": "2.1", "physical_index": 1},
         ]
 
+    async def verify(**kwargs):
+        calls.append("Roses role verification")
+        assert "The given section title is Roses." in kwargs["prompt"]
+        assert "2 Cooking" not in kwargs["prompt"] and "2.1 Sauces" not in kwargs["prompt"]
+        return '{"answer": "yes", "belongs_to_parent": true}'
+
     monkeypatch.setattr(engine, "process_no_toc", generated)
+    monkeypatch.setattr(engine, "llm_acompletion", verify)
     result = await engine.meta_processor(
         pages,
         mode="process_no_toc",
@@ -73,7 +85,7 @@ async def test_shared_boundary_page_excludes_neighbor_chapter_before_paid_checks
         logger=SimpleNamespace(info=lambda *a: None),
     )
     assert [item["title"] for item in result] == ["Roses"]
-    assert calls == ["generation"]
+    assert calls == ["generation", "Roses role verification"]
 
 
 @pytest.mark.asyncio
@@ -176,7 +188,8 @@ async def test_model_verified_heading_without_offset_can_follow_local_anchor(mon
     assert [item["title"] for item in result] == ["Gardening", "Pruning"]
     assert result[0]["anchor"]["range"][0] > 0
     assert "anchor" not in result[1]
-    assert len(verified) == 1
+    assert len(verified) == 2
+    assert all(item["title_origin"] == "generated" for item in result)
 
 
 @pytest.mark.parametrize("last_page,last_offset", [(1, 10), (0, 40)])

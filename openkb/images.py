@@ -130,6 +130,8 @@ def convert_pdf_to_pages(
             page_num = page_idx + 1
             parts: list[str] = []
             page_images: list[dict] = []
+            reference_spans: list[list[int]] = []
+            cursor = 0
 
             for block in native_pdf_blocks(page):
                 if block["type"] == 0:  # text block
@@ -137,7 +139,9 @@ def convert_pdf_to_pages(
                     for line in block["lines"]:
                         spans_text = "".join(span["text"] for span in line["spans"])
                         lines.append(spans_text)
-                    parts.append("\n".join(lines))
+                    part = "\n".join(lines)
+                    parts.append(part)
+                    cursor += len(part) + 1
 
                 elif block["type"] == 1:  # image block
                     width = block.get("width", 0)
@@ -153,7 +157,11 @@ def convert_pdf_to_pages(
                         filename = f"p{page_num}_img{img_counter}.png"
                         atomic_write_bytes(images_dir / filename, image_png)
                         img_path = f"sources/images/{doc_name}/{filename}"
-                        parts.append(f"\n![image]({img_path})\n")
+                        part = f"\n![image]({img_path})\n"
+                        start = cursor + len("\n![image](")
+                        reference_spans.append([start, start + len(img_path)])
+                        parts.append(part)
+                        cursor += len(part) + 1
                         page_images.append({"path": img_path})
                     except Exception:
                         logger.warning("Failed to save image block on page %d", page_num)
@@ -163,6 +171,7 @@ def convert_pdf_to_pages(
                     "page": page_num,
                     "content": "\n".join(parts),
                     "images": page_images,
+                    "image_reference_spans": reference_spans,
                     "unit_kind": "page",
                     "printed_page_label": page.get_label() or None,
                 }
