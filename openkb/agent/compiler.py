@@ -1943,6 +1943,9 @@ async def _compile_concepts(
                 numeric_sources=source_windows.numeric_sources(
                     originals, long=doc_type == "pageindex"
                 ),
+                original_excerpts=source_windows.original_excerpts(
+                    originals, long=doc_type == "pageindex"
+                ),
             )
         obj = _parse_page_json(raw)
         obj = figures.decorate(f"concepts/{_sanitize_concept_name(name)}.md", obj)
@@ -2030,6 +2033,9 @@ async def _compile_concepts(
                 bundle=bundle,
                 prompt_version="compiler-page-originals-v4",
                 numeric_sources=source_windows.numeric_sources(
+                    originals, long=doc_type == "pageindex"
+                ),
+                original_excerpts=source_windows.original_excerpts(
                     originals, long=doc_type == "pageindex"
                 ),
             )
@@ -2297,7 +2303,7 @@ def short_document_messages(
     document += "\nOriginal structure (native-tables-v1):\n" + json.dumps(
         structure, ensure_ascii=False
     )
-    return SourceExcerpts([content]).messages(
+    return SourceExcerpts([{**projected, "content": content}]).messages(
         [
             {
                 "role": "system",
@@ -2343,6 +2349,7 @@ async def compile_short_doc(
         wiki_dir, doc_name, kb_dir=kb_dir, view_id=selected_scope.view_id
     )
     current_original = windows.current_original_message(content)
+    original_evidence = windows.current_original_evidence(content)
     # Summary and planning reuse this prefix. Page writing receives a separate
     # original message without the summary task.
     summary_messages = short_document_messages(
@@ -2350,7 +2357,7 @@ async def compile_short_doc(
         content,
         schema_md,
         language,
-        original_evidence=windows.current_original_evidence(content),
+        original_evidence=original_evidence,
     )
     system_msg, doc_msg = summary_messages[:2]
 
@@ -2358,15 +2365,19 @@ async def compile_short_doc(
     # Planning uses this draft; page writing receives the fixed originals.
     # Validated links are assembled before publication.
     from openkb.agent.page_response import PageResponseError
+    from openkb.agent.source_excerpts import SourceExcerpts
     from openkb.compilation_report import CompilationIncomplete
     from openkb.compile_checkpoints import digest, document_checkpoints
 
+    summary_excerpts = SourceExcerpts([{**(original_evidence or {}), "content": content}])
     checkpoints = document_checkpoints(kb_dir, selected_scope.view_id, doc_name)
     signature = digest(summary_messages)
     try:
         try:
             summary_raw = checkpoints.load("short-summary", signature) if checkpoints else None
-            if summary_raw is None:
+            if summary_raw is not None:
+                summary_raw = summary_excerpts.response(summary_raw, "summary-page-json")
+            else:
                 if checkpoints:
                     checkpoints.claim_generation(
                         "short-summary", signature, stage="compile.summary"
@@ -2383,8 +2394,6 @@ async def compile_short_doc(
                     )
                 except TruncatedResponseError as error:
                     initial_error = error
-                from openkb.agent.source_excerpts import SourceExcerpts
-
                 summary_raw = await _llm_call_page_async(
                     model,
                     summary_messages,
@@ -2396,7 +2405,7 @@ async def compile_short_doc(
                     response_protocol="summary-page-json",
                     checkpoints=checkpoints,
                     checkpoint_key="short-summary",
-                    original_excerpts=SourceExcerpts([content]),
+                    original_excerpts=summary_excerpts,
                 )
                 if checkpoints:
                     checkpoints.save("short-summary", signature, summary_raw)
@@ -2506,9 +2515,10 @@ async def compile_long_doc(
         checkpoints = document_checkpoints(kb_dir, selected_scope.view_id, doc_name)
 
         async def generate(
-            messages: list[dict], stage: str, originals: list[str], sections: tuple[str, ...]
+            messages: list[dict], stage: str, originals: list[dict], sections: tuple[str, ...]
         ) -> dict:
             from openkb.agent.page_response import parse_summary
+            from openkb.agent.source_excerpts import SourceExcerpts
 
             raw = await _llm_call_page_async(
                 model,
@@ -2516,7 +2526,8 @@ async def compile_long_doc(
                 stage,
                 response_format=_JSON_RESPONSE_FORMAT,
                 bundle=bundle,
-                numeric_sources=originals,
+                numeric_sources=[original["content"] for original in originals],
+                original_excerpts=SourceExcerpts(originals),
                 prompt_version=PROMPT_VERSION,
                 response_protocol="summary-json",
                 expected_sections=sections,

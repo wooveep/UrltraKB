@@ -159,6 +159,15 @@ class CompileSourceWindows:
             texts.insert(0, self._numeric_text[path])
         return texts
 
+    def original_excerpts(self, context: PageOriginalContext, *, long: bool):
+        """Preserve qualified cells for response checks, including adjacent windows."""
+        from openkb.agent.source_excerpts import SourceExcerpts
+
+        sources = [window for window in context.windows if window["content"]]
+        if not long and (original := self.current_original_evidence()):
+            sources.insert(0, original)
+        return SourceExcerpts(sources)
+
     def current_original_evidence(self, text: str | None = None) -> dict | None:
         """Project the same qualified original for capacity, compilation and reading."""
         path = self._path()

@@ -4,6 +4,11 @@ Recompilation reads a retained unit's normalization and saved index. Its recorde
 execution mode governs the operation, including short documents that used
 segmented execution. It does not convert Office files, split worksheets, or
 reclassify the document using today's thresholds.
+Validation uses the selected saved normalization, source map, assets and conversion
+provenance, including retained slide body/notes. It does not run original-format
+text preflight, consult today's Office/CNKI runtime, or reread the original workbook.
+Missing or damaged saved inputs/indexes fail without converting or rebuilding them;
+the previous successful knowledge remains available.
 
 Source-role qualification is shared by new index inputs, compilation and question
 evidence. New block inputs record `source-structure-v1` in their processing policy.

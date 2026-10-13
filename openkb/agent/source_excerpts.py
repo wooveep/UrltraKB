@@ -5,14 +5,15 @@ turn a partial reader window into a complete procedure or authorize new claims.
 """
 
 import hashlib
-import html
 import json
 import re
 import unicodedata
+from collections.abc import Iterable
 
 from openkb.agent.page_response import PageResponseError, parse_page, parse_summary
-from openkb.agent.table_evidence import plain_prose_blocks, table_layout
+from openkb.agent.table_evidence import plain_prose_blocks
 from openkb.content_blocks import markdown_layout
+from openkb.source_contract import complete_cell_values
 
 PROTOCOL = "original-excerpts-v3"
 _MARKER = re.compile(r"^\[\[original:(x\d+\.\d+)\]\][ \t]*$", re.MULTILINE)
@@ -66,21 +67,8 @@ def _contains_path(source: str, path: str, *, prose: bool = False) -> bool:
     return False
 
 
-def _plain_cell_parts(source: str, cell: dict) -> list[str]:
-    raw = source[cell["start"] : cell["end"]]
-    match = re.fullmatch(r"<(td|th)\b[^>]*>(.*?)</\1\s*>", raw, re.DOTALL | re.IGNORECASE)
-    if not match:
-        return []
-    parts = re.split(r"<br\s*/?>", match[2], flags=re.IGNORECASE)
-    if any("<" in part or ">" in part for part in parts):
-        return []
-    # Native cells contain escaped text and explicit line breaks. Never join
-    # those breaks or infer the visibility of arbitrary nested HTML elements.
-    return [html.unescape(part) for part in parts]
-
-
 class SourceExcerpts:
-    def __init__(self, sources: list[str]):
+    def __init__(self, sources: Iterable[str | dict]):
         from openkb.llm_execution import check_model_stop
 
         self.blocks: dict[str, str] = {}
@@ -89,24 +77,22 @@ class SourceExcerpts:
         self.literal_bodies: set[str] = set()
         self.path_sources: list[str] = []
         self.prose_path_sources: list[str] = []
-        for number, text in enumerate(sources, 1):
+        for number, source in enumerate(sources, 1):
             check_model_stop()
+            text = source if isinstance(source, str) else source["content"]
             tokens, offsets = markdown_layout(text)
             check_model_stop()
             self.path_sources.append(text)
             self.prose_path_sources.extend(plain_prose_blocks(tokens))
-            # Only visible, resolved table-cell text supplies decoded entities.
-            # Attributes, comments and fenced table examples are not cell evidence.
-            if "&" in text:
-                cell_parts = [
-                    part
-                    for table in table_layout(text, (tokens, offsets))
-                    for cell in table.get("cells", [])
-                    if cell["kind"] != "unresolved"
-                    for part in _plain_cell_parts(text, cell)
-                ]
-                self.path_sources.extend(cell_parts)
-                self.prose_path_sources.extend(cell_parts)
+            # The source contract owns decoding and cell visibility. Keep each
+            # line separate; missing proof never turns printed tags into cells.
+            cell_parts = [
+                part
+                for value in complete_cell_values(source if isinstance(source, dict) else {})
+                for part in value.splitlines()
+            ]
+            self.path_sources.extend(cell_parts)
+            self.prose_path_sources.extend(cell_parts)
             protected: list[tuple[int, int]] = []
             for index, token in enumerate(tokens):
                 if index % 128 == 0:

@@ -91,31 +91,10 @@ async def recompile_source(
     frozen = read_source_revision(kb_dir, revision.source_revision_id)
     intent = read_record(kb_dir, "discovery-intents", frozen.discovery_intent_id, DiscoveryIntent)
     admission = Admission(source, frozen, intent)
-    if frozen.original_kind == "original":
-        from openkb.application.retained_inputs import frozen_source_input
-        from openkb.import_text import (
-            ImportTextRejected,
-            preflight_import_text,
-            rejection_result,
-            validate_text_preflight,
-        )
-
-        prepared = frozen_source_input(kb_dir, source, frozen)
-        try:
-            validate_text_preflight(
-                prepared,
-                preflight_import_text(
-                    kb_dir, prepared, check_stop=context.check_stop if context else lambda: None
-                ),
-            )
-        except ImportTextRejected as exc:
-            return replace(
-                rejection_result(prepared, exc),
-                source_id=source.source_id,
-                source_revision_id=frozen.source_revision_id,
-            )
     if previous and previous.status in {"empty", "retired"}:
         return result_from_publication(kb_dir, admission, previous, status="skipped")
+    # Recompile validates the saved input below. Original-format preflight would
+    # reconvert Office/CNKI or reread worksheets before reaching that input.
     actual = _manifest(kb_dir, previous) if previous else None
     source_map = None
     processing = None
@@ -155,10 +134,35 @@ async def recompile_source(
             message="No saved normalization for this input",
         )
     if normalized_source:
-        from openkb.import_text import ImportTextRejected, require_normalized_text
+        from pageindex.index.page_parts_policy import PagePartsContractError
+
+        from openkb.conversion_artifacts import read_conversion_artifacts
+        from openkb.import_text import (
+            ImportTextAssessment,
+            ImportTextRejected,
+            require_normalized_text,
+        )
+        from openkb.office.records import OfficeConversion
+        from openkb.office.slide_content import require_slide_navigation
 
         try:
             require_normalized_text(directory / "wiki" / normalized_source)
+            conversion = read_conversion_artifacts(
+                kb_dir, revision.unit_revision_id, frozen.source_revision_id
+            )
+            if conversion.get("office"):
+                try:
+                    require_slide_navigation(
+                        OfficeConversion.model_validate(conversion["office"]).slides
+                    )
+                except PagePartsContractError as error:
+                    raise ImportTextRejected(
+                        ImportTextAssessment(
+                            frozen.digest,
+                            "retained slide body/notes",
+                            unavailable="no_readable_text",
+                        )
+                    ) from error
         except ImportTextRejected as exc:
             return IngestResult(
                 source.identity,
@@ -179,15 +183,6 @@ async def recompile_source(
     from openkb.llm_usage import usage_context
 
     try:
-        from openkb.conversion_artifacts import read_conversion_artifacts
-        from openkb.office.records import OfficeConversion
-        from openkb.office.slide_content import require_slide_navigation
-
-        conversion = read_conversion_artifacts(
-            kb_dir, revision.unit_revision_id, frozen.source_revision_id
-        )
-        if conversion.get("office"):
-            require_slide_navigation(OfficeConversion.model_validate(conversion["office"]).slides)
         with (
             usage_context(
                 source_id=source.source_id,

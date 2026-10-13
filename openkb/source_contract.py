@@ -13,6 +13,24 @@ NATIVE_PAGE_POLICY = "native-page-roles-v1"
 CELL_VALUE_POLICY = "visible-cell-values-v2"
 
 
+def complete_cell_values(evidence: dict) -> list[str]:
+    """Use only resolved, completely read cells from a qualified projection.
+
+    Literal markup and legacy text carry no cell proof. Consumers must preserve
+    this projection instead of interpreting the text again as a declared format.
+    """
+    return [
+        cell["value"]
+        for table in evidence.get("native_tables", [])
+        if table.get("status") == "observed"
+        for cell in table.get("cells", [])
+        if cell.get("kind") == "cell"
+        and cell.get("value_coverage") == "complete"
+        and not cell.get("nontext_content")
+        and isinstance(cell.get("value"), str)
+    ]
+
+
 def qualify_text(raw: dict, spans: list[list[int]]) -> dict:
     """Recorded format adapters qualify a full text source before selection."""
     from openkb.source_qualification import (

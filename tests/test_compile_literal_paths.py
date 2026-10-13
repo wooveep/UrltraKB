@@ -87,11 +87,16 @@ def test_sentence_punctuation_is_not_part_of_the_source_path(ending):
 
 
 def test_complete_path_next_to_a_native_cell_break_keeps_exact_unicode_spelling():
+    from test_native_table_projection import native_page
+
+    from openkb.agent.evidence_payload import project_evidence
     from openkb.agent.source_excerpts import SourceExcerpts
+    from openkb.source_pages import read_page_selection
 
     original = "<table><tr><td>Recovery:<br/>/home/cafe\u0301/&lt;node&gt;/state</td></tr></table>"
     content = "Inspect `/home/cafe\u0301/<node>/state`."
-    assert SourceExcerpts([original]).render(content) == content
+    evidence = project_evidence(read_page_selection([native_page(original)]))
+    assert SourceExcerpts([evidence]).render(content) == content
 
 
 @pytest.mark.asyncio
@@ -124,10 +129,12 @@ def test_complete_path_next_to_a_native_cell_break_keeps_exact_unicode_spelling(
 async def test_long_summary_repairs_changed_inline_path_before_publication(
     kb_dir, monkeypatch, field, original, path, wrong
 ):
+    from test_source_qualification import freeze_source
+
     from openkb.agent.compiler import compile_long_doc
 
     wiki = kb_dir / "wiki"
-    (wiki / "sources/manual.md").write_text(original)
+    freeze_source(kb_dir, kb_dir, "md", original)
     summary = wiki / "summaries/manual.md"
     generations = []
 

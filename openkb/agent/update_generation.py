@@ -8,7 +8,6 @@ from dataclasses import replace
 from openkb.agent.compile_messages import build_page_messages
 from openkb.agent.page_response import PageResponseError
 from openkb.agent.page_updates import PageUpdate, UnchangedPage
-from openkb.agent.source_excerpts import SourceExcerpts
 from openkb.agent.update_proposals import UpdateProposal, merge_proposals
 from openkb.compile_checkpoints import digest, document_checkpoints
 from openkb.llm_execution import active_executor, check_model_stop
@@ -86,10 +85,8 @@ async def generate_page_update(
         )
 
     def excerpts(batch):
-        return SourceExcerpts(
-            windows.numeric_sources(
-                replace(originals, windows=tuple(batch)), long=current_original is None
-            )
+        return windows.original_excerpts(
+            replace(originals, windows=tuple(batch)), long=current_original is None
         )
 
     def messages(batch, editable, extra=""):
@@ -196,9 +193,17 @@ async def generate_page_update(
             )
         return editable
 
-    def accepted(key, signature, editable):
+    def accepted(key, signature, editable, batch):
         value = checkpoints.load(key, signature) if checkpoints else None
         if value is not None:
+            value = json.loads(
+                excerpts(batch).response(
+                    json.dumps(value),
+                    "page-json",
+                    update=True,
+                    previous_description=editable.request()["description"],
+                )
+            )
             try:
                 editable.apply(json.dumps(value), current=patch.original)
             except PageResponseError:
@@ -214,7 +219,7 @@ async def generate_page_update(
         if not fits(request):
             raise capacity_error()
         signature = digest(request)
-        value = accepted(key, signature, editable)
+        value = accepted(key, signature, editable, batch)
         if value is None:
             if checkpoints:
                 checkpoints.require_generation(key, signature)
@@ -255,7 +260,7 @@ async def generate_page_update(
         return value
 
     missing = sum(
-        accepted(f"{page_key}:batch:{i}", digest(messages(b, p)), for_batch(b, p)) is None
+        accepted(f"{page_key}:batch:{i}", digest(messages(b, p)), for_batch(b, p), b) is None
         for i, (b, p) in enumerate(requests)
     )
     if missing and (executor := active_executor()):
@@ -308,6 +313,7 @@ async def generate_page_update(
                 conflict_key,
                 digest(messages(selected, editable, extra)),
                 for_batch(selected, editable),
+                selected,
             )
             is None
         ) and (executor := active_executor()):

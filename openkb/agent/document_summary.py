@@ -114,9 +114,7 @@ def window_sections(window: dict) -> list[dict]:
 def summary_messages(system: dict, doc_name: str, window: dict) -> list[dict]:
     from openkb.agent.source_excerpts import SourceExcerpts
 
-    excerpts = SourceExcerpts(
-        [window["content"], *[item["content"] for item in window["supplementary_context"]]]
-    )
+    excerpts = SourceExcerpts([window, *window["supplementary_context"]])
     window = {
         **window,
         "summary_protocol": PROMPT_VERSION,
@@ -156,7 +154,7 @@ async def build_document_summary(
     windows: CompileSourceWindows,
     *,
     system_message: dict,
-    generate: Callable[[list[dict], str, list[str], tuple[str, ...]], Awaitable[dict]],
+    generate: Callable[[list[dict], str, list[dict], tuple[str, ...]], Awaitable[dict]],
     fits: Callable[[list[dict]], bool],
     checkpoints=None,
 ) -> SummaryDraft:
@@ -249,7 +247,7 @@ async def build_document_summary(
                 decoded = await generate(
                     messages,
                     f"document-summary:{current.key}",
-                    [batch["content"], *[c["content"] for c in batch["supplementary_context"]]],
+                    [batch, *batch["supplementary_context"]],
                     tuple(s["id"] for s in window_sections(batch)),
                 )
             except PageResponseError as error:
@@ -275,6 +273,19 @@ async def build_document_summary(
                     decoded,
                     metadata={**batch, "output_sections": window_sections(batch)},
                 )
+        else:
+            from openkb.agent.page_response import parse_summary
+            from openkb.agent.source_excerpts import SourceExcerpts
+
+            sections = tuple(s["id"] for s in window_sections(batch))
+            decoded = parse_summary(
+                SourceExcerpts([batch, *batch["supplementary_context"]]).response(
+                    json.dumps(decoded),
+                    "summary-json",
+                    sections,
+                ),
+                sections,
+            )
         description = decoded["description"]
         body = "\n\n".join(section["content"] for section in decoded["sections"])
         bodies.append(body)
