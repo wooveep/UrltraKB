@@ -365,14 +365,13 @@ def _convert_prepared_document(
             )
             if office_path:
                 from openkb.office.slide_content import attach_slides, read_slides
+                from openkb.source_contract import note_relative_pages
                 from openkb.source_pages import read_page_selection
 
                 slides = read_slides(office_path)
                 if slides:
                     page_records = attach_slides(page_records, slides)
-                    markdown = read_page_selection(page_records)["content"].replace(
-                        "(sources/images/", "(images/"
-                    )
+                    markdown = read_page_selection(note_relative_pages(page_records))["content"]
             atomic_write_json(sources_dir / f"{doc_name}.json", page_records, ensure_ascii=False)
         else:
             # Non-PDF, non-MD: use markitdown (docx, pptx, html, etc.).

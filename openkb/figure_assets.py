@@ -13,7 +13,9 @@ from pydantic import Field, model_validator
 from openkb.agent.page_response import PageResponseError
 from openkb.compile_checkpoints import digest
 from openkb.locks import atomic_write_bytes, atomic_write_json
-from openkb.markdown_images import image_references
+from openkb.markdown_images import ImageReference
+from openkb.source_contract import page_images
+from openkb.source_qualification import source_images
 from openkb.source_records import Digest, Record, RecordId, RelativePath
 
 
@@ -29,9 +31,16 @@ class FigureOccurrence(Record):
     asset_path: RelativePath
     asset_digest: Digest
     caption: str = ""
+    reference_span: list[int] | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @model_validator(mode="after")
     def native_location(self):
+        if self.reference_span is not None and not (
+            "page" in self.location
+            and len(self.reference_span) == 2
+            and 0 <= self.reference_span[0] < self.reference_span[1]
+        ):
+            raise ValueError("A physical image reference requires a nonempty native span")
         if set(self.location) == {"page"} and self.location["page"] >= 1:
             return self
         if (
@@ -125,40 +134,33 @@ def freeze_figures(
     """Repair only references to existing assets; never re-extract or edit frozen text."""
     source_digest = hashlib.sha256((wiki / source_path).read_bytes()).hexdigest()
     validate_figure_source(raw)
-    if isinstance(raw, dict) and raw["normalization_policy"].startswith(
-        ("txt-unicode-", "csv-", "xml-")
-    ):
-        # These formats preserve literal syntax; a Markdown-shaped example is text.
+    if isinstance(raw, str):
+        # A bare legacy normalization has no recorded syntax or occurrence map.
+        # Preserve its text, existing assets and historical records without
+        # certifying literal references or demanding image reprocessing.
         return []
     destination = destination or wiki
-    units = (
-        raw
-        if isinstance(raw, list)
-        else [{"content": raw.get("text", "") if isinstance(raw, dict) else raw}]
-    )
+    units = raw if isinstance(raw, list) else [{"content": raw.get("text", "")}]
     assets = raw.get("assets", {}) if isinstance(raw, dict) else {}
     figures = []
     for unit in units:
-        content = unit.get("content", "")
-        refs = image_references(content)
+        refs = (
+            page_images(unit)
+            if isinstance(raw, list)
+            else [ImageReference(**ref) for ref in source_images(raw)]
+        )
         entries = []
         if isinstance(raw, list):
             for ordinal, entry in enumerate(unit.get("images", [])):
-                matching = next(
-                    (
-                        r
-                        for r in refs
-                        if r.local_path in {entry["path"], entry["path"].removeprefix("sources/")}
-                    ),
-                    None,
-                )
+                matching = refs[ordinal] if ordinal < len(refs) else None
                 entries.append(
                     (
                         entry["path"],
                         {"page": unit["page"]},
                         ordinal,
-                        entry.get("caption", matching.alt if matching else ""),
+                        entry.get("caption") or "",
                         entry.get("digest"),
+                        [matching.start, matching.end] if matching else None,
                     )
                 )
         else:
@@ -178,9 +180,16 @@ def freeze_figures(
                     else f"sources/{ref.local_path}"
                 )
                 entries.append(
-                    (path, {"start": ref.start, "end": ref.end}, ordinal, ref.alt, assets.get(path))
+                    (
+                        path,
+                        {"start": ref.start, "end": ref.end},
+                        ordinal,
+                        ref.alt,
+                        assets.get(path),
+                        None,
+                    )
                 )
-        for path, location, ordinal, caption, expected in entries:
+        for path, location, ordinal, caption, expected, reference_span in entries:
             original = (wiki / path).resolve()
             if not original.is_relative_to(wiki.resolve()) or not original.is_file():
                 from openkb.processing_policy import ReprocessingRequired
@@ -214,14 +223,16 @@ def freeze_figures(
                     asset_path=target,
                     asset_digest=sha,
                     caption=caption,
+                    reference_span=reference_span,
                 )
             )
     if figures:
         key = digest({"source_path": source_path, "source_digest": source_digest, **identity})
-        atomic_write_json(
-            destination / f"sources/figure-records/{key}.json",
-            [f.model_dump(mode="json") for f in figures],
-        )
+        record_target = destination / f"sources/figure-records/{key}.json"
+        if not record_target.exists():
+            # Current reading requalifies the projection; an existing historical
+            # record is never migrated or overwritten as a side effect of reading.
+            atomic_write_json(record_target, [f.model_dump(mode="json") for f in figures])
     return figures
 
 

@@ -108,6 +108,7 @@ def test_continuation_context_uses_original_text_coordinates(kb_dir):
 
 
 def test_continuation_context_uses_physical_page_coordinates():
+    from openkb.source_contract import NATIVE_PAGE_POLICY
     from openkb.source_pages import read_page_selection
 
     text = (
@@ -117,7 +118,14 @@ def test_continuation_context_uses_physical_page_coordinates():
     source = read_page_selection(
         [
             {"page": 1, "unit_kind": "page", "content": "Unrelated first page."},
-            {"page": 2, "unit_kind": "page", "content": text},
+            {
+                "page": 2,
+                "unit_kind": "page",
+                "content": text,
+                "source_structure_policy": NATIVE_PAGE_POLICY,
+                "content_spans": [{"role": "table", "span": [14, text.index("</table>") + 8]}],
+                "image_reference_spans": [],
+            },
         ],
         "2",
     )

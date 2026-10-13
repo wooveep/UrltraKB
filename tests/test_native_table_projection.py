@@ -5,6 +5,7 @@ import json
 
 from openkb.agent.evidence_payload import project_evidence, slice_evidence
 from openkb.agent.source_windows import CompileSourceWindows
+from openkb.source_contract import NATIVE_PAGE_POLICY
 from openkb.source_pages import read_page_selection
 
 TABLE = (
@@ -15,12 +16,30 @@ TABLE = (
 )
 
 
-def source(body=TABLE):
-    return read_page_selection([{"page": 1, "unit_kind": "page", "content": body}])
+def native_page(body, page=1):
+    spans, cursor = [], 0
+    while (start := body.find("<table>", cursor)) >= 0:
+        end = body.index("</table>", start) + len("</table>")
+        spans.append({"role": "table", "span": [start, end]})
+        cursor = end
+    return {
+        "page": page,
+        "unit_kind": "page",
+        "content": body,
+        "source_structure_policy": NATIVE_PAGE_POLICY,
+        "content_spans": spans,
+        "image_reference_spans": [],
+        "images": [],
+    }
+
+
+def source(body=TABLE, *, native=True):
+    page = native_page(body) if native else {"page": 1, "unit_kind": "page", "content": body}
+    return read_page_selection([page])
 
 
 def test_original_message_supplies_explicit_merged_cell_identity(kb_dir):
-    pages = [{"page": 1, "unit_kind": "page", "content": TABLE}]
+    pages = [native_page(TABLE)]
     path = kb_dir / "wiki/sources/manual.json"
     path.write_text(json.dumps(pages))
     original = path.read_bytes()
@@ -63,7 +82,7 @@ def test_partial_read_keeps_native_cell_ids_without_backfilling_unread_values():
 
 
 def test_literal_fenced_table_is_not_promoted_to_source_cell_structure():
-    evidence = project_evidence(source("```html\n" + TABLE + "\n```"))
+    evidence = project_evidence(source("```html\n" + TABLE + "\n```", native=False))
     assert "native_tables" not in evidence
 
 
@@ -106,8 +125,8 @@ def test_small_window_continuations_preserve_original_text_and_cell_identity():
 
 def test_table_identity_is_scoped_to_original_physical_page():
     pages = [
-        {"page": 1, "unit_kind": "page", "content": TABLE},
-        {"page": 2, "unit_kind": "page", "content": TABLE.replace("Backup", "Restore")},
+        native_page(TABLE, 1),
+        native_page(TABLE.replace("Backup", "Restore"), 2),
     ]
     evidence = project_evidence(read_page_selection(pages))
     assert len(evidence["native_tables"]) == 2
@@ -122,7 +141,8 @@ def test_document_windows_parse_tables_once_including_adjacent_context(kb_dir, m
     from openkb.agent import table_evidence
 
     body = "\n\n".join([TABLE] * 5)
-    pages = [{"page": 1, "unit_kind": "page", "content": body}]
+    pages = [native_page(body)]
+    expected_content = read_page_selection(pages)["content"]
     (kb_dir / "wiki/sources/manual.json").write_text(json.dumps(pages))
     calls = []
     initialize = table_evidence._Parser.__init__
@@ -138,6 +158,6 @@ def test_document_windows_parse_tables_once_including_adjacent_context(kb_dir, m
         )
     )
     assert len(windows) >= 2
-    assert "".join(window["content"] for window in windows) == read_page_selection(pages)["content"]
+    assert "".join(window["content"] for window in windows) == expected_content
     assert len(calls) == len(set(calls)) == 5
     assert all(len(json.dumps(window, ensure_ascii=False)) <= 8000 for window in windows)

@@ -1,9 +1,27 @@
 """Literal HTML examples and malformed tags cannot establish cell facts."""
 
+import hashlib
+
 import pytest
-from test_native_table_projection import TABLE, source
+from test_native_table_projection import TABLE
 
 from openkb.agent.evidence_payload import project_evidence
+from openkb.source_qualification import MARKDOWN_POLICY
+from openkb.text_measurement import measure_markdown
+from openkb.text_source import FrozenText, TextOrigin, read_text_selection
+
+
+def source(body):
+    frozen = FrozenText(
+        text=body,
+        original_characters=len(body),
+        original_digest=hashlib.sha256(body.encode()).hexdigest(),
+        origins=(TextOrigin(normalized_span=(0, len(body)), original_span=(0, len(body))),),
+        tokens=measure_markdown(body),
+        normalization_policy=MARKDOWN_POLICY,
+        assets={},
+    )
+    return read_text_selection(frozen.model_dump(mode="json"))
 
 
 @pytest.mark.parametrize(
@@ -33,7 +51,7 @@ def test_literal_table_does_not_hide_following_real_table_in_same_html_block():
     assert evidence["content"] == selected["content"]
     (table,) = evidence["native_tables"]
     assert table["status"] == "observed"
-    assert table["native_location"]["page_spans"][0]["start"] == body.rindex("<table>")
+    assert table["native_location"]["source_spans"][0][0] == body.rindex("<table>")
 
 
 @pytest.mark.parametrize(
@@ -79,7 +97,7 @@ def test_literal_ancestors_survive_markdown_blocks_until_their_closing_tag(openi
     assert evidence["content"] == selected["content"]
     (table,) = evidence["native_tables"]
     assert table["status"] == "observed"
-    assert table["native_location"]["page_spans"][0]["start"] == body.rindex("<table>")
+    assert table["native_location"]["source_spans"][0][0] == body.rindex("<table>")
 
 
 @pytest.mark.parametrize(
@@ -102,7 +120,7 @@ def test_raw_html_text_does_not_certify_nested_examples_or_leak_after_close(tag)
     assert evidence["content"] == selected["content"]
     (table,) = evidence["native_tables"]
     assert table["status"] == "observed"
-    assert table["native_location"]["page_spans"][0]["start"] == body.index(
+    assert table["native_location"]["source_spans"][0][0] == body.index(
         "<table>", body.index(f"</{tag}>")
     )
 

@@ -8,6 +8,34 @@ from openkb.source_qualification import html_text_role
 MAX_TABLE_SLOTS = 16384
 MAX_TABLE_CHARS = 1_000_000
 _TABLE_TAGS = {"table", "thead", "tbody", "tfoot", "tr", "td", "th"}
+_CONTROLS = {
+    "input",
+    "select",
+    "option",
+    "optgroup",
+    "button",
+    "datalist",
+    "meter",
+    "progress",
+    "output",
+}
+_CELL_BLOCKS = {
+    "p",
+    "div",
+    "li",
+    "dt",
+    "dd",
+    "blockquote",
+    "pre",
+    "section",
+    "article",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+}
 TABLE_INTERPRETATION = (
     "Rows and columns describe source layout, not counts of domain items. Repeated cell IDs "
     "refer to one merged cell in this table only. An explicit empty cell differs from an "
@@ -53,6 +81,8 @@ class _Parser(_LiteralContext):
         return self.base + self.lines[line - 1] + column
 
     def handle_starttag(self, tag, attrs):
+        if not self.literal and tag == "pre" and self.cell is not None:
+            self.cell["block_break"] = True
         super().handle_starttag(tag, attrs)
         if self.literal:
             if self.cell is not None and html_text_role(self.literal) == "unresolved":
@@ -106,6 +136,13 @@ class _Parser(_LiteralContext):
             elif self.cell is not None:
                 if tag == "br":
                     self.cell["parts"].append("\n")
+                    self.cell.pop("block_break", None)
+                elif tag in _CELL_BLOCKS:
+                    self.cell["block_break"] = True
+                elif tag in _CONTROLS:
+                    # Reading all markup does not resolve an interactive value.
+                    self.cell["kind"] = "unresolved"
+                    self.cell["nontext_content"] = True
                 elif tag in {"img", "svg", "video", "audio", "object", "iframe"}:
                     self.cell["nontext_content"] = True
 
@@ -124,13 +161,21 @@ class _Parser(_LiteralContext):
                 return
             if role == "unresolved":
                 self.cell["kind"] = "unresolved"
+            if self.cell.pop("block_break", False) and self.cell["parts"]:
+                if not self.cell["parts"][-1].endswith("\n") and not data.startswith("\n"):
+                    self.cell["parts"].append("\n")
             self.cell["parts"].append(data)
 
     def handle_endtag(self, tag):
         if self.literal:
+            block_end = tag == "pre" and self.literal[-1] == tag
             super().handle_endtag(tag)
+            if block_end and not self.literal and self.cell is not None:
+                self.cell["block_break"] = True
             return
         end = self.base + self.text.index(">", self.position() - self.base) + 1
+        if tag in _CELL_BLOCKS and self.cell is not None:
+            self.cell["block_break"] = True
         if tag in {"td", "th"} and self.table is not None:
             if self.cell is None or self.cell["tag"] != tag:
                 raise ValueError("Unmatched cell ending")
@@ -161,6 +206,7 @@ def _place(table):
         for cell in row["cells"]:
             cell = {**cell, "value": "".join(cell["parts"])}
             cell.pop("parts")
+            cell.pop("block_break", None)
             while (row_index, column) in occupied:
                 column += 1
             height, width = cell["height"], cell["width"]
@@ -232,6 +278,28 @@ def table_layout(text, layout=None):
             if len(body) <= MAX_TABLE_CHARS:
                 # A rejected grid cannot erase later literal closing tags.
                 context.feed(body)
+    return tables
+
+
+def native_table_layout(text, spans, *, base=0):
+    """Parse only regions attested by physical geometry, outside literal prose."""
+    tables = []
+    for start, end in spans:
+        try:
+            body = text[start:end]
+            if len(body) > MAX_TABLE_CHARS:
+                raise ValueError("Native table text exceeds structural processing bounds")
+            parser = _Parser(body, base + start)
+            parser.feed(body)
+            parser.close()
+            if parser.table is not None or len(parser.tables) != 1:
+                raise ValueError("Native table region has incomplete structure")
+            table = parser.tables[0]
+            if [table["start"], table["end"]] != [base + start, base + end]:
+                raise ValueError("Native table region differs from its recorded boundary")
+            tables.append(table)
+        except (ValueError, TypeError) as error:
+            tables.append({"start": base + start, "end": base + end, "diagnostic": str(error)})
     return tables
 
 

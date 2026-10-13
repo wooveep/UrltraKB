@@ -6,7 +6,7 @@ text, while continuation is an offset in this selection's displayed content.
 
 import json
 
-from openkb.agent.table_evidence import TABLE_INTERPRETATION, table_layout, table_metadata
+from openkb.agent.table_evidence import TABLE_INTERPRETATION, table_metadata
 from openkb.content_blocks import markdown_layout
 from openkb.text_source import clip_text_origins
 
@@ -69,16 +69,10 @@ def _coordinates(source: dict, start: int, end: int) -> dict:
 
 def image_layout(source: dict):
     """Parse references in their complete literal context once per selection."""
-    from openkb.markdown_images import ImageReference, image_references
+    from openkb.markdown_images import ImageReference
 
-    text = source["content"]
     if "_page_segments" in source:
-        # A physical extraction does not declare Markdown syntax. Its recorded
-        # image inventory is independent of literal examples printed on a page.
-        paths = {
-            image["path"] for unit in source.get("units", []) for image in unit.get("images", [])
-        }
-        return [ref for ref in image_references(text) if ref.local_path in paths] if paths else []
+        return [ImageReference(**ref) for ref in source.get("_qualified_page_images", [])]
     result = []
     for reference in source.get("_qualified_images", []):
         for left, right, native, stop in _segments(source):
@@ -114,7 +108,7 @@ def _window(source: dict, start: int, end: int, layout=None, tables=None, images
     }
     if "_page_segments" in source:
         result["units"] = [
-            _page_unit(unit, result["page_spans"], images, source["_page_segments"])
+            _page_unit(unit, result["page_spans"])
             for unit in source.get("units", [])
             if any(span["page"] == unit["page"] for span in result["page_spans"])
         ]
@@ -220,7 +214,7 @@ def _window(source: dict, start: int, end: int, layout=None, tables=None, images
         )
     elif "_page_segments" in source:
         native_tables = table_metadata(
-            table_layout(source["content"], layout) if tables is None else tables,
+            source.get("_qualified_page_tables", []),
             start,
             end,
             lambda a, b: _coordinates(source, a, b),
@@ -239,31 +233,41 @@ def _window(source: dict, start: int, end: int, layout=None, tables=None, images
     return result
 
 
-def _page_unit(unit: dict, spans: list[dict], images, segments) -> dict:
+def _page_unit(unit: dict, spans: list[dict]) -> dict:
     """Page inventory is not evidence that each figure belongs to an excerpt."""
+    from openkb.source_contract import page_image_selection
+
     selected = [span for span in spans if span["page"] == unit["page"]]
     complete = any(span["start"] == 0 and span["end"] == len(unit["content"]) for span in selected)
-    inventory = unit.get("images", [])
-    if not complete:
-        left = next(left for left, _, page in segments if page == unit["page"])
-        paths = {
-            ref.local_path
-            for ref in images
-            if any(
-                left + span["start"] <= ref.start and ref.end <= left + span["end"]
-                for span in selected
-            )
-        }
-        inventory = [item for item in inventory if item["path"] in paths]
     return {
         **{
             key: value
             for key, value in unit.items()
-            if key not in {"content", "parts", "origin_locators", "images"}
+            if key
+            not in {
+                "content",
+                "parts",
+                "origin_locators",
+                "images",
+                "content_spans",
+                "image_reference_spans",
+                "slide",
+            }
         },
         "text_coverage": "complete" if complete else "partial",
-        "images": inventory,
-        "omitted_page_images": len(unit.get("images", [])) - len(inventory),
+        **(
+            {
+                "slide": {
+                    key: value
+                    for key, value in unit["slide"].items()
+                    if key not in {"body", "notes"}
+                }
+            }
+            if unit.get("slide")
+            else {}
+        ),
+        "structure_coverage": "recorded" if unit.get("source_structure_policy") else "unconfirmed",
+        **page_image_selection(unit, selected, complete=complete),
     }
 
 
@@ -355,11 +359,7 @@ def project_evidence(
         raise ValueError("Continuation is outside this evidence selection")
     layout = layout or (markdown_layout(text) if offset else None)
     if tables is None:
-        tables = (
-            table_layout(text, layout)
-            if "_page_segments" in source and "_qualified_tables" not in source
-            else []
-        )
+        tables = []
     images = image_layout(source) if images is None else images
     result = _window(source, offset, len(text), layout, tables, images)
     fits = fits or (lambda payload: len(json.dumps(payload, ensure_ascii=False)) <= budget)

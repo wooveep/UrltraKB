@@ -88,6 +88,11 @@ def test_compiler_figure_range_uses_the_projected_occurrence_selection(kb_dir):
             "images": [{"path": "sources/images/first.png"}, {"path": "sources/images/second.png"}],
         }
     ]
+    body = pages[0]["content"]
+    pages[0]["image_reference_spans"] = [
+        [body.index(image["path"]), body.index(image["path"]) + len(image["path"])]
+        for image in pages[0]["images"]
+    ]
     (wiki / "sources/manual.json").write_text(json.dumps(pages))
     source = read_page_selection(pages)
     selected = slice_evidence(

@@ -159,7 +159,7 @@ def restrict_query_agent(agent, selection: QuerySelection):
         )
         if images:
             content += "\nImage coverage: " + json.dumps(
-                images.listed(source, selected["units"]), ensure_ascii=False
+                images.listed(source, payload.get("units", [])), ensure_ascii=False
             )
         return content
 

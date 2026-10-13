@@ -21,7 +21,8 @@ from openkb.text_source import (
     freeze_markdown,
 )
 
-HTML_POLICY = "html-bs4-4.14.3-html.parser-markdownify-1.2.2-block-origins-v1"
+LEGACY_HTML_POLICY = "html-bs4-4.14.3-html.parser-markdownify-1.2.2-block-origins-v1"
+HTML_POLICY = "html-bs4-4.14.3-html.parser-markdownify-1.2.2-block-origins-v2-native-tables"
 _BLOCKS = {"h1", "h2", "h3", "h4", "h5", "h6", "p", "pre", "ul", "ol", "table", "blockquote", "hr"}
 _OMITTED = {"script", "style", "head", "template", "noscript"}
 _CONTAINERS = {
@@ -37,6 +38,13 @@ _CONTAINERS = {
     "nav",
     "aside",
 }
+
+
+class _SourceMarkdownConverter(MarkdownConverter):
+    def convert_table(self, el, text, parent_tags):
+        # Flattening a native HTML grid discards spans, controls and paragraph
+        # boundaries before the shared source contract can qualify cell values.
+        return "\n\n" + str(el) + "\n\n"
 
 
 def _distribute_block_links(soup):
@@ -192,7 +200,7 @@ def freeze_html(
     chunks, origins = [], []
     if offset:
         origins.append(TextOrigin(normalized_span=(0, 0), original_span=(0, offset), kind="bom"))
-    converter = MarkdownConverter(
+    converter = _SourceMarkdownConverter(
         heading_style="ATX",
         bullets="*",
         escape_misc=True,

@@ -14,6 +14,7 @@ import pymupdf
 from openkb.locks import atomic_write_bytes
 from openkb.markdown_images import apply_image_edits, image_references
 from openkb.pdf_layout import native_pdf_blocks
+from openkb.source_contract import NATIVE_PAGE_POLICY
 
 if TYPE_CHECKING:
     from openkb.inputs import PreparedImage
@@ -131,6 +132,7 @@ def convert_pdf_to_pages(
             parts: list[str] = []
             page_images: list[dict] = []
             reference_spans: list[list[int]] = []
+            content_spans: list[dict] = []
             cursor = 0
 
             for block in native_pdf_blocks(page):
@@ -140,6 +142,10 @@ def convert_pdf_to_pages(
                         spans_text = "".join(span["text"] for span in line["spans"])
                         lines.append(spans_text)
                     part = "\n".join(lines)
+                    if block.get("source_role") == "table":
+                        content_spans.append(
+                            {"role": "table", "span": [cursor, cursor + len(part)]}
+                        )
                     parts.append(part)
                     cursor += len(part) + 1
 
@@ -160,6 +166,13 @@ def convert_pdf_to_pages(
                         part = f"\n![image]({img_path})\n"
                         start = cursor + len("\n![image](")
                         reference_spans.append([start, start + len(img_path)])
+                        content_spans.append(
+                            {
+                                "role": "image",
+                                "span": [start, start + len(img_path)],
+                                "generated_span": [cursor, cursor + len(part)],
+                            }
+                        )
                         parts.append(part)
                         cursor += len(part) + 1
                         page_images.append({"path": img_path})
@@ -172,6 +185,8 @@ def convert_pdf_to_pages(
                     "content": "\n".join(parts),
                     "images": page_images,
                     "image_reference_spans": reference_spans,
+                    "source_structure_policy": NATIVE_PAGE_POLICY,
+                    "content_spans": content_spans,
                     "unit_kind": "page",
                     "printed_page_label": page.get_label() or None,
                 }
@@ -196,65 +211,12 @@ def convert_pdf_with_images(
 
     Returns the full markdown string.
     """
-    from openkb.import_text import require_pdf_text
+    from openkb.source_contract import note_relative_pages
 
-    require_pdf_text(pdf_path, allow_empty=allow_empty_text)
-    images_dir.mkdir(parents=True, exist_ok=True)
-    parts: list[str] = []
-    img_counter = 0
-
-    with pymupdf.open(str(pdf_path)) as doc:
-        for page_idx in range(len(doc)):
-            page = doc[page_idx]
-            page_num = page_idx + 1
-            parts.append("\n\n")
-            page_start = len(parts)
-            page_images = []
-            image_refs = {}
-
-            for block in native_pdf_blocks(page):
-                if block["type"] == 0:  # text block
-                    lines = []
-                    for line in block["lines"]:
-                        spans_text = "".join(span["text"] for span in line["spans"])
-                        lines.append(spans_text)
-                    parts.append("\n".join(lines))
-
-                elif block["type"] == 1:  # image block
-                    width = block.get("width", 0)
-                    height = block.get("height", 0)
-                    if width < _MIN_IMAGE_DIM or height < _MIN_IMAGE_DIM:
-                        continue
-                    image_bytes = block.get("image")
-                    if not image_bytes:
-                        continue
-                    try:
-                        image_png = _pdf_image_png(block)
-                        img_counter += 1
-                        filename = f"p{page_num}_img{img_counter}.png"
-                        atomic_write_bytes(images_dir / filename, image_png)
-                        parts.append(f"\n{md_image_ref('image', doc_name, filename)}\n")
-                        image_path = f"sources/images/{doc_name}/{filename}"
-                        page_images.append({"path": image_path})
-                        image_refs[md_image_ref("image", doc_name, filename)] = (
-                            f"![image]({image_path})"
-                        )
-                    except Exception:
-                        logger.warning("Failed to save image block on page %d", page_num)
-            if page_records is not None:
-                page_content = "\n".join(parts[page_start:])
-                for reference, replacement in image_refs.items():
-                    page_content = page_content.replace(reference, replacement)
-                page_records.append(
-                    {
-                        "page": page_num,
-                        "content": page_content,
-                        "images": page_images,
-                        "unit_kind": "page",
-                        "printed_page_label": page.get_label() or None,
-                    }
-                )
-    return "\n".join(parts)
+    pages = convert_pdf_to_pages(pdf_path, doc_name, images_dir, allow_empty_text=allow_empty_text)
+    if page_records is not None:
+        page_records.extend(pages)
+    return "\n".join("\n\n\n" + page["content"] for page in note_relative_pages(pages))
 
 
 def extract_base64_images(

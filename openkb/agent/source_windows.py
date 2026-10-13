@@ -53,8 +53,11 @@ def validate_reading_locations(value: object) -> dict:
         "cells",
         "chars",
         "offset",
+        "part",
     }:
         raise ValueError("reading_locations requires native ranges or existing node_ids")
+    if "part" in value and ("pages" not in value or value["part"] not in (None, "body", "notes")):
+        raise ValueError("reading_locations.part requires explicit pages and body/notes or null")
     if "node_ids" in value:
         ids = value["node_ids"]
         if (
@@ -69,7 +72,7 @@ def validate_reading_locations(value: object) -> dict:
         or not set(value) & {"pages", "blocks", "cells", "chars"}
     ):
         raise ValueError("reading_locations.offset requires a nonnegative reader offset and range")
-    for key in set(value) - {"node_ids", "offset"}:
+    for key in set(value) - {"node_ids", "offset", "part"}:
         if key in {"pages", "blocks"} and isinstance(value[key], list):
             numbers = value[key]
             if (
@@ -489,14 +492,16 @@ class CompileSourceWindows:
             result["native_location"] = location or {"chars": f"0:{len(raw['text'])}"}
         elif path.endswith(".json"):
             from openkb.agent.evidence_payload import project_evidence
-            from openkb.source_pages import read_page_selection
+            from openkb.source_pages import read_page_selection, select_page_part
 
             raw = self._source(path)
-            if set(location) - {"pages", "offset"}:
+            if set(location) - {"pages", "offset", "part"}:
                 raise PageResponseError("page_invalid_evidence", "Use this source's physical pages")
             if "pages" not in location:
                 return {**result, "diagnostics": ["No relevant original pages located"]}
-            selected = read_page_selection(raw, location["pages"])
+            selected = select_page_part(
+                read_page_selection(raw, location["pages"]), location.get("part")
+            )
             if selected["diagnostics"]:
                 raise PageResponseError("page_invalid_evidence", str(selected["diagnostics"]))
             projected = project_evidence(

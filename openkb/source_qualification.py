@@ -172,9 +172,15 @@ def markup_headings(text: str) -> tuple[tuple[int, int, int, str], ...]:
 
 
 def markup_source(policy: str | None) -> bool:
+    from openkb.html_source import LEGACY_HTML_POLICY
+    from openkb.source_records import ENCODING_POLICY
     from openkb.text_formats import text_normalization_policy
 
-    return policy in {MARKDOWN_POLICY, text_normalization_policy("html")}
+    return policy in {
+        MARKDOWN_POLICY,
+        text_normalization_policy("html"),
+        f"{LEGACY_HTML_POLICY}:{ENCODING_POLICY}",
+    }
 
 
 def qualified_headings(text: str, policy: str | None, origins=()) -> tuple:

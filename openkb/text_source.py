@@ -9,14 +9,9 @@ from typing import Literal
 from pydantic import Field, model_validator
 
 from openkb.content_blocks import BLOCK_POLICY, ContentBlock, validate_blocks
+from openkb.source_contract import qualify_text
 from openkb.source_pages import PageRangeError
-from openkb.source_qualification import (
-    MARKDOWN_POLICY,
-    source_headings,
-    source_images,
-    source_table_headers,
-    source_tables,
-)
+from openkb.source_qualification import MARKDOWN_POLICY
 from openkb.source_records import Digest, EncodingDecision, Record, RelativePath
 from openkb.text_measurement import MEASUREMENT_FINGERPRINT, measure_markdown
 from openkb.workbooks.records import SheetCellLocation, SheetSnapshot
@@ -315,10 +310,7 @@ def read_text_selection(raw: dict, chars: str | None = None) -> dict:
     return {
         **({"sheet": frozen.sheet.model_dump(mode="json")} if frozen.sheet else {}),
         "unit_kind": frozen.unit_kind,
-        "_qualified_headings": source_headings(raw),
-        "_qualified_images": source_images(raw),
-        "_qualified_tables": source_tables(raw, [[start, end]]),
-        "_qualified_table_headers": source_table_headers(raw),
+        **qualify_text(raw, [[start, end]]),
         "block_count": len(frozen.blocks) if frozen.blocks else None,
         "content": frozen.text[start:end],
         "pages": None,

@@ -11,6 +11,19 @@ Older retained inputs keep their exact bytes, fingerprint, units and recorded
 parser policy, including cache recovery. Reading rechecks source-role annotations
 against the complete retained source without rewriting its index. Missing format
 declarations remain unconfirmed; opening a library never upgrades them implicitly.
+New native PDF and Office inputs record `native-page-roles-v1`: table regions and
+generated image occurrences have Unicode coordinates which remain aligned when
+managed assets are relocated. PPT body/notes use the same native PDF body as the
+plain PDF adapter. Both previous PDF and slide parser policies remain registered
+for saved-cache recovery, without model calls or rebuilding navigation.
+Old pages without table proof keep their text without certifying literal HTML;
+old image inventories remain available at page granularity, with unconfirmed
+excerpt positions. The previous HTML normalization policy remains readable;
+new HTML normalization retains native table markup instead of flattening it.
+Bare legacy text cannot certify a literal image reference or trigger reprocessing
+from a printed data URI. Existing figure records and gallery assets remain readable;
+current projections never overwrite historical figure records. Recorded generated
+media ranges cannot anchor original slide navigation.
 
 Ordinary import retries keep the target's processing policy and completed units.
 If a missing normalization, missing workbook inventory, or changed index policy

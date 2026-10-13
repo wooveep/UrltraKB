@@ -62,7 +62,10 @@ def _normalize_page_content(raw_pages: Any) -> list[dict[str, Any]]:
         content = item.get("content", item.get("markdown", item.get("text", "")))
         if content is None:
             content = ""
-        content = str(content).strip()
+        # Native positions refer to the exact frozen text, including whitespace.
+        content = str(content)
+        if not any(key in item for key in ("content_spans", "image_reference_spans")):
+            content = content.strip()
 
         images = item.get("images", [])
         if not isinstance(images, list):
@@ -84,7 +87,15 @@ def _normalize_page_content(raw_pages: Any) -> list[dict[str, Any]]:
                     "content": content,
                     "images": normalized_images,
                     **{
-                        key: item[key] for key in ("unit_kind", "printed_page_label") if key in item
+                        key: item[key]
+                        for key in (
+                            "unit_kind",
+                            "printed_page_label",
+                            "image_reference_spans",
+                            "source_structure_policy",
+                            "content_spans",
+                        )
+                        if key in item
                     },
                 }
             )

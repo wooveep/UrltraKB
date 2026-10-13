@@ -28,11 +28,24 @@ def select_page_part(source: dict, part: str | None) -> dict:
                 "content": parts[part],
                 "part": part,
                 "images": page.get("images", []) if part == "body" else [],
+                **({"content_spans": []} if part == "notes" and "content_spans" in page else {}),
+                **(
+                    {"image_reference_spans": []}
+                    if part == "notes" and "image_reference_spans" in page
+                    else {}
+                ),
                 "origin_locators": [
                     item for item in page.get("origin_locators", []) if item.get("part") == part
                 ],
             }
         )
+        if part == "body" and page.get("source_structure_policy") is None:
+            # Older Office snapshots froze a separate plain-text body. Its
+            # coordinates cannot inherit occurrences from the full extraction.
+            if not page["content"].startswith(parts[part]) or any(
+                span[1] > len(parts[part]) for span in page.get("image_reference_spans", [])
+            ):
+                units[-1].pop("image_reference_spans", None)
     label = "正文" if part == "body" else "演讲备注"
     segments, cursor = [], 0
     for page in units:
@@ -40,16 +53,20 @@ def select_page_part(source: dict, part: str | None) -> dict:
         start = cursor + len(prefix)
         segments.append((start, start + len(page["content"]), page["page"]))
         cursor = start + len(page["content"]) + len("\n\n---\n\n")
-    return {
-        **source,
-        "part": part,
-        "units": units,
-        "origin_locators": [item for page in units for item in page["origin_locators"]],
-        "content": "\n\n---\n\n".join(
-            f"[Physical page {page['page']} · {label}]\n\n{page['content']}" for page in units
-        ),
-        "_page_segments": segments,
-    }
+    from openkb.source_contract import qualify_pages
+
+    return qualify_pages(
+        {
+            **source,
+            "part": part,
+            "units": units,
+            "origin_locators": [item for page in units for item in page["origin_locators"]],
+            "content": "\n\n---\n\n".join(
+                f"[Physical page {page['page']} · {label}]\n\n{page['content']}" for page in units
+            ),
+            "_page_segments": segments,
+        }
+    )
 
 
 def validate_source_ranges(pages=None, chars=None, blocks=None) -> None:
@@ -116,14 +133,20 @@ def read_page_selection(raw: Any, specification: str | None = None) -> dict:
     content = "\n\n---\n\n".join(parts)
     if diagnostics:
         content += "\n\n" + "\n".join(diagnostics)
-    return {
-        "content": content,
-        "pages": len(raw) if complete else None,
-        "unit_kind": "page" if physical else None,
-        "page_range": [p["page"] for p in selected],
-        "coverage": "complete" if complete else "unknown",
-        "diagnostics": diagnostics,
-        "units": selected,
-        "origin_locators": [item for page in selected for item in page.get("origin_locators", [])],
-        "_page_segments": segments,
-    }
+    from openkb.source_contract import qualify_pages
+
+    return qualify_pages(
+        {
+            "content": content,
+            "pages": len(raw) if complete else None,
+            "unit_kind": "page" if physical else None,
+            "page_range": [p["page"] for p in selected],
+            "coverage": "complete" if complete else "unknown",
+            "diagnostics": diagnostics,
+            "units": selected,
+            "origin_locators": [
+                item for page in selected for item in page.get("origin_locators", [])
+            ],
+            "_page_segments": segments,
+        }
+    )

@@ -85,7 +85,7 @@ def test_html_keeps_structure_and_freezes_local_and_data_images(kb_dir, tmp_path
     image.unlink()
     saved = read_document_source(kb_dir, result.source_id)
     assert "# Guide" in saved["content"] and "**body**" in saved["content"]
-    assert "* One" in saved["content"] and "| Thing | 001 |" in saved["content"]
+    assert "* One" in saved["content"] and "<td>Thing</td><td>001</td>" in saved["content"]
     assert "not_body" not in saved["content"] and "p{color" not in saved["content"]
     assert len(saved["assets"]) == 2 and "https://example.test/missing.png" in saved["content"]
     assert saved["resource_policy"] == {"download_remote_assets": False, "source": "default"}
@@ -472,6 +472,7 @@ def test_html_heading_and_table_images_remain_readable(kb_dir, tmp_path, pdf_mod
     assert result.status == "added", result.message
     source = read_document_source(kb_dir, result.source_id)
     assert (
-        "![architecture](images/" in source["content"] and "![diagram](images/" in source["content"]
+        "![architecture](images/" in source["content"]
+        and 'alt="diagram" src="images/' in source["content"]
     )
     assert all(resource["status"] == "retained" for resource in source["resources"])

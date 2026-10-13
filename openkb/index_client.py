@@ -56,9 +56,11 @@ def create_index_client(
         from openkb.index_pdf import NativePdfParser
         from openkb.office.slide_package import FrozenSlideParser
 
+        client.register_parser(NativePdfParser(legacy=True))
         client.register_parser(NativePdfParser())
         client.register_parser(FrozenBlockParser(legacy=True))
         client.register_parser(FrozenBlockParser())
+        client.register_parser(FrozenSlideParser(legacy=True))
         client.register_parser(FrozenSlideParser())
         return client
     except BaseException:

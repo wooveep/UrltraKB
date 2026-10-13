@@ -133,6 +133,7 @@ def test_text_figure_protocol_preserves_old_base_and_only_accepts_figure_project
 ):
     import hashlib
 
+    from figure_fixtures import record_markdown
     from PIL import Image
 
     from openkb.agent.page_response import PageResponseError
@@ -144,7 +145,9 @@ def test_text_figure_protocol_preserves_old_base_and_only_accepts_figure_project
     images = kb_dir / "wiki/sources/images"
     images.mkdir(exist_ok=True)
     Image.new("RGB", (20, 10), "red").save(images / "figure.png")
-    (kb_dir / "wiki/sources/manual.md").write_text("# Install\n![Install](images/figure.png)\n")
+    record_markdown(
+        kb_dir / "wiki", "sources/manual.md", "# Install\n![Install](images/figure.png)\n"
+    )
     relative = "concepts/device.md"
     page = kb_dir / "wiki" / relative
     page.write_text("---\nsources: [sources/manual.md]\n---\nKeep this rule. See `figure.png`.\n")

@@ -18,6 +18,7 @@ class ImageCoverage:
         listed = []
         for unit in units:
             for ordinal, image in enumerate(unit.get("images", [])):
+                ordinal = unit.get("image_ordinals", list(range(len(unit["images"]))))[ordinal]
                 identity = hashlib.sha256(
                     json.dumps(
                         [
@@ -49,7 +50,7 @@ class ImageCoverage:
                 listed.append(dict(record))
         return {
             "occurrences": listed,
-            "omitted": 0,
+            "omitted": sum(unit.get("omitted_page_images", 0) for unit in units),
             "coverage": "Original images retained for readers; image semantics remain unknown",
             "reading_action": source["reading_action"],
         }

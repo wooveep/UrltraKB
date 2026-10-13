@@ -215,6 +215,7 @@ def _table_blocks(page, blocks: list[dict], notes: list[dict]) -> list[dict]:
                         {
                             "type": 0,
                             "bbox": tuple(table.bounds),
+                            "source_role": "table",
                             "lines": [{"spans": [{"text": table.text}]}],
                         }
                     )

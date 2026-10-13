@@ -94,9 +94,11 @@ def normalization_fingerprint(
     }:
         from openkb.images import PDF_IMAGE_POLICY
         from openkb.pdf_layout import PDF_LAYOUT_POLICY
+        from openkb.source_contract import NATIVE_PAGE_POLICY
 
         pdf_policy["pdf_layout_policy"] = PDF_LAYOUT_POLICY
         pdf_policy["pdf_image_policy"] = PDF_IMAGE_POLICY
+        pdf_policy["native_page_policy"] = NATIVE_PAGE_POLICY
 
     office_policy: dict = {}
     if source_revision and source_revision.source_format in {
@@ -130,12 +132,14 @@ def normalization_fingerprint(
         office_policy["cnki"] = cnki_processing_identity()
     from pageindex.backend.input_package import INDEX_CONTENT_POLICY
 
+    from openkb.source_contract import CELL_VALUE_POLICY
     from openkb.source_qualification import SOURCE_STRUCTURE_POLICY
 
     return json.dumps(
         {
             "pipeline": "pdf-physical-v3",
             "source_structure_policy": SOURCE_STRUCTURE_POLICY,
+            "cell_value_policy": CELL_VALUE_POLICY,
             "pdf_recognition_policy": PDF_RECOGNITION_POLICY,
             "classification": config["pdf_limit"],
             "index_model": config.get("model"),

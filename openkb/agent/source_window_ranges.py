@@ -37,7 +37,6 @@ def split_document_window(selected: dict, window: dict) -> list[dict]:
         slice_evidence,
     )
     from openkb.agent.page_response import PageResponseError
-    from openkb.agent.table_evidence import table_layout
     from openkb.content_blocks import markdown_layout
 
     text = selected["content"]
@@ -51,7 +50,7 @@ def split_document_window(selected: dict, window: dict) -> list[dict]:
     if first > last:
         raise PageResponseError("page_truncated_response", "Original batch cannot be divided")
     layout = markdown_layout(text)
-    tables = table_layout(text, layout)
+    tables = selected.get("_qualified_page_tables", selected.get("_qualified_tables", []))
     images = image_layout(selected)
     tokens, offsets = layout
     boundaries = {
@@ -104,7 +103,6 @@ def iter_document_windows(reader, *, fits: Callable[[dict], bool]) -> Iterator[d
         project_evidence,
     )
     from openkb.agent.page_response import PageResponseError
-    from openkb.agent.table_evidence import table_layout
     from openkb.content_blocks import markdown_layout
     from openkb.source_search import original_units
 
@@ -116,7 +114,7 @@ def iter_document_windows(reader, *, fits: Callable[[dict], bool]) -> Iterator[d
         return
     digest = hashlib.sha256(reader._read(path)).hexdigest()
     layout = markdown_layout(selected["content"])
-    tables = table_layout(selected["content"], layout)
+    tables = selected.get("_qualified_page_tables", selected.get("_qualified_tables", []))
     images = image_layout(selected)
     offset = 0
     while offset < len(selected["content"]):

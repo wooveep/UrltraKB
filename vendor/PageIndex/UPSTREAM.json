@@ -3,7 +3,7 @@
   "tag": "v0.3.0.dev3",
   "commit": "9ad54122bbd519cec8913198e2d63cff92781c1e",
   "retrieved": "2026-09-28",
-  "local_version": "0.3.0.dev3+urltrakb.12",
+  "local_version": "0.3.0.dev3+urltrakb.13",
   "license": "MIT",
   "upstream_files": {
     ".claude/commands/dedupe.md": "38436c9a5f05fa548aa4b18eaa559a33e564e2c1ac5419c0f56602fb35ab539d",
@@ -129,14 +129,15 @@
     "Add packaged source identity for editable and wheel checks; package-only changes do not alter the content policy or request index rebuilding.",
     "Physical slide navigation v3: enforce incremental continuation before append, verify new IDs and original anchors, and allow one bounded correction of the current chunk. Earlier entries remain immutable and retain their existing verification phase.",
     "Physical subtree recovery (#139): reliable native heading anchors, source/parent node identities, immutable continuation prefixes, parent boundary checks, bounded local repair, frozen generic navigation limits; content policy v2.",
-    "Physical ordering keeps unlocated model-verified headings at unknown offsets instead of fabricating page-start offsets (#143)."
+    "Physical ordering keeps unlocated model-verified headings at unknown offsets instead of fabricating page-start offsets (#143).",
+    "Source contract: relocate only recorded generated image paths and rebase opaque Unicode content spans plus canonical slide body coordinates; exclude generated media syntax from original navigation anchors; preserve legacy inputs and saved parser policies."
   ],
   "local_patch": {
-    "date": "2026-10-09",
+    "date": "2026-10-13",
     "purpose": "Audited local SDK source and packaging baseline (#107); injected IndexLLM, terminal propagation, single network retry owner, content-compatible SDK identity Explicit managed-input root, client close lifecycle, and sealed read-only guards before file or storage mutations. 本地 `.8` 将同步与异步并发门移到共享模型调用入口，使注入执行器和默认客户端都遵守 IndexConfig.max_concurrency；任务政策仍独立限流。成功树的内容策略继续兼容 `.5`。 Blocking stages run off-loop with cancellation drainage; saturated event-loop sync calls fail without bypassing the cap. Dedicated workers avoid starvation of the async SDK default executor. Physical subtree recovery and conservative local heading proof (#139), content policy v2. Preserve native physical subtree bounds and disambiguate same-title numbered headings without changing original offsets.",
     "modified": {
       "README.md": "d7fbdd7adf28b03a6b678bacefe84a81157e22b0f914850a23771906251a89d4",
-      "pyproject.toml": "9ee8b7b4659b98b77d928d51360014739c4d8bf87df8639d258e38262a89a23f",
+      "pyproject.toml": "b327f439760e0c8ca13435125b9676bfa8ac8f85429e5f8ec90df71cbe1f4679",
       "pageindex/config.py": "75e073ac0dbbd98ad48a4719491ed997209c5a02c918f66a643e89aec80e90a9",
       "pageindex/errors.py": "21a519e8c8e6bb28c59ce6e8bb5675b21b63ac131edb1beb7abed93a95c1679f",
       "pageindex/types.py": "d4522438f97c6cc7301f34f8891ba98307efb39b0e4ab5996f40345158e76eac",
@@ -164,14 +165,14 @@
     },
     "added": {
       "README.urltrakb.md": "1b265459b779ffb9c1d2f9ae91bc93ec9b87e7c83060cdf25e9d0eb578ed7048",
-      "pageindex/_urltrakb_source.json": "337b529acf93e2d3c9d38364a728f7756bbd99c338edc47940db3de9227fa449",
+      "pageindex/_urltrakb_source.json": "8738bf11a42f16393fbb2b9ad6fa19426df8decf87b93c2838b478d85640198d",
       "pageindex/llm.py": "54d5b095a4467dbaab9ce16ab76edb803faf21045ad7fbf46defbc0ffaba3c22",
       "pageindex/default_llm.py": "f95550d10ffc1b05bacdcb990ab267b6a4c0cf5f329cf8f99879406105965d24",
       "tests/test_toc_body_titles.py": "e8ee446afb0b4ac305871246a481f2e3a7acb5420aec3ea8a738611ba1e808f4",
-      "pageindex/backend/input_package.py": "73227c61f98b1a4b9bb32537688142c47db55357ff98ea3d46b0cd4bfc8724d5",
+      "pageindex/backend/input_package.py": "e62ee746b9b3413b593c702e95b38163b5e8a6989c1da61e1c8922bb74822b38",
       "pageindex/index/toc_titles.py": "1dd28046aebc1ceb89935807c31d6d005ee86d383c7239f24ac6e7bb7d9c871c",
       "pageindex/index/block_policy.py": "48d3712ca7aa309c3add1fbe7386c65cf7d765831e1790630cbbb47180aba550",
-      "pageindex/index/page_parts_policy.py": "dca3953ed5639cbe10dc4d674b59b45423e5e7e1214af5ab24e90127011da2ed",
+      "pageindex/index/page_parts_policy.py": "a2e6a252c3f30e54323b30be372dcae652beb15e9d5abf4514e2cd9041328427",
       "pageindex/index/physical_sections.py": "8b7138a534f35a9b7e00c26cb56067c067cba433b8b7b7a5121b01e1c1516c8f"
     },
     "deleted": [
@@ -191,7 +192,7 @@
   "schema_version": 2,
   "distribution": "pageindex",
   "module": "pageindex",
-  "version": "0.3.0.dev3+urltrakb.12",
+  "version": "0.3.0.dev3+urltrakb.13",
   "included_files": [
     ".claude/commands/dedupe.md",
     ".gitattributes",

@@ -14,6 +14,7 @@ pytest_plugins = ("test_pdf_readback",)
     [
         ("openkb.pdf_layout.PDF_LAYOUT_POLICY", "pdf_layout_policy"),
         ("openkb.images.PDF_IMAGE_POLICY", "pdf_image_policy"),
+        ("openkb.source_contract.NATIVE_PAGE_POLICY", "native_page_policy"),
     ],
 )
 def test_pdf_based_normalization_identity_includes_native_processing_policy(
@@ -35,7 +36,12 @@ def test_pdf_based_normalization_identity_includes_native_processing_policy(
 
 
 @pytest.mark.parametrize(
-    "policy", ["openkb.pdf_layout.PDF_LAYOUT_POLICY", "openkb.images.PDF_IMAGE_POLICY"]
+    "policy",
+    [
+        "openkb.pdf_layout.PDF_LAYOUT_POLICY",
+        "openkb.images.PDF_IMAGE_POLICY",
+        "openkb.source_contract.NATIVE_PAGE_POLICY",
+    ],
 )
 def test_native_text_normalization_does_not_change_with_pdf_policy(kb_dir, monkeypatch, policy):
     from openkb.normalization import normalization_fingerprint

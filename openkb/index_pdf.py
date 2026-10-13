@@ -8,12 +8,20 @@ from pageindex.tokens import count_tokens
 
 from openkb.images import PDF_IMAGE_POLICY, convert_pdf_to_pages
 from openkb.pdf_layout import PDF_LAYOUT_POLICY
+from openkb.source_contract import NATIVE_PAGE_POLICY
 
 
 class NativePdfParser:
     """Keep tables and figure order identical in indexing and source reading."""
 
-    policy = f"openkb-native-pdf-v1:{PDF_LAYOUT_POLICY}:{PDF_IMAGE_POLICY}:{IMAGE_REFERENCE_POLICY}"
+    previous_policy = (
+        f"openkb-native-pdf-v1:{PDF_LAYOUT_POLICY}:{PDF_IMAGE_POLICY}:{IMAGE_REFERENCE_POLICY}"
+    )
+    policy = f"{previous_policy}:{NATIVE_PAGE_POLICY}"
+
+    def __init__(self, *, legacy=False):
+        self.legacy = legacy
+        self.policy = self.previous_policy if legacy else type(self).policy
 
     def supported_extensions(self) -> list[str]:
         return [".pdf"]
@@ -41,6 +49,11 @@ class NativePdfParser:
                         "unit_kind": "page",
                         "printed_page_label": page["printed_page_label"],
                         "image_reference_spans": page["image_reference_spans"],
+                        **(
+                            {key: page[key] for key in ("source_structure_policy", "content_spans")}
+                            if not self.legacy
+                            else {}
+                        ),
                     },
                 )
             )

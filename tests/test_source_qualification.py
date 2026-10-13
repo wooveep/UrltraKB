@@ -336,7 +336,9 @@ def test_visible_literal_cell_text_is_preserved(kb_dir, tmp_path, tag):
     projected = project_evidence(
         read_text_selection(json.loads(source.with_suffix(".content.json").read_text()))
     )
-    assert projected["native_tables"][0]["cells"][0]["value"] == "1999"
+    assert projected["native_tables"][0]["cells"][0]["value"] == (
+        "1\n999" if tag == "pre" else "1999"
+    )
     assert projected["content"] == text
 
 

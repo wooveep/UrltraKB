@@ -4,6 +4,7 @@ import json
 import shutil
 
 import pytest
+from figure_fixtures import record_markdown
 from PIL import Image
 
 from openkb.agent.page_figures import PageFigures, split_gallery
@@ -17,11 +18,12 @@ def original_figures(wiki):
     (wiki / "sources/images").mkdir(parents=True)
     # Identical bytes at separate positions are distinct occurrences.
     Image.new("RGB", (80, 40), "red").save(wiki / "sources/images/图 片.png")
-    source = wiki / "sources/manual.md"
-    source.write_text(
-        "# Install\n![安装](<images/图 片.png>)\n\n# Maintain\n![维护](<images/图 片.png>)\n"
+    raw = record_markdown(
+        wiki,
+        "sources/manual.md",
+        "# Install\n![安装](<images/图 片.png>)\n\n# Maintain\n![维护](<images/图 片.png>)\n",
     )
-    return freeze_figures(wiki, "sources/manual.md", source.read_text(), {})
+    return freeze_figures(wiki, "sources/manual.content.json", raw, {})
 
 
 def test_body_updates_keep_unedited_bindings_and_demote_ambiguous_old_figures(tmp_path):
@@ -91,8 +93,7 @@ def test_bare_figure_reference_is_repaired_in_candidate_only(tmp_path):
     with pytest.raises(PageResponseError, match="Ambiguous"):
         preserve_page_figures(tmp_path, wiki, {})
     assert page.read_text() == text
-    source = wiki / "sources/manual.md"
-    source.write_text("# Install\n![安装](<images/图 片.png>)\n")
+    record_markdown(wiki, "sources/manual.md", "# Install\n![安装](<images/图 片.png>)\n")
     preserve_page_figures(tmp_path, wiki, {})
     assert text.strip() in page.read_text()
     refs = image_references(page.read_text())

@@ -293,6 +293,17 @@ def page_figure_context(sources, windows, *, long: bool) -> PageFigures:
                     projected_images is None
                     or (f.location["page"], f.original_path) in projected_images
                 )
+                and (
+                    f.reference_span is None
+                    or any(
+                        span["page"] == f.location["page"]
+                        and span["start"]
+                        <= f.reference_span[0]
+                        < f.reference_span[1]
+                        <= span["end"]
+                        for span in window.get("page_spans", [])
+                    )
+                )
                 if "page" in f.location
                 else any(a <= f.location["start"] < b for a, b in window.get("source_spans", []))
             )

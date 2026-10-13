@@ -111,7 +111,9 @@ def single_slide_model(pdf_model, monkeypatch):
             # Read the unescaped JSON content rather than the repr of messages.
             text = "\n".join(message["content"] for message in kwargs["messages"])
             unit, _ = json.JSONDecoder().raw_decode(text[text.index(marker) :])
-            body = unit["parts"]["body"]
+            # This fixture's original rule is the first line. A canonical body
+            # also carries generated image syntax, which cannot be an anchor.
+            body = unit["parts"]["body"].splitlines()[0]
             result.choices[0].message = SimpleNamespace(
                 content=json.dumps(
                     [
