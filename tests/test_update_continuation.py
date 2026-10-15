@@ -8,7 +8,7 @@ import pytest
 def test_explicit_navigation_selection_keeps_all_necessary_pages(kb_dir):
     import json
 
-    from openkb.agent.source_windows import CompileSourceWindows
+    from ultrakb.agent.source_windows import CompileSourceWindows
 
     wiki = kb_dir / "wiki"
     pages = [
@@ -29,8 +29,8 @@ def test_explicit_navigation_selection_keeps_all_necessary_pages(kb_dir):
 
 
 def test_necessary_32419_character_selection_reads_every_window_without_plan_repair(kb_dir):
-    from openkb.agent.compile_plan import normalize_plan
-    from openkb.agent.source_windows import CompileSourceWindows
+    from ultrakb.agent.compile_plan import normalize_plan
+    from ultrakb.agent.source_windows import CompileSourceWindows
 
     wiki = kb_dir / "wiki"
     source = "Initial condition.\n\n" + "x\n\n" * 10780 + "Middle mandatory condition.\n\n"
@@ -58,8 +58,8 @@ def test_necessary_32419_character_selection_reads_every_window_without_plan_rep
 
 
 def test_arbitrary_suffix_cannot_certify_the_same_necessary_selection(kb_dir):
-    from openkb.agent.page_response import PageResponseError
-    from openkb.agent.source_windows import CompileSourceWindows
+    from ultrakb.agent.page_response import PageResponseError
+    from ultrakb.agent.source_windows import CompileSourceWindows
 
     wiki = kb_dir / "wiki"
     (wiki / "sources/manual.json").write_text(
@@ -84,7 +84,7 @@ def test_arbitrary_suffix_cannot_certify_the_same_necessary_selection(kb_dir):
 
 
 def test_search_hit_reads_the_indexed_section_tail_and_shared_boundary(kb_dir):
-    from openkb.agent.source_windows import CompileSourceWindows
+    from ultrakb.agent.source_windows import CompileSourceWindows
 
     wiki = kb_dir / "wiki"
     pages = [
@@ -115,7 +115,7 @@ def test_search_hit_reads_the_indexed_section_tail_and_shared_boundary(kb_dir):
 
 
 def test_new_long_page_consumes_the_whole_selected_range(kb_dir):
-    from openkb.agent.source_windows import CompileSourceWindows
+    from ultrakb.agent.source_windows import CompileSourceWindows
 
     original = "Initial condition.\n\n" + "Recorded detail.\n\n" * 2000 + "Required tail."
     wiki = kb_dir / "wiki"
@@ -129,7 +129,7 @@ def test_new_long_page_consumes_the_whole_selected_range(kb_dir):
 
 
 def test_one_native_section_keeps_its_tail_even_when_it_spans_the_document(kb_dir):
-    from openkb.agent.source_windows import CompileSourceWindows
+    from ultrakb.agent.source_windows import CompileSourceWindows
 
     (kb_dir / "wiki/sources/manual.json").write_text(
         json.dumps(

@@ -12,9 +12,17 @@ import pytest
 
 @contextmanager
 def _client(storage_path, **kwargs):
-    from pageindex import LocalClient
+    from pageindex import IndexConfig, LocalClient
     from pageindex.storage.sqlite import SQLiteStorage
 
+    kwargs.setdefault("model", "deepseek/deepseek-flash")
+    kwargs.setdefault(
+        "index_config", IndexConfig(if_add_node_summary=False, if_add_doc_description=False)
+    )
+    if runtime := kwargs.pop("llm_client", None):
+        kwargs["index_config"] = kwargs["index_config"].model_copy(
+            update={"llm_client": runtime, "require_llm_client": True}
+        )
     with SQLiteStorage(str(Path(storage_path) / "pageindex.db")) as storage:
         yield LocalClient(storage_path=storage_path, storage=storage, **kwargs)
 
@@ -39,69 +47,49 @@ def physical_pdf(tmp_path):
 
 
 @pytest.fixture
-def pdf_model(monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "fixture-key")
+def pdf_model(request, monkeypatch, live_llm):
+    from application_llm_fixtures import configure_application_model
+
+    live_llm.install(monkeypatch)
+    # Some CLI cases construct their own KB in tmp_path during the test. Do
+    # not create a second KB before those cases have exercised initialization.
+    if "kb_dir" in request.fixturenames:
+        configure_application_model(request.getfixturevalue("kb_dir"))
     fixture = SimpleNamespace(last_page=3)
-
-    def completion(**kwargs):
-        prompt = str(kwargs["messages"])
-        if "expert in extracting hierarchical tree structure" in prompt:
-            response = [
-                {
-                    "structure": "1",
-                    "title": "First section",
-                    "physical_index": "<physical_index_1>",
-                },
-                {
-                    "structure": "2",
-                    "title": "Last section",
-                    "physical_index": f"<physical_index_{fixture.last_page}>",
-                },
-            ]
-        elif "toc_detected" in prompt:
-            response = {"toc_detected": "no"}
-        elif "start_begin" in prompt:
-            response = {"start_begin": "yes"}
-        elif '"answer"' in prompt:
-            response = {"answer": "yes"}
-        else:
-            response = {
-                "description": "Physical source fixture",
-                "content": "First and last sections.",
-                "create": [],
-                "update": [],
-                "related": [],
-            }
-            from compile_responses import summary_reply
-
-            response = summary_reply(kwargs["messages"], response)
-        return SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    message=SimpleNamespace(content=json.dumps(response)), finish_reason="stop"
-                )
-            ],
-            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
-        )
-
-    async def acompletion(**kwargs):
-        return completion(**kwargs)
-
-    monkeypatch.setattr("litellm.completion", completion)
-    monkeypatch.setattr("litellm.acompletion", acompletion)
     return fixture
 
 
+@pytest.fixture
+def pdf_index_model(monkeypatch, live_llm):
+    from test_index_llm import RecordingIndexLLM
+
+    live_llm.install(monkeypatch)
+    return RecordingIndexLLM(live_llm=live_llm)
+
+
+@pytest.fixture
+def published_pdf(kb_dir, physical_pdf, live_llm):
+    from publication_fixtures import publish_document
+
+    return publish_document(
+        kb_dir,
+        physical_pdf,
+        "# Manual\n\nPhysical page one.\n\nPhysical page three.",
+        bundle=live_llm.credentials,
+    )
+
+
 def test_pageindex_full_and_range_reads_recover_the_same_managed_pdf(
-    tmp_path, physical_pdf, pdf_model
+    tmp_path, physical_pdf, pdf_index_model
 ):
     original_store, moved_store = tmp_path / "original", tmp_path / "moved"
-    with _client(model="gpt-4o", storage_path=str(original_store)) as client:
+    with _client(storage_path=str(original_store), llm_client=pdf_index_model) as client:
         identity = client.collection().add(str(physical_pdf))
+    indexed_calls = len(pdf_index_model.calls)
     shutil.copytree(original_store, moved_store)
     shutil.rmtree(original_store)
     physical_pdf.unlink()
-    with _client(model="gpt-4o", storage_path=str(moved_store)) as client:
+    with _client(storage_path=str(moved_store), llm_client=pdf_index_model) as client:
         collection = client.collection()
         cached = collection.get_page_content(identity, "1-3")
         full = collection.get_document(identity, include_text=True)
@@ -115,31 +103,35 @@ def test_pageindex_full_and_range_reads_recover_the_same_managed_pdf(
         assert collection.get_document(identity, include_text=True) == full
         assert full["metadata"]["coverage"] == "complete"
         assert full["metadata"]["processing_fingerprint"]
+    assert len(pdf_index_model.calls) == indexed_calls
 
 
-def test_pdf_index_policy_changes_cannot_hit_an_older_tree(tmp_path, physical_pdf, pdf_model):
+def test_pdf_index_policy_changes_cannot_hit_an_older_tree(tmp_path, physical_pdf, pdf_index_model):
     from pageindex import IndexConfig
 
     storage = str(tmp_path / "index")
-    with _client(model="gpt-4o", storage_path=storage) as client:
+    with _client(storage_path=storage, llm_client=pdf_index_model) as client:
         first = client.collection().add(str(physical_pdf))
         assert client.collection().add(str(physical_pdf)) == first
     with _client(
-        model="gpt-4o",
         storage_path=storage,
+        llm_client=pdf_index_model,
         index_config=IndexConfig(
             max_token_num_each_node=18000,
+            if_add_node_summary=False,
+            if_add_doc_description=False,
         ),
     ) as client:
         assert client.collection().add(str(physical_pdf)) != first
 
 
 def test_legacy_cache_recovery_keeps_images_readable_without_claiming_old_policy(
-    tmp_path, physical_pdf, pdf_model
+    tmp_path, physical_pdf, pdf_index_model
 ):
     storage = tmp_path / "legacy-index"
-    with _client(model="gpt-4o", storage_path=str(storage)) as client:
+    with _client(storage_path=str(storage), llm_client=pdf_index_model) as client:
         identity = client.collection().add(str(physical_pdf))
+        indexed_calls = len(pdf_index_model.calls)
         # Simulate the pre-metadata database and its missing page cache.
         with sqlite3.connect(storage / "pageindex.db") as db:
             db.execute("UPDATE documents SET pages=NULL, metadata=NULL")
@@ -148,9 +140,10 @@ def test_legacy_cache_recovery_keeps_images_readable_without_claiming_old_policy
     assert Path(page["images"][0]["path"]).is_file()
     assert page["images"][0]["path"] in json.dumps(full["structure"])
     assert full["metadata"]["coverage"] == "unknown"
+    assert len(pdf_index_model.calls) == indexed_calls
 
 
-def test_cache_recovery_rejects_a_missing_original_parser(tmp_path, physical_pdf, pdf_model):
+def test_cache_recovery_rejects_a_missing_original_parser(tmp_path, physical_pdf, pdf_index_model):
     from pageindex.parser.pdf import PdfParser
 
     class MarkedPdfParser(PdfParser):
@@ -160,24 +153,28 @@ def test_cache_recovery_rejects_a_missing_original_parser(tmp_path, physical_pdf
             return parsed
 
     storage = tmp_path / "custom-index"
-    with _client(model="gpt-4o", storage_path=str(storage)) as client:
+    with _client(storage_path=str(storage), llm_client=pdf_index_model) as client:
         client.register_parser(MarkedPdfParser())
         identity = client.collection().add(str(physical_pdf))
     with sqlite3.connect(storage / "pageindex.db") as db:
         db.execute("UPDATE documents SET pages=NULL")
-    with _client(model="gpt-4o", storage_path=str(storage)) as client:
+    indexed_calls = len(pdf_index_model.calls)
+    with _client(storage_path=str(storage), llm_client=pdf_index_model) as client:
         with pytest.raises(ValueError, match="parser"):
             client.collection().get_page_content(identity, "3")
+    assert len(pdf_index_model.calls) == indexed_calls
 
 
-def test_managed_copy_preserves_existing_markdown_title_semantics(tmp_path, pdf_model):
+def test_managed_copy_preserves_existing_markdown_title_semantics(tmp_path):
     from pageindex import IndexConfig
+    from test_index_llm import RecordingIndexLLM
 
     source = tmp_path / "human-readable.md"
     source.write_text("A document without headings.")
     with _client(
         storage_path=str(tmp_path / "index"),
         index_config=IndexConfig(if_add_node_summary=False, if_add_doc_description=False),
+        llm_client=RecordingIndexLLM(),
     ) as client:
         identity = client.collection().add(str(source))
         result = client.collection().get_document(identity)
@@ -185,18 +182,14 @@ def test_managed_copy_preserves_existing_markdown_title_semantics(tmp_path, pdf_
 
 
 @pytest.mark.parametrize("damage", ["reference", "markdown_reference", "tail"])
-def test_reading_rejects_a_replaced_or_truncated_page_map(kb_dir, physical_pdf, pdf_model, damage):
-    from openkb.application.documents import import_document
-    from openkb.documents import read_document_source
+def test_reading_rejects_a_replaced_or_truncated_page_map(kb_dir, published_pdf, damage):
+    from ultrakb.documents import read_document_source
 
-    imported = import_document(
-        kb_dir,
-        physical_pdf,
-    )
+    imported = published_pdf
     assert imported.status == "added", imported.message
     unit = imported.units[0]
     directory = (
-        kb_dir / ".openkb/knowledge" / unit.view_id / "revisions" / unit.knowledge_revision_id
+        kb_dir / ".ultrakb/knowledge" / unit.view_id / "revisions" / unit.knowledge_revision_id
     )
     manifest_path = directory / "manifest.json"
     manifest = json.loads(manifest_path.read_text())
@@ -218,22 +211,20 @@ def test_reading_rejects_a_replaced_or_truncated_page_map(kb_dir, physical_pdf, 
 
 @pytest.mark.parametrize("threshold", [0, 20])
 def test_application_reads_physical_ranges_from_the_actual_historical_revision(
-    kb_dir, physical_pdf, pdf_model, threshold, monkeypatch
+    kb_dir, physical_pdf, published_pdf, threshold, monkeypatch
 ):
     import yaml
 
-    from openkb.application.documents import import_document
-    from openkb.application.views import view_scope
-    from openkb.documents import read_document_source
+    from ultrakb.application.views import view_scope
+    from ultrakb.documents import read_document_source
+    from ultrakb.locks import atomic_write_text, kb_ingest_lock
 
-    config_path = kb_dir / ".openkb/config.yaml"
+    config_path = kb_dir / ".ultrakb/config.yaml"
     config = yaml.safe_load(config_path.read_text())
     config["pageindex_threshold"] = threshold
-    config_path.write_text(yaml.safe_dump(config))
-    imported = import_document(
-        kb_dir,
-        physical_pdf,
-    )
+    with kb_ingest_lock(kb_dir / ".ultrakb"):
+        atomic_write_text(config_path, yaml.safe_dump(config))
+    imported = published_pdf
     assert imported.status == "added", imported.message
     scope = view_scope(
         kb_dir,
@@ -252,7 +243,7 @@ def test_application_reads_physical_ranges_from_the_actual_historical_revision(
 
     from click.testing import CliRunner
 
-    from openkb.cli import cli
+    from ultrakb.cli import cli
 
     result = CliRunner().invoke(
         cli,
@@ -272,14 +263,14 @@ def test_application_reads_physical_ranges_from_the_actual_historical_revision(
 
     from fastapi.testclient import TestClient
 
-    from openkb import config as settings
-    from openkb.api import create_app
+    from ultrakb import config as settings
+    from ultrakb.api import create_app
 
     monkeypatch.setattr(settings, "GLOBAL_CONFIG_DIR", kb_dir / "settings")
     monkeypatch.setattr(settings, "GLOBAL_CONFIG_PATH", kb_dir / "settings/global.yaml")
     monkeypatch.setattr(settings, "GLOBAL_CONFIG_LOCK_PATH", kb_dir / "settings/.lock")
     settings.register_kb_alias("readback", kb_dir)
-    monkeypatch.setenv("OPENKB_API_TOKEN", "fixture-token")
+    monkeypatch.setenv("ULTRAKB_API_TOKEN", "fixture-token")
     with TestClient(create_app()) as client:
         response = client.post(
             "/api/v1/document/source",
@@ -300,23 +291,17 @@ def test_application_reads_physical_ranges_from_the_actual_historical_revision(
     "selection", [{"blocks": "999"}, {"chars": "0:3"}, {"pages": "1", "blocks": "1"}]
 )
 def test_legacy_pdf_without_a_source_map_rejects_character_and_block_selectors(
-    kb_dir, physical_pdf, pdf_model, selection
+    kb_dir, published_pdf, selection
 ):
-    from openkb.application.documents import import_document
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
-    from openkb.documents import read_document_source
-    from openkb.source_pages import PageRangeError
+    from ultrakb.documents import read_document_source
+    from ultrakb.source_pages import PageRangeError
 
-    apply_kb_config_patch(
-        kb_dir, KbConfigPatchRequest(kb=str(kb_dir), config={"pdf_short_max_pages": 0})
-    )
-    result = import_document(kb_dir, physical_pdf)
+    result = published_pdf
     assert result.status == "added", result.message
     unit = result.units[0]
     path = (
         kb_dir
-        / ".openkb/knowledge"
+        / ".ultrakb/knowledge"
         / unit.view_id
         / "revisions"
         / unit.knowledge_revision_id

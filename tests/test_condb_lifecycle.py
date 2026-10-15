@@ -5,12 +5,12 @@ import json
 
 import pytest
 
-from openkb.application.documents import import_document
-from openkb.application.settings import apply_kb_config_patch
-from openkb.application.settings_data import KbConfigPatchRequest
-from openkb.index_client import create_index_client
-from openkb.index_location import IndexLocation
-from openkb.knowledge_scope import legacy_scope
+from ultrakb.application.documents import import_document
+from ultrakb.application.settings import apply_kb_config_patch
+from ultrakb.application.settings_data import KbConfigPatchRequest
+from ultrakb.index_client import create_index_client
+from ultrakb.index_location import IndexLocation
+from ultrakb.knowledge_scope import legacy_scope
 
 pytest_plugins = ("block_fixtures", "test_pdf_readback")
 pytestmark = pytest.mark.usefixtures("wide_short_prompt")
@@ -34,7 +34,12 @@ def prepare(kb):
 
 def index_for(kb, unit):
     return (
-        kb / ".openkb/knowledge" / unit.view_id / "revisions" / unit.knowledge_revision_id / "index"
+        kb
+        / ".ultrakb/knowledge"
+        / unit.view_id
+        / "revisions"
+        / unit.knowledge_revision_id
+        / "index"
     )
 
 
@@ -51,8 +56,8 @@ def retained(kb, directory):
 
 
 def test_recompile_and_source_removal_retain_original_index_without_rebuilding(kb_dir, block_model):
-    from openkb.application.recompilation import recompile_document
-    from openkb.application.removal import remove_document
+    from ultrakb.application.recompilation import recompile_document
+    from ultrakb.application.removal import remove_document
 
     source = prepare(kb_dir)
     first = import_document(kb_dir, source, scope=legacy_scope(kb_dir))
@@ -73,14 +78,14 @@ def test_recompile_and_source_removal_retain_original_index_without_rebuilding(k
 
 
 def test_proposal_acceptance_copies_sealed_index_and_preserves_source_package(kb_dir, block_model):
-    from openkb.application.proposals import accept_proposal, read_proposal
+    from ultrakb.application.proposals import accept_proposal, read_proposal
 
     source = prepare(kb_dir)
     (kb_dir / "wiki/summaries/greeting.md").write_text("Human explanation.\n")
     result = import_document(kb_dir, source, scope=legacy_scope(kb_dir))
     assert result.status == "blocked", result.message
     proposal_id = result.units[0].proposal_id
-    package = kb_dir / ".openkb/proposals" / proposal_id / "index"
+    package = kb_dir / ".ultrakb/proposals" / proposal_id / "index"
     assert IndexLocation.package(package).read_only
     original = (package / "context.sqlite").read_bytes()
     opened = read_proposal(kb_dir, proposal_id)
@@ -92,9 +97,9 @@ def test_proposal_acceptance_copies_sealed_index_and_preserves_source_package(kb
 
 
 def test_publication_copy_failure_keeps_old_head_and_index(kb_dir, block_model, monkeypatch):
-    from openkb import index_packages
-    from openkb.application.recompilation import recompile_document
-    from openkb.unit_publication import read_head
+    from ultrakb import index_packages
+    from ultrakb.application.recompilation import recompile_document
+    from ultrakb.unit_publication import read_head
 
     source = prepare(kb_dir)
     first = import_document(kb_dir, source, scope=legacy_scope(kb_dir))
@@ -120,7 +125,7 @@ def test_public_pdf_import_seals_physical_pages_and_retained_images(
 ):
     from pathlib import Path
 
-    from openkb.desktop.verification_documents import verify_long_pdf
+    from ultrakb.desktop.verification_documents import verify_long_pdf
 
     prepare(kb_dir)
     result = import_document(kb_dir, physical_pdf, scope=legacy_scope(kb_dir))

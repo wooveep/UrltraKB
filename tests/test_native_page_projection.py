@@ -1,7 +1,7 @@
 """Native page excerpts do not acquire structure or figures from unrelated text."""
 
-from openkb.agent.evidence_payload import project_evidence, slice_evidence
-from openkb.source_pages import read_page_selection
+from ultrakb.agent.evidence_payload import project_evidence, slice_evidence
+from ultrakb.source_pages import read_page_selection
 
 
 def test_native_excerpt_does_not_inherit_config_comment_or_previous_section_figure():
@@ -52,7 +52,7 @@ def test_unpositioned_page_figure_is_available_without_claiming_excerpt_membersh
 def test_native_configuration_comments_do_not_split_summary_sections():
     import json
 
-    from openkb.agent.document_summary import summary_messages
+    from ultrakb.agent.document_summary import summary_messages
 
     body = "Deployment\nnode=leader\n\n# follower\nnode=backup\n"
     window = {
@@ -70,7 +70,7 @@ def test_compiler_figure_range_uses_the_projected_occurrence_selection(kb_dir):
 
     from PIL import Image
 
-    from openkb.agent.source_windows import CompileSourceWindows
+    from ultrakb.agent.source_windows import CompileSourceWindows
 
     wiki = kb_dir / "wiki"
     images = wiki / "sources/images"

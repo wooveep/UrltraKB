@@ -2,37 +2,26 @@
 
 import asyncio
 import json
-from types import SimpleNamespace
 
 import pytest
+from application_llm_fixtures import real_application_model  # noqa: F401
 from test_query_views import _import_rule
 
-from openkb.application.pages import read_page
-from openkb.application.query_views import read_query_page, resolve_query_views
-from openkb.application.refresh import (
+from ultrakb.application.pages import read_page
+from ultrakb.application.query_views import read_query_page, resolve_query_views
+from ultrakb.application.refresh import (
     cleanup_unreferenced_artifacts,
     confirm_empty_source,
     read_refresh_proposal,
     refresh_knowledge_view,
 )
-from openkb.application.removal import remove_document
-from openkb.application.views import view_scope
-
-
-def _refresh_model(monkeypatch):
-    replies = iter([{"description": "Current rule", "content": "TLS is optional."}, {}])
-    monkeypatch.setattr(
-        "litellm.completion",
-        lambda **kwargs: SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(next(replies))))],
-            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
-        ),
-    )
+from ultrakb.application.removal import remove_document
+from ultrakb.application.views import view_scope
 
 
 @pytest.mark.parametrize("operation", ["empty", "withdrawn"])
 def test_reimport_does_not_restore_excluded_input(kb_dir, monkeypatch, operation):
-    from openkb.source_catalog import read_source
+    from ultrakb.source_catalog import read_source
 
     first = _import_rule(kb_dir, monkeypatch, "install", "TLS is required.")
     scope = view_scope(kb_dir, first.units[0].view_id)
@@ -47,32 +36,31 @@ def test_reimport_does_not_restore_excluded_input(kb_dir, monkeypatch, operation
     (kb_dir / "install.pdf").unlink()
     second = _import_rule(kb_dir, monkeypatch, "install", "TLS is optional.")
     assert first.source_id == second.source_id
-    from openkb.source_changes import effective_input
+    from ultrakb.source_changes import effective_input
 
     assert not effective_input(kb_dir, "legacy", first.units[0].successful_revision_id)
     assert effective_input(kb_dir, "legacy", second.units[0].successful_revision_id)
     assert resolve_query_views(kb_dir, "What is the TLS rule?", scope=scope).has_evidence
-    _refresh_model(monkeypatch)
     result = asyncio.run(refresh_knowledge_view(kb_dir, scope=scope))
     assert result.status == "completed", result.message
     assert "TLS is optional." in (scope.wiki_dir / "summaries/install.md").read_text()
 
 
 def test_cleanup_rejects_symbolic_link_ancestors(kb_dir):
-    artifacts = kb_dir / ".openkb/artifacts"
+    artifacts = kb_dir / ".ultrakb/artifacts"
     artifacts.mkdir(exist_ok=True)
-    (artifacts / "alias").symlink_to(kb_dir / ".openkb", target_is_directory=True)
-    config = kb_dir / ".openkb/config.yaml"
+    (artifacts / "alias").symlink_to(kb_dir / ".ultrakb", target_is_directory=True)
+    config = kb_dir / ".ultrakb/config.yaml"
     original = config.read_bytes()
     with pytest.raises(ValueError, match="symbolic link|managed"):
-        cleanup_unreferenced_artifacts(kb_dir, [".openkb/artifacts/alias/config.yaml"])
+        cleanup_unreferenced_artifacts(kb_dir, [".ultrakb/artifacts/alias/config.yaml"])
     assert config.read_bytes() == original
 
 
 def test_known_link_cannot_hide_another_unparsed_managed_reference(kb_dir):
-    from openkb.application.pages import save_page
+    from ultrakb.application.pages import save_page
 
-    paths = [f".openkb/artifacts/{letter * 64}/content.png" for letter in ("a", "b")]
+    paths = [f".ultrakb/artifacts/{letter * 64}/content.png" for letter in ("a", "b")]
     for relative in paths:
         target = kb_dir / relative
         target.parent.mkdir(parents=True)
@@ -89,17 +77,16 @@ def test_known_link_cannot_hide_another_unparsed_managed_reference(kb_dir):
 
 
 def test_refresh_rejects_candidate_with_foreign_ancestry(kb_dir, monkeypatch):
-    from openkb.application.pages import save_page
+    from ultrakb.application.pages import save_page
 
     first = _import_rule(kb_dir, monkeypatch, "install", "TLS is required.")
     _import_rule(kb_dir, monkeypatch, "operate", "TLS is optional.")
     scope = view_scope(kb_dir, first.units[0].view_id)
     save_page(kb_dir, "summaries/install", "Manual knowledge", scope=scope)
     remove_document(kb_dir, first.source_id)
-    _refresh_model(monkeypatch)
     result = asyncio.run(refresh_knowledge_view(kb_dir, scope=scope))
     assert result.status == "awaiting_confirmation"
-    path = kb_dir / ".openkb/refresh-proposals" / result.proposal_id / "proposal.json"
+    path = kb_dir / ".ultrakb/refresh-proposals" / result.proposal_id / "proposal.json"
     candidate = json.loads(path.read_text())
     candidate["candidate_manifest"]["base_revision_id"] = first.units[0].knowledge_revision_id
     path.write_text(json.dumps(candidate))
@@ -111,7 +98,7 @@ def test_readers_reject_a_source_revision_assigned_to_another_unit(kb_dir, monke
     first = _import_rule(kb_dir, monkeypatch, "install", "TLS is required.")
     second = _import_rule(kb_dir, monkeypatch, "operate", "TLS is optional.")
     path = (
-        kb_dir / ".openkb/catalog/unit-revisions" / f"{first.units[0].successful_revision_id}.json"
+        kb_dir / ".ultrakb/catalog/unit-revisions" / f"{first.units[0].successful_revision_id}.json"
     )
     revision = json.loads(path.read_text())
     revision["source_revision_id"] = second.source_revision_id
@@ -134,8 +121,8 @@ def test_page_alias_cannot_hide_pending_evidence(kb_dir, monkeypatch, path):
 
 
 def test_refresh_preserves_cancellation(kb_dir, monkeypatch):
-    from openkb.application.execution import ExecutionContext
-    from openkb.locks import LockCancelled
+    from ultrakb.application.execution import ExecutionContext
+    from ultrakb.locks import LockCancelled
 
     first = _import_rule(kb_dir, monkeypatch, "install", "TLS is required.")
     scope = view_scope(kb_dir, first.units[0].view_id)
@@ -157,11 +144,11 @@ def test_refresh_preserves_cancellation(kb_dir, monkeypatch):
 
 
 def _legacy(kb_dir):
-    from openkb.state import HashRegistry
+    from ultrakb.state import HashRegistry
 
     (kb_dir / "wiki/sources/old.md").write_text("TLS is required.")
     (kb_dir / "wiki/summaries/old.md").write_text("TLS is required.")
-    registry = kb_dir / ".openkb/hashes.json"
+    registry = kb_dir / ".ultrakb/hashes.json"
     registry.write_text(
         json.dumps(
             {
@@ -178,7 +165,7 @@ def _legacy(kb_dir):
 
 @pytest.mark.parametrize("mapped", [False, True])
 def test_refresh_blocks_legacy_inputs_without_published_normalization(kb_dir, mapped):
-    from openkb.application.views import map_legacy_sources
+    from ultrakb.application.views import map_legacy_sources
 
     _legacy(kb_dir)
     if mapped:
@@ -190,9 +177,9 @@ def test_refresh_blocks_legacy_inputs_without_published_normalization(kb_dir, ma
 
 
 def test_mapped_legacy_withdrawal_does_not_revive_registry_fallback(kb_dir):
-    from openkb.application.knowledge_bases import get_kb_list
-    from openkb.application.recompilation import select_recompilation
-    from openkb.application.views import map_legacy_sources
+    from ultrakb.application.knowledge_bases import get_kb_list
+    from ultrakb.application.recompilation import select_recompilation
+    from ultrakb.application.views import map_legacy_sources
 
     _legacy(kb_dir)
     identity = map_legacy_sources(kb_dir)["source_ids"][0]
@@ -210,8 +197,8 @@ def test_mapped_legacy_withdrawal_does_not_revive_registry_fallback(kb_dir):
 
 @pytest.mark.parametrize("identifier", ["old", "f" * 64, "ol"])
 def test_repeating_legacy_withdrawal_cannot_delete_preserved_knowledge(kb_dir, identifier):
-    from openkb.application.removal import run_remove_for_api
-    from openkb.application.views import map_legacy_sources
+    from ultrakb.application.removal import run_remove_for_api
+    from ultrakb.application.views import map_legacy_sources
 
     _legacy(kb_dir)
     identity = map_legacy_sources(kb_dir)["source_ids"][0]

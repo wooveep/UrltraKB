@@ -9,14 +9,16 @@ from unittest.mock import AsyncMock
 import yaml
 from fastapi.testclient import TestClient
 
-from openkb.api import create_app
+from ultrakb.api import create_app
+
+pytest_plugins = ("test_vendor_sdk",)
 
 
 def _client(monkeypatch, token: str | None = "secret") -> TestClient:
     if token is None:
-        monkeypatch.delenv("OPENKB_API_TOKEN", raising=False)
+        monkeypatch.delenv("ULTRAKB_API_TOKEN", raising=False)
     else:
-        monkeypatch.setenv("OPENKB_API_TOKEN", token)
+        monkeypatch.setenv("ULTRAKB_API_TOKEN", token)
     return TestClient(create_app())
 
 
@@ -29,7 +31,7 @@ def _use_named_kb(monkeypatch, kb_dir, name: str = "test-kb") -> str:
         assert kb == name
         return kb_dir
 
-    monkeypatch.setattr("openkb.api_helpers.resolve_kb_alias", resolve)
+    monkeypatch.setattr("ultrakb.api_helpers.resolve_kb_alias", resolve)
     return name
 
 
@@ -44,9 +46,9 @@ def _events_from_sse(text: str) -> list[dict[str, Any]]:
 
 
 def test_no_token_configured_disables_auth(monkeypatch, tmp_path):
-    """Local-first default: with no OPENKB_API_TOKEN set, auth is off and an
+    """Local-first default: with no ULTRAKB_API_TOKEN set, auth is off and an
     unauthenticated request is allowed (not 500/401)."""
-    monkeypatch.setenv("OPENKB_KB_ROOT", str(tmp_path))
+    monkeypatch.setenv("ULTRAKB_KB_ROOT", str(tmp_path))
     client = _client(monkeypatch, token=None)
 
     response = client.get("/api/v1/kbs")  # no Authorization header
@@ -55,9 +57,9 @@ def test_no_token_configured_disables_auth(monkeypatch, tmp_path):
 
 
 def test_configured_token_is_enforced(monkeypatch, tmp_path):
-    """Setting OPENKB_API_TOKEN opts into bearer auth: an unauthenticated
+    """Setting ULTRAKB_API_TOKEN opts into bearer auth: an unauthenticated
     request is then rejected."""
-    monkeypatch.setenv("OPENKB_KB_ROOT", str(tmp_path))
+    monkeypatch.setenv("ULTRAKB_KB_ROOT", str(tmp_path))
     client = _client(monkeypatch, token="secret")
 
     response = client.get("/api/v1/kbs")  # no Authorization header
@@ -87,40 +89,42 @@ def test_query_non_stream_returns_json(monkeypatch, kb_dir):
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
 
-    async def fake_events(agent, question, **kwargs):
-        assert question == "What is OpenKB?"
-        yield {"event": "final", "data": {"answer": "A knowledge base.", "history": []}}
-
-    monkeypatch.setattr("openkb.agent.query.iter_agent_response_events", fake_events)
-
     response = client.post(
         "/api/v1/query",
-        json={"kb": kb, "question": "What is OpenKB?", "stream": False},
+        json={"kb": kb, "question": "What is UltraKB?", "stream": False},
         headers=_auth(),
     )
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["answer"] == "A knowledge base."
+    assert payload["answer"]
+    assert payload["answer_outcome"] == "insufficient_evidence"
     assert payload["saved_path"] is None
     assert payload["model_usage"]["current"]["requests"] == 0
 
 
 def test_query_stream_returns_sse_events(monkeypatch, kb_dir):
+    """Serialize application answer events without replacing the model iterator."""
+    from ultrakb.application.conversations import AnswerResult
+
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
 
-    async def fake_events(agent, question, **kwargs):
-        assert question == "What is OpenKB?"
-        yield {"event": "delta", "data": {"text": "A knowledge"}}
-        yield {"event": "delta", "data": {"text": " base."}}
-        yield {"event": "final", "data": {"answer": "A knowledge base.", "history": []}}
+    async def delivered_answer(root, question, *, context, **kwargs):
+        assert root == kb_dir
+        assert question == "What is UltraKB?"
+        with context.activity("preparing"):
+            context.on_event({"stage": "answering"})
+        context.on_event({"event": "delta", "data": {"text": "A knowledge"}})
+        context.on_event({"event": "delta", "data": {"text": " base."}})
+        with context.activity("saving"):
+            return AnswerResult("completed", "A knowledge base.")
 
-    monkeypatch.setattr("openkb.agent.query.iter_agent_response_events", fake_events)
+    monkeypatch.setattr("ultrakb.application.conversations.ask_question", delivered_answer)
 
     response = client.post(
         "/api/v1/query",
-        json={"kb": kb, "question": "What is OpenKB?"},
+        json={"kb": kb, "question": "What is UltraKB?"},
         headers=_auth(),
     )
 
@@ -145,10 +149,10 @@ def test_query_stream_returns_sse_events(monkeypatch, kb_dir):
 
 def test_query_endpoint_uses_global_model(monkeypatch, kb_dir, tmp_path):
     """The shared query execution uses the global model when the KB is silent."""
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path)
-    from openkb.agent.query import build_query_agent
-    from openkb.config import save_global_config
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", tmp_path)
+    from ultrakb.agent.query import build_query_agent
+    from ultrakb.config import save_global_config
 
     save_global_config({"model": "global-model"})
 
@@ -158,11 +162,7 @@ def test_query_endpoint_uses_global_model(monkeypatch, kb_dir, tmp_path):
         captured["model"] = model
         return build_query_agent(wiki_dir, model, *args, **kwargs)
 
-    async def fake_events(*args, **kwargs):
-        yield {"event": "final", "data": {"answer": "ok", "history": []}}
-
-    monkeypatch.setattr("openkb.agent.query.build_query_agent", capture_agent)
-    monkeypatch.setattr("openkb.agent.query.iter_agent_response_events", fake_events)
+    monkeypatch.setattr("ultrakb.agent.query.build_query_agent", capture_agent)
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
 
@@ -170,24 +170,30 @@ def test_query_endpoint_uses_global_model(monkeypatch, kb_dir, tmp_path):
         "/api/v1/query", json={"kb": kb, "question": "hi", "stream": False}, headers=_auth()
     )
     assert response.status_code == 200
+    assert response.json()["answer_outcome"] == "insufficient_evidence"
+    assert response.json()["model_usage"]["current"]["requests"] == 0
     assert captured["model"] == "global-model"
 
 
 def test_chat_non_stream_creates_and_persists_session(monkeypatch, kb_dir):
+    """The HTTP adapter persists the application turn and exposes its receipt."""
+    from ultrakb.agent.chat_session import ChatSession, load_session
+    from ultrakb.application.conversations import AnswerResult
+    from ultrakb.knowledge_scope import resolve_scope
+
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
 
-    async def fake_agent_events(agent, input_data, *, max_turns, **kwargs):
-        yield {"event": "delta", "data": {"text": "Hello"}}
-        yield {
-            "event": "final",
-            "data": {
-                "answer": "Hello",
-                "history": [{"role": "assistant", "content": "Hello"}],
-            },
-        }
+    async def delivered_turn(root, message, *, session_id=None, scope, **kwargs):
+        assert root == kb_dir and message == "Hi" and session_id is None
+        scope = resolve_scope(root, scope)
+        session = ChatSession.new(root, "", "", view_id=scope.view_id)
+        session.record_turn(message, "Hello", [{"role": "assistant", "content": "Hello"}])
+        return AnswerResult(
+            "completed", "Hello", session_id=session.id, turn_count=session.turn_count
+        )
 
-    monkeypatch.setattr("openkb.agent.chat.iter_agent_response_events", fake_agent_events)
+    monkeypatch.setattr("ultrakb.application.conversations.continue_conversation", delivered_turn)
 
     response = client.post(
         "/api/v1/chat",
@@ -199,33 +205,41 @@ def test_chat_non_stream_creates_and_persists_session(monkeypatch, kb_dir):
     payload = response.json()
     assert payload["answer"] == "Hello"
     assert payload["turn_count"] == 1
-    session_path = kb_dir / ".openkb" / "chats" / f"{payload['session_id']}.json"
+    session_path = kb_dir / ".ultrakb" / "chats" / f"{payload['session_id']}.json"
     assert session_path.exists()
+    assert load_session(kb_dir, payload["session_id"]).user_turns == ["Hi"]
 
 
 def test_chat_stream_resumes_session(monkeypatch, kb_dir):
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
 
-    from openkb.agent.chat_session import ChatSession
+    from ultrakb.agent.chat_session import ChatSession, load_session
+    from ultrakb.application.conversations import AnswerResult
+    from ultrakb.knowledge_scope import resolve_scope
 
     session = ChatSession.new(kb_dir, "gpt-4o-mini", "en")
     session.record_turn("Hi", "Hello", [{"role": "assistant", "content": "Hello"}])
 
-    async def fake_chat_events(agent, history, **kwargs):
-        assert history[-1]["role"] == "user"
-        assert history[-1]["content"][-1] == {"type": "input_text", "text": "Again"}
-        assert "Hello" not in json.dumps(history)
-        yield {"event": "delta", "data": {"text": "Again"}}
-        yield {
-            "event": "final",
-            "data": {
-                "answer": "Again",
-                "history": history + [{"role": "assistant", "content": "Again"}],
-            },
-        }
+    async def delivered_turn(root, message, *, session_id, context, scope, **kwargs):
+        assert root == kb_dir and message == "Again" and session_id == session.id
+        scope = resolve_scope(root, scope)
+        continuing = load_session(root, session_id)
+        continuing.require_view(scope.view_id)
+        assert continuing.user_turns == ["Hi"]
+        assert continuing.assistant_texts == ["Hello"]
+        context.on_event({"event": "delta", "data": {"text": "Again"}})
+        continuing.record_turn(
+            message,
+            "Again",
+            [*continuing.history, {"role": "assistant", "content": "Again"}],
+            attempt_id="continuation",
+        )
+        return AnswerResult(
+            "completed", "Again", session_id=continuing.id, turn_count=continuing.turn_count
+        )
 
-    monkeypatch.setattr("openkb.agent.chat.iter_agent_response_events", fake_chat_events)
+    monkeypatch.setattr("ultrakb.application.conversations.continue_conversation", delivered_turn)
 
     response = client.post(
         "/api/v1/chat",
@@ -237,20 +251,33 @@ def test_chat_stream_resumes_session(monkeypatch, kb_dir):
     events = _events_from_sse(response.text)
     assert events[0]["data"]["session_id"] == session.id
     assert events[-2]["data"]["turn_count"] == 2
+    assert load_session(kb_dir, session.id).user_turns == ["Hi", "Again"]
 
 
 def test_chat_stream_forwards_artifact_event(monkeypatch, kb_dir):
+    from ultrakb.application.conversations import AnswerResult
+
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
 
-    async def fake_chat_events(agent, history, **kwargs):
-        yield {
-            "event": "artifact",
-            "data": {"kind": "file", "path": "output/x.html", "name": "x.html"},
-        }
-        yield {"event": "final", "data": {"answer": "done", "history": history}}
+    artifact_path = kb_dir / "output" / "x.html"
+    artifact_path.parent.mkdir(exist_ok=True)
+    artifact_path.write_text("<h1>Artifact</h1>", encoding="utf-8")
 
-    monkeypatch.setattr("openkb.agent.chat.iter_agent_response_events", fake_chat_events)
+    async def delivered_artifact(root, message, *, context, new_session_id, **kwargs):
+        assert root == kb_dir and message == "hi"
+        assert artifact_path.is_file()
+        context.on_event(
+            {
+                "event": "artifact",
+                "data": {"kind": "file", "path": "output/x.html", "name": "x.html"},
+            }
+        )
+        return AnswerResult("completed", "done", session_id=new_session_id)
+
+    monkeypatch.setattr(
+        "ultrakb.application.conversations.continue_conversation", delivered_artifact
+    )
 
     response = client.post(
         "/api/v1/chat", json={"kb": kb, "message": "hi", "stream": True}, headers=_auth()
@@ -269,9 +296,9 @@ def test_init_endpoint_creates_named_kb_under_env_root(monkeypatch, tmp_path):
     # Run from a clean CWD so the KB does not inherit the real project-root
     # config.yaml/.env (initialize_kb seeds from Path.cwd()).
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("OPENKB_KB_ROOT", str(root))
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path)
+    monkeypatch.setenv("ULTRAKB_KB_ROOT", str(root))
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", tmp_path)
 
     response = client.post(
         "/api/v1/init",
@@ -284,7 +311,7 @@ def test_init_endpoint_creates_named_kb_under_env_root(monkeypatch, tmp_path):
     assert payload["kb"] == "postman-kb"
     assert payload["created"] is True
     assert payload["env_written"] == {"api_key": False, "openai_api_base": False}
-    assert (kb_dir / ".openkb" / "config.yaml").is_file()
+    assert (kb_dir / ".ultrakb" / "config.yaml").is_file()
     assert (kb_dir / "wiki" / "AGENTS.md").is_file()
     global_config = yaml.safe_load((tmp_path / "global.yaml").read_text(encoding="utf-8"))
     assert global_config["kb_aliases"] == {"postman-kb": str(kb_dir.resolve())}
@@ -295,7 +322,7 @@ def test_init_endpoint_ignores_stale_alias_for_creation(monkeypatch, tmp_path):
     root = tmp_path / "api-kbs"
     kb_dir = root / "postman-kb"
     stale_path = tmp_path / "stale-kb"
-    stale_path.joinpath(".openkb").mkdir(parents=True)
+    stale_path.joinpath(".ultrakb").mkdir(parents=True)
     stale_path.joinpath("wiki").mkdir()
     stale_path.joinpath("wiki", "AGENTS.md").write_text("# stale\n", encoding="utf-8")
     global_dir = tmp_path / "global-config"
@@ -312,9 +339,9 @@ def test_init_endpoint_ignores_stale_alias_for_creation(monkeypatch, tmp_path):
         ),
         encoding="utf-8",
     )
-    monkeypatch.setenv("OPENKB_KB_ROOT", str(root))
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", global_path)
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", global_dir)
+    monkeypatch.setenv("ULTRAKB_KB_ROOT", str(root))
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", global_path)
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", global_dir)
 
     response = client.post(
         "/api/v1/init",
@@ -323,7 +350,7 @@ def test_init_endpoint_ignores_stale_alias_for_creation(monkeypatch, tmp_path):
     )
 
     assert response.status_code == 200
-    assert (kb_dir / ".openkb" / "config.yaml").is_file()
+    assert (kb_dir / ".ultrakb" / "config.yaml").is_file()
     assert (kb_dir / "wiki" / "AGENTS.md").is_file()
     global_config = yaml.safe_load(global_path.read_text(encoding="utf-8"))
     assert global_config["kb_aliases"]["postman-kb"] == str(kb_dir.resolve())
@@ -347,9 +374,9 @@ def test_init_endpoint_writes_env_without_leaking_values(monkeypatch, tmp_path):
     root = tmp_path / "api-kbs"
     kb_dir = root / "new-kb"
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("OPENKB_KB_ROOT", str(root))
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path)
+    monkeypatch.setenv("ULTRAKB_KB_ROOT", str(root))
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", tmp_path)
 
     response = client.post(
         "/api/v1/init",
@@ -373,15 +400,14 @@ def test_init_endpoint_writes_env_without_leaking_values(monkeypatch, tmp_path):
     )
 
 
-def test_init_endpoint_inherits_project_root_config(monkeypatch, tmp_path):
-    # A KB created from the REST UI (no explicit params) should inherit the
-    # operator's project-root config.yaml and LLM credentials from .env, so it
-    # can run queries/compiles out of the box. Server-level OPENKB_* vars are
-    # filtered out of the inherited .env.
+def test_init_endpoint_inherits_global_connection_without_copying_cwd(monkeypatch, tmp_path):
+    from ultrakb import config as configuration
+    from ultrakb.application.settings import read_settings_view
+
     client = _client(monkeypatch)
     root = tmp_path / "api-kbs"
     kb_dir = root / "templated-kb"
-    # Simulate the project root: deploy a config.yaml + .env at CWD.
+    # Unrelated server CWD settings are not implicitly copied into each KB.
     monkeypatch.chdir(tmp_path)
     (tmp_path / "config.yaml").write_text(
         "model: openai/deepseek-v4-flash\nlanguage: zh\npageindex_threshold: 20\n",
@@ -390,42 +416,47 @@ def test_init_endpoint_inherits_project_root_config(monkeypatch, tmp_path):
     (tmp_path / ".env").write_text(
         "LLM_API_KEY=sk-inherited\n"
         "OPENAI_API_BASE=https://gateway.example/v1\n"
-        "OPENKB_API_TOKEN=secret\n"
-        "OPENKB_KB_ROOT=" + str(root) + "\n",
+        "ULTRAKB_API_TOKEN=secret\n"
+        "ULTRAKB_KB_ROOT=" + str(root) + "\n",
         encoding="utf-8",
     )
-    monkeypatch.setenv("OPENKB_KB_ROOT", str(root))
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path)
+    monkeypatch.setenv("ULTRAKB_KB_ROOT", str(root))
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", tmp_path)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_BASE", raising=False)
+    configuration.save_global_config({"model": "global-model", "language": "zh"})
 
     response = client.post("/api/v1/init", json={"kb": "templated-kb"}, headers=_auth())
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["env_written"] == {"api_key": True, "openai_api_base": True}
-    # config.yaml inherited verbatim (model/language preserved, not gpt-5.4/en).
-    config = yaml.safe_load((kb_dir / ".openkb" / "config.yaml").read_text("utf-8"))
-    assert config["model"] == "openai/deepseek-v4-flash"
-    assert config["language"] == "zh"
-    # .env inherited LLM creds but dropped server-level OPENKB_* vars.
+    assert payload["env_written"] == {"api_key": False, "openai_api_base": False}
+    config = yaml.safe_load((kb_dir / ".ultrakb" / "config.yaml").read_text("utf-8"))
+    assert config == {}
+    view = read_settings_view(kb_dir)
+    assert view.values.model == "global-model" and view.values.language == "zh"
+    assert view.sources["model"] == view.sources["api_key"] == "global"
+    configuration.save_global_config({"model": "changed-global"})
+    assert read_settings_view(kb_dir).values.model == "changed-global"
     env_text = (kb_dir / ".env").read_text(encoding="utf-8")
-    assert "LLM_API_KEY=sk-inherited" in env_text
-    assert "OPENAI_API_BASE=https://gateway.example/v1" in env_text
-    assert "OPENKB_API_TOKEN" not in env_text
-    assert "OPENKB_KB_ROOT" not in env_text
+    assert "LLM_API_KEY" not in env_text
+    assert "OPENAI_API_BASE" not in env_text
+    assert "ULTRAKB_API_TOKEN" not in env_text
+    assert "ULTRAKB_KB_ROOT" not in env_text
 
 
 def test_init_endpoint_rejects_existing_kb(monkeypatch, tmp_path):
     client = _client(monkeypatch)
     root = tmp_path / "api-kbs"
     kb_dir = root / "existing-kb"
-    (kb_dir / ".openkb").mkdir(parents=True)
+    (kb_dir / ".ultrakb").mkdir(parents=True)
     from kb_fixtures import mark_current_kb
 
     mark_current_kb(kb_dir)
-    monkeypatch.setenv("OPENKB_KB_ROOT", str(root))
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path)
+    monkeypatch.setenv("ULTRAKB_KB_ROOT", str(root))
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", tmp_path)
 
     response = client.post(
         "/api/v1/init",
@@ -469,8 +500,8 @@ def test_add_endpoint_rejects_unsupported_extension(monkeypatch, kb_dir):
 def test_add_endpoint_rejects_oversized_file(monkeypatch, kb_dir):
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
-    monkeypatch.setattr("openkb.api_helpers.MAX_UPLOAD_FILE_BYTES", 4)
-    monkeypatch.setattr("openkb.api_helpers.MAX_UPLOAD_REQUEST_BYTES", 100)
+    monkeypatch.setattr("ultrakb.api_helpers.MAX_UPLOAD_FILE_BYTES", 4)
+    monkeypatch.setattr("ultrakb.api_helpers.MAX_UPLOAD_REQUEST_BYTES", 100)
 
     response = client.post(
         "/api/v1/add",
@@ -487,8 +518,8 @@ def test_add_endpoint_rejects_oversized_file(monkeypatch, kb_dir):
 def test_add_endpoint_rejects_oversized_aggregate_request(monkeypatch, kb_dir):
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
-    monkeypatch.setattr("openkb.api_helpers.MAX_UPLOAD_FILE_BYTES", 10)
-    monkeypatch.setattr("openkb.api_helpers.MAX_UPLOAD_REQUEST_BYTES", 8)
+    monkeypatch.setattr("ultrakb.api_helpers.MAX_UPLOAD_FILE_BYTES", 10)
+    monkeypatch.setattr("ultrakb.api_helpers.MAX_UPLOAD_REQUEST_BYTES", 8)
 
     response = client.post(
         "/api/v1/add",
@@ -510,7 +541,7 @@ def test_add_endpoint_uploads_and_adds_single_file(monkeypatch, kb_dir):
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
 
-    from openkb.application.documents import AddFileResult
+    from ultrakb.application.documents import AddFileResult
 
     calls = []
 
@@ -518,7 +549,7 @@ def test_add_endpoint_uploads_and_adds_single_file(monkeypatch, kb_dir):
         calls.append((path, target_kb))
         return AddFileResult(path.name, str(path), "added", f"{path.name} added to knowledge base.")
 
-    monkeypatch.setattr("openkb.api_helpers._add_for_api", fake_add)
+    monkeypatch.setattr("ultrakb.api_helpers._add_for_api", fake_add)
 
     response = client.post(
         "/api/v1/add",
@@ -549,8 +580,8 @@ def test_add_endpoint_runs_real_add_helper_outside_event_loop(monkeypatch, kb_di
         assert doc_name == "paper"
         assert target_kb == kb_dir
 
-    monkeypatch.setattr("openkb.cli._setup_llm_key", lambda kb: None)
-    monkeypatch.setattr("openkb.agent.compiler.compile_short_doc", fake_compile_short_doc)
+    monkeypatch.setattr("ultrakb.cli._setup_llm_key", lambda kb: None)
+    monkeypatch.setattr("ultrakb.agent.compiler.compile_short_doc", fake_compile_short_doc)
 
     response = client.post(
         "/api/v1/add",
@@ -570,7 +601,7 @@ def test_add_endpoint_uploads_and_adds_multiple_files(monkeypatch, kb_dir):
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
 
-    from openkb.application.documents import AddFileResult
+    from ultrakb.application.documents import AddFileResult
 
     calls = []
 
@@ -590,7 +621,7 @@ def test_add_endpoint_uploads_and_adds_multiple_files(monkeypatch, kb_dir):
             f"{path.name} added to knowledge base.",
         )
 
-    monkeypatch.setattr("openkb.api_helpers._add_for_api", fake_add)
+    monkeypatch.setattr("ultrakb.api_helpers._add_for_api", fake_add)
 
     response = client.post(
         "/api/v1/add",
@@ -656,12 +687,12 @@ def test_add_endpoint_uses_unique_raw_filename(monkeypatch, kb_dir):
     kb = _use_named_kb(monkeypatch, kb_dir)
     (kb_dir / "raw" / "paper.md").write_text("existing", encoding="utf-8")
 
-    from openkb.application.documents import AddFileResult
+    from ultrakb.application.documents import AddFileResult
 
     def fake_add(path, target_kb, **kwargs):
         return AddFileResult(path.name, str(path), "added", f"{path.name} added to knowledge base.")
 
-    monkeypatch.setattr("openkb.api_helpers._add_for_api", fake_add)
+    monkeypatch.setattr("ultrakb.api_helpers._add_for_api", fake_add)
 
     response = client.post(
         "/api/v1/add",
@@ -681,7 +712,7 @@ def test_add_endpoint_removes_skipped_upload(monkeypatch, kb_dir):
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
 
-    from openkb.application.documents import AddFileResult
+    from ultrakb.application.documents import AddFileResult
 
     skipped_path = None
 
@@ -690,7 +721,7 @@ def test_add_endpoint_removes_skipped_upload(monkeypatch, kb_dir):
         skipped_path = path
         return AddFileResult(path.name, None, "skipped", "Already in knowledge base: paper.md")
 
-    monkeypatch.setattr("openkb.api_helpers._add_for_api", fake_add)
+    monkeypatch.setattr("ultrakb.api_helpers._add_for_api", fake_add)
 
     response = client.post(
         "/api/v1/add",
@@ -716,12 +747,12 @@ def test_add_endpoint_streams_events(monkeypatch, kb_dir):
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
 
-    from openkb.application.documents import AddFileResult
+    from ultrakb.application.documents import AddFileResult
 
     def fake_add(path, target_kb, **kwargs):
         return AddFileResult(path.name, str(path), "added", f"{path.name} added to knowledge base.")
 
-    monkeypatch.setattr("openkb.api_helpers._add_for_api", fake_add)
+    monkeypatch.setattr("ultrakb.api_helpers._add_for_api", fake_add)
 
     response = client.post(
         "/api/v1/add",
@@ -747,7 +778,7 @@ def test_add_endpoint_streams_events(monkeypatch, kb_dir):
 
 def test_unknown_kb_returns_400(monkeypatch, tmp_path):
     client = _client(monkeypatch)
-    monkeypatch.setattr("openkb.api_helpers.resolve_kb_alias", lambda kb: tmp_path)
+    monkeypatch.setattr("ultrakb.api_helpers.resolve_kb_alias", lambda kb: tmp_path)
 
     response = client.post(
         "/api/v1/query",
@@ -761,7 +792,7 @@ def test_unknown_kb_returns_400(monkeypatch, tmp_path):
 
 def test_kb_endpoints_reject_unknown_kb(monkeypatch, tmp_path):
     client = _client(monkeypatch)
-    monkeypatch.setattr("openkb.api_helpers.resolve_kb_alias", lambda kb: tmp_path)
+    monkeypatch.setattr("ultrakb.api_helpers.resolve_kb_alias", lambda kb: tmp_path)
 
     for path in ("/api/v1/list", "/api/v1/status", "/api/v1/lint"):
         response = client.post(
@@ -831,7 +862,7 @@ def test_list_endpoint_returns_structured_inventory(monkeypatch, kb_dir):
         "abc123": {"name": "paper.pdf", "type": "pdf", "pages": 12},
         "def456": {"name": "notes.md", "type": "md"},
     }
-    (kb_dir / ".openkb" / "hashes.json").write_text(json.dumps(hashes), encoding="utf-8")
+    (kb_dir / ".ultrakb" / "hashes.json").write_text(json.dumps(hashes), encoding="utf-8")
     (kb_dir / "wiki" / "summaries" / "paper.md").write_text("# Paper", encoding="utf-8")
     (kb_dir / "wiki" / "concepts" / "attention.md").write_text("# Attention", encoding="utf-8")
     reports_dir = kb_dir / "wiki" / "reports"
@@ -871,7 +902,7 @@ def test_list_endpoint_returns_structured_inventory(monkeypatch, kb_dir):
 def test_list_endpoint_includes_entities(monkeypatch, kb_dir):
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
-    (kb_dir / ".openkb" / "hashes.json").write_text(
+    (kb_dir / ".ultrakb" / "hashes.json").write_text(
         json.dumps({"h1": {"name": "p.pdf", "type": "pdf"}}), encoding="utf-8"
     )
     (kb_dir / "wiki" / "entities").mkdir(parents=True, exist_ok=True)
@@ -894,7 +925,7 @@ def test_status_endpoint_returns_structured_counts(monkeypatch, kb_dir):
     (kb_dir / "wiki" / "reports" / "lint_20260101_000000.md").write_text(
         "# Report", encoding="utf-8"
     )
-    (kb_dir / ".openkb" / "hashes.json").write_text(
+    (kb_dir / ".ultrakb" / "hashes.json").write_text(
         json.dumps({"abc123": {"name": "paper.pdf", "type": "pdf"}}),
         encoding="utf-8",
     )
@@ -934,7 +965,7 @@ def test_lint_endpoint_skips_empty_kb(monkeypatch, kb_dir):
     assert response.json() == {
         "skipped": True,
         "reason": "no_documents_indexed",
-        "message": "Nothing to lint - no documents indexed yet. Run `openkb add` first.",
+        "message": "Nothing to lint - no documents indexed yet. Run `ultrakb add` first.",
         "structural_report": None,
         "knowledge_report": None,
         "report_path": None,
@@ -944,20 +975,15 @@ def test_lint_endpoint_skips_empty_kb(monkeypatch, kb_dir):
     assert list((kb_dir / "wiki" / "reports").glob("*.md")) == []
 
 
-def test_lint_endpoint_runs_and_writes_report(monkeypatch, kb_dir):
-    client = _client(monkeypatch)
-    kb = _use_named_kb(monkeypatch, kb_dir)
-    (kb_dir / ".openkb" / "hashes.json").write_text(
-        json.dumps({"abc123": {"name": "paper.pdf", "type": "pdf"}}),
-        encoding="utf-8",
+def test_lint_endpoint_runs_and_writes_report(monkeypatch, kb_dir, live_llm):
+    from application_llm_fixtures import (
+        assert_semantic_lint_delivery,
+        semantic_lint_fixture,
     )
 
-    async def fake_knowledge_lint(kb, model, **kwargs):
-        assert kb == kb_dir
-        return "No semantic issues."
-
-    monkeypatch.setattr("openkb.cli._setup_llm_key", lambda kb: None)
-    monkeypatch.setattr("openkb.agent.linter.run_knowledge_lint", fake_knowledge_lint)
+    client = _client(monkeypatch)
+    kb = _use_named_kb(monkeypatch, kb_dir)
+    reports = semantic_lint_fixture(kb_dir, live_llm, monkeypatch)
 
     response = client.post(
         "/api/v1/lint",
@@ -971,14 +997,14 @@ def test_lint_endpoint_runs_and_writes_report(monkeypatch, kb_dir):
     assert payload["reason"] is None
     assert payload["message"] == "Lint report written."
     assert "Structural Lint Report" in payload["structural_report"]
-    assert payload["knowledge_report"] == "No semantic issues."
+    assert_semantic_lint_delivery(payload["knowledge_report"], reports, live_llm)
     # Without `fix`, the new count fields are absent (None).
     assert payload["lint_files_changed"] is None
     assert payload["lint_ghosts_removed"] is None
-    reports = list((kb_dir / "wiki" / "reports").glob("lint_*.md"))
-    assert len(reports) == 1
-    assert payload["report_path"] == str(reports[0])
-    assert "No semantic issues." in reports[0].read_text(encoding="utf-8")
+    saved = list((kb_dir / "wiki" / "reports").glob("lint_*.md"))
+    assert len(saved) == 1
+    assert payload["report_path"] == str(saved[0])
+    assert payload["knowledge_report"] in saved[0].read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -986,24 +1012,21 @@ def test_lint_endpoint_runs_and_writes_report(monkeypatch, kb_dir):
 # ---------------------------------------------------------------------------
 
 
-def test_lint_endpoint_fix_rewrites_broken_wikilinks(monkeypatch, kb_dir):
+def test_lint_endpoint_fix_rewrites_broken_wikilinks(monkeypatch, kb_dir, live_llm):
+    from application_llm_fixtures import (
+        assert_semantic_lint_delivery,
+        semantic_lint_fixture,
+    )
+
+    from ultrakb.locks import atomic_write_text
+
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
-    # Non-empty hashes so the report path (not the skip path) runs.
-    (kb_dir / ".openkb" / "hashes.json").write_text(
-        json.dumps({"abc123": {"name": "paper.pdf", "type": "pdf"}}),
-        encoding="utf-8",
-    )
+    reports = semantic_lint_fixture(kb_dir, live_llm, monkeypatch)
     # Valid target + a page with a broken link that has no match.
-    (kb_dir / "wiki" / "concepts" / "a.md").write_text("A valid page.", encoding="utf-8")
-    page = kb_dir / "wiki" / "summaries" / "s.md"
-    page.write_text("See [[concepts/a]] and [[Ghost Link]].", encoding="utf-8")
-
-    async def fake_knowledge_lint(kb, model, **kwargs):
-        return "No semantic issues."
-
-    monkeypatch.setattr("openkb.cli._setup_llm_key", lambda kb: None)
-    monkeypatch.setattr("openkb.agent.linter.run_knowledge_lint", fake_knowledge_lint)
+    page = kb_dir / "wiki" / "summaries" / "orion.md"
+    post_fix_body = page.read_text(encoding="utf-8")
+    atomic_write_text(page, post_fix_body.replace("Ghost Link.", "[[Ghost Link]]."))
 
     response = client.post(
         "/api/v1/lint",
@@ -1018,30 +1041,28 @@ def test_lint_endpoint_fix_rewrites_broken_wikilinks(monkeypatch, kb_dir):
     assert payload["lint_ghosts_removed"] >= 1
     assert "[[Ghost Link]]" not in page.read_text(encoding="utf-8")
     # The valid link is left intact.
-    assert "[[concepts/a]]" in page.read_text(encoding="utf-8")
+    assert "[[concepts/orion]]" in page.read_text(encoding="utf-8")
+    assert page.read_text(encoding="utf-8") == post_fix_body
     # A lint report was still written, reflecting the post-fix state.
     assert payload["skipped"] is False
     assert "Fixed" in payload["message"]
-    reports = list((kb_dir / "wiki" / "reports").glob("lint_*.md"))
-    assert len(reports) == 1
+    assert_semantic_lint_delivery(payload["knowledge_report"], reports, live_llm)
+    saved = list((kb_dir / "wiki" / "reports").glob("lint_*.md"))
+    assert len(saved) == 1
+    assert payload["knowledge_report"] in saved[0].read_text(encoding="utf-8")
 
 
-def test_lint_endpoint_fix_noop_when_clean(monkeypatch, kb_dir):
+def test_lint_endpoint_fix_noop_when_clean(monkeypatch, kb_dir, live_llm):
+    from application_llm_fixtures import (
+        assert_semantic_lint_delivery,
+        semantic_lint_fixture,
+    )
+
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
-    (kb_dir / ".openkb" / "hashes.json").write_text(
-        json.dumps({"abc123": {"name": "paper.pdf", "type": "pdf"}}),
-        encoding="utf-8",
-    )
-    # Clean wiki: only a valid, resolving link.
-    (kb_dir / "wiki" / "concepts" / "a.md").write_text("A valid page.", encoding="utf-8")
-    (kb_dir / "wiki" / "summaries" / "s.md").write_text("See [[concepts/a]].", encoding="utf-8")
-
-    async def fake_knowledge_lint(kb, model, **kwargs):
-        return "No semantic issues."
-
-    monkeypatch.setattr("openkb.cli._setup_llm_key", lambda kb: None)
-    monkeypatch.setattr("openkb.agent.linter.run_knowledge_lint", fake_knowledge_lint)
+    reports = semantic_lint_fixture(kb_dir, live_llm, monkeypatch)
+    page = kb_dir / "wiki" / "summaries" / "orion.md"
+    body = page.read_text(encoding="utf-8")
 
     response = client.post(
         "/api/v1/lint",
@@ -1055,6 +1076,8 @@ def test_lint_endpoint_fix_noop_when_clean(monkeypatch, kb_dir):
     assert payload["lint_ghosts_removed"] == 0
     assert "Nothing to fix" in payload["message"]
     assert payload["skipped"] is False
+    assert page.read_text(encoding="utf-8") == body
+    assert_semantic_lint_delivery(payload["knowledge_report"], reports, live_llm)
 
 
 def test_remove_non_stream_success(monkeypatch, kb_dir):
@@ -1075,7 +1098,7 @@ def test_remove_non_stream_success(monkeypatch, kb_dir):
         "message": "paper.pdf removed from knowledge base.",
     }
     monkeypatch.setattr(
-        "openkb.api.run_remove_for_api",
+        "ultrakb.api.run_remove_for_api",
         lambda kb_dir, identifier, **kw: payload,
     )
 
@@ -1097,7 +1120,7 @@ def test_remove_not_found_returns_404(monkeypatch, kb_dir):
     kb = _use_named_kb(monkeypatch, kb_dir)
 
     monkeypatch.setattr(
-        "openkb.api.run_remove_for_api",
+        "ultrakb.api.run_remove_for_api",
         lambda kb_dir, identifier, **kw: {"status": "not_found", "message": "Document not found."},
     )
     response = client.post(
@@ -1113,7 +1136,7 @@ def test_remove_multiple_matches_returns_409(monkeypatch, kb_dir):
     kb = _use_named_kb(monkeypatch, kb_dir)
 
     monkeypatch.setattr(
-        "openkb.api.run_remove_for_api",
+        "ultrakb.api.run_remove_for_api",
         lambda kb_dir, identifier, **kw: {
             "status": "multiple",
             "candidates": [
@@ -1150,7 +1173,7 @@ def test_remove_dry_run_returns_plan(monkeypatch, kb_dir):
             "entities_deleted": [],
         }
 
-    monkeypatch.setattr("openkb.api.run_remove_for_api", fake)
+    monkeypatch.setattr("ultrakb.api.run_remove_for_api", fake)
 
     response = client.post(
         "/api/v1/remove",
@@ -1173,7 +1196,7 @@ def test_remove_passes_keep_empty(monkeypatch, kb_dir):
         captured["keep_empty"] = keep_empty
         return {"status": "removed", "name": "p", "doc_name": "p", "actions": []}
 
-    monkeypatch.setattr("openkb.api.run_remove_for_api", fake)
+    monkeypatch.setattr("ultrakb.api.run_remove_for_api", fake)
     client.post(
         "/api/v1/remove",
         json={"kb": kb, "identifier": "p", "keep_empty": True},
@@ -1187,7 +1210,7 @@ def test_remove_stream_returns_sse(monkeypatch, kb_dir):
     kb = _use_named_kb(monkeypatch, kb_dir)
 
     monkeypatch.setattr(
-        "openkb.api_helpers.run_remove_for_api",
+        "ultrakb.api_helpers.run_remove_for_api",
         lambda kb_dir, identifier, **kw: {
             "status": "removed",
             "name": "paper.pdf",
@@ -1218,7 +1241,7 @@ def test_remove_stream_not_found(monkeypatch, kb_dir):
     kb = _use_named_kb(monkeypatch, kb_dir)
 
     monkeypatch.setattr(
-        "openkb.api_helpers.run_remove_for_api",
+        "ultrakb.api_helpers.run_remove_for_api",
         lambda kb_dir, identifier, **kw: {"status": "not_found"},
     )
     response = client.post(
@@ -1239,7 +1262,7 @@ def test_remove_stream_not_found(monkeypatch, kb_dir):
 
 
 def _seed_short(kb_dir: Path, *, slug: str = "notes", name: str = "notes.md") -> None:
-    (kb_dir / ".openkb" / "hashes.json").write_text(
+    (kb_dir / ".ultrakb" / "hashes.json").write_text(
         json.dumps(
             {
                 "h_s": {"name": name, "doc_name": slug, "type": "md"},
@@ -1256,7 +1279,7 @@ def _seed_long(
     from kb_fixtures import seed_document_index
 
     seed_document_index(kb_dir, doc_id, slug)
-    (kb_dir / ".openkb" / "hashes.json").write_text(
+    (kb_dir / ".ultrakb" / "hashes.json").write_text(
         json.dumps(
             {
                 "h_l": {"name": name, "doc_name": slug, "type": "long_pdf", "doc_id": doc_id},
@@ -1275,11 +1298,11 @@ def _seed_long(
 
 
 def _patch_recompile(monkeypatch):
-    monkeypatch.setattr("openkb.cli._setup_llm_key", lambda kb: None)
+    monkeypatch.setattr("ultrakb.cli._setup_llm_key", lambda kb: None)
     short = AsyncMock()
     long_ = AsyncMock()
-    monkeypatch.setattr("openkb.agent.compiler.compile_short_doc", short)
-    monkeypatch.setattr("openkb.agent.compiler.compile_long_doc", long_)
+    monkeypatch.setattr("ultrakb.agent.compiler.compile_short_doc", short)
+    monkeypatch.setattr("ultrakb.agent.compiler.compile_long_doc", long_)
     return short, long_
 
 
@@ -1343,7 +1366,7 @@ def test_recompile_multiple_409(monkeypatch, kb_dir):
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
     # Two entries whose slug share a substring.
-    (kb_dir / ".openkb" / "hashes.json").write_text(
+    (kb_dir / ".ultrakb" / "hashes.json").write_text(
         json.dumps(
             {
                 "h1": {"name": "a.pdf", "doc_name": "rep-x", "type": "md"},
@@ -1412,9 +1435,9 @@ def test_recompile_all_recompiles_every_doc(monkeypatch, kb_dir):
     _seed_short(kb_dir, slug="a", name="a.md")
     (kb_dir / "wiki" / "sources" / "a.md").write_text("# A\n", encoding="utf-8")
     # add a second short doc to the registry
-    data = json.loads((kb_dir / ".openkb" / "hashes.json").read_text())
+    data = json.loads((kb_dir / ".ultrakb" / "hashes.json").read_text())
     data["h2"] = {"name": "b.md", "doc_name": "b", "type": "md"}
-    (kb_dir / ".openkb" / "hashes.json").write_text(json.dumps(data))
+    (kb_dir / ".ultrakb" / "hashes.json").write_text(json.dumps(data))
     (kb_dir / "wiki" / "sources" / "b.md").write_text("# B\n", encoding="utf-8")
     short, _ = _patch_recompile(monkeypatch)
 
@@ -1435,7 +1458,7 @@ def test_recompile_refresh_schema_invoked(monkeypatch, kb_dir):
     kb = _use_named_kb(monkeypatch, kb_dir)
     _seed_short(kb_dir)
     _patch_recompile(monkeypatch)
-    from openkb.schema import AGENTS_MD
+    from ultrakb.schema import AGENTS_MD
 
     schema = kb_dir / "wiki/AGENTS.md"
     schema.write_text("Previous custom schema", encoding="utf-8")
@@ -1456,9 +1479,9 @@ def test_recompile_skip_missing_source(monkeypatch, kb_dir):
     _seed_short(kb_dir, slug="good", name="good.md")
     (kb_dir / "wiki" / "sources" / "good.md").write_text("# Good\n", encoding="utf-8")
     # second doc whose source file is absent -> should be skipped
-    data = json.loads((kb_dir / ".openkb" / "hashes.json").read_text())
+    data = json.loads((kb_dir / ".ultrakb" / "hashes.json").read_text())
     data["h2"] = {"name": "bad.md", "doc_name": "bad", "type": "md"}
-    (kb_dir / ".openkb" / "hashes.json").write_text(json.dumps(data))
+    (kb_dir / ".ultrakb" / "hashes.json").write_text(json.dumps(data))
     short, _ = _patch_recompile(monkeypatch)
 
     response = client.post(
@@ -1479,9 +1502,9 @@ def test_recompile_compile_error_counts_as_skipped(monkeypatch, kb_dir):
     _seed_short(kb_dir)
     short = AsyncMock(side_effect=RuntimeError("boom"))
     long_ = AsyncMock()
-    monkeypatch.setattr("openkb.cli._setup_llm_key", lambda kb: None)
-    monkeypatch.setattr("openkb.agent.compiler.compile_short_doc", short)
-    monkeypatch.setattr("openkb.agent.compiler.compile_long_doc", long_)
+    monkeypatch.setattr("ultrakb.cli._setup_llm_key", lambda kb: None)
+    monkeypatch.setattr("ultrakb.agent.compiler.compile_short_doc", short)
+    monkeypatch.setattr("ultrakb.agent.compiler.compile_long_doc", long_)
 
     response = client.post(
         "/api/v1/recompile",
@@ -1532,10 +1555,10 @@ def test_recompile_stream_not_found(monkeypatch, kb_dir):
 def test_cors_wildcard_disables_credentials(monkeypatch):
     """allow_origins=[*] must force allow_credentials=False (CORS spec).
     A wildcard with credentials lets any site send credentialed requests."""
-    monkeypatch.setenv("OPENKB_CORS_ORIGINS", "*")
+    monkeypatch.setenv("ULTRAKB_CORS_ORIGINS", "*")
     from fastapi import FastAPI
 
-    from openkb.api import _configure_cors
+    from ultrakb.api import _configure_cors
 
     app = FastAPI()
     _configure_cors(app)
@@ -1552,10 +1575,10 @@ def test_cors_wildcard_disables_credentials(monkeypatch):
 
 def test_cors_explicit_origins_keep_credentials(monkeypatch):
     """Explicit origins allow credentials (normal case)."""
-    monkeypatch.setenv("OPENKB_CORS_ORIGINS", "http://localhost:3000")
+    monkeypatch.setenv("ULTRAKB_CORS_ORIGINS", "http://localhost:3000")
     from fastapi import FastAPI
 
-    from openkb.api import _configure_cors
+    from ultrakb.api import _configure_cors
 
     app = FastAPI()
     _configure_cors(app)
@@ -1569,7 +1592,7 @@ def test_cors_explicit_origins_keep_credentials(monkeypatch):
 
 def test_token_compare_digest_accepts_correct(monkeypatch, kb_dir):
     """compare_digest should accept the correct token and reject wrong ones."""
-    monkeypatch.setenv("OPENKB_API_TOKEN", "secret")
+    monkeypatch.setenv("ULTRAKB_API_TOKEN", "secret")
     client = TestClient(create_app())
     # Wrong token -> 401
     r = client.get("/api/v1/kbs", headers={"Authorization": "Bearer wrong"})
@@ -1580,14 +1603,14 @@ def test_token_compare_digest_accepts_correct(monkeypatch, kb_dir):
 
 
 def test_meta_endpoint_returns_real_version(monkeypatch):
-    import openkb
+    import ultrakb
 
     client = _client(monkeypatch)
     response = client.get("/api/v1/meta", headers=_auth())
 
     assert response.status_code == 200
     body = response.json()
-    assert body["version"] == openkb.__version__
+    assert body["version"] == ultrakb.__version__
     assert isinstance(body["version"], str) and body["version"]
 
 
@@ -1602,7 +1625,7 @@ def test_concurrent_same_kb_lint_serialized(monkeypatch, kb_dir):
 
     import httpx
 
-    monkeypatch.setenv("OPENKB_API_TOKEN", "secret")
+    monkeypatch.setenv("ULTRAKB_API_TOKEN", "secret")
     _use_named_kb(monkeypatch, kb_dir)
 
     active = 0
@@ -1616,7 +1639,7 @@ def test_concurrent_same_kb_lint_serialized(monkeypatch, kb_dir):
         active -= 1
         return {"skipped": False, "message": "ok"}
 
-    monkeypatch.setattr("openkb.api.run_lint_report", slow_lint)
+    monkeypatch.setattr("ultrakb.api.run_lint_report", slow_lint)
 
     app = create_app()
 
@@ -1645,7 +1668,7 @@ def test_concurrent_readonly_lint_not_serialized(monkeypatch, kb_dir):
 
     import httpx
 
-    monkeypatch.setenv("OPENKB_API_TOKEN", "secret")
+    monkeypatch.setenv("ULTRAKB_API_TOKEN", "secret")
     _use_named_kb(monkeypatch, kb_dir)
 
     active = 0
@@ -1659,7 +1682,7 @@ def test_concurrent_readonly_lint_not_serialized(monkeypatch, kb_dir):
         active -= 1
         return {"skipped": False, "message": "ok"}
 
-    monkeypatch.setattr("openkb.api.run_lint_report", slow_lint)
+    monkeypatch.setattr("ultrakb.api.run_lint_report", slow_lint)
 
     app = create_app()
 
@@ -1684,7 +1707,7 @@ def test_resolve_credential_bundle_reads_kb_key(monkeypatch, kb_dir):
     """resolve_credential_bundle reads the KB's LLM_API_KEY without polluting os.environ."""
     import os
 
-    from openkb.config import resolve_credential_bundle
+    from ultrakb.config import resolve_credential_bundle
 
     monkeypatch.setenv("LLM_API_KEY", "server-key")
     (kb_dir / ".env").write_text("LLM_API_KEY=kb-specific-key\n", encoding="utf-8")
@@ -1699,9 +1722,9 @@ def test_query_endpoint_passes_kb_key_in_bundle(monkeypatch, kb_dir):
     """The query endpoint must pass the KB's key in the bundle, not via os.environ."""
     import os
 
-    from openkb.agent.query import build_query_agent
+    from ultrakb.agent.query import build_query_agent
 
-    monkeypatch.setenv("OPENKB_API_TOKEN", "secret")
+    monkeypatch.setenv("ULTRAKB_API_TOKEN", "secret")
     monkeypatch.setenv("LLM_API_KEY", "server-key")
     kb = _use_named_kb(monkeypatch, kb_dir)
     (kb_dir / ".env").write_text("LLM_API_KEY=kb-specific-key\n", encoding="utf-8")
@@ -1713,11 +1736,7 @@ def test_query_endpoint_passes_kb_key_in_bundle(monkeypatch, kb_dir):
         captured["env_key"] = os.environ.get("LLM_API_KEY")
         return build_query_agent(wiki_dir, model, language, bundle)
 
-    async def fake_events(*args, **kwargs):
-        yield {"event": "final", "data": {"answer": "answer", "history": []}}
-
-    monkeypatch.setattr("openkb.agent.query.build_query_agent", capture_agent)
-    monkeypatch.setattr("openkb.agent.query.iter_agent_response_events", fake_events)
+    monkeypatch.setattr("ultrakb.agent.query.build_query_agent", capture_agent)
 
     client = TestClient(create_app())
     r = client.post(
@@ -1726,6 +1745,8 @@ def test_query_endpoint_passes_kb_key_in_bundle(monkeypatch, kb_dir):
         headers=_auth(),
     )
     assert r.status_code == 200
+    assert r.json()["answer_outcome"] == "insufficient_evidence"
+    assert r.json()["model_usage"]["current"]["requests"] == 0
     assert captured.get("bundle_key") == "kb-specific-key"
     # os.environ must remain the server key (no env mutation).
     assert captured.get("env_key") == "server-key"
@@ -1733,11 +1754,11 @@ def test_query_endpoint_passes_kb_key_in_bundle(monkeypatch, kb_dir):
 
 def test_resolve_credential_bundle_no_env_returns_none(monkeypatch, kb_dir):
     """With no KB .env, no process env, and no global .env, api_key is None."""
-    from openkb.config import resolve_credential_bundle
+    from ultrakb.config import resolve_credential_bundle
 
     monkeypatch.delenv("LLM_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_BASE", raising=False)
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", kb_dir / "no-global")
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", kb_dir / "no-global")
     bundle = resolve_credential_bundle(kb_dir)
     assert bundle.api_key is None
 
@@ -1750,7 +1771,7 @@ def test_resolve_credential_bundle_falls_back_to_process_env(monkeypatch, kb_dir
     """
     import os
 
-    from openkb.config import resolve_credential_bundle
+    from ultrakb.config import resolve_credential_bundle
 
     monkeypatch.setenv("LLM_API_KEY", "server-key")
     # No kb_dir/.env written — the KB has no local key of its own. The process
@@ -1771,7 +1792,7 @@ def test_concurrent_same_kb_recompile_serialized(monkeypatch, kb_dir):
 
     import httpx
 
-    monkeypatch.setenv("OPENKB_API_TOKEN", "secret")
+    monkeypatch.setenv("ULTRAKB_API_TOKEN", "secret")
     _use_named_kb(monkeypatch, kb_dir)
 
     active = 0
@@ -1787,7 +1808,7 @@ def test_concurrent_same_kb_recompile_serialized(monkeypatch, kb_dir):
         active -= 1
         yield {"event": "final", "recompiled": 0, "skipped": 0}
 
-    monkeypatch.setattr("openkb.api.iter_recompile", slow_iter_recompile)
+    monkeypatch.setattr("ultrakb.api.iter_recompile", slow_iter_recompile)
 
     app = create_app()
 
@@ -1823,11 +1844,11 @@ def test_concurrent_different_kbs_do_not_block(monkeypatch, kb_dir, tmp_path_fac
 
     import httpx
 
-    monkeypatch.setenv("OPENKB_API_TOKEN", "secret")
+    monkeypatch.setenv("ULTRAKB_API_TOKEN", "secret")
     kb_dir_a = kb_dir
     kb_dir_b = tmp_path_factory.mktemp("kb-b")
     for d in (kb_dir_a, kb_dir_b):
-        (d / ".openkb").mkdir(parents=True, exist_ok=True)
+        (d / ".ultrakb").mkdir(parents=True, exist_ok=True)
         from kb_fixtures import mark_current_kb
 
         mark_current_kb(d)
@@ -1836,7 +1857,7 @@ def test_concurrent_different_kbs_do_not_block(monkeypatch, kb_dir, tmp_path_fac
     def resolve(kb):
         return kb_dir_a if kb == "kb-a" else kb_dir_b
 
-    monkeypatch.setattr("openkb.api_helpers.resolve_kb_alias", resolve)
+    monkeypatch.setattr("ultrakb.api_helpers.resolve_kb_alias", resolve)
 
     active = 0
     max_seen = 0
@@ -1851,7 +1872,7 @@ def test_concurrent_different_kbs_do_not_block(monkeypatch, kb_dir, tmp_path_fac
         active -= 1
         yield {"event": "final", "recompiled": 0, "skipped": 0}
 
-    monkeypatch.setattr("openkb.api.iter_recompile", slow_iter_recompile)
+    monkeypatch.setattr("ultrakb.api.iter_recompile", slow_iter_recompile)
 
     app = create_app()
 
@@ -1921,7 +1942,7 @@ def test_graph_html_endpoint_returns_self_contained_html(monkeypatch, kb_dir):
     assert response.headers["content-type"].startswith("text/html")
     body = response.text
     # Self-contained template rendered, placeholder substituted with real data.
-    assert "<title>openkb · knowledge graph</title>" in body
+    assert "<title>ultrakb · knowledge graph</title>" in body
     assert "__GRAPH_DATA__" not in body
     assert "concepts/a" in body  # a node id from the injected graph JSON
 
@@ -1934,7 +1955,7 @@ def test_graph_html_endpoint_empty_wiki_still_renders(monkeypatch, kb_dir):
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
-    assert "<title>openkb · knowledge graph</title>" in response.text
+    assert "<title>ultrakb · knowledge graph</title>" in response.text
 
 
 def test_output_endpoint_serves_output_html(monkeypatch, kb_dir):
@@ -2072,29 +2093,30 @@ def test_page_endpoint_rejects_mid_path_escape(monkeypatch, kb_dir):
     assert response.status_code == 400
 
 
-def test_deck_endpoint_non_stream_generates_artifact(monkeypatch, kb_dir):
+def test_deck_endpoint_non_stream_generates_artifact(monkeypatch, kb_dir, model_service):
+    from short_generation import install_short_deck
+
+    from ultrakb.deck.validator import validate_deck
+
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
-    (kb_dir / "wiki" / "concepts" / "a.md").write_text("# A\n\nContent.", encoding="utf-8")
-
-    async def fake_run(self):
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-        (self.output_dir / "index.html").write_text("<html>deck</html>", encoding="utf-8")
-        self.validation = None
-        return self.output_dir
-
-    monkeypatch.setattr("openkb.skill.generator.Generator.run", fake_run)
+    intent = install_short_deck(kb_dir)
 
     response = client.post(
         "/api/v1/deck",
-        json={"kb": kb, "name": "my-deck", "intent": "explain X", "stream": False},
+        json={"kb": kb, "name": "my-deck", "intent": intent, "stream": False},
         headers=_auth(),
     )
 
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["name"] == "my-deck"
-    assert (kb_dir / "output" / "decks" / "my-deck" / "index.html").exists()
+    target = kb_dir / "output/decks/my-deck"
+    assert Path(body["path"]) == target
+    assert "17 credits" in (target / "index.html").read_text()
+    assert not validate_deck(target).errors
+    assert 2 <= len(model_service.requests) <= 6
+    assert all(request["max_tokens"] == 256 for request in model_service.requests)
 
 
 def test_deck_list_endpoint(monkeypatch, kb_dir):
@@ -2141,27 +2163,23 @@ def test_deck_download_rejects_path_traversal_name(monkeypatch, kb_dir):
     assert response.status_code in (400, 404)
 
 
-def test_skill_endpoint_non_stream_generates_artifact(monkeypatch, kb_dir):
+def test_skill_endpoint_non_stream_generates_artifact(monkeypatch, kb_dir, model_service):
+    from short_generation import assert_formatter_delivery, retained_formatter
+
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
-    (kb_dir / "wiki" / "concepts" / "a.md").write_text("# A\n\nContent.", encoding="utf-8")
-
-    async def fake_run(self):
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-        (self.output_dir / "SKILL.md").write_text("---\nname: x\n---\nbody", encoding="utf-8")
-        self.validation = None
-        return self.output_dir
-
-    monkeypatch.setattr("openkb.skill.generator.Generator.run", fake_run)
+    intent = retained_formatter(kb_dir, model_service.credentials)
 
     response = client.post(
         "/api/v1/skill",
-        json={"kb": kb, "name": "my-skill", "intent": "be an expert", "stream": False},
+        json={"kb": kb, "name": "my-skill", "intent": intent, "stream": False},
         headers=_auth(),
     )
 
-    assert response.status_code == 200
-    assert (kb_dir / "output" / "skills" / "my-skill" / "SKILL.md").exists()
+    assert response.status_code == 200, response.text
+    assert response.json()["name"] == "my-skill"
+    assert Path(response.json()["path"]) == kb_dir / "output/skills/my-skill"
+    assert_formatter_delivery(kb_dir, "my-skill", model_service)
 
 
 def test_skill_archive_endpoint_returns_zip(monkeypatch, kb_dir):
@@ -2197,8 +2215,8 @@ def test_kb_config_get_returns_fields_and_key_presence(monkeypatch, kb_dir):
 
 
 def test_kb_config_get_reports_default_source(monkeypatch, kb_dir, tmp_path):
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", tmp_path)
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
     body = client.get("/api/v1/kb/config", params={"kb": kb}, headers=_auth()).json()
@@ -2208,8 +2226,8 @@ def test_kb_config_get_reports_default_source(monkeypatch, kb_dir, tmp_path):
 
 def test_kb_config_get_reports_global_source(monkeypatch, kb_dir, tmp_path):
     gp = tmp_path / "global.yaml"
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", gp)
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", gp)
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", tmp_path)
     gp.write_text(yaml.safe_dump({"model": "global-model"}), encoding="utf-8")
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
@@ -2221,8 +2239,8 @@ def test_kb_config_get_reports_global_source(monkeypatch, kb_dir, tmp_path):
 
 def test_kb_config_get_reports_kb_source_on_override(monkeypatch, kb_dir, tmp_path):
     gp = tmp_path / "global.yaml"
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", gp)
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", gp)
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", tmp_path)
     gp.write_text(yaml.safe_dump({"model": "global-model"}), encoding="utf-8")
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
@@ -2244,7 +2262,7 @@ def test_kb_config_patch_updates_model_only(monkeypatch, kb_dir):
 
     assert response.status_code == 200
     assert response.json()["model"] == "claude-opus"
-    saved = yaml.safe_load((kb_dir / ".openkb" / "config.yaml").read_text())
+    saved = yaml.safe_load((kb_dir / ".ultrakb" / "config.yaml").read_text())
     assert saved["model"] == "claude-opus"
 
 
@@ -2263,7 +2281,7 @@ def test_kb_config_patch_sets_and_reverts_entity_types(monkeypatch, kb_dir):
     body = r.json()
     assert body["entity_types"] == ["person", "team", "other"]
     assert body["sources"]["entity_types"] == "kb"
-    saved = yaml.safe_load((kb_dir / ".openkb" / "config.yaml").read_text())
+    saved = yaml.safe_load((kb_dir / ".ultrakb" / "config.yaml").read_text())
     assert saved["entity_types"] == ["Person", "Team!"]  # raw value persisted
 
     # Revert (explicit null) -> inherit; with no global set, falls to default.
@@ -2277,9 +2295,9 @@ def test_kb_config_patch_sets_and_reverts_entity_types(monkeypatch, kb_dir):
 
 
 def test_global_config_patch_entity_types(monkeypatch, tmp_path):
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path)
-    monkeypatch.delenv("OPENKB_KB_ROOT", raising=False)
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", tmp_path)
+    monkeypatch.delenv("ULTRAKB_KB_ROOT", raising=False)
     client = _client(monkeypatch)
     r = client.patch(
         "/api/v1/config", json={"config": {"entity_types": ["Org", "Law!"]}}, headers=_auth()
@@ -2289,9 +2307,9 @@ def test_global_config_patch_entity_types(monkeypatch, tmp_path):
 
 
 def test_kb_config_get_reports_global_source_for_entity_types(monkeypatch, kb_dir, tmp_path):
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path)
-    from openkb.config import save_global_config
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", tmp_path)
+    from ultrakb.config import save_global_config
 
     save_global_config({"entity_types": ["team", "org"]})
     client = _client(monkeypatch)
@@ -2314,9 +2332,15 @@ def test_kb_config_patch_unknown_field_is_400(monkeypatch, kb_dir):
 
 
 def test_kb_config_patch_clears_api_key_on_explicit_null(monkeypatch, kb_dir):
+    # create_app loads the repository .env; this case requires no inherited key.
+    monkeypatch.setenv("LLM_API_KEY", "")
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", kb_dir / "empty-global")
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", kb_dir / "empty-global/global.yaml")
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
     (kb_dir / ".env").write_text("LLM_API_KEY=secret123\n", encoding="utf-8")
+    before = client.get("/api/v1/kb/config", params={"kb": kb}, headers=_auth())
+    assert before.status_code == 200 and before.json()["has_api_key"] is True
 
     response = client.patch("/api/v1/kb/config", json={"kb": kb, "api_key": None}, headers=_auth())
 
@@ -2381,7 +2405,7 @@ def test_kb_config_patch_coerces_numeric_string_threshold(monkeypatch, kb_dir):
     assert response.status_code == 200
 
     # The coerced NATIVE int must be what landed on disk, not the string "20".
-    saved = yaml.safe_load((kb_dir / ".openkb" / "config.yaml").read_text())
+    saved = yaml.safe_load((kb_dir / ".ultrakb" / "config.yaml").read_text())
     assert type(saved["pageindex_threshold"]) is int
     assert saved["pageindex_threshold"] == 20
 
@@ -2440,9 +2464,14 @@ def test_kb_config_patch_clears_export_prefixed_api_key(monkeypatch, kb_dir):
     so ``pop("LLM_API_KEY")`` matches; otherwise the key would survive under
     ``"export LLM_API_KEY"`` while python-dotenv (which strips ``export``) keeps
     reading it back as a live credential."""
+    monkeypatch.setenv("LLM_API_KEY", "")
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", kb_dir / "empty-global")
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", kb_dir / "empty-global/global.yaml")
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
     (kb_dir / ".env").write_text("export LLM_API_KEY=secret123\n", encoding="utf-8")
+    before = client.get("/api/v1/kb/config", params={"kb": kb}, headers=_auth())
+    assert before.status_code == 200 and before.json()["has_api_key"] is True
 
     response = client.patch("/api/v1/kb/config", json={"kb": kb, "api_key": None}, headers=_auth())
 
@@ -2456,12 +2485,12 @@ def test_kb_config_patch_clears_export_prefixed_api_key(monkeypatch, kb_dir):
 def test_kb_config_patch_null_removes_key(monkeypatch, kb_dir):
     """config: {model: null} removes the key from config.yaml (revert to
     inherited), not persist model: None."""
-    from openkb.config import DEFAULT_CONFIG, resolve_effective_config
+    from ultrakb.config import DEFAULT_CONFIG, resolve_effective_config
 
-    # Isolate from any real ~/.config/openkb/global.yaml on the host so the
+    # Isolate from any real ~/.config/ultrakb/global.yaml on the host so the
     # "falls back to default" assertion below is deterministic.
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", kb_dir / "global" / "global.yaml")
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", kb_dir / "global")
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", kb_dir / "global" / "global.yaml")
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", kb_dir / "global")
 
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
@@ -2472,7 +2501,7 @@ def test_kb_config_patch_null_removes_key(monkeypatch, kb_dir):
         "/api/v1/kb/config", json={"kb": kb, "config": {"model": None}}, headers=_auth()
     )
     assert response.status_code == 200
-    saved = yaml.safe_load((kb_dir / ".openkb" / "config.yaml").read_text())
+    saved = yaml.safe_load((kb_dir / ".ultrakb" / "config.yaml").read_text())
     assert "model" not in saved
 
     # The key must be truly gone, not merely nulled: resolve_effective_config
@@ -2496,7 +2525,7 @@ def test_kb_config_patch_field_omitted_leaves_key_unchanged(monkeypatch, kb_dir)
     )
 
     assert response.status_code == 200
-    saved = yaml.safe_load((kb_dir / ".openkb" / "config.yaml").read_text())
+    saved = yaml.safe_load((kb_dir / ".ultrakb" / "config.yaml").read_text())
     assert saved["model"] == "kb-model"
     assert saved["language"] == "en"
 
@@ -2513,19 +2542,19 @@ def test_kb_config_patch_does_not_materialize_defaults(monkeypatch, kb_dir):
     breaking global/default inheritance for fields the client never touched.
     The fix does a RAW read-modify-write of only the KB's explicit keys.
     """
-    from openkb.config import DEFAULT_CONFIG, resolve_effective_config
+    from ultrakb.config import DEFAULT_CONFIG, resolve_effective_config
 
-    # Isolate from any real ~/.config/openkb/global.yaml on the host so the
+    # Isolate from any real ~/.config/ultrakb/global.yaml on the host so the
     # "still inherits" assertions below are deterministic.
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", kb_dir / "global" / "global.yaml")
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", kb_dir / "global")
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", kb_dir / "global" / "global.yaml")
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", kb_dir / "global")
 
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
 
     # The kb_dir fixture's config.yaml is silent on model/language/threshold —
     # it only carries its own unrelated explicit keys.
-    before = yaml.safe_load((kb_dir / ".openkb" / "config.yaml").read_text())
+    before = yaml.safe_load((kb_dir / ".ultrakb" / "config.yaml").read_text())
     assert "model" not in before
     assert "language" not in before
     assert "pageindex_threshold" not in before
@@ -2535,7 +2564,7 @@ def test_kb_config_patch_does_not_materialize_defaults(monkeypatch, kb_dir):
     )
     assert response.status_code == 200
 
-    saved = yaml.safe_load((kb_dir / ".openkb" / "config.yaml").read_text())
+    saved = yaml.safe_load((kb_dir / ".ultrakb" / "config.yaml").read_text())
     # The patched key landed...
     assert saved["model"] == "claude-opus"
     # ...the KB's pre-existing explicit keys survive untouched...
@@ -2566,9 +2595,9 @@ def test_kb_config_patch_does_not_materialize_defaults(monkeypatch, kb_dir):
 
 
 def test_global_config_get_defaults_when_absent(monkeypatch, tmp_path):
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path)
-    monkeypatch.delenv("OPENKB_KB_ROOT", raising=False)
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", tmp_path)
+    monkeypatch.delenv("ULTRAKB_KB_ROOT", raising=False)
     client = _client(monkeypatch)
     body = client.get("/api/v1/config", headers=_auth()).json()
     expected = {
@@ -2592,8 +2621,8 @@ def test_global_config_get_defaults_when_absent(monkeypatch, tmp_path):
 
 def test_global_config_patch_sets_value_and_preserves_registry(monkeypatch, tmp_path):
     gp = tmp_path / "global.yaml"
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", gp)
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", gp)
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", tmp_path)
     gp.write_text(
         yaml.safe_dump({"known_kbs": ["/a"], "kb_aliases": {"x": "/a"}, "default_kb": "/a"}),
         encoding="utf-8",
@@ -2612,8 +2641,8 @@ def test_global_config_patch_sets_value_and_preserves_registry(monkeypatch, tmp_
 
 
 def test_global_config_patch_rejects_unknown_and_bad_type(monkeypatch, tmp_path):
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", tmp_path)
     client = _client(monkeypatch)
     assert (
         client.patch("/api/v1/config", json={"config": {"modle": "x"}}, headers=_auth()).status_code
@@ -2632,8 +2661,8 @@ def test_global_config_patch_rejects_registry_key(monkeypatch, tmp_path):
     # proves the endpoint cannot be used to write registry keys at all, since
     # they're rejected by the same "unknown field" 400 as a typo'd scalar.
     gp = tmp_path / "global.yaml"
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", gp)
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", gp)
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", tmp_path)
     gp.write_text(
         yaml.safe_dump({"known_kbs": ["/a"], "kb_aliases": {"x": "/a"}, "default_kb": "/a"}),
         encoding="utf-8",
@@ -2649,8 +2678,8 @@ def test_global_config_patch_rejects_registry_key(monkeypatch, tmp_path):
 
 def test_global_config_patch_null_reverts_to_default(monkeypatch, tmp_path):
     gp = tmp_path / "global.yaml"
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", gp)
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", gp)
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", tmp_path)
     gp.write_text(yaml.safe_dump({"model": "global-model"}), encoding="utf-8")
     client = _client(monkeypatch)
     response = client.patch("/api/v1/config", json={"config": {"model": None}}, headers=_auth())
@@ -2660,8 +2689,8 @@ def test_global_config_patch_null_reverts_to_default(monkeypatch, tmp_path):
 
 
 def test_global_config_requires_auth(monkeypatch, tmp_path):
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", tmp_path)
     client = _client(monkeypatch)
     assert client.get("/api/v1/config").status_code == 401
     assert client.patch("/api/v1/config", json={"config": {"model": "x"}}).status_code == 401
@@ -2673,8 +2702,8 @@ def test_global_config_requires_auth(monkeypatch, tmp_path):
 
 
 def test_global_config_get_reports_no_credentials_when_env_absent(monkeypatch, tmp_path):
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", tmp_path)
     client = _client(monkeypatch)
     body = client.get("/api/v1/config", headers=_auth()).json()
     assert body["has_api_key"] is False
@@ -2682,8 +2711,8 @@ def test_global_config_get_reports_no_credentials_when_env_absent(monkeypatch, t
 
 
 def test_global_config_get_reports_credentials_without_leaking_key(monkeypatch, tmp_path):
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", tmp_path)
     (tmp_path / ".env").write_text(
         "LLM_API_KEY=global-secret\nOPENAI_API_BASE=https://gw.example/v1\n", encoding="utf-8"
     )
@@ -2697,8 +2726,8 @@ def test_global_config_get_reports_credentials_without_leaking_key(monkeypatch, 
 
 
 def test_global_config_patch_writes_api_key_to_global_env_0600(monkeypatch, tmp_path):
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", tmp_path)
     client = _client(monkeypatch)
 
     response = client.patch("/api/v1/config", json={"api_key": "sk-global"}, headers=_auth())
@@ -2720,8 +2749,8 @@ def test_global_config_patch_writes_api_key_to_global_env_0600(monkeypatch, tmp_
 
 
 def test_global_config_patch_clears_api_key_on_explicit_null(monkeypatch, tmp_path):
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", tmp_path)
     (tmp_path / ".env").write_text("LLM_API_KEY=global-secret\n", encoding="utf-8")
     client = _client(monkeypatch)
 
@@ -2733,8 +2762,8 @@ def test_global_config_patch_clears_api_key_on_explicit_null(monkeypatch, tmp_pa
 
 
 def test_global_config_patch_roundtrips_openai_api_base(monkeypatch, tmp_path):
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", tmp_path)
     client = _client(monkeypatch)
 
     response = client.patch(
@@ -2757,8 +2786,8 @@ def test_global_config_patch_credential_rotation_preserves_env_and_registry(monk
     leaves co-existing .env entries intact, and never clobbers global.yaml's KB
     registry (the write is under the same global lock)."""
     gp = tmp_path / "global.yaml"
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", gp)
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", gp)
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", tmp_path)
     gp.write_text(yaml.safe_dump({"known_kbs": ["/a"], "model": "global-model"}), encoding="utf-8")
     (tmp_path / ".env").write_text("LLM_API_KEY=old\nPAGEINDEX_API_KEY=pk-123\n", encoding="utf-8")
     client = _client(monkeypatch)
@@ -2779,8 +2808,8 @@ def test_global_config_patch_rejects_newline_in_credential(monkeypatch, tmp_path
     """The global patch path rejects a newline/CR in a credential value (400)
     BEFORE the global lock is touched — a raw \\r\\n in openai_api_base would
     otherwise inject extra KEY=VALUE lines into the global .env. Disk untouched."""
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", tmp_path)
     (tmp_path / ".env").write_text("LLM_API_KEY=keep\n", encoding="utf-8")
     client = _client(monkeypatch)
 
@@ -2803,8 +2832,8 @@ def test_global_config_patch_rejects_newline_in_credential(monkeypatch, tmp_path
 
 
 def _make_kb(path: Path) -> None:
-    """Create the minimal shape _is_kb_dir accepts: `.openkb` + `wiki` dirs."""
-    (path / ".openkb").mkdir(parents=True)
+    """Create the minimal shape _is_kb_dir accepts: `.ultrakb` + `wiki` dirs."""
+    (path / ".ultrakb").mkdir(parents=True)
     from kb_fixtures import mark_current_kb
 
     mark_current_kb(path)
@@ -2812,10 +2841,10 @@ def _make_kb(path: Path) -> None:
 
 
 def test_global_config_get_reports_kb_root_env_pinned(monkeypatch, tmp_path):
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", tmp_path)
     root = tmp_path / "env-root"
-    monkeypatch.setenv("OPENKB_KB_ROOT", str(root))
+    monkeypatch.setenv("ULTRAKB_KB_ROOT", str(root))
     # A global.yaml kb_root is ineffective while env pins the root.
     (tmp_path / "global.yaml").write_text(
         yaml.safe_dump({"kb_root": str(tmp_path / "ignored")}), encoding="utf-8"
@@ -2827,9 +2856,9 @@ def test_global_config_get_reports_kb_root_env_pinned(monkeypatch, tmp_path):
 
 
 def test_global_config_get_reports_global_kb_root(monkeypatch, tmp_path):
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path)
-    monkeypatch.delenv("OPENKB_KB_ROOT", raising=False)
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", tmp_path)
+    monkeypatch.delenv("ULTRAKB_KB_ROOT", raising=False)
     custom = tmp_path / "custom"
     (tmp_path / "global.yaml").write_text(
         yaml.safe_dump({"kb_root": str(custom)}), encoding="utf-8"
@@ -2842,9 +2871,9 @@ def test_global_config_get_reports_global_kb_root(monkeypatch, tmp_path):
 
 def test_global_config_patch_sets_and_clears_kb_root(monkeypatch, tmp_path):
     gp = tmp_path / "global.yaml"
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", gp)
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path)
-    monkeypatch.delenv("OPENKB_KB_ROOT", raising=False)
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", gp)
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", tmp_path)
+    monkeypatch.delenv("ULTRAKB_KB_ROOT", raising=False)
     # Pre-existing registry keys must survive the kb_root write.
     gp.write_text(
         yaml.safe_dump({"known_kbs": ["/a"], "kb_aliases": {"x": "/a"}}), encoding="utf-8"
@@ -2878,9 +2907,9 @@ def test_init_endpoint_creates_kb_at_custom_absolute_path(monkeypatch, tmp_path)
     root = tmp_path / "api-kbs"
     custom = tmp_path / "elsewhere" / "my-kb"
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("OPENKB_KB_ROOT", str(root))
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path)
+    monkeypatch.setenv("ULTRAKB_KB_ROOT", str(root))
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", tmp_path)
 
     response = client.post(
         "/api/v1/init",
@@ -2891,7 +2920,7 @@ def test_init_endpoint_creates_kb_at_custom_absolute_path(monkeypatch, tmp_path)
     assert response.status_code == 200
     assert response.json()["created"] is True
     # Created at the custom path, NOT under the root.
-    assert (custom / ".openkb" / "config.yaml").is_file()
+    assert (custom / ".ultrakb" / "config.yaml").is_file()
     assert (custom / "wiki" / "AGENTS.md").is_file()
     assert not (root / "outside-kb").exists()
     # Registered under its name so it resolves by name afterwards.
@@ -2906,8 +2935,8 @@ def test_init_endpoint_creates_kb_at_custom_absolute_path(monkeypatch, tmp_path)
 def test_init_endpoint_rejects_relative_path(monkeypatch, tmp_path):
     client = _client(monkeypatch)
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", tmp_path)
 
     response = client.post(
         "/api/v1/init",
@@ -2925,12 +2954,12 @@ def test_init_endpoint_rejects_relative_path(monkeypatch, tmp_path):
 
 
 def test_kbs_discovery_unions_root_and_registered_deduped(monkeypatch, tmp_path):
-    from openkb.config import register_kb_alias
+    from ultrakb.config import register_kb_alias
 
     root = tmp_path / "root"
-    monkeypatch.setenv("OPENKB_KB_ROOT", str(root))
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path)
+    monkeypatch.setenv("ULTRAKB_KB_ROOT", str(root))
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", tmp_path)
 
     child = root / "child-kb"  # a root child
     _make_kb(child)
@@ -2954,13 +2983,13 @@ def test_kbs_discovery_unions_root_and_registered_deduped(monkeypatch, tmp_path)
 
 
 def test_kbs_discovery_skips_stale_registered_entry(monkeypatch, tmp_path):
-    from openkb.config import register_kb_alias
+    from ultrakb.config import register_kb_alias
 
     root = tmp_path / "root"
     root.mkdir()
-    monkeypatch.setenv("OPENKB_KB_ROOT", str(root))
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path)
+    monkeypatch.setenv("ULTRAKB_KB_ROOT", str(root))
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", tmp_path)
 
     live = tmp_path / "live-kb"
     _make_kb(live)
@@ -2982,9 +3011,9 @@ def test_kbs_discovery_root_child_shadows_colliding_off_root_kb(monkeypatch, tmp
     cards. Regression for the by-path-only dedupe that let a basename collision
     duplicate the name."""
     root = tmp_path / "root"
-    monkeypatch.setenv("OPENKB_KB_ROOT", str(root))
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path)
+    monkeypatch.setenv("ULTRAKB_KB_ROOT", str(root))
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", tmp_path)
 
     root_notes = root / "notes"
     _make_kb(root_notes)
@@ -3036,8 +3065,8 @@ def test_global_config_patch_rejects_splitlines_separator_in_credential(monkeypa
     """The global patch path also rejects a non-CR/LF ``splitlines`` separator
     (here a file-separator ``\\x1c``) in a credential value — same parser, same
     guard. The global ``.env`` is untouched."""
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", tmp_path)
     (tmp_path / ".env").write_text("LLM_API_KEY=keep\n", encoding="utf-8")
     client = _client(monkeypatch)
 
@@ -3061,9 +3090,9 @@ def test_global_config_endpoints_degrade_on_non_mapping_yaml(monkeypatch, tmp_pa
     """A hand-corrupted global.yaml that parses to a bare list must not 500 the
     config endpoints: GET reports defaults and PATCH stays operable (the loader
     coerces the non-mapping to ``{}``)."""
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path)
-    monkeypatch.delenv("OPENKB_KB_ROOT", raising=False)
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", tmp_path)
+    monkeypatch.delenv("ULTRAKB_KB_ROOT", raising=False)
     (tmp_path / "global.yaml").write_text("- just\n- a\n- list\n", encoding="utf-8")
     client = _client(monkeypatch)
 
@@ -3085,9 +3114,9 @@ def test_global_config_patch_rejects_relative_kb_root(monkeypatch, tmp_path):
     """A relative kb_root is a 400 (mirrors ``/init``'s absolute-path guard); an
     absolute path is accepted and an explicit null clears it back to default."""
     gp = tmp_path / "global.yaml"
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", gp)
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path)
-    monkeypatch.delenv("OPENKB_KB_ROOT", raising=False)
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", gp)
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", tmp_path)
+    monkeypatch.delenv("ULTRAKB_KB_ROOT", raising=False)
     client = _client(monkeypatch)
 
     rel = client.patch("/api/v1/config", json={"kb_root": "kbs"}, headers=_auth())
@@ -3116,9 +3145,9 @@ def test_kbs_listing_survives_dangling_summary_symlink(monkeypatch, tmp_path):
     500 the whole listing: that KB still lists (``last_compile`` None) and the
     other KBs are unaffected."""
     root = tmp_path / "root"
-    monkeypatch.setenv("OPENKB_KB_ROOT", str(root))
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", tmp_path)
+    monkeypatch.setenv("ULTRAKB_KB_ROOT", str(root))
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", tmp_path)
 
     bad = root / "bad-kb"
     _make_kb(bad)
@@ -3148,13 +3177,13 @@ def _isolate_global(monkeypatch, tmp_path: Path) -> Path:
     physically deleting a KB never removes the test's own global.yaml."""
     gdir = tmp_path / "gconf"
     gdir.mkdir()
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", gdir)
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", gdir / "global.yaml")
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", gdir)
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", gdir / "global.yaml")
     return gdir
 
 
 def _make_kb(root: Path) -> Path:
-    (root / ".openkb").mkdir(parents=True)
+    (root / ".ultrakb").mkdir(parents=True)
     from kb_fixtures import mark_current_kb
 
     mark_current_kb(root)
@@ -3163,7 +3192,7 @@ def _make_kb(root: Path) -> Path:
 
 
 def test_delete_kb_removes_dir_and_unregisters(monkeypatch, tmp_path):
-    from openkb.config import register_kb_alias, registered_kbs
+    from ultrakb.config import register_kb_alias, registered_kbs
 
     _isolate_global(monkeypatch, tmp_path)
     kb = _make_kb(tmp_path / "mykb")
@@ -3198,11 +3227,11 @@ def test_delete_kb_rejects_non_kb_target(monkeypatch, tmp_path):
     # A registered name pointing at a real dir that is NOT a KB: it passes the
     # endpoint's "registered" gate, but delete_kb refuses to rmtree a non-KB
     # directory -> 400 (never deletes an arbitrary path).
-    from openkb.config import register_kb_alias
+    from ultrakb.config import register_kb_alias
 
     _isolate_global(monkeypatch, tmp_path)
     plain = tmp_path / "plain"
-    plain.mkdir()  # a real directory, but not a KB (no .openkb/wiki)
+    plain.mkdir()  # a real directory, but not a KB (no .ultrakb/wiki)
     register_kb_alias("ghost-kb", plain)
     client = _client(monkeypatch)
     resp = client.post(
@@ -3386,7 +3415,7 @@ def test_edit_page_keeps_body_starting_with_dashes(monkeypatch, kb_dir):
 def test_delete_kb_ghost_entry_unregisters_via_endpoint(monkeypatch, tmp_path):
     # A registered name whose directory was removed by hand (a ghost) must be
     # cleanable via the endpoint (config.delete_kb tolerates it).
-    from openkb.config import register_kb_alias, registered_kbs
+    from ultrakb.config import register_kb_alias, registered_kbs
 
     _isolate_global(monkeypatch, tmp_path)
     ghost = tmp_path / "ghost-kb"  # registered but never created on disk
@@ -3432,7 +3461,7 @@ def test_summary_page_is_editable_but_not_deletable(monkeypatch, kb_dir):
 def test_delete_kb_maps_oserror_to_clean_500(monkeypatch, tmp_path):
     # An rmtree failure (permission/disk, or a still-open lock file on Windows)
     # surfaces as a clean 500 with a message, not an uncaught stack trace.
-    from openkb.config import register_kb_alias
+    from ultrakb.config import register_kb_alias
 
     _isolate_global(monkeypatch, tmp_path)
     kb = _make_kb(tmp_path / "mykb")
@@ -3441,7 +3470,7 @@ def test_delete_kb_maps_oserror_to_clean_500(monkeypatch, tmp_path):
     def boom(_):
         raise OSError("disk on fire")
 
-    monkeypatch.setattr("openkb.api_kbs_router.delete_kb", boom)
+    monkeypatch.setattr("ultrakb.api_kbs_router.delete_kb", boom)
     client = _client(monkeypatch)
     r = client.post(
         "/api/v1/kb/delete", json={"kb": "boom-kb", "confirm_name": "boom-kb"}, headers=_auth()
@@ -3453,7 +3482,7 @@ def test_delete_kb_maps_oserror_to_clean_500(monkeypatch, tmp_path):
 def test_delete_kb_filenotfound_is_idempotent(monkeypatch, tmp_path):
     # A concurrent delete that already removed the tree (FileNotFoundError) is a
     # success, not a 500 — deleting an already-gone KB is idempotent.
-    from openkb.config import register_kb_alias
+    from ultrakb.config import register_kb_alias
 
     _isolate_global(monkeypatch, tmp_path)
     kb = _make_kb(tmp_path / "mykb")
@@ -3462,7 +3491,7 @@ def test_delete_kb_filenotfound_is_idempotent(monkeypatch, tmp_path):
     def already_gone(_):
         raise FileNotFoundError()
 
-    monkeypatch.setattr("openkb.api_kbs_router.delete_kb", already_gone)
+    monkeypatch.setattr("ultrakb.api_kbs_router.delete_kb", already_gone)
     client = _client(monkeypatch)
     r = client.post(
         "/api/v1/kb/delete", json={"kb": "gone-kb", "confirm_name": "gone-kb"}, headers=_auth()
@@ -3487,8 +3516,8 @@ def test_inventory_requests_wait_without_blocking_active_async_writer(kb_dir):
         import sys
         from pathlib import Path
         import httpx
-        from openkb.api import create_app
-        from openkb.locks import async_kb_lock
+        from ultrakb.api import create_app
+        from ultrakb.locks import async_kb_lock
 
         async def main():
             kb = Path(sys.argv[1])
@@ -3497,7 +3526,7 @@ def test_inventory_requests_wait_without_blocking_active_async_writer(kb_dir):
                 transport=httpx.ASGITransport(app=app), base_url="http://local"
             ) as client:
                 requests = []
-                async with async_kb_lock(kb / ".openkb", exclusive=True):
+                async with async_kb_lock(kb / ".ultrakb", exclusive=True):
                     for endpoint in ("list", "status"):
                         requests.append(asyncio.create_task(client.post(
                             f"/api/v1/{endpoint}", json={"kb": kb.name}
@@ -3511,7 +3540,7 @@ def test_inventory_requests_wait_without_blocking_active_async_writer(kb_dir):
 
         asyncio.run(main())
     """)
-    env = dict(os.environ, OPENKB_API_TOKEN="", OPENKB_KB_ROOT=str(kb_dir.parent))
+    env = dict(os.environ, ULTRAKB_API_TOKEN="", ULTRAKB_KB_ROOT=str(kb_dir.parent))
     subprocess.run(
         [sys.executable, "-c", probe, str(kb_dir)],
         env=env,

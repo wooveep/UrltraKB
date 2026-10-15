@@ -1,0 +1,51 @@
+"""Actual Qt watch controls and spawned document tasks against the HTTP fixture."""
+
+
+def verify_watch(window, kb, wait_until, *, model=False):
+    from ultrakb.desktop.watch import WatchDialog
+    from ultrakb.locks import atomic_write_text, kb_ingest_lock
+
+    # Every raw Markdown source now goes through common source admission, even
+    # when a legacy content hash exists. Only the controlled-model run may add
+    # a document; the model-free smoke check exercises idle scan/stop controls.
+    if model:
+        source = kb / "raw/监听启动.md"
+        with kb_ingest_lock(kb / ".ultrakb"):
+            atomic_write_text(source, "# 监听启动\n\n这份稳定资料来自启动补查。")
+    before = {task.id for task in window.manager.tasks()}
+    window.open_knowledge_base(kb)
+    wait_until(lambda: window.kb == kb and not window.io._callbacks)
+    window._watch()
+    dialog = next(p for p in window.findChildren(WatchDialog) if p.isVisible())
+    try:
+        dialog.start_button.click()
+        watch = window.watch_registry.start(kb / ".")
+        assert len(window.watch_registry.watches()) == 1
+        wait_until(lambda: watch.view().scans > 0 and watch.view().pending == 0)
+        if model:
+            wait_until(lambda: watch.view().submitted == 1 and watch.view().active == 0)
+            first = next(task for task in window.manager.tasks() if task.id not in before)
+            assert first.succeeded == 1 and first.results[0].revision, first
+            nested = kb / "raw/中文 空格"
+            nested.mkdir()
+            temporary = nested / ".pending"
+            temporary.write_text("# 原子保存\n\n另一份完整资料。", encoding="utf-8")
+            temporary.rename(nested / "原子保存.md")
+            wait_until(lambda: watch.view().submitted == 2 and watch.view().active == 0)
+            tasks = [task for task in window.manager.tasks() if task.id not in before]
+            assert len(tasks) == 2 and all(task.succeeded == 1 for task in tasks), tasks
+        else:
+            assert watch.view().submitted == 0
+        dialog.refresh()
+        dialog.grab().save(str(kb.parent / "native-watch.png"))
+        dialog.table.selectRow(0)
+        dialog.stop_button.click()
+        wait_until(lambda: watch.join(0))
+        assert watch.view().state == "stopped"
+        count = len(window.manager.tasks())
+        (kb / "raw/停止之后.md").write_text("No late task", encoding="utf-8")
+        assert len(window.manager.tasks()) == count
+    finally:
+        dialog.reject()
+        window.watch_registry.stop_all(close=False)
+        wait_until(window.watch_registry.stopped)

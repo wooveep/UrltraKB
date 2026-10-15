@@ -1,4 +1,4 @@
-"""Tests for openkb.skill.marketplace — regenerate <kb>/.claude-plugin/marketplace.json
+"""Tests for ultrakb.skill.marketplace — regenerate <kb>/.claude-plugin/marketplace.json
 from <kb>/output/skills/*/SKILL.md."""
 
 from __future__ import annotations
@@ -6,12 +6,12 @@ from __future__ import annotations
 import json
 import textwrap
 
-from openkb.skill.marketplace import regenerate_marketplace
+from ultrakb.skill.marketplace import regenerate_marketplace
 
 
 def _make_kb(tmp_path):
-    (tmp_path / ".openkb").mkdir()
-    (tmp_path / ".openkb" / "config.yaml").write_text("model: gpt-4o-mini\n")
+    (tmp_path / ".ultrakb").mkdir()
+    (tmp_path / ".ultrakb" / "config.yaml").write_text("model: gpt-4o-mini\n")
     (tmp_path / "output" / "skills").mkdir(parents=True)
     return tmp_path
 
@@ -157,15 +157,15 @@ def test_regenerate_falls_back_when_no_git_config(tmp_path, monkeypatch):
     regenerate_marketplace(kb)
 
     manifest = json.loads((kb / ".claude-plugin" / "marketplace.json").read_text())
-    assert manifest["owner"]["name"] == "openkb-user"
+    assert manifest["owner"]["name"] == "ultrakb-user"
     # email is optional when missing
     assert "email" not in manifest["owner"] or manifest["owner"]["email"] == ""
 
 
-def test_regenerate_uses_openkb_at_vectify_convention(tmp_path):
-    """All OpenKB-generated marketplaces must self-identify as 'vectify'
-    (top level) with a plugin named 'openkb', so users install via the
-    canonical `openkb@vectify` regardless of which KB they're consuming.
+def test_regenerate_uses_ultrakb_at_vectify_convention(tmp_path):
+    """All UltraKB-generated marketplaces must self-identify as 'vectify'
+    (top level) with a plugin named 'ultrakb', so users install via the
+    canonical `ultrakb@vectify` regardless of which KB they're consuming.
     Different KBs are distinguished by <owner>/<repo> URL, not manifest name."""
     kb = _make_kb(tmp_path)
     _make_skill(kb, "demo", "d")
@@ -173,7 +173,7 @@ def test_regenerate_uses_openkb_at_vectify_convention(tmp_path):
 
     manifest = json.loads((kb / ".claude-plugin" / "marketplace.json").read_text())
     assert manifest["name"] == "vectify"
-    assert manifest["plugins"][0]["name"] == "openkb"
+    assert manifest["plugins"][0]["name"] == "ultrakb"
 
 
 def test_regenerate_description_is_not_truncated(tmp_path):
@@ -189,4 +189,4 @@ def test_regenerate_description_is_not_truncated(tmp_path):
     # Must not end with a truncated word (no trailing space-letter-letter etc.)
     desc = manifest["metadata"]["description"]
     assert not desc.endswith(" ")
-    assert desc.endswith(".") or desc.endswith("OpenKB.")
+    assert desc.endswith(".") or desc.endswith("UltraKB.")

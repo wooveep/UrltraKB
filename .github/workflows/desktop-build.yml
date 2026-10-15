@@ -15,7 +15,7 @@ on:
       - '.github/workflows/desktop-build.yml'
       - 'scripts/**'
       - 'packaging/**'
-      - 'openkb/**'
+      - 'ultrakb/**'
       - 'assets/fonts/**'
       - 'skills/**'
       - 'vendor/**'
@@ -48,7 +48,7 @@ jobs:
           targets = [
               {"runner": "ubuntu-24.04", "arch": "amd64", "target": "debian-amd64"},
               {"runner": "ubuntu-24.04-arm", "arch": "arm64", "target": "debian-arm64"},
-              {"runner": "windows-2025", "target": "windows-x64", "build-dir": "C:/urltrakb-build"},
+              {"runner": "windows-2025", "target": "windows-x64", "build-dir": "C:/ultrakb-build"},
               {"runner": "macos-15", "target": "macos-arm64", "build-dir": "build/packages"},
           ]
           requested = os.environ["REQUESTED_TARGET"]
@@ -77,10 +77,10 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Build native Debian environment
-        run: docker build -f packaging/desktop/Dockerfile -t urltrakb-builder .
+        run: docker build -f packaging/desktop/Dockerfile -t ultrakb-builder .
       - name: Freeze, inventory and package
         run: |
-          docker run --rm -v "$PWD:/workspace" urltrakb-builder bash -euc '
+          docker run --rm -v "$PWD:/workspace" ultrakb-builder bash -euc '
             git config --global --add safe.directory /workspace
             python3 scripts/make_packages.py desktop
             python3 scripts/make_packages.py bundle
@@ -93,16 +93,16 @@ jobs:
             bash -euc '
               apt-get update
               apt-get install -y --no-install-recommends /artifacts/*/*.deb
-              urltrakb-cli --help
-              QT_QPA_PLATFORM=offscreen /opt/urltrakb/UrltraKBVerify --output /evidence/result
-              apt-get remove -y urltrakb
-              test ! -e /opt/urltrakb/UrltraKB
-              test ! -e /usr/bin/urltrakb
+              ultrakb-cli --help
+              QT_QPA_PLATFORM=offscreen /opt/ultrakb/UltraKBVerify --output /evidence/result
+              apt-get remove -y ultrakb
+              test ! -e /opt/ultrakb/UltraKB
+              test ! -e /usr/bin/ultrakb
             '
       - name: Upload Debian package and source
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: UrltraKB-debian-${{ matrix.arch }}
+          name: UltraKB-debian-${{ matrix.arch }}
           path: dist/
           if-no-files-found: error
           compression-level: 0
@@ -168,7 +168,7 @@ jobs:
       - name: Upload application and source
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: UrltraKB-${{ matrix.target }}
+          name: UltraKB-${{ matrix.target }}
           path: dist/
           if-no-files-found: error
           compression-level: 0
@@ -204,7 +204,7 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          pattern: UrltraKB-*
+          pattern: UltraKB-*
           path: release-downloads
       - name: Verify versions, source commits and checksums
         env:
@@ -220,7 +220,7 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
           if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release create "$RELEASE_TAG" --verify-tag --title "UrltraKB $RELEASE_TAG" \
+            gh release create "$RELEASE_TAG" --verify-tag --title "UltraKB $RELEASE_TAG" \
               --notes-file packaging/desktop/RELEASE_NOTES.md --draft
           fi
           gh release upload "$RELEASE_TAG" release-assets/* --clobber

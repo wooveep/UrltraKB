@@ -7,15 +7,14 @@ from pathlib import Path
 import olefile
 import pytest
 
-pytest_plugins = ("pending_fixtures",)
+pytest_plugins = ("pending_fixtures", "processing_fixtures")
 FIXTURES = Path(__file__).parent / "fixtures/office"
 
 
 def test_corrupt_xls_native_package_is_not_reported_as_missing_rebuilder(
-    kb_dir, tmp_path, pdf_model
+    kb_dir, tmp_path, pdf_model, processing_only, processing_context
 ):
-    from openkb.application.documents import import_document
-    from openkb.application.pending import process_pending
+    from ultrakb.application.pending import process_pending
 
     host = tmp_path / "bad-package.xls"
     shutil.copyfile(FIXTURES / "package-text.xls", host)
@@ -23,8 +22,9 @@ def test_corrupt_xls_native_package_is_not_reported_as_missing_rebuilder(
         path = ["MBD0009CF7B", "\x01Ole10Native"]
         value = compound.openstream(path).read()
         compound.write_stream(path, b"\xff" * 4 + value[4:])
-    import_document(kb_dir, host)
-    result = process_pending(kb_dir)
+    processing_only(host)
+    result = process_pending(kb_dir, context=processing_context)
+    assert processing_context.executor.calls == 0
     assert [item["outcome"] for item in result["checkpoints"]] == ["corrupt_object"]
     assert result["groups"][0]["sources"] == 1
 
@@ -37,21 +37,29 @@ def test_corrupt_xls_native_package_is_not_reported_as_missing_rebuilder(
     ],
 )
 def test_orphan_and_historical_complete_files_survive_container_removal(
-    kb_dir, tmp_path, pdf_model, office_runtime, prepared_cfb_helper, fixture, extensions
+    kb_dir,
+    tmp_path,
+    pdf_model,
+    office_runtime,
+    prepared_cfb_helper,
+    fixture,
+    extensions,
+    processing_only,
+    processing_context,
 ):
-    from openkb.application.documents import import_document
-    from openkb.application.pending import process_pending
-    from openkb.application.removal import remove_document
-    from openkb.application.sources import source_inventory
-    from openkb.documents import read_document_source
-    from openkb.source_catalog import list_sources
+    from ultrakb.application.pending import process_pending
+    from ultrakb.application.removal import remove_document
+    from ultrakb.application.sources import source_inventory
+    from ultrakb.documents import read_document_source
+    from ultrakb.source_catalog import list_sources
 
     original = tmp_path / fixture
     shutil.copyfile(FIXTURES / fixture, original)
-    parent = import_document(kb_dir, original)
+    parent = processing_only(original)
     remove_document(kb_dir, parent.source_id)
     original.unlink()
-    result = process_pending(kb_dir)
+    result = process_pending(kb_dir, context=processing_context)
+    assert processing_context.executor.calls == 0
     children = [s for s in list_sources(kb_dir) if s.source_id != parent.source_id]
     assert {s.name.rsplit(".", 1)[-1] for s in children} == extensions, result
     units = {item["source_id"]: item["units"] for item in source_inventory(kb_dir)}
@@ -65,12 +73,16 @@ def test_orphan_and_historical_complete_files_survive_container_removal(
         assert "private_object" in {c["outcome"] for c in result["checkpoints"]}
 
 
-def test_compressed_ppt_waits_for_shared_budget_then_resumes_once(kb_dir, pdf_model):
-    from openkb.application.documents import import_document
-    from openkb.application.pending import process_pending, update_execution_budget
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
-    from openkb.source_catalog import list_sources
+def test_compressed_ppt_waits_for_shared_budget_then_resumes_once(
+    kb_dir, pdf_model, processing_context
+):
+    from processing_fixtures import publish_processed_text
+
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.pending import process_pending, update_execution_budget
+    from ultrakb.application.settings import apply_kb_config_patch
+    from ultrakb.application.settings_data import KbConfigPatchRequest
+    from ultrakb.source_catalog import list_sources
 
     apply_kb_config_patch(
         kb_dir,
@@ -82,22 +94,28 @@ def test_compressed_ppt_waits_for_shared_budget_then_resumes_once(kb_dir, pdf_mo
     # Body conversion is unavailable, but original admission still commits discovery.
     parent = import_document(kb_dir, FIXTURES / "package-text.ppt")
     assert parent.status == "failed"
-    from openkb.application.pending import pending_status
+    from ultrakb.application.pending import pending_status
 
     group = pending_status(kb_dir)["groups"][0]["root_import_id"]
     update_execution_budget(kb_dir, group, {"max_decompressed_bytes": 39000})
-    waiting = process_pending(kb_dir)
+    waiting = process_pending(kb_dir, context=processing_context)
     assert waiting["jobs"][0]["status"] == "budget_wait"
     assert waiting["checkpoints"] == [] and waiting["groups"][0]["sources"] == 1
-    assert process_pending(kb_dir)["processed"] == 0
+    assert process_pending(kb_dir, context=processing_context)["processed"] == 0
     update_execution_budget(kb_dir, group, {"max_decompressed_bytes": 1000000})
-    result = process_pending(kb_dir)
+    result = process_pending(kb_dir, context=processing_context)
+    child = next(item for item in list_sources(kb_dir) if item.source_id != parent.source_id)
+    publish_processed_text(kb_dir, child.source_id)
+    result = process_pending(kb_dir, context=processing_context)
     assert result["imports_pending"] == 0 and len(list_sources(kb_dir)) == 2
+    assert result["processed"] == 0
+    assert processing_context.executor.calls == 0
 
 
-def test_corrupt_ppt_compression_keeps_a_diagnostic_without_an_import(kb_dir, tmp_path, pdf_model):
-    from openkb.application.documents import import_document
-    from openkb.application.pending import process_pending
+def test_corrupt_ppt_compression_keeps_a_diagnostic_without_an_import(
+    kb_dir, tmp_path, pdf_model, processing_only, processing_context
+):
+    from ultrakb.application.pending import process_pending
 
     host = tmp_path / "corrupt.ppt"
     shutil.copyfile(FIXTURES / "package-text.ppt", host)
@@ -107,19 +125,22 @@ def test_corrupt_ppt_compression_keeps_a_diagnostic_without_an_import(kb_dir, tm
         assert struct.unpack_from("<HHI", data, 37067) == (16, 0x1011, 497)
         data[37067 + 8 + 496] ^= 1
         compound.write_stream("PowerPoint Document", bytes(data))
-    import_document(kb_dir, host)
-    result = process_pending(kb_dir)
+    processing_only(host)
+    result = process_pending(kb_dir, context=processing_context)
+    assert processing_context.executor.calls == 0
     assert [c["outcome"] for c in result["checkpoints"]] == ["corrupt_object"]
     assert result["groups"][0]["sources"] == 1
 
 
 @pytest.mark.parametrize("host", ["xls", "ppt"])
-def test_non_file_objects_have_specific_diagnostics(kb_dir, pdf_model, host):
-    from openkb.application.documents import import_document
-    from openkb.application.pending import process_pending
+def test_non_file_objects_have_specific_diagnostics(
+    kb_dir, pdf_model, host, processing_only, processing_context
+):
+    from ultrakb.application.pending import process_pending
 
-    import_document(kb_dir, FIXTURES / ("object-diagnostics." + host))
-    result = process_pending(kb_dir)
+    processing_only(FIXTURES / ("object-diagnostics." + host))
+    result = process_pending(kb_dir, context=processing_context)
+    assert processing_context.executor.calls == 0
     outcomes = {c["outcome"] for c in result["checkpoints"]}
     assert {"external_reference", "preview", "private_object"} <= outcomes
     assert result["groups"][0]["sources"] == (2 if host == "ppt" else 1)
@@ -127,31 +148,37 @@ def test_non_file_objects_have_specific_diagnostics(kb_dir, pdf_model, host):
 
 @pytest.mark.parametrize("corrupt_policy", [False, True])
 def test_legacy_discovery_keeps_recursive_host_coverage(
-    kb_dir, pdf_model, office_runtime, prepared_cfb_helper, corrupt_policy
+    kb_dir,
+    pdf_model,
+    office_runtime,
+    prepared_cfb_helper,
+    corrupt_policy,
+    processing_only,
+    processing_context,
 ):
     import json
 
-    from openkb.application.documents import import_document
-    from openkb.application.pending import pending_status, process_pending
-    from openkb.documents import read_document_source
-    from openkb.source_catalog import list_sources
+    from ultrakb.application.pending import pending_status, process_pending
+    from ultrakb.documents import read_document_source
+    from ultrakb.source_catalog import list_sources
 
-    parent = import_document(kb_dir, FIXTURES / "legacy-nested-xls.doc")
+    parent = processing_only(FIXTURES / "legacy-nested-xls.doc")
     job = pending_status(kb_dir)["jobs"][0]
-    path = kb_dir / ".openkb/catalog/discovery-intents" / (job["id"] + ".json")
+    path = kb_dir / ".ultrakb/catalog/discovery-intents" / (job["id"] + ".json")
     saved = json.loads(path.read_text())
     saved["policy"] = "office-embedded-files-v2"
     path.write_text(json.dumps(saved))  # Persisted state from the previous release.
-    process_pending(kb_dir, max_jobs=1)
+    process_pending(kb_dir, max_jobs=1, context=processing_context)
     if corrupt_policy:
         child = next(
             j for j in pending_status(kb_dir)["jobs"] if j.get("filename", "").endswith(".xls")
         )
-        checkpoint = kb_dir / ".openkb/catalog/discovery-checkpoints" / (child["id"] + ".json")
+        checkpoint = kb_dir / ".ultrakb/catalog/discovery-checkpoints" / (child["id"] + ".json")
         altered = json.loads(checkpoint.read_text())
         altered["policy"] = "office-embedded-files-v3"
         checkpoint.write_text(json.dumps(altered))
-    result = process_pending(kb_dir)
+    result = process_pending(kb_dir, context=processing_context)
+    assert processing_context.executor.calls == 0
     children = [s for s in list_sources(kb_dir) if s.source_id != parent.source_id]
     docs = [s for s in children if s.name.endswith(".doc")]
     assert len(docs) == 1 and result["groups"][0]["sources"] == 3, result

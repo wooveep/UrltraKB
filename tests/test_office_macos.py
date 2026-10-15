@@ -11,34 +11,34 @@ pytest_plugins = ("test_office_import",)
 def test_frozen_application_finds_office_after_bundle_relocation(
     kb_dir, tmp_path, monkeypatch, layout
 ):
-    from openkb.office.runtime import runtime_path
+    from ultrakb.office.runtime import runtime_path
 
     install = tmp_path / "installation"
     if layout == "app":
-        executable = install / "UrltraKB.app/Contents/MacOS/UrltraKB"
+        executable = install / "UltraKB.app/Contents/MacOS/UltraKB"
         internal = executable.parent.parent / "Frameworks"
         office = executable.parent.parent / "Resources/office"
         internal.mkdir(parents=True)
         office.mkdir(parents=True)
         (internal / "office").symlink_to("../Resources/office", target_is_directory=True)
     else:
-        executable = install / "UrltraKB"
+        executable = install / "UltraKB"
         internal = install / "_internal"
         office = internal / "office"
         office.mkdir(parents=True)
-    (office / "openkb-office.json").write_text("runtime inventory")
+    (office / "ultrakb-office.json").write_text("runtime inventory")
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     monkeypatch.setattr(sys, "_MEIPASS", str(internal), raising=False)
     monkeypatch.setattr(sys, "executable", str(executable))
 
-    assert (runtime_path(kb_dir) / "openkb-office.json").read_text() == "runtime inventory"
+    assert (runtime_path(kb_dir) / "ultrakb-office.json").read_text() == "runtime inventory"
 
 
 def test_private_runtime_converts_word_and_powerpoint(
     kb_dir, office_runtime, tmp_path, monkeypatch
 ):
-    from openkb.desktop.verification_runtimes import verify_office_conversions
-    from openkb.office import convert
+    from ultrakb.desktop.verification_runtimes import verify_office_conversions
+    from ultrakb.office import convert
 
     run = convert.run_supervised
 
@@ -55,7 +55,7 @@ def test_private_runtime_converts_word_and_powerpoint(
 
 
 def test_office_accepts_apple_silicon_host(monkeypatch):
-    from openkb.office import probe
+    from ultrakb.office import probe
 
     monkeypatch.setattr(probe.sys, "platform", "darwin")
     monkeypatch.setattr(probe.platform, "machine", lambda: "arm64")
@@ -65,7 +65,7 @@ def test_office_accepts_apple_silicon_host(monkeypatch):
 
 
 def test_office_rejects_unshipped_intel_mac_runtime(monkeypatch):
-    from openkb.office import probe
+    from ultrakb.office import probe
 
     monkeypatch.setattr(probe.sys, "platform", "darwin")
     monkeypatch.setattr(probe.platform, "machine", lambda: "x86_64")

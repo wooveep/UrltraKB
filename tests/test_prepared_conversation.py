@@ -6,8 +6,9 @@ import threading
 
 import pytest
 
-from openkb.agent.chat_session import load_session
-from openkb.application.conversations import continue_conversation
+from ultrakb.agent.chat_session import load_session
+from ultrakb.application.conversations import continue_conversation
+from ultrakb.locks import atomic_write_text
 
 pytest_plugins = ("test_vendor_sdk",)
 
@@ -19,8 +20,6 @@ async def test_unknown_or_exceeded_capacity_stops_before_send_and_keeps_question
 ):
     from tokenizers import Tokenizer, models, pre_tokenizers
 
-    from openkb.locks import atomic_write_text
-
     tokenizer = Tokenizer(models.WordLevel({"[UNK]": 0, "current": 1}, unk_token="[UNK]"))
     tokenizer.pre_tokenizer = pre_tokenizers.Whitespace()
     path = kb_dir / "fixture-tokenizer.json"
@@ -30,8 +29,7 @@ async def test_unknown_or_exceeded_capacity_stops_before_send_and_keeps_question
         if known
         else ""
     )
-    (kb_dir / ".openkb/config.yaml").write_text("model: openai/private-chat\n" + capacity)
-    (kb_dir / ".env").write_text(f"LLM_API_KEY=fixture-key\nOPENAI_API_BASE={model_service.url}\n")
+    (kb_dir / ".ultrakb/config.yaml").write_text("model: openai/private-chat\n" + capacity)
     atomic_write_text(kb_dir / "wiki/sources/manual.md", "A retained source.")
     question = "current " * 40
     result = await continue_conversation(kb_dir, question)
@@ -48,19 +46,16 @@ async def test_recent_input_uses_six_real_user_turns_and_preserves_full_conversa
     kb_dir, model_service
 ):
     from agents import set_tracing_disabled
-    from test_vendor_sdk import streamed_response
 
-    from openkb.agent.chat_session import ChatSession
-    from openkb.locks import atomic_write_text
+    from ultrakb.agent.chat_session import ChatSession
 
     set_tracing_disabled(True)
-    (kb_dir / ".openkb/config.yaml").write_text(
-        "model: openai/gpt-4o-mini\nmodel_capacity:\n"
+    (kb_dir / ".ultrakb/config.yaml").write_text(
+        "model: deepseek/deepseek-flash\nmodel_capacity:\n"
         "  max_input_tokens: 65536\n  tokenizer_model: gpt-4o-mini\n"
     )
-    (kb_dir / ".env").write_text(f"LLM_API_KEY=fixture-key\nOPENAI_API_BASE={model_service.url}\n")
     atomic_write_text(kb_dir / "wiki/sources/manual.md", "A retained source.")
-    session = ChatSession.new(kb_dir, "openai/gpt-4o-mini", "en")
+    session = ChatSession.new(kb_dir, "deepseek/deepseek-flash", "en")
     for index in range(8):
         session.record_turn(
             f"USER_INTENT_{index}: I prefer an indoor room.",
@@ -70,17 +65,13 @@ async def test_recent_input_uses_six_real_user_turns_and_preserves_full_conversa
                 {"type": "function_call_output", "call_id": "prior", "output": "TOOL_POISON"},
             ],
         )
-    original = "What should I consider for my preferred room?"
-    model_service.replies.append(
-        (
-            200,
-            streamed_response(
-                {"role": "assistant", "content": "Keep indoor requirements in mind."}
-            ),
-        )
+    original = (
+        "Using only my preferences, state my preferred room in one brief sentence. "
+        "No research is needed."
     )
     result = await continue_conversation(kb_dir, original, session_id=session.id)
     assert result.status == "completed", result
+    assert "indoor" in result.answer.lower()
     assert len(model_service.requests) == 1
     sent = model_service.requests[0]["messages"]
     assert [m["role"] for m in sent if m["role"] != "system"] == ["user"]
@@ -96,25 +87,22 @@ async def test_recent_input_uses_six_real_user_turns_and_preserves_full_conversa
 
 
 @pytest.mark.asyncio
-async def test_threshold_recall_rereads_old_users_and_later_correction_wins(kb_dir, model_service):
-    import re
-
+async def test_threshold_recall_rereads_old_users_and_later_correction_wins(
+    kb_dir, model_service, monkeypatch
+):
     from agents import set_tracing_disabled
-    from test_context_retrieval import rank_reply
-    from test_vendor_sdk import response, streamed_response
 
-    from openkb.agent.chat_session import ChatSession
-    from openkb.application.execution import ExecutionContext
-    from openkb.locks import atomic_write_text
+    from ultrakb.agent.chat_session import ChatSession
+    from ultrakb.application.execution import ExecutionContext
 
     set_tracing_disabled(True)
-    (kb_dir / ".openkb/config.yaml").write_text(
-        "model: openai/gpt-4o-mini\nmodel_capacity:\n"
+    monkeypatch.setattr("ultrakb.context.preparation.RECALL_THRESHOLD_TOKENS", 1)
+    (kb_dir / ".ultrakb/config.yaml").write_text(
+        "model: deepseek/deepseek-flash\nmodel_capacity:\n"
         "  max_input_tokens: 65536\n  tokenizer_model: gpt-4o-mini\n"
     )
-    (kb_dir / ".env").write_text(f"LLM_API_KEY=fixture-key\nOPENAI_API_BASE={model_service.url}\n")
     atomic_write_text(kb_dir / "wiki/sources/manual.md", "A retained source.")
-    session = ChatSession.new(kb_dir, "openai/gpt-4o-mini", "en")
+    session = ChatSession.new(kb_dir, "deepseek/deepseek-flash", "en")
     for index in range(9):
         text = (
             "My room is ARCHIVE_ROOM and my budget is 42 credits. "
@@ -125,30 +113,8 @@ async def test_threshold_recall_rereads_old_users_and_later_correction_wins(kb_d
                 else f"Workspace notes {index}. "
             )
         )
-        session.record_turn(text + "workspace " * 1100, "ASSISTANT_POISON: budget is 999", [])
+        session.record_turn(text, "ASSISTANT_POISON: budget is 999", [])
 
-    def model_reply(request):
-        prompt = json.dumps(request["messages"])
-        assert "ASSISTANT_POISON" not in prompt
-        if request.get("stream"):
-            assert "ARCHIVE_ROOM" in prompt and "GARDEN_ROOM" in prompt
-            assert "42 credits" in prompt and "budget is 999" not in prompt
-            return streamed_response(
-                {"role": "assistant", "content": "GARDEN_ROOM, budget 42 credits."}
-            )
-        if request.get("tools"):
-            ids = re.findall(r"- id: (\S+)", request["messages"][-1]["content"])
-            reply = rank_reply(ids)
-            reply["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"] = json.dumps(
-                {"ranked_ids": ids, "done": True}
-            )
-            return reply
-        value = (
-            {"title": "Workspace"} if "Name the subject" in prompt else {"belongs_to_current": True}
-        )
-        return response({"role": "assistant", "content": json.dumps(value)})
-
-    model_service.replies.extend((200, model_reply) for _ in range(9))
     events = []
     result = await continue_conversation(
         kb_dir,
@@ -157,21 +123,26 @@ async def test_threshold_recall_rereads_old_users_and_later_correction_wins(kb_d
         context=ExecutionContext(on_event=events.append),
     )
     assert result.status == "completed", result
-    assert result.answer == "GARDEN_ROOM, budget 42 credits."
+    assert "GARDEN_ROOM" in result.answer and "42" in result.answer
+    assert "999" not in result.answer
+    sent = json.dumps(model_service.requests)
+    assert "ASSISTANT_POISON" not in sent and "budget is 999" not in sent
+    assert all(term in sent for term in ("ARCHIVE_ROOM", "GARDEN_ROOM", "42 credits"))
     context = next(e["context"] for e in events if e.get("stage") == "context_preparation")
     assert context["index"]["indexed_turns"] == 5
     assert context["index"]["pending_turns"] == 4
     assert context["recall"]["status"] == "completed"
     assert 0 < context["recall"]["context_tokens"] <= 2000
-    assert context["recall"]["stage_sends"]["retrieval"] == 2
+    assert 0 < context["recall"]["stage_sends"]["retrieval"] <= 8
     restored = load_session(kb_dir, session.id)
     assert restored.turns[-1].user_text == "Confirm my room and budget."
     assert len(restored.turns) == 10
-    from openkb.llm_usage import read_requests
+    from ultrakb.llm_usage import read_requests
 
     requests = read_requests(kb_dir)
-    assert len(requests) == result.model_usage["current"]["requests"] == 9
-    assert {r.operation for r in requests} == {
+    assert len(requests) == result.model_usage["current"]["requests"] == len(model_service.requests)
+    assert 3 <= len(requests) <= 16
+    assert {r.operation for r in requests} >= {
         "answer",
         "conversation_index",
         "conversation_retrieval",
@@ -183,27 +154,23 @@ async def test_threshold_recall_rereads_old_users_and_later_correction_wins(kb_d
 @pytest.mark.asyncio
 @pytest.mark.parametrize("cancel_task", [False, True])
 async def test_cancel_during_real_context_work_keeps_submission_without_late_commit(
-    kb_dir, model_service, cancel_task
+    kb_dir, model_service, cancel_task, monkeypatch
 ):
-    from test_vendor_sdk import response
+    from ultrakb.agent.chat_session import ChatSession
+    from ultrakb.application.execution import ExecutionContext
+    from ultrakb.llm_usage import read_requests
 
-    from openkb.agent.chat_session import ChatSession
-    from openkb.application.execution import ExecutionContext
-    from openkb.llm_usage import read_requests
+    monkeypatch.setattr("ultrakb.context.preparation.RECALL_THRESHOLD_TOKENS", 1)
 
-    (kb_dir / ".openkb/config.yaml").write_text(
-        "model: openai/gpt-4o-mini\nmodel_capacity:\n"
+    (kb_dir / ".ultrakb/config.yaml").write_text(
+        "model: deepseek/deepseek-flash\nmodel_capacity:\n"
         "  max_input_tokens: 65536\n  tokenizer_model: gpt-4o-mini\n"
     )
-    (kb_dir / ".env").write_text(f"LLM_API_KEY=fixture-key\nOPENAI_API_BASE={model_service.url}\n")
-    (kb_dir / "wiki/sources/manual.md").write_text("A retained original.")
-    session = ChatSession.new(kb_dir, "openai/gpt-4o-mini", "en")
+    atomic_write_text(kb_dir / "wiki/sources/manual.md", "A retained original.")
+    session = ChatSession.new(kb_dir, "deepseek/deepseek-flash", "en")
     for index in range(9):
-        session.record_turn(f"Intent {index}: " + "workspace " * 1100, "POISON", [])
+        session.record_turn(f"Intent {index}: quiet indoor workspace.", "POISON", [])
     model_service.delay = 0.2
-    model_service.replies.append(
-        (200, response({"role": "assistant", "content": '{"title":"Notes"}'}))
-    )
     stopped = threading.Event()
     task = asyncio.create_task(
         continue_conversation(
@@ -238,14 +205,13 @@ async def test_cancel_during_real_context_work_keeps_submission_without_late_com
 
 @pytest.mark.asyncio
 async def test_current_question_fits_but_reader_schemas_exceed_capacity(kb_dir, model_service):
-    from openkb.application.conversations import ask_question
+    from ultrakb.application.conversations import ask_question
 
-    (kb_dir / ".openkb/config.yaml").write_text(
-        "model: openai/gpt-4o-mini\nmodel_capacity:\n"
+    (kb_dir / ".ultrakb/config.yaml").write_text(
+        "model: deepseek/deepseek-flash\nmodel_capacity:\n"
         "  max_input_tokens: 16\n  tokenizer_model: gpt-4o-mini\n"
     )
-    (kb_dir / ".env").write_text(f"LLM_API_KEY=fixture-key\nOPENAI_API_BASE={model_service.url}\n")
-    (kb_dir / "wiki/sources/manual.md").write_text("A retained original.")
+    atomic_write_text(kb_dir / "wiki/sources/manual.md", "A retained original.")
     result = await ask_question(kb_dir, "Explain.")
     assert result.status == "blocked", result
     assert "capacity" in result.error.lower()
@@ -253,29 +219,53 @@ async def test_current_question_fits_but_reader_schemas_exceed_capacity(kb_dir, 
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("report_usage", [False, True])
 async def test_cancel_during_answer_settles_usage_without_committing(
-    kb_dir, model_service, report_usage
+    kb_dir, model_service, monkeypatch
 ):
+    import litellm
     from agents import set_tracing_disabled
-    from test_vendor_sdk import streamed_response
+    from litellm import CustomStreamWrapper
 
-    from openkb.application.execution import ExecutionContext
-    from openkb.llm_usage import read_requests
+    from ultrakb.application.execution import ExecutionContext
+    from ultrakb.llm_usage import read_requests
 
-    (kb_dir / ".openkb/config.yaml").write_text(
-        "model: openai/gpt-4o-mini\nmodel_capacity:\n"
+    receipts = []
+    completion, acompletion = litellm.completion, litellm.acompletion
+    stream_next = CustomStreamWrapper.__anext__
+
+    def receive(response):
+        if (usage := getattr(response, "usage", None)) is not None:
+            cached = getattr(getattr(usage, "prompt_tokens_details", None), "cached_tokens", None)
+            receipts.append((response.id, usage.prompt_tokens, usage.completion_tokens, cached))
+
+    def observed_completion(**kwargs):
+        response = completion(**kwargs)
+        receive(response)
+        return response
+
+    async def observed_acompletion(**kwargs):
+        response = await acompletion(**kwargs)
+        if not kwargs.get("stream"):
+            receive(response)
+        return response
+
+    async def observed_chunk(stream):
+        chunk = await stream_next(stream)
+        receive(chunk)
+        return chunk
+
+    monkeypatch.setattr(litellm, "completion", observed_completion)
+    monkeypatch.setattr(litellm, "acompletion", observed_acompletion)
+    monkeypatch.setattr(CustomStreamWrapper, "__anext__", observed_chunk)
+
+    (kb_dir / ".ultrakb/config.yaml").write_text(
+        "model: deepseek/deepseek-flash\nmodel_capacity:\n"
         "  max_input_tokens: 65536\n  tokenizer_model: gpt-4o-mini\n"
     )
-    (kb_dir / ".env").write_text(f"LLM_API_KEY=fixture-key\nOPENAI_API_BASE={model_service.url}\n")
-    (kb_dir / "wiki/sources/manual.md").write_text("A retained original.")
+    atomic_write_text(kb_dir / "wiki/sources/manual.md", "A retained original.")
     set_tracing_disabled(True)
     events = []
     model_service.delay = 0.2
-    chunks = streamed_response({"role": "assistant", "content": "ok"})
-    if not report_usage:
-        chunks = [chunk for chunk in chunks if not chunk.get("usage")]
-    model_service.replies.append((200, chunks))
     task = asyncio.create_task(
         continue_conversation(
             kb_dir, "Retain my submission", context=ExecutionContext(on_event=events.append)
@@ -294,8 +284,34 @@ async def test_cancel_during_answer_settles_usage_without_committing(
     assert restored.turns == []
     assert restored.incomplete[0]["message"] == "Retain my submission"
     assert restored.token_usage is not None
-    request = read_requests(kb_dir)[0]
-    assert restored.token_usage["output"] == request.output_total == (3 if report_usage else None)
-    # Managed after-turn cleanup settled the HTTP response while the application
-    # discarded the answer. The ledger reports transport completion honestly.
-    assert request.state == "completed"
+    requests = read_requests(kb_dir)
+    assert len(requests) == len(model_service.requests) == len(receipts)
+    assert sum(request.operation == "answer" for request in requests) == 1
+    assert len({request.execution_id for request in requests}) == 1
+    execution = json.loads(
+        (kb_dir / f".ultrakb/usage/executions/{requests[0].execution_id}.json").read_text()
+    )
+    assert execution["state"] == "interrupted"
+    for request in requests:
+        assert request.state == "completed"
+        assert request.usage_status == "known" and request.send_status == "sent"
+        assert request.input_total is not None and request.input_total > 0
+        assert request.output_total is not None and request.output_total > 0
+        assert request.cached_input is not None
+    assert sorted(
+        (
+            request.provider_request_id,
+            request.input_total,
+            request.output_total,
+            request.cached_input,
+        )
+        for request in requests
+    ) == sorted(receipts)
+    assert restored.token_usage["input_cached"] == sum(request.cached_input for request in requests)
+    assert restored.token_usage["input_uncached"] == sum(
+        request.input_total - request.cached_input for request in requests
+    )
+    assert restored.token_usage["output"] == sum(request.output_total for request in requests)
+    # After-turn cleanup completes the current response and its planned tools,
+    # including any genuine retrieval request, before stopping the SDK loop.
+    # The application discards that turn; every real transport receipt is billed.

@@ -41,8 +41,9 @@ def test_unsupported_host_fails_explicitly(host):
 def test_debian_metadata_and_extracted_installation(tmp_path, arch, version):
     program = tmp_path / "program"
     (program / "_internal").mkdir(parents=True)
-    (program / "UrltraKB").write_text("#!/bin/sh\nexit 0\n")
-    (program / "UrltraKB").chmod(0o755)
+    for name in ("UltraKB", "UltraKBCLI", "UltraKBAPI"):
+        (program / name).write_text("#!/bin/sh\nexit 0\n")
+        (program / name).chmod(0o755)
     (program / "_internal/lib.so.1").write_bytes(b"library")
     (program / "_internal/lib.so").symlink_to("lib.so.1")
     source = Path(__file__).resolve().parents[1]
@@ -59,11 +60,14 @@ def test_debian_metadata_and_extracted_installation(tmp_path, arch, version):
     ).strip() == version.replace(".dev", "~dev")
     installed = tmp_path / "installed"
     subprocess.run(["dpkg-deb", "--extract", str(deb), str(installed)], check=True)
-    assert (installed / "opt/urltrakb/UrltraKB").stat().st_mode & 0o111
-    assert (installed / "opt/urltrakb/_internal/lib.so").is_symlink()
-    assert (installed / "opt/urltrakb/_internal/lib.so").read_bytes() == b"library"
-    assert 'exec /opt/urltrakb/UrltraKB "$@"' in (installed / "usr/bin/urltrakb").read_text()
-    assert "Exec=urltrakb\n" in (installed / "usr/share/applications/urltrakb.desktop").read_text()
+    assert (installed / "opt/ultrakb/UltraKB").stat().st_mode & 0o111
+    assert (installed / "opt/ultrakb/_internal/lib.so").is_symlink()
+    assert (installed / "opt/ultrakb/_internal/lib.so").read_bytes() == b"library"
+    assert 'exec /opt/ultrakb/UltraKBCLI "$@"' in (installed / "usr/bin/ultrakb").read_text()
+    assert 'exec /opt/ultrakb/UltraKB "$@"' in (installed / "usr/bin/ultrakb-desktop").read_text()
+    assert 'exec /opt/ultrakb/UltraKBAPI "$@"' in (installed / "usr/bin/ultrakb-api").read_text()
+    desktop = installed / "usr/share/applications/ultrakb.desktop"
+    assert "Exec=ultrakb-desktop\n" in desktop.read_text()
 
 
 def test_macos_bundle_keeps_metadata_out_of_code_directories(tmp_path):
@@ -72,10 +76,10 @@ def test_macos_bundle_keeps_metadata_out_of_code_directories(tmp_path):
     identity = {"version": "0.1.dev123+g123456789abc", "commit": "a" * 40}
     inventory = {
         "files": [
-            {"path": "UrltraKB"},
+            {"path": "UltraKB"},
             {"path": "_internal/coloredlogs-15.0.1.dist-info/METADATA", "typecode": "DATA"},
             {"path": "_internal/library.dylib", "typecode": "BINARY"},
-            {"path": "_internal/openkb/_build_info.json", "typecode": "DATA"},
+            {"path": "_internal/ultrakb/_build_info.json", "typecode": "DATA"},
             {"path": "_internal/office/LibreOffice.app/Contents/MacOS/soffice"},
         ],
         "directory_links": {
@@ -87,11 +91,11 @@ def test_macos_bundle_keeps_metadata_out_of_code_directories(tmp_path):
     # makes codesign mistake Python .dist-info directories for unsigned bundles.
     entries = osx.BUNDLE.__new__(osx.BUNDLE)._process_bundle_toc(bundle_toc(program, inventory))
     layout = {name: (source, kind) for name, source, kind in entries}
-    assert layout["Contents/MacOS/UrltraKB"][1] == "EXECUTABLE"
+    assert layout["Contents/MacOS/UltraKB"][1] == "EXECUTABLE"
     assert layout["Contents/Frameworks/library.dylib"][1] == "BINARY"
     assert layout["Contents/Resources/coloredlogs-15.0.1.dist-info/METADATA"][1] == "DATA"
     assert layout["Contents/Frameworks/coloredlogs-15.0.1.dist-info"][1] == "SYMLINK"
-    assert layout["Contents/Resources/openkb/_build_info.json"][1] == "DATA"
+    assert layout["Contents/Resources/ultrakb/_build_info.json"][1] == "DATA"
     assert not any("LibreOffice.app" in name for name in layout)
     assert info_plist(identity)["LSMinimumSystemVersion"] == "14.0"
 
@@ -118,10 +122,10 @@ def test_program_copy_preserves_mac_framework_links(tmp_path):
         "Versions/Current/Resources", target_is_directory=True
     )
     identity = {"version": "0.1.dev123+g123456789abc", "commit": "a" * 40}
-    info = original / "_internal/openkb/_build_info.json"
+    info = original / "_internal/ultrakb/_build_info.json"
     info.parent.mkdir()
     info.write_text(json.dumps(identity))
-    for name in ("UrltraKB", "UrltraKBCLI", "UrltraKBAPI", "UrltraKBVerify"):
+    for name in ("UltraKB", "UltraKBCLI", "UltraKBAPI", "UltraKBVerify"):
         (original / name).write_bytes(b"executable")
         (original / name).chmod(0o755)
     inventory = {

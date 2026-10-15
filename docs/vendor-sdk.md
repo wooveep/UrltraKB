@@ -53,11 +53,11 @@ uv build vendor/ChatIndex --out-dir dist
 uv build vendor/ConDB --out-dir dist
 uv build --out-dir dist
 uv run python scripts/verify_vendor_artifacts.py --dist dist
-uv export --frozen --format requirements-txt --no-dev --no-emit-project --no-emit-package pageindex --no-emit-package ictree --no-emit-package pageindex-condb --no-emit-package litellm --no-hashes --output-file /tmp/openkb-wheel-constraints.txt
-uv venv /tmp/openkb-wheel-check
-uv pip install --python /tmp/openkb-wheel-check/bin/python --constraint /tmp/openkb-wheel-constraints.txt --find-links dist dist/openkb-*.whl
-uv pip check --python /tmp/openkb-wheel-check/bin/python
-LITELLM_LOCAL_MODEL_COST_MAP=True /tmp/openkb-wheel-check/bin/python scripts/verify_vendor_install.py --wheel
+uv export --frozen --format requirements-txt --no-dev --no-emit-project --no-emit-package pageindex --no-emit-package ictree --no-emit-package pageindex-condb --no-emit-package litellm --no-hashes --output-file /tmp/ultrakb-wheel-constraints.txt
+uv venv /tmp/ultrakb-wheel-check
+uv pip install --python /tmp/ultrakb-wheel-check/bin/python --constraint /tmp/ultrakb-wheel-constraints.txt --find-links dist dist/ultrakb-*.whl
+uv pip check --python /tmp/ultrakb-wheel-check/bin/python
+LITELLM_LOCAL_MODEL_COST_MAP=True /tmp/ultrakb-wheel-check/bin/python scripts/verify_vendor_install.py --wheel
 ```
 
 根 wheel 依赖四个独立 vendor wheel；根 sdist 和提交源码导出包含全部 vendor 源码、
@@ -88,7 +88,7 @@ uv run pytest tests/test_vendor_sdk.py tests/test_vendor_packages.py tests/test_
 ```
 
 原始第三方源码通过摘要核对，
-不统一格式化；新增 OpenKB 脚本和测试遵守根 lint，vendor 的行为补丁通过实际接口测试。
+不统一格式化；新增 UltraKB 脚本和测试遵守根 lint，vendor 的行为补丁通过实际接口测试。
 OpenKB 原有 800 行约束不变。LiteLLM `.2` 已实现离线初始化、请求隔离和缺失 usage 保真；统一执行政策由 OpenKB 执行器负责。
 全量运行出现 9 条上游警告（异步日志清理及 Pydantic 弃用），保留为后续运行时整合基线。
 这里只记录实际 SDK/源码/发行验证，不代表 Windows 或 Debian 完整桌面发行已验收。
@@ -103,7 +103,7 @@ LiteLLM `.2` 验证（2026-10-06）：开发与独立 wheel 环境分别通过 2
 
 ## 任务模型执行政策
 
-编译通过 `openkb/llm_execution.py`，在 KB 租约取得后由 `ExecutionContext` 冻结角色模型、凭据和政策。默认所有角色继承 `model`；可选 `conversation_model`、`retrieval_model` 只覆盖模型名，共享同一凭据与端点。运行中编辑配置只影响新任务。API key 在快照中缺失时，API key 认证路径在发送前失败，不能读取之后加入的环境或 SDK 全局 key；订阅登录、工作负载身份和本地 Ollama 保留 SDK 自有认证路径。
+编译通过 `ultrakb/llm_execution.py`，在 KB 租约取得后由 `ExecutionContext` 冻结角色模型、凭据和政策。默认所有角色继承 `model`；可选 `conversation_model`、`retrieval_model` 只覆盖模型名，共享同一凭据与端点。运行中编辑配置只影响新任务。API key 在快照中缺失时，API key 认证路径在发送前失败，不能读取之后加入的环境或 SDK 全局 key；订阅登录、工作负载身份和本地 Ollama 保留 SDK 自有认证路径。
 
 KB 的 `model_policy` 可设置 `max_calls`（默认 1000）、`concurrency`（5）、`retries`（2）、`backoff`（0.25 秒）及可选 `deadline_seconds`。计数跨角色、修复和重试共用。文档索引同时遵守已有 `concurrency` / `IndexConfig.max_concurrency`，实际并发不会超过任一限制。普通 completion 的网络重试只有执行器负责，首次发送就关闭 SDK 自动重试；没有可观察 HTTPX 发送的失败不自动重试，也不声称传输观测完整。取消或过期后保留已花费的用量，丢弃迟到结果。
 
@@ -117,11 +117,11 @@ counts, and stream cleanup completes before application leases are released.
 
 ## 新版知识库与文档索引
 
-新建知识库在 `.openkb/format.json` 声明 `openkb.context-kb` 版本 1。
+新建知识库在 `.ultrakb/format.json` 声明 `ultrakb.context-kb` 版本 1。
 共享应用入口在写入和模型调用前拒绝没有标记的旧库及未知格式，不迁移旧数据。
 重新导入原始资料需要显式新建库；新版库内部的历史来源、知识修订和产物引用继续保留。
 
-所有 OpenKB 文档客户端由 `openkb/index_client.py` 构造，同时注入任务模型和
+所有 UltraKB 文档客户端由 `ultrakb/index_client.py` 构造，同时注入任务模型和
 `ConDBPageIndexStorage`。`IndexLocation` 描述数据库、托管输入根、格式、只读性与
 所属修订。工作库使用 `context.sqlite`，`okb_` 表完整保存构建文档、原始 metadata、
 pages 和扩展字段；源文件摘要与处理策略去重键分开保存，树与业务映射在同一事务提交。

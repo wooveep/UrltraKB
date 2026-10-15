@@ -2,26 +2,27 @@
 
 import pytest
 
-pytest_plugins = ("test_workbook_import",)
+pytest_plugins = ("test_office_import", "block_fixtures", "workbook_fixtures")
 
 
-def test_xls_rename_and_reorder_use_the_same_identity_reconciliation(kb_dir, tmp_path, pdf_model):
+def test_xls_rename_and_reorder_use_the_same_identity_reconciliation(kb_dir, tmp_path):
     from pathlib import Path
     from shutil import copyfile
 
-    from openkb.application.documents import import_document
-    from openkb.documents import read_document_source
+    from office_publication_fixtures import publish_workbook
+
+    from ultrakb.documents import read_document_source
 
     fixtures = Path(__file__).parent / "fixtures/office"
     workbook = tmp_path / "workbook.xls"
     copyfile(fixtures / "typed-sheets.xls", workbook)
-    first = import_document(
+    first = publish_workbook(
         kb_dir,
         workbook,
     )
     original = {unit.name: unit.unit_id for unit in first.units}
     copyfile(fixtures / "renamed-sheets.xls", workbook)
-    second = import_document(
+    second = publish_workbook(
         kb_dir,
         workbook,
     )
@@ -36,14 +37,15 @@ def test_xls_rename_and_reorder_use_the_same_identity_reconciliation(kb_dir, tmp
 
 
 def test_rename_and_reorder_keep_sheet_identity_without_using_table_position(
-    kb_dir, three_sheets, pdf_model
+    kb_dir,
+    three_sheets,
 ):
+    from office_publication_fixtures import publish_workbook
     from openpyxl import load_workbook
 
-    from openkb.application.documents import import_document
-    from openkb.documents import read_document_source
+    from ultrakb.documents import read_document_source
 
-    first = import_document(
+    first = publish_workbook(
         kb_dir,
         three_sheets,
     )
@@ -52,7 +54,7 @@ def test_rename_and_reorder_keep_sheet_identity_without_using_table_position(
     book["Alpha"].title = "Renamed Alpha"
     book.move_sheet("Gamma", offset=-2)
     book.save(three_sheets)
-    second = import_document(
+    second = publish_workbook(
         kb_dir,
         three_sheets,
     )
@@ -69,17 +71,18 @@ def test_rename_and_reorder_keep_sheet_identity_without_using_table_position(
 
 
 def test_confirmed_empty_and_deleted_sheets_retire_only_their_contributions(
-    kb_dir, three_sheets, pdf_model
+    kb_dir,
+    three_sheets,
 ):
+    from office_publication_fixtures import publish_workbook
     from openpyxl import load_workbook
 
-    from openkb.application.documents import import_document
-    from openkb.application.refresh import refresh_status
-    from openkb.application.sources import source_inventory
-    from openkb.application.views import view_scope
-    from openkb.documents import read_document_source
+    from ultrakb.application.refresh import refresh_status
+    from ultrakb.application.sources import source_inventory
+    from ultrakb.application.views import view_scope
+    from ultrakb.documents import read_document_source
 
-    first = import_document(
+    first = publish_workbook(
         kb_dir,
         three_sheets,
     )
@@ -89,7 +92,7 @@ def test_confirmed_empty_and_deleted_sheets_retire_only_their_contributions(
     book["Beta"]["A1"] = None
     del book["Gamma"]
     book.save(three_sheets)
-    second = import_document(
+    second = publish_workbook(
         kb_dir,
         three_sheets,
     )
@@ -119,19 +122,19 @@ def test_confirmed_empty_and_deleted_sheets_retire_only_their_contributions(
 
 
 def test_failed_and_objects_only_sheets_do_not_become_successful_empty_targets(
-    kb_dir, three_sheets, pdf_model, tmp_path
+    kb_dir, three_sheets, tmp_path
 ):
     from zipfile import ZipFile
 
+    from office_publication_fixtures import publish_workbook
     from openpyxl import load_workbook
     from openpyxl.drawing.image import Image
     from PIL import Image as PillowImage
 
-    from openkb.application.documents import import_document
-    from openkb.application.sources import source_inventory
-    from openkb.documents import read_document_source
+    from ultrakb.application.sources import source_inventory
+    from ultrakb.documents import read_document_source
 
-    first = import_document(
+    first = publish_workbook(
         kb_dir,
         three_sheets,
     )
@@ -149,7 +152,7 @@ def test_failed_and_objects_only_sheets_do_not_become_successful_empty_targets(
     with ZipFile(three_sheets, "w") as archive:
         for name, body in parts.items():
             archive.writestr(name, body)
-    second = import_document(
+    second = publish_workbook(
         kb_dir,
         three_sheets,
     )
@@ -166,11 +169,12 @@ def test_failed_and_objects_only_sheets_do_not_become_successful_empty_targets(
     assert "GAMMA_SHEET" in old["content"]
 
 
-def test_workbook_removal_preview_names_owned_sheets(kb_dir, three_sheets, pdf_model):
-    from openkb.application.documents import import_document
-    from openkb.application.removal import preview_removal
+def test_workbook_removal_preview_names_owned_sheets(kb_dir, three_sheets):
+    from office_publication_fixtures import publish_workbook
 
-    first = import_document(kb_dir, three_sheets)
+    from ultrakb.application.removal import preview_removal
+
+    first = publish_workbook(kb_dir, three_sheets)
     preview = preview_removal(kb_dir, first.source_id)
     labels = str(preview.plan.actions)
     assert all(unit.unit_id in labels for unit in first.units)
@@ -178,17 +182,17 @@ def test_workbook_removal_preview_names_owned_sheets(kb_dir, three_sheets, pdf_m
 
 @pytest.mark.parametrize("deleted", [False, True])
 def test_retirement_commit_failure_keeps_old_contribution_and_refresh_reason(
-    kb_dir, three_sheets, pdf_model, monkeypatch, deleted
+    kb_dir, three_sheets, monkeypatch, deleted
 ):
+    from office_publication_fixtures import publish_workbook
     from openpyxl import load_workbook
 
-    from openkb.application.documents import import_document
-    from openkb.application.refresh import refresh_status
-    from openkb.application.views import view_scope
-    from openkb.documents import read_document_source
-    from openkb.mutation import MutationSnapshot
+    from ultrakb.application.refresh import refresh_status
+    from ultrakb.application.views import view_scope
+    from ultrakb.documents import read_document_source
+    from ultrakb.mutation import MutationSnapshot
 
-    first = import_document(
+    first = publish_workbook(
         kb_dir,
         three_sheets,
     )
@@ -207,7 +211,7 @@ def test_retirement_commit_failure_keeps_old_contribution_and_refresh_reason(
         commit(snapshot)
 
     monkeypatch.setattr(MutationSnapshot, "mark_committed", fail_retirement)
-    second = import_document(
+    second = publish_workbook(
         kb_dir,
         three_sheets,
     )
@@ -217,7 +221,7 @@ def test_retirement_commit_failure_keeps_old_contribution_and_refresh_reason(
     pending = refresh_status(kb_dir, scope=view_scope(kb_dir, beta.view_id))["needs_refresh"]
     assert not any(reason["kind"] == "empty" for reasons in pending.values() for reason in reasons)
     if deleted:
-        from openkb.application.workbook_actions import retry_worksheet
+        from ultrakb.application.workbook_actions import retry_worksheet
 
         monkeypatch.setattr(MutationSnapshot, "mark_committed", commit)
         retried = retry_worksheet(kb_dir, first.source_id, beta.unit_id)
@@ -226,13 +230,12 @@ def test_retirement_commit_failure_keeps_old_contribution_and_refresh_reason(
 
 @pytest.mark.parametrize("keep_anchor", [False, True])
 def test_all_renamed_and_reordered_cannot_inherit_another_sheets_history(
-    kb_dir, three_sheets, pdf_model, keep_anchor
+    kb_dir, three_sheets, keep_anchor
 ):
+    from office_publication_fixtures import publish_workbook
     from openpyxl import load_workbook
 
-    from openkb.application.documents import import_document
-
-    first = import_document(
+    first = publish_workbook(
         kb_dir,
         three_sheets,
     )
@@ -243,7 +246,7 @@ def test_all_renamed_and_reordered_cannot_inherit_another_sheets_history(
             sheet.title = "New " + sheet.title
     book.move_sheet("New Gamma", offset=-1 if keep_anchor else -2)
     book.save(three_sheets)
-    second = import_document(
+    second = publish_workbook(
         kb_dir,
         three_sheets,
     )
@@ -251,13 +254,13 @@ def test_all_renamed_and_reordered_cannot_inherit_another_sheets_history(
     assert len(current) == (2 if keep_anchor else 3) and not current & original
 
 
-def test_deleted_sheet_is_withdrawn(kb_dir, three_sheets, pdf_model):
+def test_deleted_sheet_is_withdrawn(kb_dir, three_sheets):
+    from office_publication_fixtures import publish_workbook
     from openpyxl import load_workbook
 
-    from openkb.application.documents import import_document
-    from openkb.documents import read_document_source
+    from ultrakb.documents import read_document_source
 
-    first = import_document(
+    first = publish_workbook(
         kb_dir,
         three_sheets,
     )
@@ -265,7 +268,7 @@ def test_deleted_sheet_is_withdrawn(kb_dir, three_sheets, pdf_model):
     book = load_workbook(three_sheets)
     del book["Gamma"]
     book.save(three_sheets)
-    second = import_document(
+    second = publish_workbook(
         kb_dir,
         three_sheets,
     )
@@ -275,17 +278,17 @@ def test_deleted_sheet_is_withdrawn(kb_dir, three_sheets, pdf_model):
     assert read["validity"] == "withdrawn"
 
 
-def test_unextracted_background_picture_is_not_confirmed_empty(kb_dir, three_sheets, pdf_model):
+def test_unextracted_background_picture_is_not_confirmed_empty(kb_dir, three_sheets):
     from io import BytesIO
     from zipfile import ZipFile
 
+    from office_publication_fixtures import publish_workbook
     from openpyxl import load_workbook
     from PIL import Image
 
-    from openkb.application.documents import import_document
-    from openkb.application.sources import source_inventory
+    from ultrakb.application.sources import source_inventory
 
-    import_document(
+    publish_workbook(
         kb_dir,
         three_sheets,
     )
@@ -314,7 +317,7 @@ def test_unextracted_background_picture_is_not_confirmed_empty(kb_dir, three_she
     with ZipFile(three_sheets, "w") as archive:
         for name, body in parts.items():
             archive.writestr(name, body)
-    second = import_document(
+    second = publish_workbook(
         kb_dir,
         three_sheets,
     )

@@ -14,13 +14,13 @@ without restoring the excluded revisions.
 Refresh the shared knowledge base:
 
 ```sh
-openkb refresh status
-openkb refresh run
-openkb refresh proposals
-openkb refresh show PROPOSAL
-openkb refresh accept PROPOSAL --version REVIEWED_VERSION
-openkb refresh history
-openkb refresh read-history KNOWLEDGE_REVISION summaries/PAGE
+ultrakb refresh status
+ultrakb refresh run
+ultrakb refresh proposals
+ultrakb refresh show PROPOSAL
+ultrakb refresh accept PROPOSAL --version REVIEWED_VERSION
+ultrakb refresh history
+ultrakb refresh read-history KNOWLEDGE_REVISION summaries/PAGE
 ```
 
 Refresh rebuilds generated knowledge from the knowledge base’s successful, currently valid
@@ -35,8 +35,8 @@ than being treated as empty evidence. Complete their source mapping and
 recompilation before refreshing. Withdrawal of a mapped legacy source conservatively
 marks uncertain old pages and preserves their bodies, including on repeated removal.
 
-`openkb refresh empty SOURCE --generation GENERATION` explicitly confirms that the
-reviewed source revision contributes no current knowledge. `openkb list` shows its
+`ultrakb refresh empty SOURCE --generation GENERATION` explicitly confirms that the
+reviewed source revision contributes no current knowledge. `ultrakb list` shows its
 generation. The operation rejects a changed source. Import and recompilation do not
 silently clear remaining refresh reasons.
 
@@ -54,8 +54,8 @@ and the reviewed `version`. `POST /api/v1/page` accepts `knowledge_revision_id` 
 an immutable historical read. Page responses include validity and actual revisions.
 
 Removal retains referenced originals, assets, indexes, normalization caches, saved
-differences and persistent import intents. `openkb refresh references` (or
+differences and persistent import intents. `ultrakb refresh references` (or
 `GET /api/v1/refresh/references`) reports the conservative inventory. Explicit
-`openkb refresh cleanup PATH...` only removes managed original/cache artifacts
+`ultrakb refresh cleanup PATH...` only removes managed original/cache artifacts
 proven unreferenced; incomplete ownership records defer cleanup. Removing a source
 does not remove independent sources recovered from it.

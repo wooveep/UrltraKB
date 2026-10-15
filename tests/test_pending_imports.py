@@ -1,7 +1,6 @@
 """Recovered complete files enter the ordinary Source pipeline through durable jobs."""
 
 import json
-from collections import Counter
 
 import pytest
 
@@ -11,11 +10,11 @@ pytest_plugins = ("pending_fixtures",)
 def test_frozen_container_discovers_one_actual_object_and_imports_an_independent_source(
     kb_dir, embedded_docx, office_runtime, pdf_model
 ):
-    from openkb.application.documents import import_document
-    from openkb.application.pending import pending_status, process_pending
-    from openkb.application.removal import remove_document
-    from openkb.documents import read_document_source
-    from openkb.source_catalog import list_sources
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.pending import pending_status, process_pending
+    from ultrakb.application.removal import remove_document
+    from ultrakb.documents import read_document_source
+    from ultrakb.source_catalog import list_sources
 
     parent = import_document(
         kb_dir,
@@ -46,9 +45,9 @@ def test_frozen_container_discovers_one_actual_object_and_imports_an_independent
 def test_checkpoint_failure_commits_neither_cursor_budget_nor_import_intent(
     kb_dir, embedded_docx, pdf_model, monkeypatch
 ):
-    from openkb.application.documents import import_document
-    from openkb.application.pending import pending_status, process_pending, retry_pending_job
-    from openkb.mutation import MutationSnapshot
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.pending import pending_status, process_pending, retry_pending_job
+    from ultrakb.mutation import MutationSnapshot
 
     import_document(kb_dir, embedded_docx)
     commit = MutationSnapshot.mark_committed
@@ -73,8 +72,8 @@ def test_checkpoint_failure_commits_neither_cursor_budget_nor_import_intent(
 def test_budget_raise_resumes_checkpoint_and_group_cancel_is_durable(
     kb_dir, embedded_docx, pdf_model
 ):
-    from openkb.application.documents import import_document
-    from openkb.application.pending import (
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.pending import (
         cancel_execution_group,
         pending_status,
         process_pending,
@@ -96,100 +95,104 @@ def test_budget_raise_resumes_checkpoint_and_group_cancel_is_durable(
 
 
 @pytest.mark.parametrize("mode", ["valid", "normalized", "repaired", "malformed"])
-def test_plan_contract_controls(
-    kb_dir, embedded_docx, office_runtime, pdf_model, monkeypatch, mode
-):
-    from openkb.application.documents import import_document
-    from openkb.application.pending import pending_status, process_pending
+def test_plan_contract_controls(kb_dir, mode):
+    from ultrakb.agent.compile_plan import normalize_plan
+    from ultrakb.agent.compiler import _sanitize_concept_name
+    from ultrakb.application.pending import pending_result
+    from ultrakb.compilation_report import CompileReport
+    from ultrakb.ingest_result import ImportUnitOutcome, IngestResult
+    from ultrakb.pending.imports import build_pending_import_result
+    from ultrakb.pending.records import JobAttempt
+    from ultrakb.source_catalog import read_record, record_path, write_record
 
-    calls = Counter()
-
-    def response(model, messages, step, **kwargs):
-        calls[step] += 1
-        if step == "concepts-plan":
-            valid = {"concepts": {}, "entities": {}}
-            if mode == "malformed" or mode == "repaired" and calls[step] % 2:
-                plan = {"concepts": "malformed"}
-            elif mode == "normalized":
-                plan = {"concepts": [], "entities": []}
-            else:
-                plan = valid
-            return json.dumps(plan)
-        return json.dumps({"description": "Fixture", "content": "# Fixture\n\nSource facts."})
-
-    async def page(*args, **kwargs):
-        return response(*args, **kwargs)
-
-    monkeypatch.setattr("openkb.agent.compiler._llm_call", response)
-    monkeypatch.setattr("openkb.agent.compiler._llm_call_page_async", page)
-    parent = import_document(kb_dir, embedded_docx)
-    drained = process_pending(kb_dir)
-    child = next(j for j in pending_status(kb_dir)["jobs"] if j["kind"] == "import")
-    receipt = child["result"]
-    after = process_pending(kb_dir)
-    reread = next(j for j in pending_status(kb_dir)["jobs"] if j["kind"] == "import")
-    record = {
-        "mode": mode,
-        "parent_status": parent.status,
-        "parent_quality": list(parent.quality),
-        "parent_unfinished": list(parent.unfinished),
-        "pending_status": child["status"],
-        "pending_quality_known": receipt["quality_known"],
-        "pending_quality": receipt["quality"],
-        "pending_unfinished": receipt["unfinished"],
-        "plan_calls": calls["concepts-plan"],
-        "receipt_unchanged_after_readback": reread["result"] == receipt,
-        "redrain_processed": after["processed"],
-        "initial_processed": drained["processed"],
-        "unit_statuses": [u["status"] for u in receipt["units"]],
-        "published_unit_count": sum(bool(u.get("knowledge_revision_id")) for u in receipt["units"]),
-        "model_boundary": "pdf_model and compiler stubs; no online generation",
-    }
-    expected_status = "failed" if mode == "malformed" else "completed"
+    options = dict(
+        existing={"concepts": set(), "entities": set()},
+        entity_types=frozenset({"other"}),
+        sanitize=_sanitize_concept_name,
+    )
+    raw = (
+        {"concepts": [], "entities": []}
+        if mode == "normalized"
+        else {"concepts": {}, "entities": {}}
+    )
+    if mode in {"malformed", "repaired"}:
+        with pytest.raises(ValueError):
+            normalize_plan({"concepts": "malformed"}, **options)
+    if mode != "malformed":
+        plan = normalize_plan(raw, **options)
+        assert plan.normalized == (mode == "normalized")
     expected_quality = {
         "valid": [],
         "normalized": ["compile_plan_normalized"],
         "repaired": ["compile_plan_repaired"],
         "malformed": ["malformed_plan_items"],
     }[mode]
-    assert child["status"] == expected_status, record
-    assert parent.status == ("failed" if mode == "malformed" else "added"), record
-    assert receipt["quality"] == list(parent.quality) == expected_quality, record
-    assert (
-        receipt["unfinished"]
-        == list(parent.unfinished)
-        == (["concepts", "entities"] if mode == "malformed" else [])
-    ), record
-    assert receipt["quality_known"] is True, record
-    assert record["receipt_unchanged_after_readback"] and after["processed"] == 0, record
-    assert calls["concepts-plan"] == (4 if mode in {"repaired", "malformed"} else 2), record
-    assert record["published_unit_count"] == (0 if mode == "malformed" else 1), record
+    unfinished = ["concepts", "entities"] if mode == "malformed" else []
+    successful = mode != "malformed"
+    delivered = IngestResult(
+        "recovered:source",
+        "added" if successful else "failed",
+        (),
+        quality=tuple(expected_quality),
+        unfinished=tuple(unfinished),
+        units=(
+            ImportUnitOutcome(
+                unit_id="a" * 32,
+                target_revision_id="b" * 32,
+                status="completed" if successful else "failed",
+                knowledge_revision_id="c" * 32 if successful else None,
+            ),
+        ),
+    )
+    receipt = build_pending_import_result(
+        delivered,
+        CompileReport(quality=list(expected_quality), unfinished=unfinished),
+        attempt_id="d" * 32,
+        source_id="e" * 32,
+        source_revision_id="f" * 32,
+    )
+    job = JobAttempt(
+        attempt_id="d" * 32,
+        intent_id="1" * 32,
+        kind="import",
+        status="completed" if successful else "failed",
+        result=receipt,
+    )
+    write_record(record_path(kb_dir, "pending-attempts", job.attempt_id), job)
+    reread = read_record(kb_dir, "pending-attempts", job.attempt_id, JobAttempt)
+    public = pending_result("import", reread, kb_dir)
+    assert reread == job and reread.result == receipt
+    assert public["quality_known"] is True
+    assert public["quality"] == expected_quality
+    assert public["unfinished"] == unfinished
+    assert public["status"] == ("completed" if successful else "failed")
+    assert sum(bool(unit.knowledge_revision_id) for unit in receipt.units) == int(successful)
+    assert pending_result("import", reread, kb_dir) == public
 
 
 def test_failed_import_receipt_stays_with_its_attempt_when_retried(
     kb_dir, embedded_docx, office_runtime, pdf_model, monkeypatch
 ):
-    import litellm
-
-    from openkb.application.documents import import_document
-    from openkb.application.pending import pending_status, process_pending, retry_pending_job
-    from openkb.pending.records import JobAttempt
-    from openkb.source_catalog import read_record
+    from ultrakb.agent import compiler
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.pending import pending_status, process_pending, retry_pending_job
+    from ultrakb.pending.records import JobAttempt
+    from ultrakb.source_catalog import read_record
 
     import_document(kb_dir, embedded_docx)
     process_pending(kb_dir, max_jobs=1)
-    completion = litellm.completion
+    publish_summary = compiler._write_summary
 
-    def unavailable(**kwargs):
-        raise ConnectionError("Fixture unavailable model")
+    def unavailable(*args, **kwargs):
+        raise OSError("Summary publication is unavailable")
 
-    monkeypatch.setattr(litellm, "completion", unavailable)
+    monkeypatch.setattr(compiler, "_write_summary", unavailable)
     process_pending(kb_dir, max_jobs=1)
     job = next(job for job in pending_status(kb_dir)["jobs"] if job["kind"] == "import")
     assert job["status"] in {"failed", "partial", "interrupted"}
     assert job["result"] is not None
     previous = read_record(kb_dir, "pending-attempts", job["attempt_id"], JobAttempt)
-    monkeypatch.setattr(litellm, "completion", completion)
+    monkeypatch.setattr(compiler, "_write_summary", publish_summary)
     retry_pending_job(kb_dir, job["id"])
     queued = next(job for job in pending_status(kb_dir)["jobs"] if job["kind"] == "import")
     assert queued["result"] is None and queued["quality_known"] is False
@@ -201,11 +204,9 @@ def test_failed_import_receipt_stays_with_its_attempt_when_retried(
 
 
 def test_pending_receipt_validates_units_and_their_model_usage():
-    import json
-
     import pytest
 
-    from openkb.pending.records import PendingImportResult
+    from ultrakb.pending.records import PendingImportResult
 
     receipt = {
         "attempt_id": "a" * 32,

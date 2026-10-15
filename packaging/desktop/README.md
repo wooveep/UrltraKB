@@ -1,4 +1,4 @@
-# UrltraKB desktop builds and split delivery
+# UltraKB desktop builds and split delivery
 
 ## Four-platform GitHub releases
 
@@ -8,13 +8,13 @@ sources and the existing dependency locks.
 
 | Output | Native build environment | Installation |
 | --- | --- | --- |
-| `UrltraKB-VERSION-debian-amd64.deb` | Debian 13, x86_64 | `sudo apt install ./FILE.deb` |
-| `UrltraKB-VERSION-debian-arm64.deb` | Debian 13, ARM64 | `sudo apt install ./FILE.deb` |
-| `UrltraKB-VERSION-windows-x64.zip` | Windows x86_64 | Extract; run `UrltraKB.exe` |
-| `UrltraKB-VERSION-macos-arm64.zip` | macOS ARM64 | Extract; move `UrltraKB.app` to Applications |
+| `UltraKB-VERSION-debian-amd64.deb` | Debian 13, x86_64 | `sudo apt install ./FILE.deb` |
+| `UltraKB-VERSION-debian-arm64.deb` | Debian 13, ARM64 | `sudo apt install ./FILE.deb` |
+| `UltraKB-VERSION-windows-x64.zip` | Windows x86_64 | Extract; run `UltraKB.exe` |
+| `UltraKB-VERSION-macos-arm64.zip` | macOS ARM64 | Extract; move `UltraKB.app` to Applications |
 
-Debian packages require glibc 2.41 or newer and install under `/opt/urltrakb`,
-with desktop integration and `urltrakb`, `urltrakb-cli`, `urltrakb-api` launchers.
+Debian packages require glibc 2.41 or newer and install under `/opt/ultrakb`,
+with desktop integration and `ultrakb`, `ultrakb-cli`, `ultrakb-api` launchers.
 The macOS app requires Apple Silicon and macOS 14 or newer. It is ad-hoc signed,
 without Apple notarization; first launch may need approval in Privacy & Security.
 
@@ -62,7 +62,7 @@ third-party material audit below remains a separate process.
 
 ## Source and license materials
 
-Build and package the actual UrltraKB desktop, CLI, REST and acceptance entry
+Build and package the actual UltraKB desktop, CLI, REST and acceptance entry
 points. Runtime archives contain the program, original licenses and a reference
 to a separate matching source/build archive. Complete source materials are not
 bundled into the runtime archive.
@@ -76,7 +76,7 @@ CNKI conversion uses the pinned PyMuPDF/MuPDF native runtime already needed for
 PDF input. The freeze includes the converter worker, its hashable source helpers,
 native libraries and PyMuPDF license metadata. No external CNKI reader or system
 `mutool` is required. Converter provenance, the compatibility patch and platform
-wheel hashes are in `openkb/cnki/assets/`; `uv.lock` pins the runtime dependency.
+wheel hashes are in `ultrakb/cnki/assets/`; `uv.lock` pins the runtime dependency.
 For Python wheel delivery, build and supply all five packages:
 
 ```sh
@@ -100,7 +100,7 @@ committed source to a new directory:
 ```
 
 This reads Git objects and excludes workspace changes, private notes and retired
-browser files. It writes `source-export.json` and `openkb/_build_info.json` with
+browser files. It writes `source-export.json` and `ultrakb/_build_info.json` with
 the commit and its exact release tag or development version. In the exported directory, set
 `SETUPTOOLS_SCM_PRETEND_VERSION` to the printed version, then install the desktop,
 API and development extras explicitly:
@@ -134,12 +134,12 @@ accidental collection of DLLs from developer utilities.
 `prepare_desktop_assets.py` verifies the Node and font downloads and builds
 the locked native renderer. `build_desktop.py` caches the pinned token
 vocabularies, then freezes the desktop and complete core dependency set.
-The resulting `dist/UrltraKB` directory contains:
+The resulting `dist/UltraKB` directory contains:
 
-- `UrltraKB`: native Qt Widgets workbench.
-- `UrltraKBCLI`: existing Click commands, without Qt initialization.
-- `UrltraKBAPI`: independent REST service, without Qt initialization.
-- `UrltraKBVerify`: explicit acceptance runner for this build.
+- `UltraKB`: native Qt Widgets workbench.
+- `UltraKBCLI`: existing Click commands, without Qt initialization.
+- `UltraKBAPI`: independent REST service, without Qt initialization.
+- `UltraKBVerify`: explicit acceptance runner for this build.
 
 Keep the program directory together. Data and settings use the existing
 user-selected KB directories and configured user profile, not this directory.
@@ -156,11 +156,11 @@ the complete NewCM font package, native renderers, document converters, model
 clients, fonts and original license files remain included.
 
 ```sh
-packaging/desktop/dist/UrltraKB/UrltraKBVerify --output /tmp/native-check
-packaging/desktop/dist/UrltraKB/UrltraKBVerify --output /tmp/native-corpus \
+packaging/desktop/dist/UltraKB/UltraKBVerify --output /tmp/native-check
+packaging/desktop/dist/UltraKB/UltraKBVerify --output /tmp/native-corpus \
   --corpus tests/fixtures/native-render-corpus.json
 .venv/bin/python scripts/verify_desktop_model.py \
-  --program packaging/desktop/dist/UrltraKB/UrltraKBVerify \
+  --program packaging/desktop/dist/UltraKB/UltraKBVerify \
   --output /tmp/native-model --inputs /path/to/document-fixtures
 ```
 
@@ -176,10 +176,10 @@ a pending KB deletion. Each restart is a separate process using the previous
 run's KB and history. Use a new output directory for every command:
 
 ```sh
-packaging/desktop/dist/UrltraKB/UrltraKBVerify --output /tmp/exit-wait --lifecycle wait
-packaging/desktop/dist/UrltraKB/UrltraKBVerify --output /tmp/exit-stop --lifecycle stop
-packaging/desktop/dist/UrltraKB/UrltraKBVerify --output /tmp/exit-delete --lifecycle delete
-packaging/desktop/dist/UrltraKB/UrltraKBVerify --output /tmp/restarted \
+packaging/desktop/dist/UltraKB/UltraKBVerify --output /tmp/exit-wait --lifecycle wait
+packaging/desktop/dist/UltraKB/UltraKBVerify --output /tmp/exit-stop --lifecycle stop
+packaging/desktop/dist/UltraKB/UltraKBVerify --output /tmp/exit-delete --lifecycle delete
+packaging/desktop/dist/UltraKB/UltraKBVerify --output /tmp/restarted \
   --lifecycle restart --lifecycle-state /tmp/exit-wait
 ```
 
@@ -192,10 +192,11 @@ previous run's global settings.
 
 ## Delivery names and contents
 
-The public program directory and executable names always use **UrltraKB**:
-`UrltraKB`, `UrltraKBCLI`, `UrltraKBAPI`, `UrltraKBVerify` (with `.exe` on Windows).
-Internal Python imports, the `openkb` CLI installation command and existing user
-configuration paths remain compatible.
+The public program directory and executable names always use **UltraKB**:
+`UltraKB`, `UltraKBCLI`, `UltraKBAPI`, `UltraKBVerify` (with `.exe` on Windows).
+Python imports and installed CLI commands use `ultrakb`. User configuration is in
+`~/.config/ultrakb/`, and KB state is in `.ultrakb/`. See the
+[name-switch guidance](../../README.md#名称切换与旧数据) before opening older data.
 
 After inventory and complete material assembly, create one separate source/build
 archive and one runtime archive per platform with the committed packaging tool:
@@ -204,15 +205,15 @@ archive and one runtime archive per platform with the committed packaging tool:
 .venv/bin/python scripts/package_desktop.py materials --source . \
   --materials /path/to/complete-distribution --output /path/to/delivery
 .venv/bin/python scripts/package_desktop.py runtime --source . \
-  --program packaging/desktop/dist/UrltraKB --inventory /path/to/inventory.json \
+  --program packaging/desktop/dist/UltraKB --inventory /path/to/inventory.json \
   --materials /path/to/complete-distribution \
-  --source-archive /path/to/delivery/UrltraKB-VERSION-materials.zip \
+  --source-archive /path/to/delivery/UltraKB-VERSION-materials.zip \
   --output /path/to/delivery
 ```
 
 Replace `VERSION` with the exported version. The names are
-`UrltraKB-VERSION-windows-x64.zip`, `UrltraKB-VERSION-debian13.6-x64.tar.gz`,
-and `UrltraKB-VERSION-materials.zip`. Each runtime archive has one `UrltraKB/`
+`UltraKB-VERSION-windows-x64.zip`, `UltraKB-VERSION-debian13.6-x64.tar.gz`,
+and `UltraKB-VERSION-materials.zip`. Each runtime archive has one `UltraKB/`
 directory. The tool rejects stale identities, changed input bytes and existing
 output files, selects only inventoried program files, and rechecks every archive
 member. Keep all three downloads and their checksums together in the delivery
@@ -226,8 +227,8 @@ local download endpoint for the separate archive.
 
 To install or serve all corresponding source materials, extract the materials
 archive at the same location as the runtime archive, merging
-`UrltraKB/distribution/`. Its complete schema-1 manifest replaces the compact
+`UltraKB/distribution/`. Its complete schema-1 manifest replaces the compact
 manifest and enables the full material downloads. A source/wheel REST deployment
-can instead set `OPENKB_DISTRIBUTION_DIR` to that extracted directory, with the
+can instead set `ULTRAKB_DISTRIBUTION_DIR` to that extracted directory, with the
 matching exported package containing `_build_info.json` installed. Private KB
 routes remain independent of this public material endpoint.

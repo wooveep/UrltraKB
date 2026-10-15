@@ -14,10 +14,10 @@ import tarfile
 import tempfile
 from pathlib import Path
 
-from openkb.locks import atomic_write_json
-from openkb.office.inventory import digest, inventory
-from openkb.office.probe import host_conditions, probe
-from openkb.office.records import OfficeArtifact, OfficeManifest
+from ultrakb.locks import atomic_write_json
+from ultrakb.office.inventory import digest, inventory
+from ultrakb.office.probe import host_conditions, probe
+from ultrakb.office.records import OfficeArtifact, OfficeManifest
 
 REPOSITORY = Path(__file__).resolve().parents[1]
 
@@ -28,7 +28,7 @@ def verify(path: Path, record: dict):
 
 
 def prepare(archive: Path, source: Path, output: Path, launcher: Path | None = None):
-    lock_path = REPOSITORY / "openkb/office/runtime-lock.json"
+    lock_path = REPOSITORY / "ultrakb/office/runtime-lock.json"
     lock = json.loads(lock_path.read_text())
     host_conditions()
     verify(archive, lock[sys.platform])
@@ -83,10 +83,10 @@ def prepare(archive: Path, source: Path, output: Path, launcher: Path | None = N
                     "Windows Office requires the separately built owned-process launcher"
                 )
         fonts_path = REPOSITORY / "assets/fonts/manifest.json"
-        license_dir = runtime / "openkb-provenance/licenses"
+        license_dir = runtime / "ultrakb-provenance/licenses"
         license_dir.mkdir(parents=True)
-        shutil.copy2(lock_path, runtime / "openkb-provenance/runtime-lock.json")
-        shutil.copy2(fonts_path, runtime / "openkb-provenance/application-fonts.json")
+        shutil.copy2(lock_path, runtime / "ultrakb-provenance/runtime-lock.json")
+        shutil.copy2(fonts_path, runtime / "ultrakb-provenance/application-fonts.json")
         font_dir = runtime / (
             "LibreOffice.app/Contents/Resources/fonts/truetype"
             if sys.platform == "darwin"
@@ -105,7 +105,7 @@ def prepare(archive: Path, source: Path, output: Path, launcher: Path | None = N
             sign(runtime / "LibreOffice.app")
         private_launcher = None
         if sys.platform == "win32" and launcher:
-            private_launcher = "openkb-provenance/office-launcher.exe"
+            private_launcher = "ultrakb-provenance/office-launcher.exe"
             shutil.copy2(launcher, runtime / private_launcher)
         actual = probe(runtime, python, soffice, private_launcher)
         files, links = inventory(runtime)
@@ -137,7 +137,7 @@ def prepare(archive: Path, source: Path, output: Path, launcher: Path | None = N
             },
             application_fonts_manifest=digest(fonts_path),
         )
-        atomic_write_json(runtime / "openkb-office.json", manifest.model_dump(mode="json"))
+        atomic_write_json(runtime / "ultrakb-office.json", manifest.model_dump(mode="json"))
         runtime.rename(output)
         print(f"Prepared {manifest.version} / {manifest.build_id}: {len(files)} files at {output}")
 

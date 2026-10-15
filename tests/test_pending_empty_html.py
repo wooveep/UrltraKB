@@ -8,9 +8,9 @@ pytest_plugins = ("pending_fixtures",)
 
 
 def test_script_only_embedded_html_is_not_imported(kb_dir, writer_document, pdf_model):
-    from openkb.application.documents import import_document
-    from openkb.application.pending import pending_status, process_pending
-    from openkb.source_catalog import list_sources
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.pending import pending_status, process_pending
+    from ultrakb.source_catalog import list_sources
 
     with ZipFile(writer_document, "a") as package:
         package.writestr(
@@ -31,9 +31,9 @@ def test_script_only_embedded_html_is_not_imported(kb_dir, writer_document, pdf_
     assert process_pending(kb_dir)["processed"] == 0
     assert pending_status(kb_dir)["jobs"] == result["jobs"]
 
-    from openkb.application.ingestion import pending_counts
-    from openkb.application.pending import cancel_execution_group, retry_pending_job
-    from openkb.source_catalog import read_admission, read_source
+    from ultrakb.application.ingestion import pending_counts
+    from ultrakb.application.pending import cancel_execution_group, retry_pending_job
+    from ultrakb.source_catalog import read_admission, read_source
 
     admission = read_admission(kb_dir, read_source(kb_dir, parent.source_id))
     assert pending_counts(kb_dir, admission)["imports_pending"] == 0
@@ -49,8 +49,8 @@ def test_script_only_embedded_html_is_not_imported(kb_dir, writer_document, pdf_
 
 @pytest.mark.parametrize("body", ["", "<!-- no body -->", '<script>var data = "API";</script>'])
 def test_empty_html_direct_import_has_no_document_artifacts(kb_dir, tmp_path, pdf_model, body):
-    from openkb.application.documents import import_document
-    from openkb.source_catalog import list_sources
+    from ultrakb.application.documents import import_document
+    from ultrakb.source_catalog import list_sources
 
     path = tmp_path / "empty.html"
     path.write_text("<html><head><title>Guide</title></head><body>" + body + "</body></html>")
@@ -60,17 +60,17 @@ def test_empty_html_direct_import_has_no_document_artifacts(kb_dir, tmp_path, pd
     assert result.units == () and result.unfinished == ()
     assert result.quality == ("empty_html_not_imported",)
     assert not list_sources(kb_dir)
-    assert not list((kb_dir / ".openkb/catalog/source-revisions").glob("*.json"))
-    assert not list((kb_dir / ".openkb/catalog/units").glob("*.json"))
-    assert not list((kb_dir / ".openkb/knowledge").glob("*"))
+    assert not list((kb_dir / ".ultrakb/catalog/source-revisions").glob("*.json"))
+    assert not list((kb_dir / ".ultrakb/catalog/units").glob("*.json"))
+    assert not list((kb_dir / ".ultrakb/knowledge").glob("*"))
     assert result.model_usage["current"]["requests"] == 0
 
 
 def test_embedded_html_with_static_body_still_imports(kb_dir, writer_document, pdf_model):
-    from openkb.application.documents import import_document
-    from openkb.application.pending import process_pending
-    from openkb.documents import read_document_source
-    from openkb.source_catalog import list_sources
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.pending import process_pending
+    from ultrakb.documents import read_document_source
+    from ultrakb.source_catalog import list_sources
 
     with ZipFile(writer_document, "a") as package:
         package.writestr(
@@ -88,13 +88,13 @@ def test_embedded_html_with_static_body_still_imports(kb_dir, writer_document, p
 
 
 def test_runtime_reports_not_imported_as_skipped(kb_dir, writer_document, pdf_model, monkeypatch):
-    from openkb.application.documents import import_document
-    from openkb.application.execution import ExecutionContext
-    from openkb.application.pending import claim_pending_job, process_pending, run_pending_job
-    from openkb.runtime.records import UnitIdentity
-    from openkb.runtime.requests import RunPendingJob
-    from openkb.runtime.worker import _execute
-    from openkb.source_catalog import list_sources
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.execution import ExecutionContext
+    from ultrakb.application.pending import claim_pending_job, process_pending, run_pending_job
+    from ultrakb.runtime.records import UnitIdentity
+    from ultrakb.runtime.requests import RunPendingJob
+    from ultrakb.runtime.worker import _execute
+    from ultrakb.source_catalog import list_sources
 
     with ZipFile(writer_document, "a") as package:
         package.writestr("word/embeddings/empty.htm", "<html><body></body></html>")
@@ -103,7 +103,7 @@ def test_runtime_reports_not_imported_as_skipped(kb_dir, writer_document, pdf_mo
     job = claim_pending_job(kb_dir)
     outcome = run_pending_job(kb_dir, job["id"], job["dispatch_id"])
     # Replay the real storage-boundary result through the worker's status projection.
-    monkeypatch.setattr("openkb.application.pending.run_pending_job", lambda *a, **k: outcome)
+    monkeypatch.setattr("ultrakb.application.pending.run_pending_job", lambda *a, **k: outcome)
     result = _execute(
         RunPendingJob(job["id"], job["dispatch_id"]),
         UnitIdentity("a" * 32, "1", str(kb_dir), "b" * 64),

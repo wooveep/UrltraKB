@@ -1,6 +1,6 @@
 import json
 
-from openkb.state import HashRegistry
+from ultrakb.state import HashRegistry
 
 
 def test_empty_registry_is_known_false(tmp_path):

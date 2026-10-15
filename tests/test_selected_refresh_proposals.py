@@ -4,14 +4,14 @@ import asyncio
 import json
 
 import pytest
-from test_selected_refresh_sdk import _changed_reply, _import, _prepared
+from test_selected_refresh_sdk import _import, _prepared
 
 pytest_plugins = ("test_vendor_sdk",)
 
 
 def _proposal(kb, service):
-    from openkb.application.pages import read_page, save_page
-    from openkb.application.refresh import refresh_selected_sources
+    from ultrakb.application.pages import read_page, save_page
+    from ultrakb.application.refresh import refresh_selected_sources
 
     sources, scope = _prepared(kb, service)
     for name in ("concepts/shared", "summaries/normal"):
@@ -23,10 +23,9 @@ def _proposal(kb, service):
             version=page.version,
             scope=scope,
         )
-    service.replies.append((200, _changed_reply))
     result = asyncio.run(refresh_selected_sources(kb, sources, scope=scope))
     assert result.status == "awaiting_confirmation", result.message
-    path = kb / ".openkb/refresh-proposals" / result.proposal_id / "proposal.json"
+    path = kb / ".ultrakb/refresh-proposals" / result.proposal_id / "proposal.json"
     return scope, result, path
 
 
@@ -34,8 +33,8 @@ def _proposal(kb, service):
 def test_selected_proposal_preserves_manual_baseline_and_rejects_late_acceptance(
     kb_dir, model_service, superseded
 ):
-    from openkb.application.refresh import accept_refresh_proposal, read_refresh_proposal
-    from openkb.unit_publication import read_head, wiki_versions
+    from ultrakb.application.refresh import accept_refresh_proposal, read_refresh_proposal
+    from ultrakb.unit_publication import read_head, wiki_versions
 
     scope, result, _ = _proposal(kb_dir, model_service)
     if superseded:
@@ -79,11 +78,11 @@ def test_selected_proposal_preserves_manual_baseline_and_rejects_late_acceptance
 def test_selected_proposal_rejects_changed_retained_metadata_even_when_superseded(
     kb_dir, model_service, mutation, superseded
 ):
-    from openkb.application.refresh import accept_refresh_proposal, read_refresh_proposal
-    from openkb.ingest_records import ImportUnit
-    from openkb.source_catalog import read_record
-    from openkb.state import HashRegistry
-    from openkb.unit_publication import read_head, wiki_versions
+    from ultrakb.application.refresh import accept_refresh_proposal, read_refresh_proposal
+    from ultrakb.ingest_records import ImportUnit
+    from ultrakb.source_catalog import read_record
+    from ultrakb.state import HashRegistry
+    from ultrakb.unit_publication import read_head, wiki_versions
 
     scope, result, path = _proposal(kb_dir, model_service)
     data = json.loads(path.read_text())
@@ -129,23 +128,22 @@ def test_selected_proposal_rejects_changed_retained_metadata_even_when_supersede
 
 
 def test_scoped_proposal_cannot_modify_index_without_global_resolution(kb_dir, model_service):
-    from openkb.application.pages import read_page, save_page
-    from openkb.application.refresh import (
+    from ultrakb.application.pages import read_page, save_page
+    from ultrakb.application.refresh import (
         accept_refresh_proposal,
         read_refresh_proposal,
         refresh_selected_sources,
     )
-    from openkb.ingest_records import KnowledgeHead
-    from openkb.refresh_publication import refresh_baselines
-    from openkb.state import HashRegistry
-    from openkb.unit_publication import read_head, wiki_versions
+    from ultrakb.ingest_records import KnowledgeHead
+    from ultrakb.refresh_publication import refresh_baselines
+    from ultrakb.state import HashRegistry
+    from ultrakb.unit_publication import read_head, wiki_versions
 
     sources, scope = _prepared(kb_dir, model_service)
     page = read_page(kb_dir, "concepts/shared", scope=scope)
     save_page(
         kb_dir, page.path, page.body + "\nHuman review note.\n", version=page.version, scope=scope
     )
-    model_service.replies.append((200, _changed_reply))
     result = asyncio.run(
         refresh_selected_sources(
             kb_dir,
@@ -155,13 +153,15 @@ def test_scoped_proposal_cannot_modify_index_without_global_resolution(kb_dir, m
         )
     )
     assert result.status == "awaiting_confirmation", result.message
-    directory = kb_dir / ".openkb/refresh-proposals" / result.proposal_id
+    directory = kb_dir / ".ultrakb/refresh-proposals" / result.proposal_id
     path = directory / "proposal.json"
     proposal = json.loads(path.read_text())
     assert proposal["selection"]["page_paths"] == ["concepts/shared.md"]
     assert "index.md" not in proposal["selection"]["resolved"]
     index = directory / "wiki/index.md"
-    index.write_text(index.read_text() + "\nUnselected injected index content.\n")
+    from ultrakb.locks import atomic_write_text
+
+    atomic_write_text(index, index.read_text() + "\nUnselected injected index content.\n")
     proposal["candidate_pages"]["index.md"] = HashRegistry.hash_file(index)
     proposal["candidate_manifest"]["generated_baselines"] = refresh_baselines(
         KnowledgeHead.model_validate_json(json.dumps(proposal["expected_head"])),

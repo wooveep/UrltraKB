@@ -1,7 +1,7 @@
 """Markdown boundaries at the agreed native content-rendering seam."""
 
-from openkb.rendering.markdown import render_markdown
-from openkb.rendering.renderer import RenderedBlock
+from ultrakb.rendering.markdown import render_markdown
+from ultrakb.rendering.renderer import RenderedBlock
 
 
 class LocalRenderer:
@@ -26,7 +26,7 @@ def test_code_and_link_destinations_remain_literal_while_real_math_is_rendered()
     assert renderer.sources == ["a"]
     assert "[[concepts/demo]]" in result.html
     assert "https://example.test/$destination$" in result.html
-    assert 'href="openkb:concepts/demo"' in result.html
+    assert 'href="ultrakb:concepts/demo"' in result.html
 
 
 def test_inline_display_formula_does_not_swallow_following_prose_or_blocks():

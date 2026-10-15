@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-pytest_plugins = ("test_office_import",)
+pytest_plugins = ("test_office_import", "block_fixtures", "processing_fixtures")
 
 FIXTURE = Path(__file__).parent / "fixtures/office/slides.pptx"
 
@@ -17,8 +17,8 @@ def frozen_slide_conversion(monkeypatch):
     import pymupdf
     from pptx import Presentation
 
-    from openkb.office.records import OfficeConversion, Slide
-    from openkb.state import HashRegistry
+    from ultrakb.office.records import OfficeConversion, Slide
+    from ultrakb.state import HashRegistry
 
     identity = {"fixture": "frozen-physical-slides"}
 
@@ -73,8 +73,8 @@ def frozen_slide_conversion(monkeypatch):
         receipt.write_text(record.model_dump_json())
         return receipt
 
-    monkeypatch.setattr("openkb.office.convert.convert_office", convert)
-    monkeypatch.setattr("openkb.office.runtime.processing_identity", lambda _: identity)
+    monkeypatch.setattr("ultrakb.office.convert.convert_office", convert)
+    monkeypatch.setattr("ultrakb.office.runtime.processing_identity", lambda _: identity)
 
     def original(path, body=""):
         from pptx.util import Inches
@@ -93,49 +93,18 @@ def frozen_slide_conversion(monkeypatch):
 
 
 @pytest.fixture
-def single_slide_model(pdf_model, monkeypatch):
-    import json
-    from types import SimpleNamespace
-
+def single_slide_model(pdf_model, monkeypatch, live_llm):
     import litellm
 
-    original = litellm.completion
     calls = []
 
     def completion(**kwargs):
         calls.append(kwargs)
-        result = original(**kwargs)
-        text = str(kwargs["messages"])
-        if "PHYSICAL SLIDE STRUCTURE" in text:
-            marker = '{"unit": 1, "parts":'
-            # Read the unescaped JSON content rather than the repr of messages.
-            text = "\n".join(message["content"] for message in kwargs["messages"])
-            unit, _ = json.JSONDecoder().raw_decode(text[text.index(marker) :])
-            # This fixture's original rule is the first line. A canonical body
-            # also carries generated image syntax, which cannot be an anchor.
-            body = unit["parts"]["body"].splitlines()[0]
-            result.choices[0].message = SimpleNamespace(
-                content=json.dumps(
-                    [
-                        {
-                            "structure": "1",
-                            "title": "Original rule",
-                            "title_origin": "generated",
-                            "physical_index": 1,
-                            "anchor": {
-                                "unit": 1,
-                                "part": "body",
-                                "range": [0, len(body)],
-                                "excerpt": body,
-                            },
-                        }
-                    ]
-                )
-            )
-        return result
+        return live_llm.completion(**kwargs)
 
     async def acompletion(**kwargs):
-        return completion(**kwargs)
+        calls.append(kwargs)
+        return await live_llm.acompletion(**kwargs)
 
     monkeypatch.setattr(litellm, "completion", completion)
     monkeypatch.setattr(litellm, "acompletion", acompletion)
@@ -148,10 +117,10 @@ def test_image_only_presentation_retains_pdf_without_publishing_knowledge(
 ):
     import pymupdf
 
-    from openkb.application.documents import import_document
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
-    from openkb.documents import read_document_source
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.settings import apply_kb_config_patch
+    from ultrakb.application.settings_data import KbConfigPatchRequest
+    from ultrakb.documents import read_document_source
 
     apply_kb_config_patch(
         kb_dir, KbConfigPatchRequest(kb=str(kb_dir), config={"pdf_short_max_pages": limit})
@@ -194,10 +163,10 @@ def test_image_only_replacement_keeps_previous_knowledge_and_retains_new_pdf(
 ):
     import pymupdf
 
-    from openkb.application.documents import import_document
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
-    from openkb.documents import read_document_source
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.settings import apply_kb_config_patch
+    from ultrakb.application.settings_data import KbConfigPatchRequest
+    from ultrakb.documents import read_document_source
 
     apply_kb_config_patch(
         kb_dir, KbConfigPatchRequest(kb=str(kb_dir), config={"pdf_short_max_pages": limit})
@@ -242,22 +211,22 @@ def test_recompilation_of_previously_published_textless_slides_does_not_call_mod
 ):
     import asyncio
 
-    from openkb.application.documents import import_document
-    from openkb.application.recompilation import recompile_document, select_recompilation
-    from openkb.documents import read_document_source
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.recompilation import recompile_document, select_recompilation
+    from ultrakb.documents import read_document_source
 
     path = frozen_slide_conversion(tmp_path / "old-textless.pptx")
     # Simulate the prior full-compilation policy to retain an old successful snapshot.
     with monkeypatch.context() as old_policy:
         from dataclasses import replace
 
-        from openkb.import_text import preflight_import_text
+        from ultrakb.import_text import preflight_import_text
 
         def old_preflight(*args, **kwargs):
             return replace(preflight_import_text(*args, **kwargs), unavailable=None)
 
-        old_policy.setattr("openkb.import_text.preflight_import_text", old_preflight)
-        old_policy.setattr("openkb.office.slide_content.require_slide_navigation", lambda _: None)
+        old_policy.setattr("ultrakb.import_text.preflight_import_text", old_preflight)
+        old_policy.setattr("ultrakb.office.slide_content.require_slide_navigation", lambda _: None)
         first = import_document(
             kb_dir,
             path,
@@ -276,65 +245,19 @@ def test_recompilation_of_previously_published_textless_slides_does_not_call_mod
 
 
 @pytest.fixture
-def presentation_model(pdf_model, monkeypatch):
-    import json
-    from types import SimpleNamespace
-
+def presentation_model(pdf_model, monkeypatch, live_llm):
     import litellm
 
-    original = litellm.completion
     prompts = []
 
     def completion(**kwargs):
         prompt = str(kwargs["messages"])
         prompts.append(prompt)
-        if "PHYSICAL SLIDE STRUCTURE" not in prompt:
-            return original(**kwargs)
-        result = original(**kwargs)
-        result.choices[0].message = SimpleNamespace(
-            content=json.dumps(
-                [
-                    {
-                        "structure": "1",
-                        "title": "Key rotation guidance",
-                        "title_origin": "generated",
-                        "physical_index": 1,
-                        "anchor": {
-                            "unit": 1,
-                            "part": "notes",
-                            "range": [0, 17],
-                            "excerpt": "Speaker note only",
-                        },
-                    }
-                ]
-            )
-        )
-        text = "\n".join(message["content"] for message in kwargs["messages"])
-        marker = '{"unit": 2, "parts":'
-        if marker in text:
-            unit, _ = json.JSONDecoder().raw_decode(text[text.index(marker) :])
-            body = unit["parts"]["body"]
-            start = body.index("AFTER_IMAGE_MARKER")
-            entries = json.loads(result.choices[0].message.content)
-            entries.append(
-                {
-                    "structure": "2",
-                    "title": "Illustrated details",
-                    "title_origin": "generated",
-                    "physical_index": 2,
-                    "anchor": {
-                        "unit": 2,
-                        "part": "body",
-                        "range": [start, start + 18],
-                        "excerpt": "AFTER_IMAGE_MARKER",
-                    },
-                }
-            )
-            result.choices[0].message.content = json.dumps(entries)
-        return result
+        return live_llm.completion(**kwargs)
 
     async def acompletion(**kwargs):
-        return completion(**kwargs)
+        prompts.append(str(kwargs["messages"]))
+        return await live_llm.acompletion(**kwargs)
 
     monkeypatch.setattr(litellm, "completion", completion)
     monkeypatch.setattr(litellm, "acompletion", acompletion)
@@ -343,21 +266,30 @@ def presentation_model(pdf_model, monkeypatch):
 
 @pytest.mark.parametrize("limit", [10, 1])
 def test_pptx_retains_hidden_slides_and_notes_without_extra_pages(
-    kb_dir, tmp_path, office_runtime, presentation_model, limit
+    kb_dir, tmp_path, office_runtime, processing_only, limit
 ):
-    from openkb.application.documents import import_document
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
-    from openkb.documents import read_document_source
+    from native_processing_inputs import retain_physical_slide_pages
+    from processing_fixtures import source_processing_context
+
+    from ultrakb.application.settings import apply_kb_config_patch
+    from ultrakb.application.settings_data import KbConfigPatchRequest
+    from ultrakb.documents import read_document_source
+    from ultrakb.llm_usage import aggregate_usage
 
     apply_kb_config_patch(
         kb_dir, KbConfigPatchRequest(kb=str(kb_dir), config={"pdf_short_max_pages": limit})
     )
     path = tmp_path / "演示文稿.pptx"
     shutil.copyfile(FIXTURE, path)
-    imported = import_document(kb_dir, path)
-    assert imported.status == "added", imported.message
+    context = source_processing_context()
+    imported = processing_only(path, context=context)
+    retain_physical_slide_pages(kb_dir, imported.source_id)
+    assert context.executor is not None and context.executor.calls == 0
+    assert aggregate_usage(kb_dir)["requests"] == 0
     source = read_document_source(kb_dir, imported.source_id)
+    assert source["knowledge_revision_id"] is None
+    assert source["length_class"] == ("long" if limit == 1 else "short")
+    assert source["execution_mode"] == ("segmented" if limit == 1 else "full")
     assert source["pages"] == 3
     assert "HIDDEN_SLIDE_BODY" in source["content"]
     assert "演讲备注" in source["content"]
@@ -373,33 +305,64 @@ def test_pptx_retains_hidden_slides_and_notes_without_extra_pages(
     assert "rotate key every 90 days" in notes["content"]
     assert "Alpha visible slide" not in notes["content"]
     assert notes["origin_locators"][0]["part"] == "notes"
-    if limit == 1:
-        assert any("PHYSICAL SLIDE STRUCTURE" in prompt for prompt in presentation_model)
+
+
+def test_pptx_rejects_unusable_summary_capacity_and_retains_source(
+    kb_dir, office_runtime, presentation_model
+):
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.settings import apply_kb_config_patch
+    from ultrakb.application.settings_data import KbConfigPatchRequest
+    from ultrakb.documents import read_document_source
+
+    apply_kb_config_patch(
+        kb_dir,
+        KbConfigPatchRequest(
+            kb=str(kb_dir),
+            config={"model": "gpt-4o", "model_capacity": {"max_input_tokens": 1100}},
+        ),
+    )
+    imported = import_document(kb_dir, FIXTURE)
+    assert imported.status == "failed", imported.message
+    assert "document_summary_capacity_exceeded" in imported.message
+    saved = read_document_source(kb_dir, imported.source_id)
+    assert saved["knowledge_revision_id"] is None
+    assert saved["length_class"] == "short" and saved["execution_mode"] == "segmented"
+    processing = saved["target_processing"]
+    assert processing["input_limit"] == 1100
+    assert processing["estimated_input_tokens"] > processing["input_limit"]
+    assert (kb_dir / saved["original_path"]).read_bytes() == FIXTURE.read_bytes()
+    assert (kb_dir / saved["internal_pdf_path"]).is_file()
+    assert saved["units"][2]["parts"]["notes"] == "Notes-only page evidence."
 
 
 def test_notes_only_change_rebuilds_index_and_cache_recovers_both_parts(
-    kb_dir, tmp_path, office_runtime, presentation_model
+    kb_dir, tmp_path, office_runtime, presentation_model, wide_short_prompt, live_llm
 ):
     import json
     import sqlite3
 
     from pageindex import IndexConfig
 
-    from openkb.application.documents import import_document
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
-    from openkb.block_package import create_index_client
-    from openkb.condb_storage import ConDBPageIndexStorage
-    from openkb.documents import read_document_source
-    from openkb.index_location import IndexLocation
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.settings import apply_kb_config_patch
+    from ultrakb.application.settings_data import KbConfigPatchRequest
+    from ultrakb.block_package import create_index_client
+    from ultrakb.condb_storage import ConDBPageIndexStorage
+    from ultrakb.documents import read_document_source
+    from ultrakb.index_llm import PageIndexLLM
+    from ultrakb.index_location import IndexLocation
+    from ultrakb.llm_execution import CompletionExecutor, RoleBindings
 
+    # Force segmentation at the full-request seam while leaving room for the
+    # segmented summary protocol; an undersized limit stops before cache checks.
     apply_kb_config_patch(
         kb_dir,
         KbConfigPatchRequest(
             kb=str(kb_dir),
             config={
                 "model": "gpt-4o",
-                "model_capacity": {"max_input_tokens": 1100},
+                "model_capacity": {"max_input_tokens": 4000},
             },
         ),
     )
@@ -409,27 +372,60 @@ def test_notes_only_change_rebuilds_index_and_cache_recovers_both_parts(
     assert imported.status == "added", imported.message
     saved = read_document_source(kb_dir, imported.source_id)
     assert saved["length_class"] == "short" and saved["execution_mode"] == "segmented"
+    processing = saved["target_processing"]
+    assert processing["input_limit"] == 4000
+    assert processing["estimated_input_tokens"] > processing["input_limit"]
     retained = (kb_dir / saved["internal_pdf_path"]).with_suffix(".okpi")
     package = tmp_path / "slides.okpi"
     shutil.copyfile(retained, package)
     store = tmp_path / "standalone-index"
+    # This regression needs a real navigation decision, not new node summaries
+    # or another document description for each copy of the same frozen source.
+    index_options = IndexConfig(
+        if_add_node_summary=False,
+        if_add_doc_description=False,
+        llm_client=PageIndexLLM(
+            CompletionExecutor(RoleBindings("deepseek/deepseek-flash", live_llm.credentials))
+        ),
+    )
     with ConDBPageIndexStorage(IndexLocation.package(store)) as database:
         client = create_index_client(
             storage_path=str(store),
             storage=database,
             model="gpt-4o",
-            index_config=IndexConfig(if_add_node_summary=True),
+            index_config=index_options,
         )
         collection = client.collection()
+        tree_prompts = len(presentation_model)
         first = collection.add(str(package))
+        assert any(
+            "PHYSICAL SLIDE STRUCTURE" in prompt for prompt in presentation_model[tree_prompts:]
+        )
         before = collection.get_document(first, include_text=True)
         assert before["page_count"] == 3
-        assert before["structure"][0]["title_origin"] == "generated"
-        assert before["structure"][0]["anchor"]["part"] == "notes"
-        assert "rotate key every 90 days" in before["structure"][0]["text"]
-        anchor = before["structure"][1]["anchor"]
-        start, end = anchor["range"]
-        assert saved["units"][1]["parts"]["body"][start:end] == "AFTER_IMAGE_MARKER"
+        nodes = []
+
+        def collect(items):
+            for node in items:
+                nodes.append(node)
+                collect(node.get("nodes", []))
+
+        collect(before["structure"])
+        assert all(node["title_origin"] == "generated" for node in nodes)
+        assert any(
+            node["anchor"]["part"] == "notes"
+            and node["anchor"]["unit"] == 1
+            and "rotate key every 90 days" in node["text"]
+            for node in nodes
+        )
+        assert any("AFTER_IMAGE_MARKER" in node["anchor"]["excerpt"] for node in nodes)
+        for node in nodes:
+            anchor = node["anchor"]
+            start, end = anchor["range"]
+            # Coordinates address the index's frozen original, before paths
+            # are materialized for a different KB/source location.
+            indexed_part = before["metadata"]["page_parts"][anchor["unit"] - 1][anchor["part"]]
+            assert indexed_part[start:end] == anchor["excerpt"]
         content = json.loads(package.read_text())
         content["slides"][2]["notes"] = "Changed notes, identical PDF bytes."
         package.write_text(json.dumps(content))
@@ -446,9 +442,20 @@ def test_notes_only_change_rebuilds_index_and_cache_recovers_both_parts(
         ).collection()
         expected = collection.get_page_content(first, "1-3")
         assert Path(expected[1]["images"][0]["path"]).is_file()
+        assert expected[2]["parts"]["notes"] == "Notes-only page evidence."
         before = collection.get_document(first, include_text=True)
         with sqlite3.connect(moved / "context.sqlite") as db:
-            db.execute("UPDATE okb_documents SET payload = json_set(payload, '$.pages', NULL)")
+            cleared = db.execute(
+                "UPDATE okb_documents SET payload = json_set(payload, '$.pages', NULL)"
+            )
+            assert cleared.rowcount == 2
+            assert (
+                db.execute(
+                    "SELECT COUNT(*) FROM okb_documents "
+                    "WHERE json_extract(payload, '$.pages') IS NULL"
+                ).fetchone()[0]
+                == 2
+            )
         calls = len(presentation_model)
         assert collection.get_page_content(first, "1-3") == expected
         assert collection.get_document(first, include_text=True) == before
@@ -467,9 +474,9 @@ def test_presentation_api_and_cli_select_the_same_speaker_notes(
     from click.testing import CliRunner
     from fastapi.testclient import TestClient
 
-    from openkb.api import create_app
-    from openkb.cli import cli
-    from openkb.config import register_kb_alias
+    from ultrakb.api import create_app
+    from ultrakb.cli import cli
+    from ultrakb.config import register_kb_alias
 
     register_kb_alias("presentation", kb_dir)
     with TestClient(create_app()) as client:
@@ -502,38 +509,29 @@ def test_presentation_api_and_cli_select_the_same_speaker_notes(
     assert json.loads(output.output)["content"] == notes["content"]
 
 
-def test_note_anchor_cannot_claim_body_coordinates(
-    kb_dir, office_runtime, presentation_model, monkeypatch
-):
-    import json
+def test_note_anchor_cannot_claim_body_coordinates():
+    from pageindex.index.page_parts_policy import PagePartsPolicy
 
-    import litellm
-
-    from openkb.application.documents import import_document
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
-    from openkb.documents import read_document_source
-
-    original = litellm.completion
-
-    def completion(**kwargs):
-        result = original(**kwargs)
-        if "PHYSICAL SLIDE STRUCTURE" in str(kwargs["messages"]):
-            value = json.loads(result.choices[0].message.content)
-            value[0]["anchor"]["part"] = "body"
-            result.choices[0].message.content = json.dumps(value)
-        return result
-
-    async def acompletion(**kwargs):
-        return completion(**kwargs)
-
-    monkeypatch.setattr(litellm, "completion", completion)
-    monkeypatch.setattr(litellm, "acompletion", acompletion)
-    apply_kb_config_patch(
-        kb_dir, KbConfigPatchRequest(kb=str(kb_dir), config={"pdf_short_max_pages": 1})
+    policy = PagePartsPolicy(
+        {
+            "unit_count": 1,
+            "page_parts": [
+                {
+                    "body": "Alpha visible slide",
+                    "notes": "Speaker note only: rotate key every 90 days.",
+                }
+            ],
+        }
     )
-    imported = import_document(kb_dir, FIXTURE)
-    assert imported.status == "failed" and "anchor" in imported.message.lower()
-    source = read_document_source(kb_dir, imported.source_id)
-    assert source["knowledge_revision_id"] is None
-    assert source["office"]["slides"][0]["notes"].startswith("Speaker note only")
+    entry = {
+        "structure": "1",
+        "title": "Key rotation",
+        "title_origin": "generated",
+        "physical_index": 1,
+        "anchor": {"unit": 1, "part": "body", "range": [0, 17], "excerpt": "Speaker note only"},
+    }
+    policy.normalize_anchor(entry)
+    assert not policy.valid(entry)
+    with pytest.raises(ValueError, match="Unverified physical slide anchors"):
+        policy.validate_order([entry])
+    assert policy.parts[0]["notes"] == "Speaker note only: rotate key every 90 days."

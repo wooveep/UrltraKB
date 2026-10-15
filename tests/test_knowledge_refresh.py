@@ -1,15 +1,16 @@
 """Source changes retain evidence until an explicitly validated refresh replaces it."""
 
 import pytest
+from application_llm_fixtures import real_application_model  # noqa: F401
 from test_query_views import _import_rule
 
 
 def test_withdrawal_marks_old_evidence_and_preserves_history(kb_dir, monkeypatch):
-    from openkb.application.query_views import resolve_query_views
-    from openkb.application.refresh import refresh_status
-    from openkb.application.removal import preview_removal, remove_document
-    from openkb.application.views import view_scope
-    from openkb.documents import read_document_source
+    from ultrakb.application.query_views import resolve_query_views
+    from ultrakb.application.refresh import refresh_status
+    from ultrakb.application.removal import preview_removal, remove_document
+    from ultrakb.application.views import view_scope
+    from ultrakb.documents import read_document_source
 
     first = _import_rule(kb_dir, monkeypatch, "install", "TLS is required.")
     scope = view_scope(kb_dir, first.units[0].view_id)
@@ -40,20 +41,21 @@ def test_withdrawal_marks_old_evidence_and_preserves_history(kb_dir, monkeypatch
 def test_failed_update_keeps_old_body_with_pending_refresh(kb_dir, monkeypatch):
     import pymupdf
 
-    from openkb.application.documents import import_document
-    from openkb.application.query_views import resolve_query_views
-    from openkb.application.refresh import refresh_status
-    from openkb.application.views import view_scope
-    from openkb.documents import read_document_source
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.query_views import resolve_query_views
+    from ultrakb.application.refresh import refresh_status
+    from ultrakb.application.views import view_scope
+    from ultrakb.documents import read_document_source
 
     first = _import_rule(kb_dir, monkeypatch, "install", "TLS is required.")
     with pymupdf.open() as pdf:
         pdf.new_page().insert_text((72, 72), "TLS is forbidden.")
         (kb_dir / "install.pdf").write_bytes(pdf.tobytes())
-    monkeypatch.setattr(
-        "litellm.completion",
-        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("model unavailable")),
-    )
+
+    def fail_summary_publication(*args, **kwargs):
+        raise OSError("summary storage unavailable")
+
+    monkeypatch.setattr("ultrakb.agent.compiler._write_summary", fail_summary_publication)
 
     failed = import_document(
         kb_dir,
@@ -66,7 +68,7 @@ def test_failed_update_keeps_old_body_with_pending_refresh(kb_dir, monkeypatch):
     assert "TLS is required." in read_document_source(kb_dir, first.source_id)["content"]
     import asyncio
 
-    from openkb.application.refresh import refresh_knowledge_view
+    from ultrakb.application.refresh import refresh_knowledge_view
 
     before = refresh_status(kb_dir, scope=scope)
     assert asyncio.run(refresh_knowledge_view(kb_dir, scope=scope)).status == "blocked"
@@ -76,10 +78,10 @@ def test_failed_update_keeps_old_body_with_pending_refresh(kb_dir, monkeypatch):
 def test_refresh_retires_pages_without_sources_and_keeps_a_snapshot(kb_dir, monkeypatch):
     import asyncio
 
-    from openkb.application.pages import read_page
-    from openkb.application.refresh import refresh_knowledge_view, refresh_status
-    from openkb.application.removal import remove_document
-    from openkb.application.views import view_scope
+    from ultrakb.application.pages import read_page
+    from ultrakb.application.refresh import refresh_knowledge_view, refresh_status
+    from ultrakb.application.removal import remove_document
+    from ultrakb.application.views import view_scope
 
     first = _import_rule(kb_dir, monkeypatch, "install", "TLS is required.")
     scope = view_scope(kb_dir, first.units[0].view_id)
@@ -96,7 +98,7 @@ def test_refresh_retires_pages_without_sources_and_keeps_a_snapshot(kb_dir, monk
     assert not (scope.wiki_dir / "summaries/install.md").exists()
     assert "TLS is required." in read_page(kb_dir, "summaries/install", scope=history).content
     assert refresh_status(kb_dir, scope=scope)["needs_refresh"] == {}
-    from openkb.application.refresh import list_knowledge_history
+    from ultrakb.application.refresh import list_knowledge_history
 
     history = list_knowledge_history(kb_dir, scope=scope)
     assert history[-1]["knowledge_revision_id"] == first.units[0].knowledge_revision_id
@@ -104,10 +106,10 @@ def test_refresh_retires_pages_without_sources_and_keeps_a_snapshot(kb_dir, monk
 
 
 def test_reader_reports_pending_evidence_and_historical_status(kb_dir, monkeypatch):
-    from openkb.application.pages import read_page
-    from openkb.application.query_views import read_query_page, resolve_query_views
-    from openkb.application.removal import remove_document
-    from openkb.application.views import view_scope
+    from ultrakb.application.pages import read_page
+    from ultrakb.application.query_views import read_query_page, resolve_query_views
+    from ultrakb.application.removal import remove_document
+    from ultrakb.application.views import view_scope
 
     first = _import_rule(kb_dir, monkeypatch, "install", "TLS is required.")
     scope = view_scope(kb_dir, first.units[0].view_id)
@@ -126,13 +128,13 @@ def test_reader_reports_pending_evidence_and_historical_status(kb_dir, monkeypat
 def test_confirming_empty_contribution_requires_current_source(kb_dir, monkeypatch):
     import asyncio
 
-    from openkb.application.refresh import (
+    from ultrakb.application.refresh import (
         confirm_empty_source,
         refresh_knowledge_view,
         refresh_status,
     )
-    from openkb.application.views import view_scope
-    from openkb.source_catalog import read_source
+    from ultrakb.application.views import view_scope
+    from ultrakb.source_catalog import read_source
 
     first = _import_rule(kb_dir, monkeypatch, "install", "TLS is required.")
     scope = view_scope(kb_dir, first.units[0].view_id)
@@ -148,15 +150,13 @@ def test_confirming_empty_contribution_requires_current_source(kb_dir, monkeypat
     assert not (scope.wiki_dir / "summaries/install.md").exists()
 
 
-def test_refresh_uses_only_the_remaining_sources(kb_dir, monkeypatch):
+def test_refresh_uses_only_the_remaining_sources(kb_dir, monkeypatch, live_llm):
     import asyncio
-    import json
-    from types import SimpleNamespace
 
-    from openkb.application.query_views import read_query_page, resolve_query_views
-    from openkb.application.refresh import refresh_knowledge_view, refresh_status
-    from openkb.application.removal import remove_document
-    from openkb.application.views import view_scope
+    from ultrakb.application.query_views import read_query_page, resolve_query_views
+    from ultrakb.application.refresh import refresh_knowledge_view, refresh_status
+    from ultrakb.application.removal import remove_document
+    from ultrakb.application.views import view_scope
 
     first = _import_rule(kb_dir, monkeypatch, "install", "TLS is required.")
     second = _import_rule(
@@ -167,20 +167,12 @@ def test_refresh_uses_only_the_remaining_sources(kb_dir, monkeypatch):
     )
     scope = view_scope(kb_dir, first.units[0].view_id)
     remove_document(kb_dir, first.source_id, scope=scope)
-    prompts = []
-    replies = iter([{"description": "Operating rule", "content": "Port 443 is open."}, {}])
+    before = len(live_llm.calls)
 
-    def model(**kwargs):
-        prompts.append(str(kwargs["messages"]))
-        return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(next(replies))))],
-            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
-        )
-
-    monkeypatch.setattr("litellm.completion", model)
     result = asyncio.run(refresh_knowledge_view(kb_dir, scope=scope))
     assert result.status == "completed", result.message
-    assert prompts and "TLS is required" not in "".join(prompts)
+    prompts = str([call["messages"] for call in live_llm.calls[before:]])
+    assert len(live_llm.calls) > before and "TLS is required" not in prompts
     selection = resolve_query_views(kb_dir, "WinStack V1 ports?", scope=scope)
     assert "Port 443 is open" in read_query_page(
         selection, "summaries/operate.md", view_id=scope.view_id
@@ -192,15 +184,15 @@ def test_refresh_uses_only_the_remaining_sources(kb_dir, monkeypatch):
 def test_refresh_protects_manual_pages_until_the_saved_diff_is_accepted(kb_dir, monkeypatch):
     import asyncio
 
-    from openkb.application.pages import read_page, save_page
-    from openkb.application.refresh import (
+    from ultrakb.application.pages import read_page, save_page
+    from ultrakb.application.refresh import (
         accept_refresh_proposal,
         read_refresh_proposal,
         refresh_knowledge_view,
         refresh_status,
     )
-    from openkb.application.removal import remove_document
-    from openkb.application.views import view_scope
+    from ultrakb.application.removal import remove_document
+    from ultrakb.application.views import view_scope
 
     first = _import_rule(kb_dir, monkeypatch, "install", "TLS is required.")
     scope = view_scope(kb_dir, first.units[0].view_id)
@@ -225,9 +217,9 @@ def test_refresh_protects_manual_pages_until_the_saved_diff_is_accepted(kb_dir, 
 def test_failed_refresh_preserves_the_old_result_and_reasons(kb_dir, monkeypatch):
     import asyncio
 
-    from openkb.application.refresh import refresh_knowledge_view, refresh_status
-    from openkb.application.removal import remove_document
-    from openkb.application.views import view_scope
+    from ultrakb.application.refresh import refresh_knowledge_view, refresh_status
+    from ultrakb.application.removal import remove_document
+    from ultrakb.application.views import view_scope
 
     first = _import_rule(kb_dir, monkeypatch, "install", "TLS is required.")
     _import_rule(
@@ -239,9 +231,11 @@ def test_failed_refresh_preserves_the_old_result_and_reasons(kb_dir, monkeypatch
     scope = view_scope(kb_dir, first.units[0].view_id)
     remove_document(kb_dir, first.source_id, scope=scope)
     before = refresh_status(kb_dir, scope=scope)
-    monkeypatch.setattr(
-        "litellm.completion", lambda **kwargs: (_ for _ in ()).throw(RuntimeError("offline"))
-    )
+
+    def fail_summary_publication(*args, **kwargs):
+        raise OSError("summary storage unavailable")
+
+    monkeypatch.setattr("ultrakb.agent.compiler._write_summary", fail_summary_publication)
     result = asyncio.run(refresh_knowledge_view(kb_dir, scope=scope))
     assert result.status == "failed"
     assert refresh_status(kb_dir, scope=scope) == before
@@ -251,16 +245,16 @@ def test_failed_refresh_preserves_the_old_result_and_reasons(kb_dir, monkeypatch
 def test_late_refresh_acceptance_cannot_clear_new_reasons(kb_dir, monkeypatch):
     import asyncio
 
-    from openkb.application.pages import read_page, save_page
-    from openkb.application.refresh import (
+    from ultrakb.application.pages import read_page, save_page
+    from ultrakb.application.refresh import (
         accept_refresh_proposal,
         confirm_empty_source,
         read_refresh_proposal,
         refresh_knowledge_view,
         refresh_status,
     )
-    from openkb.application.views import view_scope
-    from openkb.source_catalog import read_source
+    from ultrakb.application.views import view_scope
+    from ultrakb.source_catalog import read_source
 
     first = _import_rule(kb_dir, monkeypatch, "install", "TLS is required.")
     scope = view_scope(kb_dir, first.units[0].view_id)
@@ -281,15 +275,15 @@ def test_late_refresh_acceptance_cannot_clear_new_reasons(kb_dir, monkeypatch):
 
 @pytest.mark.parametrize("entrypoint", ["cli", "api", "worker"])
 def test_withdraw_and_refresh_are_available_in_each_adapter(kb_dir, monkeypatch, entrypoint):
-    from openkb.application.refresh import refresh_status
-    from openkb.application.views import view_scope
+    from ultrakb.application.refresh import refresh_status
+    from ultrakb.application.views import view_scope
 
     first = _import_rule(kb_dir, monkeypatch, "install", "TLS is required.")
     scope = view_scope(kb_dir, first.units[0].view_id)
     if entrypoint == "cli":
         from click.testing import CliRunner
 
-        from openkb.cli import cli
+        from ultrakb.cli import cli
 
         prefix = [
             "--kb-dir",
@@ -304,11 +298,11 @@ def test_withdraw_and_refresh_are_available_in_each_adapter(kb_dir, monkeypatch,
     elif entrypoint == "api":
         from fastapi.testclient import TestClient
 
-        from openkb.api import create_app
-        from openkb.config import register_kb_alias
+        from ultrakb.api import create_app
+        from ultrakb.config import register_kb_alias
 
         register_kb_alias("refresh-test", kb_dir)
-        monkeypatch.delenv("OPENKB_API_TOKEN", raising=False)
+        monkeypatch.delenv("ULTRAKB_API_TOKEN", raising=False)
         with TestClient(create_app()) as client:
             removed = client.post(
                 "/api/v1/remove",
@@ -326,9 +320,9 @@ def test_withdraw_and_refresh_are_available_in_each_adapter(kb_dir, monkeypatch,
                 refreshed.text
             )
     else:
-        from openkb.application.removal import preview_removal
-        from openkb.runtime.requests import RefreshKnowledge, RemoveDocument
-        from openkb.runtime.tasks import TaskManager
+        from ultrakb.application.removal import preview_removal
+        from ultrakb.runtime.requests import RefreshKnowledge, RemoveDocument
+        from ultrakb.runtime.tasks import TaskManager
 
         preview = preview_removal(kb_dir, first.source_id, scope=scope)
         manager = TaskManager(history_dir=kb_dir / "task-history")
@@ -348,14 +342,11 @@ def test_withdraw_and_refresh_are_available_in_each_adapter(kb_dir, monkeypatch,
 
 
 def test_unchanged_pending_page_keeps_its_old_input_revision(kb_dir, monkeypatch):
-    import json
-    from types import SimpleNamespace
-
     import pymupdf
 
-    from openkb.application.documents import import_document
-    from openkb.application.pages import read_page
-    from openkb.application.views import view_scope
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.pages import read_page
+    from ultrakb.application.views import view_scope
 
     first = _import_rule(kb_dir, monkeypatch, "install", "TLS is required.")
     second = _import_rule(
@@ -367,14 +358,6 @@ def test_unchanged_pending_page_keeps_its_old_input_revision(kb_dir, monkeypatch
     with pymupdf.open() as pdf:
         pdf.new_page().insert_text((72, 72), "TLS is optional.")
         (kb_dir / "install.pdf").write_bytes(pdf.tobytes())
-    replies = iter([{"description": "Updated rule", "content": "TLS is optional."}, {}])
-    monkeypatch.setattr(
-        "litellm.completion",
-        lambda **kwargs: SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(next(replies))))],
-            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
-        ),
-    )
     updated = import_document(
         kb_dir,
         kb_dir / "install.pdf",
@@ -386,9 +369,9 @@ def test_unchanged_pending_page_keeps_its_old_input_revision(kb_dir, monkeypatch
 
 
 def test_cleanup_retains_history_and_defers_when_ownership_is_unreadable(kb_dir, monkeypatch):
-    from openkb.application.refresh import cleanup_unreferenced_artifacts
-    from openkb.application.removal import remove_document
-    from openkb.documents import read_document_source
+    from ultrakb.application.refresh import cleanup_unreferenced_artifacts
+    from ultrakb.application.removal import remove_document
+    from ultrakb.documents import read_document_source
 
     first = _import_rule(kb_dir, monkeypatch, "install", "TLS is required.")
     original = read_document_source(kb_dir, first.source_id)["original_path"]
@@ -396,10 +379,10 @@ def test_cleanup_retains_history_and_defers_when_ownership_is_unreadable(kb_dir,
     retained = cleanup_unreferenced_artifacts(kb_dir, [original])
     assert retained["retained"] == [original]
     assert (kb_dir / original).is_file()
-    orphan = ".openkb/artifacts/" + "d" * 64 + "/content.pdf"
+    orphan = ".ultrakb/artifacts/" + "d" * 64 + "/content.pdf"
     (kb_dir / orphan).parent.mkdir(parents=True)
     (kb_dir / orphan).write_bytes(b"orphan")
-    broken = kb_dir / ".openkb/catalog/discovery-intents" / ("e" * 32 + ".json")
+    broken = kb_dir / ".ultrakb/catalog/discovery-intents" / ("e" * 32 + ".json")
     broken.write_text("{broken")
     deferred = cleanup_unreferenced_artifacts(kb_dir, [orphan])
     assert deferred["retained"] == [orphan] and not deferred["complete"]
@@ -407,10 +390,10 @@ def test_cleanup_retains_history_and_defers_when_ownership_is_unreadable(kb_dir,
 
 
 def test_cleanup_does_not_guess_ownership_of_inline_managed_links(kb_dir):
-    from openkb.application.pages import save_page
-    from openkb.application.refresh import cleanup_unreferenced_artifacts
+    from ultrakb.application.pages import save_page
+    from ultrakb.application.refresh import cleanup_unreferenced_artifacts
 
-    artifact = ".openkb/artifacts/" + "f" * 64 + "/content.pdf"
+    artifact = ".ultrakb/artifacts/" + "f" * 64 + "/content.pdf"
     (kb_dir / artifact).parent.mkdir(parents=True)
     (kb_dir / artifact).write_bytes(b"retained manually linked evidence")
     page = kb_dir / "wiki/concepts/manual.md"

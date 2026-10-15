@@ -41,7 +41,7 @@ remains **short**. Unknown capacity still attempts the full request. This is not
 a guarantee that every later model request fits. No pre-summary or truncation is
 introduced; existing PageIndex and compiler content algorithms are used.
 
-`openkb --kb-dir /path/to/kb settings` (or `settings --global`) reports effective
+`ultrakb --kb-dir /path/to/kb settings` (or `settings --global`) reports effective
 values, their origins, and capacity diagnostics without API keys. The settings
 API and desktop settings expose the same fields. Source reads, document lists,
 and import outcomes report saved classification and execution separately.

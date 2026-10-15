@@ -1,8 +1,8 @@
-"""Tests for openkb.agent.tools — plain function implementations."""
+"""Tests for ultrakb.agent.tools — plain function implementations."""
 
 from __future__ import annotations
 
-from openkb.agent.tools import (
+from ultrakb.agent.tools import (
     artifact_event_from_write,
     get_wiki_page_content,
     list_wiki_files,

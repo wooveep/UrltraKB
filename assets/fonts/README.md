@@ -1,4 +1,4 @@
-# UrltraKB application fonts
+# UltraKB application fonts
 
 The original, unmodified Adobe fonts in this directory are supplied by the maintainer.
 `manifest.json` is the runtime whitelist: it pins each selected file's SHA256,
@@ -17,7 +17,7 @@ Code uses an explicit Source Han Sans fallback for Chinese at every weight.
 
 The source tree loads this directory. Wheel and frozen builds include only the
 manifest's fonts, their notices and this manifest/README, under
-`openkb/desktop/assets/fonts/`. Keep the wheel's explicit force-include list in
+`ultrakb/desktop/assets/fonts/`. Keep the wheel's explicit force-include list in
 sync with the manifest; the desktop spec derives its whitelist from it.
 Native diagram rendering retains its separately pinned Noto resources/notices.
 

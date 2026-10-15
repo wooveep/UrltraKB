@@ -1,11 +1,11 @@
-"""Tests for `openkb.url_ingest` — the URL → raw/ input-acquisition layer."""
+"""Tests for `ultrakb.url_ingest` — the URL → raw/ input-acquisition layer."""
 
 from __future__ import annotations
 
 import io
 from unittest.mock import MagicMock, patch
 
-from openkb.url_ingest import (
+from ultrakb.url_ingest import (
     _parse_content_disposition_filename,
     _pdf_filename,
     _sanitize_filename,
@@ -481,16 +481,16 @@ def test_add_single_file_returns_added_on_success(tmp_path):
     """Tri-state return contract: ``"added"`` when the file was newly
     indexed. URL-ingest uses this to decide whether to keep / unlink
     the just-downloaded file."""
-    from openkb.cli import add_single_file
-    from openkb.converter import ConvertResult
+    from ultrakb.cli import add_single_file
+    from ultrakb.converter import ConvertResult
 
     # Build a minimal KB scaffold
-    (tmp_path / ".openkb").mkdir()
-    (tmp_path / ".openkb" / "config.yaml").write_text("model: gpt-4o-mini\n")
+    (tmp_path / ".ultrakb").mkdir()
+    (tmp_path / ".ultrakb" / "config.yaml").write_text("model: gpt-4o-mini\n")
     from kb_fixtures import mark_current_kb
 
     mark_current_kb(tmp_path)
-    (tmp_path / ".openkb" / "hashes.json").write_text("{}")
+    (tmp_path / ".ultrakb" / "hashes.json").write_text("{}")
     (tmp_path / "raw").mkdir()
     (tmp_path / "wiki" / "summaries").mkdir(parents=True)
     (tmp_path / "wiki" / "sources").mkdir(parents=True)
@@ -513,8 +513,8 @@ def test_add_single_file_returns_added_on_success(tmp_path):
         return None
 
     with (
-        patch("openkb.application.documents.convert_document", return_value=mock_result),
-        patch("openkb.agent.compiler.compile_short_doc", new=compile_noop),
+        patch("ultrakb.application.documents.convert_document", return_value=mock_result),
+        patch("ultrakb.agent.compiler.compile_short_doc", new=compile_noop),
     ):
         outcome = add_single_file(doc, tmp_path)
 
@@ -522,7 +522,7 @@ def test_add_single_file_returns_added_on_success(tmp_path):
 
 
 def test_add_single_file_returns_skipped_on_dedup(kb_dir, pdf_model):
-    from openkb.cli import add_single_file
+    from ultrakb.cli import add_single_file
 
     doc = kb_dir / "raw/x.md"
     doc.write_text("# Hello")
@@ -534,15 +534,15 @@ def test_add_single_file_returns_failed_on_pipeline_error(tmp_path):
     """A pipeline failure (e.g. transient LLM error during compilation)
     must be distinguishable from dedup-skip, so URL-ingest can preserve
     the raw file for retry instead of deleting it."""
-    from openkb.cli import add_single_file
-    from openkb.converter import ConvertResult
+    from ultrakb.cli import add_single_file
+    from ultrakb.converter import ConvertResult
 
-    (tmp_path / ".openkb").mkdir()
-    (tmp_path / ".openkb" / "config.yaml").write_text("model: gpt-4o-mini\n")
+    (tmp_path / ".ultrakb").mkdir()
+    (tmp_path / ".ultrakb" / "config.yaml").write_text("model: gpt-4o-mini\n")
     from kb_fixtures import mark_current_kb
 
     mark_current_kb(tmp_path)
-    (tmp_path / ".openkb" / "hashes.json").write_text("{}")
+    (tmp_path / ".ultrakb" / "hashes.json").write_text("{}")
     (tmp_path / "raw").mkdir()
     (tmp_path / "wiki" / "summaries").mkdir(parents=True)
     (tmp_path / "wiki" / "sources").mkdir(parents=True)
@@ -565,9 +565,9 @@ def test_add_single_file_returns_failed_on_pipeline_error(tmp_path):
 
     # Make both compile attempts raise to drive the failure path.
     with (
-        patch("openkb.application.documents.convert_document", return_value=mock_result),
-        patch("openkb.agent.compiler.compile_short_doc", new=fail_compile),
-        patch("openkb.application.documents.time.sleep"),
+        patch("ultrakb.application.documents.convert_document", return_value=mock_result),
+        patch("ultrakb.agent.compiler.compile_short_doc", new=fail_compile),
+        patch("ultrakb.application.documents.time.sleep"),
     ):
         outcome = add_single_file(doc, tmp_path)
 
@@ -587,19 +587,19 @@ def _prepared_fetch(filename, content):
 def test_url_ingest_cleans_up_orphan_on_dedup_skip(kb_dir, pdf_model):
     from click.testing import CliRunner
 
-    from openkb.cli import cli
+    from ultrakb.cli import cli
 
     runner = CliRunner()
     arguments = ["--kb-dir", str(kb_dir), "add", "https://example.com/paper"]
     with patch(
-        "openkb.url_ingest.fetch_url_to_raw",
+        "ultrakb.url_ingest.fetch_url_to_raw",
         side_effect=_prepared_fetch("paper.md", b"# Paper\n\nBody"),
     ):
         first = runner.invoke(cli, arguments)
         assert first.exit_code == 0 and "; added" in first.output
         repeated = runner.invoke(cli, arguments)
     assert repeated.exit_code == 0 and "; skipped" in repeated.output
-    from openkb.source_catalog import list_sources, read_source_revision
+    from ultrakb.source_catalog import list_sources, read_source_revision
 
     sources = list_sources(kb_dir)
     assert len(sources) == 1
@@ -612,8 +612,8 @@ def test_url_ingest_cleans_up_orphan_on_dedup_skip(kb_dir, pdf_model):
 def test_url_ingest_delegates_private_input_to_shared_document_use_case(kb_dir):
     from click.testing import CliRunner
 
-    from openkb.application.documents import DocumentResult
-    from openkb.cli import cli
+    from ultrakb.application.documents import DocumentResult
+    from ultrakb.cli import cli
 
     seen = []
 
@@ -628,10 +628,10 @@ def test_url_ingest_delegates_private_input_to_shared_document_use_case(kb_dir):
 
     with (
         patch(
-            "openkb.url_ingest.fetch_url_to_raw",
+            "ultrakb.url_ingest.fetch_url_to_raw",
             side_effect=_prepared_fetch("paper.md", b"# Paper\n\nBody"),
         ),
-        patch("openkb.application.urls.import_document", side_effect=ingest),
+        patch("ultrakb.application.urls.import_document", side_effect=ingest),
     ):
         result = CliRunner().invoke(
             cli, ["--kb-dir", str(kb_dir), "add", "https://example.com/paper"]
@@ -640,19 +640,21 @@ def test_url_ingest_delegates_private_input_to_shared_document_use_case(kb_dir):
     assert len(seen) == 1 and not seen[0].exists()
 
 
-def test_url_ingest_keeps_raw_file_on_pipeline_failure(kb_dir, monkeypatch):
+def test_url_ingest_keeps_raw_file_on_pipeline_failure(kb_dir, monkeypatch, live_llm):
     from click.testing import CliRunner
 
-    from openkb.application.knowledge_bases import get_kb_list
-    from openkb.cli import cli
-    from openkb.documents import read_document_source
+    from ultrakb.application.knowledge_bases import get_kb_list
+    from ultrakb.cli import cli
+    from ultrakb.documents import read_document_source
 
-    def unavailable(**kwargs):
-        raise ValueError("model unavailable")
+    live_llm.install(monkeypatch)
 
-    monkeypatch.setattr("litellm.completion", unavailable)
+    def unavailable(*args, **kwargs):
+        raise OSError("summary publication unavailable")
+
+    monkeypatch.setattr("ultrakb.agent.compiler._write_summary", unavailable)
     with patch(
-        "openkb.url_ingest.fetch_url_to_raw",
+        "ultrakb.url_ingest.fetch_url_to_raw",
         side_effect=_prepared_fetch("paper.md", b"# Paper\n\nBody"),
     ):
         result = CliRunner().invoke(
@@ -673,14 +675,14 @@ def test_url_ingest_pipeline_failure_rolls_back_converted_source_but_keeps_downl
     """
     from click.testing import CliRunner
 
-    from openkb.cli import cli
+    from ultrakb.cli import cli
 
-    (tmp_path / ".openkb").mkdir()
-    (tmp_path / ".openkb" / "config.yaml").write_text("model: gpt-4o-mini\n")
+    (tmp_path / ".ultrakb").mkdir()
+    (tmp_path / ".ultrakb" / "config.yaml").write_text("model: gpt-4o-mini\n")
     from kb_fixtures import mark_current_kb
 
     mark_current_kb(tmp_path)
-    (tmp_path / ".openkb" / "hashes.json").write_text("{}")
+    (tmp_path / ".ultrakb" / "hashes.json").write_text("{}")
     (tmp_path / "raw").mkdir()
     (tmp_path / "wiki" / "summaries").mkdir(parents=True)
     (tmp_path / "wiki" / "sources").mkdir(parents=True)
@@ -694,20 +696,20 @@ def test_url_ingest_pipeline_failure_rolls_back_converted_source_but_keeps_downl
 
     runner = CliRunner()
     with (
-        patch("openkb.cli._find_kb_dir", return_value=tmp_path),
+        patch("ultrakb.cli._find_kb_dir", return_value=tmp_path),
         patch(
-            "openkb.url_ingest.fetch_url_to_raw",
+            "ultrakb.url_ingest.fetch_url_to_raw",
             side_effect=_prepared_fetch(fetched_path.name, b"# Paper\n\nBody"),
         ),
-        patch("openkb.agent.compiler.compile_short_doc", new=fail_compile),
-        patch("openkb.application.documents.time.sleep"),
-        patch("openkb.cli._setup_llm_key"),
+        patch("ultrakb.agent.compiler.compile_short_doc", new=fail_compile),
+        patch("ultrakb.application.documents.time.sleep"),
+        patch("ultrakb.cli._setup_llm_key"),
     ):
         result = runner.invoke(cli, ["add", "https://example.com/paper"])
 
     assert result.exit_code == 0, result.output
     assert "; failed" in result.output
-    from openkb.source_catalog import list_sources, read_source_revision
+    from ultrakb.source_catalog import list_sources, read_source_revision
 
     source = list_sources(tmp_path)[0]
     original = read_source_revision(tmp_path, source.target_revision_id).original
@@ -718,21 +720,21 @@ def test_url_ingest_pipeline_failure_rolls_back_converted_source_but_keeps_downl
 def test_cli_url_preparation_is_private_and_outside_kb_lease(tmp_path):
     from click.testing import CliRunner
 
-    from openkb.application.documents import DocumentResult
-    from openkb.cli import cli
-    from openkb.locks import kb_ingest_lock_held
+    from ultrakb.application.documents import DocumentResult
+    from ultrakb.cli import cli
+    from ultrakb.locks import kb_ingest_lock_held
 
-    (tmp_path / ".openkb").mkdir()
-    (tmp_path / ".openkb/config.yaml").write_text("model: gpt-4o-mini\n")
+    (tmp_path / ".ultrakb").mkdir()
+    (tmp_path / ".ultrakb/config.yaml").write_text("model: gpt-4o-mini\n")
     from kb_fixtures import mark_current_kb
 
     mark_current_kb(tmp_path)
-    (tmp_path / ".openkb/hashes.json").write_text("{}")
+    (tmp_path / ".ultrakb/hashes.json").write_text("{}")
     (tmp_path / "raw").mkdir()
     acquired = []
 
     def fetch(url, preparation_root, **kwargs):
-        assert not kb_ingest_lock_held(tmp_path / ".openkb")
+        assert not kb_ingest_lock_held(tmp_path / ".ultrakb")
         assert not preparation_root.is_relative_to(tmp_path)
         source = preparation_root / "raw/paper.md"
         source.parent.mkdir(parents=True)
@@ -741,10 +743,11 @@ def test_cli_url_preparation_is_private_and_outside_kb_lease(tmp_path):
         return source
 
     with (
-        patch("openkb.cli._find_kb_dir", return_value=tmp_path),
-        patch("openkb.url_ingest.fetch_url_to_raw", side_effect=fetch),
+        patch("ultrakb.cli._find_kb_dir", return_value=tmp_path),
+        patch("ultrakb.url_ingest.fetch_url_to_raw", side_effect=fetch),
         patch(
-            "openkb.application.urls.import_document", return_value=DocumentResult("", "failed", ())
+            "ultrakb.application.urls.import_document",
+            return_value=DocumentResult("", "failed", ()),
         ),
     ):
         result = CliRunner().invoke(cli, ["add", "https://example.com/paper"])
@@ -756,13 +759,15 @@ def test_cli_url_preparation_is_private_and_outside_kb_lease(tmp_path):
 def test_cli_url_retains_download_without_replacing_existing_raw_file(kb_dir, pdf_model):
     from click.testing import CliRunner
 
-    from openkb.cli import cli
-    from openkb.source_catalog import list_sources, read_source_revision
+    from ultrakb.cli import cli
+    from ultrakb.source_catalog import list_sources, read_source_revision
 
     existing = kb_dir / "raw/paper.md"
     existing.write_bytes(b"Existing local file")
     body = b"# Paper\n\nDownloaded content"
-    with patch("openkb.url_ingest.fetch_url_to_raw", side_effect=_prepared_fetch("paper.md", body)):
+    with patch(
+        "ultrakb.url_ingest.fetch_url_to_raw", side_effect=_prepared_fetch("paper.md", body)
+    ):
         result = CliRunner().invoke(
             cli, ["--kb-dir", str(kb_dir), "add", "https://example.com/paper"]
         )

@@ -23,8 +23,8 @@ def test_parent_pipe_death_reaps_worker_group(tmp_path):
     )
     parent_code = (
         "import sys; from pathlib import Path; "
-        "from openkb.office.processes import run_supervised; "
-        "from openkb.office.policy import office_environment; "
+        "from ultrakb.office.processes import run_supervised; "
+        "from ultrakb.office.policy import office_environment; "
         "python=Path(sys.executable); sys.platform='darwin'; "
         "task=Path(sys.argv[1]); "
         "run_supervised(python.parent,python.name,None,task,"
@@ -70,7 +70,7 @@ def test_parent_pipe_death_reaps_worker_group(tmp_path):
 
 
 def test_worker_starts_when_embedded_python_reports_a_directory(tmp_path):
-    from openkb.office import processes
+    from ultrakb.office import processes
 
     supervisor = tmp_path / "supervisor.py"
     supervisor.write_bytes(Path(processes.__file__).with_name("supervisor.py.txt").read_bytes())

@@ -20,14 +20,14 @@ from pathlib import Path
 
 from dotenv import dotenv_values
 
-from openkb.locks import atomic_write_json, kb_ingest_lock
 from scripts.llm_trace_proxy import AuditProxy, utc_now
+from ultrakb.locks import atomic_write_json, kb_ingest_lock
 
 
 def worker(kb: Path, source: Path, result_path: Path) -> int:
-    from openkb.application.documents import import_document
-    from openkb.cli import _setup_llm_key
-    from openkb.config import resolve_credential_bundle
+    from ultrakb.application.documents import import_document
+    from ultrakb.cli import _setup_llm_key
+    from ultrakb.config import resolve_credential_bundle
 
     _setup_llm_key(kb)
     try:
@@ -71,22 +71,22 @@ def main() -> int:
         parser.error(
             "Use --upstream for the audit destination; remove the KB-local base override first"
         )
-    from openkb.application.knowledge_bases import initialize_kb
-    from openkb.config import load_config, save_config
+    from ultrakb.application.knowledge_bases import initialize_kb
+    from ultrakb.config import load_config, save_config
 
-    if not (kb / ".openkb/config.yaml").exists():
+    if not (kb / ".ultrakb/config.yaml").exists():
         initialize_kb(kb, model=args.model, language=args.language, seed_environment=False)
-    with kb_ingest_lock(kb / ".openkb"):
-        config = load_config(kb / ".openkb/config.yaml")
+    with kb_ingest_lock(kb / ".ultrakb"):
+        config = load_config(kb / ".ultrakb/config.yaml")
         config.update(
             model=args.model,
             language=args.language,
             timeout=args.timeout,
             concurrency=args.concurrency,
         )
-        save_config(kb / ".openkb/config.yaml", config)
+        save_config(kb / ".ultrakb/config.yaml", config)
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ-") + uuid.uuid4().hex[:8]
-    directory = kb / ".openkb/traces" / run_id
+    directory = kb / ".ultrakb/traces" / run_id
     directory.mkdir(parents=True, mode=0o700)
     manifest = {
         "run_id": run_id,
@@ -135,7 +135,7 @@ def main() -> int:
                 DEEPSEEK_API_BASE=audit.base_url,
                 LLM_API_KEY=api_key,
                 DEEPSEEK_API_KEY=api_key,
-                OPENKB_LLM_AUDIT="1",
+                ULTRAKB_LLM_AUDIT="1",
                 PYTHONUNBUFFERED="1",
                 LITELLM_LOCAL_MODEL_COST_MAP="True",
             )

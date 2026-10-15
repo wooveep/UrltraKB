@@ -36,12 +36,12 @@ HTTP JSON/SSE and watch events retain the same structured outcomes.
 
 ## Catalog writer compatibility
 
-`.openkb/catalog/schema.json` records `schema_version`,
+`.ultrakb/catalog/schema.json` records `schema_version`,
 `minimum_writer_version`, and `required_capabilities`. Record schema 1 and
 catalog writer protocol 3 are supported by this implementation. These numbers
 describe storage protocols, not the application package version.
 
-The authoritative capability list is `openkb.catalog_schema.SUPPORTED_CAPABILITIES`:
+The authoritative capability list is `ultrakb.catalog_schema.SUPPORTED_CAPABILITIES`:
 source revisions, unit publication, worksheet units/lifecycle, durable import
 dispatch, shared knowledge, knowledge refresh,
 frozen normalization, multi-format sources, explicit reprocessing, and embedded
@@ -80,10 +80,10 @@ Run the complete development checks with the pinned environment:
 
 ```bash
 uv sync --all-extras --offline
-OPENKB_TEST_OFFICE_RUNTIME=/path/to/prepared-runtime .venv/bin/pytest -q
+ULTRAKB_TEST_OFFICE_RUNTIME=/path/to/prepared-runtime .venv/bin/pytest -q
 .venv/bin/ruff check .
 .venv/bin/ruff format --check .
-.venv/bin/mypy openkb
+.venv/bin/mypy ultrakb
 ```
 
 These checks do not approve a release. Keep the following issues open until

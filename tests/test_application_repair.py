@@ -1,18 +1,18 @@
 import pytest
 
-from openkb.application.pages import read_page, save_page
-from openkb.mutation import RecoveryRequired, repair_marker, snapshot_paths
+from ultrakb.application.pages import read_page, save_page
+from ultrakb.mutation import RecoveryRequired, repair_marker, snapshot_paths
 
 
 @pytest.mark.parametrize(
     ("filename", "content"),
     [
         (".env", "LLM_API_KEY='unterminated"),
-        (".openkb/hashes.json", '{"legacy-hash": {"doc_name": ["not a name"], "type": "md"}}'),
+        (".ultrakb/hashes.json", '{"legacy-hash": {"doc_name": ["not a name"], "type": "md"}}'),
     ],
 )
 def test_repair_retains_block_for_invalid_credentials_or_registry(kb_dir, filename, content):
-    from openkb.application.repair import repair_knowledge_base
+    from ultrakb.application.repair import repair_knowledge_base
 
     (kb_dir / filename).write_text(content)
     repair_marker(kb_dir).write_text("{}")
@@ -25,19 +25,19 @@ def test_repair_retains_block_for_invalid_credentials_or_registry(kb_dir, filena
 def test_stale_creation_intent_cannot_bypass_existing_storage_checks(kb_dir):
     import json
 
-    from openkb.application.repair import repair_knowledge_base
+    from ultrakb.application.repair import repair_knowledge_base
 
-    (kb_dir / ".openkb/initializing.json").write_text(
+    (kb_dir / ".ultrakb/initializing.json").write_text(
         json.dumps({"version": 1, "kb_dir": str(kb_dir)})
     )
-    (kb_dir / ".openkb/config.yaml").unlink()
+    (kb_dir / ".ultrakb/config.yaml").unlink()
     repair_marker(kb_dir).write_text("{}")
     assert not repair_knowledge_base(kb_dir).repaired
     assert repair_marker(kb_dir).exists()
 
 
 def test_repair_retains_missing_backup_and_resumes_only_after_checked_recovery(kb_dir):
-    from openkb.application.repair import repair_knowledge_base
+    from ultrakb.application.repair import repair_knowledge_base
 
     page = kb_dir / "wiki/concepts/attention.md"
     page.write_text("Original\n")

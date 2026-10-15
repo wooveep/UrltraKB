@@ -102,7 +102,7 @@
       "pyproject.toml": "85f1ab99520d0909c224da418f159a511753acb3cd30a021dd607a00d2d07c3e"
     },
     "added": {
-      "README.urltrakb.md": "d03d39a3aede9ee80be40ff3876f41dfac18ca52dd61e3cca06aef80a5037223",
+      "README.urltrakb.md": "ce1cea05f6e73879d01bd51c93f306130385a877aba00619b05075f18daead03",
       "contextdb/_urltrakb_source.json": "9e0df9ef055d2bfc50e918824a5bd971e7dad3a64e21de4e84ce31a6051c4337",
       "contextdb/adapter/chatindex.py": "fcd971601531ce4e61a8022057a781920be9040d3b0ca6851481157fc37e5a71",
       "contextdb/adapter/document.py": "e375063981b006cf7bd781d5da797e8cfb91010ff24b2968f22da23a91e521d1",

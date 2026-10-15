@@ -11,11 +11,11 @@ pytest_plugins = ("block_fixtures",)
 def indexed_failure(kb_dir, tmp_path, block_model, monkeypatch, wide_short_prompt):
     import litellm
 
-    from openkb.application.documents import import_document
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
-    from openkb.llm_execution import ModelBudgetExceeded
-    from openkb.source_catalog import list_sources
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.settings import apply_kb_config_patch
+    from ultrakb.application.settings_data import KbConfigPatchRequest
+    from ultrakb.llm_execution import ModelBudgetExceeded
+    from ultrakb.source_catalog import list_sources
 
     apply_kb_config_patch(
         kb_dir,
@@ -42,12 +42,12 @@ def indexed_failure(kb_dir, tmp_path, block_model, monkeypatch, wide_short_promp
 
 
 def test_complete_index_survives_rollback_and_is_reused_once(kb_dir, indexed_failure):
-    from openkb.application.source_retry import retry_source
-    from openkb.source_catalog import read_admission
-    from openkb.unit_publication import list_source_units, read_head, read_unit_publication
+    from ultrakb.application.source_retry import retry_source
+    from ultrakb.source_catalog import read_admission
+    from ultrakb.unit_publication import list_source_units, read_head, read_unit_publication
 
     source, requests = indexed_failure
-    markers = list((kb_dir / ".openkb/index-checkpoints").rglob("checkpoint.json"))
+    markers = list((kb_dir / ".ultrakb/index-checkpoints").rglob("checkpoint.json"))
     assert len(markers) == 1
     assert read_head(kb_dir).knowledge_revision_id is None
     unit = list_source_units(kb_dir, source.source_id)[0]
@@ -74,14 +74,14 @@ def test_legacy_index_without_generation_options_remains_reusable(
     import hashlib
     from importlib.metadata import version
 
-    from openkb.application.execution import ExecutionContext
-    from openkb.application.source_retry import retry_source
-    from openkb.config import load_config, save_config
-    from openkb.ingest_records import UnitRevision
-    from openkb.locks import kb_ingest_lock
-    from openkb.normalization import normalization_id, read_normalization
-    from openkb.source_catalog import read_record
-    from openkb.unit_publication import list_source_units
+    from ultrakb.application.execution import ExecutionContext
+    from ultrakb.application.source_retry import retry_source
+    from ultrakb.config import load_config, save_config
+    from ultrakb.ingest_records import UnitRevision
+    from ultrakb.locks import kb_ingest_lock
+    from ultrakb.normalization import normalization_id, read_normalization
+    from ultrakb.source_catalog import read_record
+    from ultrakb.unit_publication import list_source_units
 
     source, requests = indexed_failure
     unit = list_source_units(kb_dir, source.source_id)[0]
@@ -91,7 +91,7 @@ def test_legacy_index_without_generation_options_remains_reusable(
     )
     policy = json.loads(saved.fingerprint)
     context = ExecutionContext()
-    with kb_ingest_lock(kb_dir / ".openkb"), context.begin(kb_dir):
+    with kb_ingest_lock(kb_dir / ".ultrakb"), context.begin(kb_dir):
         connection = context.executor.bindings.public_identity()
     connection.pop("role_generation")
     assert saved.source_path is not None
@@ -106,17 +106,17 @@ def test_legacy_index_without_generation_options_remains_reusable(
         "sdk": {name: version(name) for name in ("pageindex", "pageindex-condb")},
         "connection": connection,
     }
-    marker_path = next((kb_dir / ".openkb/index-checkpoints").rglob("checkpoint.json"))
+    marker_path = next((kb_dir / ".ultrakb/index-checkpoints").rglob("checkpoint.json"))
     marker = json.loads(marker_path.read_text())
     marker["identity"] = hashlib.sha256(json.dumps(legacy, sort_keys=True).encode()).hexdigest()
     marker_path.write_text(json.dumps(marker))
     retained = marker_path.read_bytes()
-    with kb_ingest_lock(kb_dir / ".openkb"):
-        config_path = kb_dir / ".openkb/config.yaml"
+    with kb_ingest_lock(kb_dir / ".ultrakb"):
+        config_path = kb_dir / ".ultrakb/config.yaml"
         save_config(config_path, {**load_config(config_path), "role_generation": generation})
     context = ExecutionContext()
     before = len(requests)
-    with kb_ingest_lock(kb_dir / ".openkb"), context.begin(kb_dir):
+    with kb_ingest_lock(kb_dir / ".ultrakb"), context.begin(kb_dir):
         result = retry_source(kb_dir, source.source_id, context=context)
     if generation:
         assert result.status == "failed" and "identity changed" in result.message
@@ -128,26 +128,63 @@ def test_legacy_index_without_generation_options_remains_reusable(
 
 
 def test_unrelated_manual_page_does_not_invalidate_document_index(kb_dir, indexed_failure):
-    from openkb.application.source_retry import retry_source
-    from openkb.knowledge_scope import live_scope
-    from openkb.locks import atomic_write_text, kb_ingest_lock
+    from ultrakb.application.proposals import list_proposals
+    from ultrakb.application.source_retry import retry_source
+    from ultrakb.knowledge_scope import live_scope
+    from ultrakb.locks import atomic_write_text, kb_ingest_lock
+    from ultrakb.state import HashRegistry
 
     source, requests = indexed_failure
     manual = live_scope(kb_dir).wiki_dir / "concepts/manual-note.md"
-    with kb_ingest_lock(kb_dir / ".openkb"):
-        atomic_write_text(manual, "# A gardener's manual note\nKeep this independent edit.")
+    manual_body = (
+        "# Conference-room lighting\n"
+        "Use the wall switch to turn on the conference-room light.\n"
+        "Keep this independent edit."
+    )
+    with kb_ingest_lock(kb_dir / ".ultrakb"):
+        atomic_write_text(manual, manual_body)
+    marker_path = next((kb_dir / ".ultrakb/index-checkpoints").rglob("checkpoint.json"))
+    retained_marker = marker_path.read_bytes()
+    indexed_files = json.loads(retained_marker)["files"]
+    retained_files = {
+        name: HashRegistry.hash_file(marker_path.parent / "data" / name) for name in indexed_files
+    }
+    assert retained_files == indexed_files
     before = sum("CONTENT BLOCK STRUCTURE" in value for value in requests)
     result = retry_source(kb_dir, source.source_id)
     assert result.status == "added", result.message
-    assert "Keep this independent edit" in manual.read_text()
+    assert manual.read_bytes() == manual_body.encode("utf-8")
     assert sum("CONTENT BLOCK STRUCTURE" in value for value in requests) == before
+    assert marker_path.read_bytes() == retained_marker
+    assert {
+        name: HashRegistry.hash_file(marker_path.parent / "data" / name) for name in indexed_files
+    } == retained_files
+    assert not list_proposals(kb_dir)
+
+
+@pytest.mark.parametrize("rewrite_manual", [False, True])
+def test_manual_page_review_is_limited_to_changed_pages(rewrite_manual):
+    from ultrakb.unit_publication import protected_knowledge_pages
+
+    manual = "concepts/manual-note.md"
+    current = {manual: "human-page-digest"}
+    candidate = {
+        **current,
+        "summaries/gardening.md": "new-summary-digest",
+        "sources/gardening.okbi": "retained-index-digest",
+    }
+    if rewrite_manual:
+        candidate[manual] = "proposed-manual-page-digest"
+    assert protected_knowledge_pages(current, candidate, {}) == (
+        {manual} if rewrite_manual else set()
+    )
 
 
 def test_corrupt_completed_index_is_not_reused_or_silently_rebuilt(kb_dir, indexed_failure):
-    from openkb.application.source_retry import retry_source
+    from ultrakb.application.source_retry import retry_source
 
     source, requests = indexed_failure
-    path = next((kb_dir / ".openkb/index-checkpoints").rglob("checkpoint.json"))
+    path = next((kb_dir / ".ultrakb/index-checkpoints").rglob("checkpoint.json"))
     marker = json.loads(path.read_text())
     marker["files"]["index/context.sqlite"] = "0" * 64
     path.write_text(json.dumps(marker))
@@ -162,12 +199,12 @@ def test_corrupt_completed_index_is_not_reused_or_silently_rebuilt(kb_dir, index
 def test_reading_a_sealed_checkpoint_does_not_make_it_unusable(kb_dir, indexed_failure, dirty):
     import sqlite3
 
-    from openkb.application.source_retry import retry_source
-    from openkb.index_location import IndexLocation
-    from openkb.state import HashRegistry
+    from ultrakb.application.source_retry import retry_source
+    from ultrakb.index_location import IndexLocation
+    from ultrakb.state import HashRegistry
 
     source, requests = indexed_failure
-    marker_path = next((kb_dir / ".openkb/index-checkpoints").rglob("checkpoint.json"))
+    marker_path = next((kb_dir / ".ultrakb/index-checkpoints").rglob("checkpoint.json"))
     retained = marker_path.read_bytes()
     marker = json.loads(retained)
     location = IndexLocation.package(marker_path.parent / "data/index")
@@ -195,13 +232,13 @@ def test_reading_a_sealed_checkpoint_does_not_make_it_unusable(kb_dir, indexed_f
 
 
 def test_withdrawn_source_cannot_restore_an_index_checkpoint(kb_dir, indexed_failure):
-    from openkb.application.removal import preview_removal, remove_document
-    from openkb.application.source_retry import retry_source
+    from ultrakb.application.removal import preview_removal, remove_document
+    from ultrakb.application.source_retry import retry_source
 
     source, requests = indexed_failure
     preview = preview_removal(kb_dir, source.source_id)
     remove_document(kb_dir, source.source_id, version=preview.version)
-    assert not list((kb_dir / ".openkb/index-checkpoints").rglob("checkpoint.json"))
+    assert not list((kb_dir / ".ultrakb/index-checkpoints").rglob("checkpoint.json"))
     before = len(requests)
     with pytest.raises(ValueError, match="current source"):
         retry_source(kb_dir, source.source_id)

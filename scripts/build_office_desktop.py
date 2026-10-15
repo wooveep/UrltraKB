@@ -24,18 +24,18 @@ def main():
     parser.add_argument("--verify-only", action="store_true")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
-    lock = json.loads((root / "openkb/office/runtime-lock.json").read_text())
+    lock = json.loads((root / "ultrakb/office/runtime-lock.json").read_text())
     verify(args.office_archive, lock[sys.platform])
     verify(args.office_source, lock["source"])
     launcher = None
     if sys.platform == "win32":
-        project = root / "openkb/office/launcher"
+        project = root / "ultrakb/office/launcher"
         subprocess.run(["cargo", "build", "--locked", "--release"], cwd=project, check=True)
-        launcher = project / "target/release/openkb-office-launcher.exe"
+        launcher = project / "target/release/ultrakb-office-launcher.exe"
     staging = root / "packaging/desktop/build"
     staging.mkdir(parents=True, exist_ok=True)
     # Verify native Office dependencies before the expensive application freeze.
-    # PyInstaller owns dist/UrltraKB, so stage the sidecar outside it until then.
+    # PyInstaller owns dist/UltraKB, so stage the sidecar outside it until then.
     with tempfile.TemporaryDirectory(prefix="office-native-", dir=staging) as directory:
         office = Path(directory) / "office"
         prepare(args.office_archive, args.office_source, office, launcher)
@@ -52,13 +52,13 @@ def main():
                     "tests/test_office_inventory.py",
                 ],
                 cwd=root,
-                env={**os.environ, "OPENKB_TEST_OFFICE_RUNTIME": str(office)},
+                env={**os.environ, "ULTRAKB_TEST_OFFICE_RUNTIME": str(office)},
                 check=True,
             )
         if args.verify_only:
             return
         build_desktop()
-        shutil.move(office, root / "packaging/desktop/dist/UrltraKB/_internal/office")
+        shutil.move(office, root / "packaging/desktop/dist/UltraKB/_internal/office")
 
 
 if __name__ == "__main__":

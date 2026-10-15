@@ -8,9 +8,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from openkb.config import LlmCredentialBundle
-from openkb.indexer import _build_index_config
 from scripts.llm_trace_proxy import AuditProxy, usage_counts
+from ultrakb.config import LlmCredentialBundle
+from ultrakb.indexer import _build_index_config
 
 
 @pytest.fixture
@@ -25,34 +25,7 @@ def provider():
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             requests.append((body, dict(self.headers)))
             time.sleep(0.08)
-            response = {
-                "id": "fixture",
-                "object": "chat.completion",
-                "created": 1,
-                "model": body["model"],
-                "choices": [
-                    {
-                        "index": 0,
-                        "finish_reason": "stop",
-                        "message": {
-                            "role": "assistant",
-                            "content": "OK",
-                            "reasoning_content": "fixture reasoning",
-                        },
-                    }
-                ],
-                "usage": {
-                    "prompt_tokens": 50,
-                    "prompt_cache_hit_tokens": 20,
-                    "prompt_cache_miss_tokens": 30,
-                    "completion_tokens": 32,
-                    "completion_tokens_details": {"reasoning_tokens": 12},
-                    "total_tokens": 82,
-                },
-            }
-            status = 200
-            if "fail" in body["messages"][0]["content"]:
-                status, response = 500, {"error": "test-key failed"}
+            status, response = 500, {"error": "test-key local delivery refusal"}
             raw = json.dumps(response).encode()
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
@@ -72,39 +45,49 @@ def provider():
 
 
 def test_sync_and_async_index_requests_use_kb_deadline_and_keep_raw_usage(
-    provider, tmp_path, monkeypatch
+    live_llm, tmp_path, monkeypatch
 ):
     from pageindex import config
     from pageindex.index.utils import llm_acompletion, llm_completion
 
+    # Warm the actual same-run reply before testing delayed local delivery.
+    message = "Reply exactly ok."
+    live_llm.completion(messages=[{"role": "user", "content": message}], max_tokens=64)
+    service = live_llm._proxy
+    before = len(service.requests)
+    monkeypatch.setattr(service, "delay", 0.08)
+    monkeypatch.setattr("litellm.completion", live_llm._sdk_completion)
+    monkeypatch.setattr("litellm.acompletion", live_llm._sdk_acompletion)
     monkeypatch.setitem(config._LLM_PARAMS, "timeout", 0.02)
-    monkeypatch.setenv("OPENKB_LLM_AUDIT", "1")
+    monkeypatch.setenv("ULTRAKB_LLM_AUDIT", "1")
     directory = tmp_path / "trace"
-    with AuditProxy(directory, upstream=provider[0], timeout=2, api_key="test-key") as audit:
+    key = live_llm.credentials.api_key
+    with AuditProxy(directory, upstream=service.url, timeout=90, api_key=key) as audit:
         options = _build_index_config(
             {"timeout": 2},
-            bundle=LlmCredentialBundle(
-                api_key="test-key",
-                base_url=audit.base_url,
-            ),
+            bundle=LlmCredentialBundle(api_key=key, base_url=audit.base_url),
         )
+        options.llm_params["max_tokens"] = 64
         with config.llm_params_scope(options.llm_params):
-            assert llm_completion("deepseek/deepseek-flash", "hello") == "OK"
-            assert asyncio.run(llm_acompletion("deepseek/deepseek-flash", "hello")) == "OK"
+            first = llm_completion("deepseek/deepseek-flash", message)
+            second = asyncio.run(llm_acompletion("deepseek/deepseek-flash", message))
+        assert first.strip() == second.strip() == "ok"
         summary = audit.summary()
-        assert summary["completed"] == 2
-        assert summary["pending"] == 0
-        assert summary["usage"]["reasoning_tokens"]["known_sum"] == 24
-        assert summary["usage"]["answer_tokens"]["known_sum"] == 40
+        assert summary["completed"] == 2 and summary["pending"] == 0
         assert all(r["step"] == "pageindex.index" for r in summary["attempts"])
-    assert len(provider[1]) == 2
-    assert provider[1][0][1]["Authorization"] == "Bearer test-key"
-    assert "X-OpenKB-Step" not in provider[1][0][1]
-    raw = json.loads((directory / "000001/response.json").read_text())
-    assert raw["body"]["choices"][0]["message"]["reasoning_content"] == "fixture reasoning"
-    assert raw["body"]["usage"]["prompt_cache_hit_tokens"] == 20
-    assert raw["tokens"]["input_cache_miss_tokens"] == 30
-    assert "test-key" not in "".join(p.read_text() for p in directory.rglob("*.json"))
+    assert len(service.requests) - before == 2
+    raw = [json.loads((directory / f"{i:06d}/response.json").read_text()) for i in (1, 2)]
+    for delivered in raw:
+        usage = delivered["body"]["usage"]
+        assert delivered["tokens"]["input_tokens"] == usage["prompt_tokens"]
+        assert delivered["tokens"]["input_cache_hit_tokens"] == usage["prompt_cache_hit_tokens"]
+        assert delivered["tokens"]["input_cache_miss_tokens"] == usage["prompt_cache_miss_tokens"]
+        assert delivered["tokens"]["output_tokens"] == usage["completion_tokens"]
+    assert raw[0]["body"] == raw[1]["body"]
+    assert summary["usage"]["output_tokens"]["known_sum"] == sum(
+        value["body"]["usage"]["completion_tokens"] for value in raw
+    )
+    assert all(key not in p.read_text() for p in directory.rglob("*.json"))
 
 
 def test_failed_attempt_and_redaction_are_recorded(provider, tmp_path):

@@ -1,0 +1,536 @@
+"""Q&A agent for querying the UltraKB knowledge base."""
+
+from __future__ import annotations
+
+import asyncio
+from collections.abc import AsyncGenerator
+from pathlib import Path
+from typing import Any, Literal
+
+from agents import Agent, Runner, function_tool
+
+from ultrakb.agent.query_evidence import evidence_answer, restrict_query_agent
+from ultrakb.agent.streaming import settled_stream
+from ultrakb.agent.tools import (
+    artifact_event_from_write,
+    get_wiki_page_content,
+    read_wiki_file,
+    write_kb_file,
+)
+from ultrakb.application.query_views import QuerySelection, resolve_query_views
+from ultrakb.config import LlmCredentialBundle, resolve_model_settings
+from ultrakb.knowledge_scope import KnowledgeScope, resolve_scope
+from ultrakb.schema import get_agents_md
+
+MAX_TURNS = 50
+
+_QUERY_INSTRUCTIONS_TEMPLATE = """\
+You are UltraKB, a knowledge-base Q&A agent. You answer questions by searching the wiki.
+
+{schema_md}
+
+Use the bound knowledge-base reading workflow and its executable native source actions.
+Use summaries, concept and entity pages to locate the associated originals.
+Answer the requested parts with explanations, comparisons and calculations supported
+by the originals you actually read. State their objects, conditions and any assumptions
+used in derived estimates. Base recommendations on documented attributes and cite them.
+Read further for a necessary unanswered part; once those parts are addressed, finish.
+Before each tool call, output one short sentence explaining the reason.
+"""
+
+
+def build_query_agent(
+    wiki_root: str,
+    model: str,
+    language: str = "en",
+    bundle: "LlmCredentialBundle | None" = None,
+) -> Agent:
+    """Build and return the Q&A agent."""
+    schema_md = get_agents_md(Path(wiki_root))
+    instructions = _QUERY_INSTRUCTIONS_TEMPLATE.format(schema_md=schema_md)
+    instructions += f"\n\nIMPORTANT: Answer in {language} language."
+
+    @function_tool
+    def read_file(path: str) -> str:
+        """Read a Markdown file from the wiki.
+        Args:
+            path: File path relative to wiki root (e.g. 'summaries/paper.md').
+        """
+        return read_wiki_file(path, wiki_root)
+
+    @function_tool
+    def get_page_content(
+        doc_name: str, pages: str, part: Literal["body", "notes"] | None = None
+    ) -> str:
+        """Get text content of specific pages from a PageIndex (long) document.
+        Only use for documents with doc_type: pageindex. For short documents,
+        use read_file instead.
+        Args:
+            doc_name: Document name (e.g. 'attention-is-all-you-need').
+            pages: Page specification (e.g. '3-5,7,10-12').
+            part: Use null for PDF/full pages; only partitioned slides accept body or notes.
+        """
+        return get_wiki_page_content(doc_name, pages, wiki_root, part)
+
+    from agents.model_settings import ModelSettings
+
+    if bundle is not None:
+        model_settings = {
+            "parallel_tool_calls": (
+                bundle.parallel_tool_calls if bundle.parallel_tool_calls_explicit else False
+            ),
+            "extra_headers": bundle.extra_headers or None,
+            "extra_args": {"timeout": bundle.timeout} if bundle.timeout is not None else None,
+        }
+    else:
+        model_settings = resolve_model_settings()
+    model_settings["include_usage"] = True
+
+    from ultrakb.agent.managed_model import ManagedAgentModel
+    from ultrakb.llm_execution import active_executor
+
+    managed = ManagedAgentModel(executor) if (executor := active_executor()) else None
+    if managed:
+        model_settings["retry"] = managed.retry_settings()
+
+    return Agent(
+        name="wiki-query",
+        instructions=instructions,
+        tools=[read_file, get_page_content],
+        model=managed or f"litellm/{model}",
+        model_settings=ModelSettings(**model_settings),
+    )
+
+
+def _resolve_tool_call_id(raw_item: Any) -> str | None:
+    """Resolve a tool call's correlation id exactly as the Agents SDK's
+    ``ToolCallItem.call_id`` / ``ToolCallOutputItem.call_id`` property does:
+    prefer ``call_id``, fall back to ``id``, dict-aware.
+
+    The ChatCompletions/LiteLLM path emits only ``id`` (no ``call_id``) on the
+    output item, so without the ``id`` fallback the key written on the
+    ``tool_call`` side and the key read on the ``tool_call_output_item`` side
+    disagree, ``pending_calls.pop`` misses, and the ``output/*.html`` artifact
+    card silently never fires. Deriving the key with this one helper on BOTH
+    sides keeps them aligned.
+    """
+    if isinstance(raw_item, dict):
+        return raw_item.get("call_id") or raw_item.get("id")
+    return getattr(raw_item, "call_id", None) or getattr(raw_item, "id", None)
+
+
+async def iter_agent_response_events(
+    agent: Agent,
+    input_data: str | list[dict[str, Any]],
+    *,
+    max_turns: int = MAX_TURNS,
+    run_config: Any = None,
+    selection: QuerySelection | None = None,
+    readers_bound: bool = False,
+) -> AsyncGenerator[dict[str, Any], None]:
+    """Yield non-TTY events for a streamed agent response.
+
+    The CLI renders these events to stdout; the REST API serializes the same
+    events as SSE. Events: ``{"event": "delta", "data": {"text": ...}}`` for
+    each response-text delta, ``{"event": "tool_call", "data": {...}}`` for
+    tool invocations, and a final ``{"event": "final", "data": {"answer": ...,
+    "history": [...]}}`` carrying the complete answer and reusable Agents SDK
+    history.
+    """
+    from agents import RawResponsesStreamEvent, RunItemStreamEvent
+    from openai.types.responses import ResponseTextDeltaEvent
+
+    if selection is not None:
+        if not selection.has_evidence:
+            answer = evidence_answer("", selection)
+            history = (
+                [{"role": "user", "content": input_data}]
+                if isinstance(input_data, str)
+                else input_data
+            )
+            yield {"event": "delta", "data": {"text": answer}}
+            yield {
+                "event": "final",
+                "data": {
+                    "answer": answer,
+                    "history": [*history, {"role": "assistant", "content": answer}],
+                    "answer_outcome": "insufficient_evidence",
+                },
+            }
+            return
+        if not readers_bound:
+            agent = restrict_query_agent(agent, selection)
+
+    from ultrakb.agent.answer_finalization import AnswerFinisher
+    from ultrakb.agent.managed_model import ManagedAgentModel
+
+    bound_model = getattr(run_config, "model", None) or agent.model
+    managed = bound_model if isinstance(bound_model, ManagedAgentModel) else None
+    finisher = AnswerFinisher(managed.executor, agent, max_turns) if managed else None
+    if managed:
+        managed.finisher = finisher
+    result = (
+        Runner.run_streamed(
+            agent,
+            input_data,
+            max_turns=max_turns,
+            run_config=run_config,
+        )
+        if run_config
+        else Runner.run_streamed(agent, input_data, max_turns=max_turns)
+    )
+    collected: list[str] = []
+    pending_calls: dict[str, tuple[str, str]] = {}
+    from ultrakb.agent.token_usage import TokenUsage, add_usage, execution_usage
+
+    usage = None
+
+    stream = settled_stream(result)
+    try:
+        async for event in stream:
+            if isinstance(event, RawResponsesStreamEvent):
+                if getattr(event.data, "type", "") == "response.created":
+                    yield {"event": "answer_start", "data": {}}
+                if getattr(event.data, "type", "") == "response.completed":
+                    reported = getattr(
+                        event.data.response, "ultrakb_usage", event.data.response.usage
+                    )
+                    current = TokenUsage.from_provider(reported).to_dict()
+                    usage = add_usage(usage, current)
+                    yield {"event": "usage", "data": execution_usage(usage)}
+                if isinstance(event.data, ResponseTextDeltaEvent):
+                    text = event.data.delta
+                    if text:
+                        collected.append(text)
+                        yield {"event": "delta", "data": {"text": text}}
+            elif isinstance(event, RunItemStreamEvent):
+                item = event.item
+                if item.type == "tool_call_item":
+                    raw_item = item.raw_item
+                    name = getattr(raw_item, "name", "?")
+                    arguments = getattr(raw_item, "arguments", "") or ""
+                    call_id = _resolve_tool_call_id(raw_item)
+                    if call_id:
+                        pending_calls[call_id] = (name, arguments)
+                    from ultrakb.application.execution import current_execution
+
+                    execution = current_execution()
+                    metadata = (
+                        execution.tool_metadata(
+                            call_id, "retrieving" if name.startswith("search_") else "reading"
+                        )
+                        if execution and call_id
+                        else {}
+                    )
+                    yield {
+                        "event": "tool_call",
+                        "data": {
+                            "name": name,
+                            "arguments": arguments,
+                            "tool_call_id": call_id,
+                            **metadata,
+                        },
+                    }
+                elif item.type == "tool_call_output_item":
+                    raw_item = item.raw_item
+                    call_id = _resolve_tool_call_id(raw_item)
+                    name, arguments = (
+                        pending_calls.pop(call_id, ("", ""))
+                        if isinstance(call_id, str)
+                        else ("", "")
+                    )
+                    from ultrakb.application.execution import current_execution
+
+                    execution = current_execution()
+                    metadata = (
+                        execution.tool_activities.get(call_id, {}) if execution and call_id else {}
+                    )
+                    yield {
+                        "event": "tool_done",
+                        "data": {"name": name, "tool_call_id": call_id, **metadata},
+                    }
+                    payload = artifact_event_from_write(
+                        name, arguments, str(getattr(item, "output", "") or "")
+                    )
+                    if payload is not None:
+                        yield {"event": "artifact", "data": payload}
+
+    finally:
+        await stream.aclose()
+        if finisher:
+            finisher.close()
+        if managed:
+            managed.finisher = None
+
+    from ultrakb.agent.answer_text import visible_answer
+
+    # Deltas also contain assistant narration before tool calls. The SDK's
+    # terminal output identifies the actual answer, independently of that trace.
+    final = result.final_output
+    from ultrakb.llm_execution import check_model_stop
+
+    check_model_stop()
+    if not isinstance(final, str) or not visible_answer(final).strip():
+        raise ValueError("The agent did not produce a valid final answer")
+    answer = visible_answer(final)
+    answer_outcome = "partial" if finisher and finisher.reason else "answered"
+    from ultrakb.application.answer_citations import capture_answer_citations
+    from ultrakb.application.execution import current_execution
+
+    execution = current_execution()
+    citations = (
+        capture_answer_citations(answer, selection, execution.returned_reads)
+        if selection and execution
+        else None
+    )
+    history = result.to_input_list()
+    yield {
+        "event": "final",
+        "data": {
+            "answer": answer,
+            "history": history,
+            "usage": execution_usage(usage),
+            "answer_outcome": answer_outcome,
+            "unfinished": finisher.unfinished if finisher else (),
+            "evidence_audit": None,
+            "citations": citations,
+        },
+    }
+
+
+def build_chat_agent(
+    kb_dir: Path,
+    model: str,
+    language: str = "en",
+    bundle: "LlmCredentialBundle | None" = None,
+    *,
+    scope: KnowledgeScope | None = None,
+) -> Agent:
+    """Build the chat agent: query agent + a write tool restricted to
+    ``<kb>/wiki/explorations/**`` and ``<kb>/output/**`` + a ``ShellTool``
+    advertising locally-installed Anthropic-style skills.
+
+    This is the variant used by the interactive ``ultrakb chat`` REPL so users
+    can iterate on generated artifacts (e.g. ``output/skills/<name>/``) via
+    natural-language follow-ups without giving the agent unrestricted write
+    access to the wiki.
+
+    Skill discovery: ``ultrakb/agent/skills.scan_local_skills`` looks in
+    ``<kb>/skills/``, ``~/.ultrakb/skills/``, ``~/.claude/skills/`` for
+    ``SKILL.md`` files. Any found skill is exposed to the agent via
+    ``ShellTool.environment.skills`` so the model can ``cat`` the skill body
+    and follow its instructions when the user's request matches.
+    """
+    scope = resolve_scope(kb_dir, scope)
+    wiki_root = str(scope.wiki_dir)
+    kb_root = str(kb_dir)
+    base = build_query_agent(wiki_root, model, language=language, bundle=bundle)
+
+    @function_tool
+    def write_file(path: str, content: str) -> str:
+        """Write a text file under the KB.
+
+        Allowed paths (relative to KB root):
+          * ``wiki/explorations/**`` — chat-derived notes.
+          * ``output/**``            — generator artifacts (skills, etc.).
+
+        Any other path is rejected. Parent directories are created.
+
+        Args:
+            path: File path relative to KB root
+                (e.g. ``"output/skills/demo/SKILL.md"``).
+            content: Full text content to write (overwrites if file exists).
+        """
+        return write_kb_file(path, content, kb_root, scope=scope)
+
+    extra_tools: list = [write_file]
+    skill_instructions_addendum = ""
+
+    # Skill discovery via function tools. The agents SDK has a richer
+    # ``ShellTool``+``ShellToolLocalSkill`` mechanism for this, but those
+    # are OpenAI Responses-API hosted tools; LiteLLM routes through
+    # ChatCompletions which rejects hosted tools. So we use plain
+    # ``function_tool`` primitives that work with any LiteLLM-routed model.
+    from ultrakb.agent.skills import scan_local_skills
+
+    skills = scan_local_skills(kb_dir)
+    skill_index = {s["name"]: s for s in skills}
+
+    if skill_index:
+        skill_list_text = _format_skill_list(skills)
+
+        @function_tool
+        def list_skills() -> str:
+            """List skills available in this environment.
+
+            Returns a text catalog of installed Anthropic-style skills.
+            Each entry has a name and a one-line description; use the
+            description to decide whether the skill matches the user's
+            request, then call ``read_skill(name)`` to load its body.
+            """
+            return skill_list_text
+
+        @function_tool
+        def read_skill(name: str) -> str:
+            """Read a skill's ``SKILL.md`` body.
+
+            Call this once you've decided a skill matches the user's
+            request. The returned text is the full skill instructions
+            (frontmatter stripped). Follow it as your working method
+            and write outputs via the ``write_file`` tool.
+
+            Args:
+                name: skill name as listed by ``list_skills``.
+            """
+            entry = skill_index.get(name)
+            if entry is None:
+                return f"Unknown skill: {name!r}. Call list_skills() to see available skills."
+            md_path = Path(entry["path"]) / "SKILL.md"
+            try:
+                text = md_path.read_text(encoding="utf-8")
+            except OSError as exc:
+                return f"Could not read {md_path}: {exc}"
+            # Strip frontmatter, return body only.
+            from ultrakb.agent.skills import _parse_frontmatter
+
+            _, body = _parse_frontmatter(text)
+            return body
+
+        extra_tools.extend([list_skills, read_skill])
+
+        # Build the prompt addendum listing skill names + descriptions
+        # right inside the system prompt so the model sees them up front
+        # and knows what to look for, even before deciding to call
+        # list_skills(). This is the difference between "agent
+        # eventually discovers skills" and "agent treats skill use as
+        # the default for matching requests".
+        skill_lines = []
+        for s in skills:
+            desc_one_line = " ".join(s["description"].split())
+            skill_lines.append(f"- **{s['name']}** — {desc_one_line}")
+        skill_instructions_addendum = (
+            "\n\n## Available skills\n\n"
+            "The following Anthropic-style skill packages are installed in "
+            "this environment. **When a user request matches a skill's "
+            "description (e.g. 'make a deck', 'generate slides', 'draft a "
+            "report'), you MUST call `read_skill(name)` to load that "
+            "skill's full instructions and follow them strictly** — do not "
+            "freestyle the output format if a skill covers it.\n\n"
+            + "\n".join(skill_lines)
+            + "\n\nIf no listed skill matches the request, proceed with "
+            "your default tools."
+        )
+
+    new_instructions = (base.instructions or "") + skill_instructions_addendum
+    return base.clone(
+        tools=[*base.tools, *extra_tools],
+        instructions=new_instructions,
+    )
+
+
+def _format_skill_list(skills: list[dict[str, str]]) -> str:
+    """Render the skill catalog as a compact text block for the agent."""
+    if not skills:
+        return "No skills installed."
+    lines = [f"{len(skills)} skill(s) available:\n"]
+    for s in skills:
+        lines.append(f"- {s['name']}")
+        # Indent description; keep it one paragraph so the agent reads it fast.
+        desc = " ".join(s["description"].split())
+        lines.append(f"    {desc}")
+    lines.append("\nTo use a skill, call read_skill(name) and follow its instructions.")
+    return "\n".join(lines)
+
+
+async def run_query(
+    question: str,
+    kb_dir: Path,
+    model: str,
+    stream: bool = False,
+    *,
+    raw: bool = False,
+    run_config: Any = None,
+    bundle: LlmCredentialBundle | None = None,
+    scope: KnowledgeScope | None = None,
+) -> str:
+    """Run a Q&A query against the knowledge base.
+
+    Args:
+        question: The user's question.
+        kb_dir: Root of the knowledge base.
+        model: LLM model name.
+        stream: If True, print response tokens to stdout as they arrive.
+        raw: If True, write raw markdown source instead of rendering it
+            (still keeps tool-call line styling).
+
+    Returns:
+        The agent's final answer as a string.
+    """
+    selection = resolve_query_views(kb_dir, question, scope=scope)
+    if not selection.has_evidence:
+        answer = evidence_answer("", selection)
+        if stream:
+            print(answer)
+        return answer
+    scope = resolve_scope(kb_dir, scope)
+    import sys
+
+    from ultrakb.config import resolve_effective_config
+
+    config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
+    language: str = config.get("language", "en")
+
+    wiki_root = str(scope.wiki_dir)
+
+    agent = build_query_agent(wiki_root, model, language=language, bundle=bundle)
+    if not stream:
+        from ultrakb.agent.answer_text import visible_answer
+
+        agent = restrict_query_agent(agent, selection)
+        result = await Runner.run(agent, question, max_turns=MAX_TURNS, run_config=run_config)
+        return visible_answer(result.final_output or "")
+
+    import os
+    from contextlib import aclosing
+
+    from ultrakb.terminal_answers import AnswerRenderer
+
+    events = iter_agent_response_events(agent, question, run_config=run_config, selection=selection)
+    with AnswerRenderer(
+        use_color=sys.stdout.isatty() and not os.environ.get("NO_COLOR"), raw=raw
+    ) as render:
+        async with aclosing(events):
+            async for event in events:
+                if event["event"] == "final":
+                    render.finish(event["data"]["answer"])
+                    return event["data"]["answer"]
+                render(event)
+    return ""
+
+
+def build_run_config_from_bundle(model: str, bundle: "LlmCredentialBundle | None") -> Any:
+    """Build an Agents-SDK `RunConfig` from a credential bundle.
+
+    When *bundle* is `None`, returns `None` so low-level callers fall
+    back to the default provider (process-wide `litellm.api_key` / env vars).
+    When a bundle is supplied, a dedicated `LitellmModel` instance is created
+    with the per-KB `api_key` and `base_url` so concurrent requests on the
+    shared event-loop thread never read each other's credentials.
+
+    The model is passed to `LitellmModel` *verbatim* (e.g. ``openai/gpt-4o``)
+    because `LitellmModel` feeds it straight to ``litellm.acompletion``. The
+    ``litellm/`` prefix is an Agent-layer convention to select the backend and
+    must NOT be added here -- doing so yields ``litellm/openai/...`` which
+    litellm rejects as an unknown provider.
+    """
+    from ultrakb.agent.managed_model import ManagedAgentModel
+    from ultrakb.llm_execution import active_executor, compiler_executor
+
+    executor = active_executor()
+    if bundle is None and executor is None:
+        return None
+    from agents import RunConfig
+    from agents.model_settings import ModelSettings
+
+    managed = ManagedAgentModel(executor or compiler_executor(model, bundle, {}))
+    return RunConfig(model=managed, model_settings=ModelSettings(retry=managed.retry_settings()))

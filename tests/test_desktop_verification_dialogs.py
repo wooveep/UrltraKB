@@ -21,8 +21,8 @@ import time
 from PySide6.QtCore import QTimer
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QDialog, QMessageBox
-from openkb.desktop.verification import create_application
-from openkb.desktop.verification_dialogs import message_box
+from ultrakb.desktop.verification import create_application
+from ultrakb.desktop.verification_dialogs import message_box
 
 app = create_application()
 parent = QDialog()

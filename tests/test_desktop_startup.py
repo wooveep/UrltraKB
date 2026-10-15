@@ -17,7 +17,7 @@ def test_first_frame_uses_bundled_fonts_without_manual_theme_change(tmp_path, mo
         [
             sys.executable,
             "-m",
-            "openkb.desktop.verification",
+            "ultrakb.desktop.verification",
             "--startup",
             mode,
             "--output",
@@ -38,7 +38,7 @@ import os, sys, types
 from pathlib import Path
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication, QWidget
-from openkb.desktop import instance
+from ultrakb.desktop import instance
 root = Path(sys.argv.pop(1))
 instance.instance_directory = lambda: root
 class Workbench(QWidget):
@@ -57,10 +57,10 @@ class Workbench(QWidget):
     def poll(self):
         if (root / 'quit').exists():
             QApplication.instance().quit()
-module = types.ModuleType('openkb.desktop.window')
+module = types.ModuleType('ultrakb.desktop.window')
 module.Workbench = Workbench
 sys.modules[module.__name__] = module
-from openkb.desktop.bootstrap import main
+from ultrakb.desktop.bootstrap import main
 raise SystemExit(main())
 """
 

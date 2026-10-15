@@ -1,178 +1,230 @@
-"""Application imports use native original windows, with no compulsory plan gate."""
+"""Original preparation, delivered-page validation and publication regressions.
+
+Parser and storage cases use domain inputs directly. Real prompt/response behavior
+is covered by the short and long compiler integrations in test_compiler.py.
+"""
 
 import json
-from types import SimpleNamespace
+from contextlib import contextmanager
 
 import pytest
-from compile_responses import summary_reply
 
-pytest_plugins = ("test_pdf_readback",)
+from ultrakb import frontmatter
+from ultrakb.agent.compile_delivery import publish_compile_results
+from ultrakb.agent.compile_messages import build_page_messages
+from ultrakb.agent.compile_plan import normalize_plan
+from ultrakb.agent.compiler import _ENTITY_TYPE_LIST, _sanitize_concept_name
+from ultrakb.agent.page_delivery import validate_page_delivery
+from ultrakb.agent.page_response import PageResponseError, page_repair_message
+from ultrakb.agent.page_updates import PageUpdate, UnchangedPage
+from ultrakb.agent.source_windows import CompileSourceWindows
+from ultrakb.locks import atomic_write_json, atomic_write_text
 
-
-def patch_page_response(messages, response):
-    """Controlled provider replies follow the compiler's temporary edit protocol."""
-    for message in messages:
-        content = message.get("content")
-        if isinstance(content, str) and content.startswith("Temporary editable page blocks:\n"):
-            data = json.loads(content.split("\n", 1)[1].split("\n\n", 1)[0])
-            try:
-                page = json.loads(response)
-            except ValueError:
-                return response
-            if not isinstance(page, dict) or not isinstance(page.get("content"), str):
-                return response
-            return json.dumps(
-                {
-                    "base_sha256": data["base_sha256"],
-                    "description": page.get("description", page.get("brief", "")),
-                    **(
-                        {
-                            "source_ranges": next(
-                                [
-                                    r["id"]
-                                    for r in json.loads(m["content"].split("\n", 1)[1])["ranges"]
-                                ]
-                                for m in messages
-                                if isinstance(m.get("content"), str)
-                                and m["content"].startswith("Figure source ranges:\n")
-                            )
-                        }
-                        if any(
-                            isinstance(m.get("content"), str)
-                            and m["content"].startswith("Figure source ranges:\n")
-                            for m in messages
-                        )
-                        else {}
-                    ),
-                    **({"type": page["type"]} if "type" in page else {}),
-                    "edits": [
-                        {
-                            "block_id": data["blocks"][-1]["id"],
-                            "operation": "insert_after",
-                            "content": "\n\n" + page["content"],
-                        }
-                    ],
-                }
-            )
-    try:
-        return json.dumps(summary_reply(messages, json.loads(response)))
-    except ValueError:
-        return response
+pytest_plugins = ("test_pdf_readback", "processing_fixtures")
 
 
-def compile_boundary(monkeypatch, plan, requests, page_reply=None):
-    def response(**kwargs):
-        messages = kwargs["messages"]
-        prompt = str(messages)
-        if "Based on the summary above" in prompt:
-            result = plan(messages) if callable(plan) else plan
-        else:
-            requests.append(messages)
-            result = page_reply or {
-                "description": "Recorded section",
-                "content": "# Record\n\nSection facts.",
-            }
-            if "Write a summary page for this document" in prompt:
-                result = {k: v for k, v in result.items() if k != "type"}
-        return SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    message=SimpleNamespace(
-                        content=patch_page_response(messages, json.dumps(result))
-                    ),
-                    finish_reason="stop",
-                )
-            ],
-            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+def _plan(wiki, value):
+    return normalize_plan(
+        value,
+        existing={
+            kind: {p.stem for p in (wiki / kind).glob("*.md")} for kind in ("concepts", "entities")
+        },
+        entity_types=frozenset(_ENTITY_TYPE_LIST),
+        sanitize=_sanitize_concept_name,
+    )
+
+
+def _checkpoints(kb_dir):
+    import uuid
+
+    from ultrakb.compile_checkpoints import CompileCheckpoints
+    from ultrakb.lifecycle import current_generation
+    from ultrakb.model_task import ModelTask
+
+    task = ModelTask(
+        task_id=uuid.uuid4().hex,
+        kb_generation=current_generation(kb_dir),
+        fingerprint="f" * 64,
+        bindings={"models": {"compile": "deepseek/deepseek-flash"}},
+        policy={"max_calls": 2},
+    )
+    return CompileCheckpoints(kb_dir, task, {"document": "manual"}, {"protocol": "page-v1"})
+
+
+@contextmanager
+def _publication(kb_dir, retained, *, recompile=False):
+    """Publish genuine retained inputs, without a generator or model replacement."""
+    from ultrakb.ingest_records import UnitRevision
+    from ultrakb.normalization import normalization_id, read_normalization, restore_normalization
+    from ultrakb.source_catalog import read_admission, read_record, read_source
+    from ultrakb.source_map import freeze_text_map
+    from ultrakb.unit_publication import (
+        begin_unit_attempt,
+        list_source_units,
+        prepare_compile_view,
+        publish_unit_revision,
+    )
+
+    admission = read_admission(kb_dir, read_source(kb_dir, retained.source_id))
+    [unit] = list_source_units(kb_dir, retained.source_id)
+    revision = read_record(kb_dir, "unit-revisions", unit.target_revision_id, UnitRevision)
+    from ultrakb.locks import kb_ingest_lock
+
+    with kb_ingest_lock(kb_dir / ".ultrakb"):
+        state, admitted = begin_unit_attempt(
+            kb_dir,
+            unit,
+            revision,
+            retry_confirmed=True,
+            recompile=recompile,
+            discovery_intent=admission.discovery_intent,
         )
+        assert admitted
+        directory, normalized = read_normalization(
+            kb_dir, normalization_id(revision.source_revision_id, revision.processing_fingerprint)
+        )
+        with prepare_compile_view(kb_dir) as view:
+            converted = restore_normalization(directory, normalized, view.scope.wiki_dir.parent)
+            yield view.scope.wiki_dir, unit.doc_name
+            state = publish_unit_revision(
+                kb_dir,
+                admission,
+                unit,
+                revision,
+                state,
+                view,
+                normalized_source=converted.source_path.relative_to(view.scope.wiki_dir).as_posix(),
+                source_map=freeze_text_map(view.scope.wiki_dir, unit.doc_name),
+                processing=converted.processing,
+                is_long=converted.is_long_doc,
+                normalized_format="markdown",
+            )
+            assert state.status == "completed"
 
-    async def asynchronous(**kwargs):
-        return response(**kwargs)
 
-    monkeypatch.setattr("litellm.completion", response)
-    monkeypatch.setattr("litellm.acompletion", asynchronous)
+def _page_request(reader, item, *, kind="concepts", action="create", long=False):
+    relative = f"{kind}/{item['name']}.md" if action == "update" else None
+    originals = reader.prepare(item, relative, long=long)
+    return build_page_messages(
+        system_message={"role": "system", "content": "Compile original knowledge."},
+        current_original=None if long else reader.current_original_message(),
+        original_context=originals.message,
+        known_targets_message={"role": "user", "content": "Known page targets."},
+        task_message={
+            "role": "user",
+            "content": (
+                f"{'Update' if action == 'update' else 'Write'} the "
+                f"{'concept' if kind == 'concepts' else 'entity'} page"
+            ),
+        },
+        update_message=PageUpdate((reader.wiki / relative).read_text()).message()
+        if relative
+        else None,
+    )
 
 
-def test_short_update_rereads_prior_originals(kb_dir, monkeypatch):
-    from openkb.application.documents import import_document
-
-    previous = kb_dir / "old.txt"
-    previous.write_text("For Model A, 12 slots are recommended.\n")
-    current = kb_dir / "new.txt"
-    current.write_text("For Model B, 24 slots are required.\n")
-    calls = []
-    compile_boundary(monkeypatch, {"concepts": {"create": [{"name": "slots"}]}}, calls)
-    assert import_document(kb_dir, previous).status == "added"
-    calls.clear()
-    compile_boundary(monkeypatch, {"concepts": {"update": [{"name": "slots"}]}}, calls)
-    assert import_document(kb_dir, current).status == "added"
-    update = next(m for m in calls if "Update the concept page" in str(m))
-    assert "For Model A, 12 slots are recommended." in str(update)
-    assert "For Model B, 24 slots are required." in str(update)
-    assert "coverage" in str(update)
+def test_short_update_rereads_prior_originals(kb_dir):
+    wiki = kb_dir / "wiki"
+    atomic_write_text(wiki / "sources/old.md", "For Model A, 12 slots are recommended.\n")
+    atomic_write_text(wiki / "sources/new.md", "For Model B, 24 slots are required.\n")
+    atomic_write_text(
+        wiki / "summaries/old.md", "---\nfull_text: sources/old.md\n---\nEarlier navigation."
+    )
+    atomic_write_text(
+        wiki / "concepts/slots.md",
+        "---\nsources: [summaries/old.md]\n---\n# Slots\n\nFor Model A, 12 slots are recommended.",
+    )
+    request = _page_request(CompileSourceWindows(wiki, "new"), {"name": "slots"}, action="update")
+    assert "For Model A, 12 slots are recommended." in str(request)
+    assert "For Model B, 24 slots are required." in str(request)
+    assert "coverage" in str(request)
 
 
 @pytest.mark.parametrize("kind", ["concepts", "entities"])
-def test_unchanged_update_resolves_without_new_source_contribution(kb_dir, monkeypatch, kind):
-    import litellm
+def test_unchanged_update_resolves_without_new_source_contribution(kb_dir, processing_only, kind):
+    from ultrakb.application.removal import run_remove_for_api
+    from ultrakb.knowledge_evidence import page_evidence
+    from ultrakb.knowledge_scope import live_scope
 
-    from openkb.application.documents import import_document
-    from openkb.application.removal import run_remove_for_api
-    from openkb.knowledge_evidence import page_evidence
-    from openkb.knowledge_scope import live_scope
-
-    original, duplicate = kb_dir / "old.txt", kb_dir / "new.txt"
-    original.write_text("River equipment requires supervision during winter.")
-    duplicate.write_text(
-        "River equipment requires supervision during winter. New setup is recorded."
-    )
-    item = {"name": "river-equipment", "type": "product"}
-    compile_boundary(monkeypatch, {kind: {"create": [item]}}, [])
-    assert import_document(kb_dir, original).status == "added"
+    old, new = kb_dir / "old.txt", kb_dir / "new.txt"
+    old.write_text("River equipment requires supervision during winter.")
+    new.write_text("River equipment requires supervision during winter. New setup is recorded.")
+    original = processing_only(old)
+    with _publication(kb_dir, original) as (wiki, name):
+        plan = _plan(wiki, {kind: {"create": [{"name": "river-equipment", "type": "product"}]}})
+        body = "# River equipment\n\nRiver equipment requires supervision during winter."
+        publish_compile_results(
+            wiki,
+            name,
+            plan,
+            summary=body,
+            rewrite_summary=True,
+            **(
+                {"concept_results": [("river-equipment", body, False, "Winter supervision")]}
+                if kind == "concepts"
+                else {
+                    "entity_results": [("river-equipment", body, "Winter supervision", "product")]
+                }
+            ),
+        )
     page = kb_dir / f"wiki/{kind}/river-equipment.md"
     before = page.read_bytes()
     basis = page_evidence(live_scope(kb_dir), f"{kind}/river-equipment.md")
-    requests = []
-    compile_boundary(
-        monkeypatch,
-        {
-            kind: {
-                "update": [{**item, "brief": "Check the winter supervision requirement."}],
-                "create": [{"name": "new-setup", "type": "other"}],
-            }
-        },
-        requests,
-    )
-    boundary = litellm.acompletion
-    update_requests = []
-
-    async def response(**kwargs):
-        for message in kwargs["messages"]:
-            content = message.get("content")
-            if isinstance(content, str) and content.startswith("Temporary editable page blocks:\n"):
-                update_requests.append(kwargs["messages"])
-                blocks = json.loads(content.split("\n", 1)[1].split("\n\n", 1)[0])
-                reply = {
+    assert basis["source_revision_ids"] == (original.source_revision_id,)
+    duplicate = processing_only(new)
+    with _publication(kb_dir, duplicate) as (wiki, name):
+        patch = PageUpdate(page.read_text())
+        unchanged = patch.apply(
+            json.dumps(
+                {
                     "status": "unchanged",
-                    "base_sha256": blocks["base_sha256"],
+                    "base_sha256": patch.digest,
                     "reason": "The winter requirement is already fully expressed.",
                 }
-                return SimpleNamespace(
-                    choices=[
-                        SimpleNamespace(
-                            message=SimpleNamespace(content=json.dumps(reply)), finish_reason="stop"
-                        )
+            ),
+            current=page.read_text(),
+        )
+        assert isinstance(unchanged, UnchangedPage)
+        plan = _plan(
+            wiki,
+            {
+                kind: {
+                    "update": [
+                        {
+                            "name": "river-equipment",
+                            "brief": "Check the winter supervision requirement.",
+                        }
                     ],
-                    usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
-                )
-        return await boundary(**kwargs)
-
-    monkeypatch.setattr("litellm.acompletion", response)
-    result = import_document(kb_dir, duplicate)
-    assert result.status == "added", result
-    assert "page_update_unchanged" in result.quality
-    assert len(update_requests) == 1
-    assert "Check the winter supervision requirement." in str(update_requests)
+                    "create": [{"name": "new-setup", "type": "other"}],
+                }
+            },
+        )
+        request = _page_request(
+            CompileSourceWindows(wiki, name, kb_dir=kb_dir),
+            plan.__dict__[kind].update[0],
+            kind=kind,
+            action="update",
+        )
+        assert "winter" in str(request)
+        results = (
+            [
+                ("river-equipment", unchanged, True, ""),
+                ("new-setup", "# New setup\n\nNew setup is recorded.", False, "New setup"),
+            ]
+            if kind == "concepts"
+            else [
+                ("river-equipment", unchanged, "", ""),
+                ("new-setup", "# New setup\n\nNew setup is recorded.", "New setup", "other"),
+            ]
+        )
+        publish_compile_results(
+            wiki,
+            name,
+            plan,
+            summary="New setup is recorded.",
+            rewrite_summary=True,
+            **({"concept_results": results} if kind == "concepts" else {"entity_results": results}),
+        )
     assert page.read_bytes() == before
     assert (kb_dir / f"wiki/{kind}/new-setup.md").exists()
     retained = page_evidence(live_scope(kb_dir), f"{kind}/river-equipment.md")
@@ -180,228 +232,198 @@ def test_unchanged_update_resolves_without_new_source_contribution(kb_dir, monke
     assert retained["refresh_reasons"] == basis["refresh_reasons"]
     assert run_remove_for_api(kb_dir, "new")["status"] == "removed"
     assert page.read_bytes() == before
+    assert page_evidence(live_scope(kb_dir), f"{kind}/river-equipment.md")[
+        "source_revision_ids"
+    ] == (original.source_revision_id,)
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("long", [False, True])
 @pytest.mark.parametrize(
     "kind,action", [(k, a) for k in ("concepts", "entities") for a in ("create", "update")]
 )
-async def test_page_transport_uses_originals_without_planning_history(
-    kb_dir, monkeypatch, long, kind, action
-):
-    from openkb.agent.compiler import compile_long_doc, compile_short_doc
-
+def test_page_transport_uses_originals_without_planning_history(kb_dir, long, kind, action):
     wiki = kb_dir / "wiki"
     original = "# Thermal controls\n\nOriginal fact: supervision is required below freezing.\n"
-    (wiki / "sources/prior.md").write_text("Prior condition: keep the safety interlock active.")
+    atomic_write_text(
+        wiki / "sources/prior.md", "Prior condition: keep the safety interlock active."
+    )
     if action == "update":
-        (wiki / kind).mkdir(exist_ok=True)
-        (wiki / kind / "thermal-controls.md").write_text(
+        atomic_write_text(
+            wiki / kind / "thermal-controls.md",
             "---\nsources: [sources/prior.md]\n---\n# Thermal controls\n\n"
-            "Retained prior condition.\n"
+            "Retained prior condition.",
         )
-    suffix = "json" if long else "md"
-    source = wiki / f"sources/current.{suffix}"
-    source.write_text(
-        json.dumps([{"page": 1, "unit_kind": "page", "content": original}]) if long else original
+    atomic_write_text(
+        wiki / f"sources/current.{'json' if long else 'md'}",
+        json.dumps([{"page": 1, "unit_kind": "page", "content": original}]) if long else original,
     )
-    summary = wiki / "summaries/current.md"
-    summary.write_text(f"---\nfull_text: sources/current.{suffix}\n---\nNavigation only.")
-    compile_boundary(
-        monkeypatch,
-        {
-            kind: {
-                action: [
-                    {
-                        "name": "thermal-controls",
-                        "title": "Thermal controls",
-                        "reading_locations": {"pages": "1"} if long else {},
-                        "type": "other",
-                    }
-                ]
-            }
-        },
-        [],
-        page_reply={"description": "Planning only", "content": "PLANNING_ONLY_INFERENCE"},
+    atomic_write_text(
+        wiki / "summaries/current.md",
+        f"---\nfull_text: sources/current.{'json' if long else 'md'}\n---\nPLANNING_ONLY_INFERENCE",
     )
-    sends = []
+    request = _page_request(
+        CompileSourceWindows(wiki, "current"),
+        {"name": "thermal-controls", "reading_locations": {"pages": "1"} if long else {}},
+        kind=kind,
+        action=action,
+        long=long,
+    )
+    assert "PLANNING_ONLY_INFERENCE" not in str(request)
+    assert "Original fact: supervision is required below freezing." in str(request)
+    assert all(m["role"] != "assistant" for m in request)
+    if action == "update":
+        assert "Prior condition: keep the safety interlock active." in str(request)
 
-    async def response(**kwargs):
-        sends.append(kwargs["messages"])
-        raw = json.dumps({"description": "Thermal controls", "content": original})
-        return SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    message=SimpleNamespace(content=patch_page_response(kwargs["messages"], raw)),
-                    finish_reason="stop",
+
+def test_content_only_entity_update_preserves_confirmed_type(kb_dir):
+    wiki = kb_dir / "wiki"
+    original = (
+        "---\ntype: Organization\nsources: [summaries/old.md]\n---\n"
+        "# River Research\n\nAn organization."
+    )
+    atomic_write_text(wiki / "entities/river-research.md", original)
+    patch = PageUpdate(original, allowed_types=frozenset(_ENTITY_TYPE_LIST))
+    delivered = patch.apply(
+        json.dumps(
+            {
+                "base_sha256": patch.digest,
+                "edits": [
+                    {
+                        "block_id": patch.request()["blocks"][-1]["id"],
+                        "operation": "insert_after",
+                        "content": "\n\nRiver Research has a new recorded location.",
+                    }
+                ],
+            }
+        ),
+        current=original,
+    )
+    assert "type" not in delivered
+    plan = _plan(wiki, {"entities": {"update": [{"name": "river-research"}]}})
+    publish_compile_results(
+        wiki,
+        "new",
+        plan,
+        summary="Summary.",
+        entity_results=[
+            (
+                "river-research",
+                delivered["content"],
+                delivered["description"],
+                frontmatter.parse(original)["type"].lower(),
+            )
+        ],
+    )
+    assert (
+        frontmatter.parse((wiki / "entities/river-research.md").read_text())["type"]
+        == "Organization"
+    )
+
+
+def test_navigation_only_import_keeps_fact_provenance_and_survives_removal(kb_dir, processing_only):
+    from ultrakb.application.removal import run_remove_for_api
+    from ultrakb.knowledge_evidence import page_evidence
+    from ultrakb.knowledge_scope import live_scope
+
+    old, new = kb_dir / "old.txt", kb_dir / "new.txt"
+    old.write_text("Recorded orchard operating conditions.")
+    new.write_text("A document that points readers to the orchard topic.")
+    first = processing_only(old)
+    with _publication(kb_dir, first) as (wiki, name):
+        publish_compile_results(
+            wiki,
+            name,
+            _plan(wiki, {"create": [{"name": "orchard"}]}),
+            summary="Orchard conditions.",
+            rewrite_summary=True,
+            concept_results=[
+                (
+                    "orchard",
+                    "# Orchard\n\nRecorded orchard operating conditions.",
+                    False,
+                    "Conditions",
                 )
             ],
-            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
         )
-
-    monkeypatch.setattr("litellm.acompletion", response)
-    if long:
-        await compile_long_doc(
-            "current", summary, "current-id", kb_dir, "test-model", navigation=[]
-        )
-    else:
-        await compile_short_doc("current", source, kb_dir, "test-model")
-    page_sends = [
-        s
-        for s in sends
-        if any(
-            label in str(s)
-            for label in (
-                "Write the concept page",
-                "Update the concept page",
-                "Write the entity page",
-                "Update the entity page",
-            )
-        )
-    ]
-    assert len(page_sends) == 1
-    prompt = str(page_sends[0])
-    assert "PLANNING_ONLY_INFERENCE" not in prompt
-    assert "Original fact: supervision is required below freezing." in prompt
-    if action == "update":
-        assert "Prior condition: keep the safety interlock active." in prompt
-
-
-def test_content_only_entity_update_preserves_confirmed_type(kb_dir, monkeypatch):
-    from openkb import frontmatter
-    from openkb.application.documents import import_document
-
-    previous, current = kb_dir / "old.txt", kb_dir / "new.txt"
-    previous.write_text("River Research is an organization.")
-    current.write_text("River Research has a new recorded location.")
-    compile_boundary(
-        monkeypatch,
-        {"entities": {"create": [{"name": "river-research", "type": "organization"}]}},
-        [],
-        page_reply={
-            "description": "Organization",
-            "content": "# River Research\n\nAn organization.",
-            "type": "organization",
-        },
-    )
-    assert import_document(kb_dir, previous).status == "added"
-    page = kb_dir / "wiki/entities/river-research.md"
-    assert frontmatter.parse(page.read_text())["type"] == "Organization"
-    compile_boundary(monkeypatch, {"entities": {"update": [{"name": "river-research"}]}}, [])
-    assert import_document(kb_dir, current).status == "added"
-    assert frontmatter.parse(page.read_text())["type"] == "Organization"
-
-
-def test_navigation_only_import_keeps_fact_provenance_and_survives_removal(kb_dir, monkeypatch):
-    from openkb import frontmatter
-    from openkb.application.documents import import_document
-    from openkb.application.removal import run_remove_for_api
-    from openkb.knowledge_evidence import page_evidence
-    from openkb.knowledge_scope import live_scope
-
-    previous, current = kb_dir / "old.txt", kb_dir / "new.txt"
-    previous.write_text("Recorded orchard operating conditions.")
-    current.write_text("A document that points readers to the orchard topic.")
-    compile_boundary(monkeypatch, {"concepts": {"create": [{"name": "orchard"}]}}, [])
-    assert import_document(kb_dir, previous).status == "added"
     page = kb_dir / "wiki/concepts/orchard.md"
     before = page.read_bytes()
-    evidence = page_evidence(live_scope(kb_dir), "concepts/orchard.md")
-    compile_boundary(monkeypatch, {"concepts": {"related": ["orchard"]}}, [])
-    assert import_document(kb_dir, current).status == "added"
+    basis = page_evidence(live_scope(kb_dir), "concepts/orchard.md")
+    assert basis["source_revision_ids"] == (first.source_revision_id,)
+    current = processing_only(new)
+    with _publication(kb_dir, current) as (wiki, name):
+        publish_compile_results(
+            wiki,
+            name,
+            _plan(wiki, {"related": ["orchard"]}),
+            summary="Pointers to the orchard topic.",
+            rewrite_summary=True,
+        )
     assert page.read_bytes() == before
     assert "[[concepts/orchard]]" in (kb_dir / "wiki/summaries/new.md").read_text()
     assert frontmatter.parse(page.read_text())["sources"] == ["summaries/old.md"]
     assert (
         page_evidence(live_scope(kb_dir), "concepts/orchard.md")["source_revision_ids"]
-        == (evidence["source_revision_ids"])
+        == basis["source_revision_ids"]
     )
     assert run_remove_for_api(kb_dir, "new")["status"] == "removed"
     assert page.read_bytes() == before
     assert (
         page_evidence(live_scope(kb_dir), "concepts/orchard.md")["source_revision_ids"]
-        == (evidence["source_revision_ids"])
+        == basis["source_revision_ids"]
     )
 
 
-def test_short_import_preserves_summary_and_assembles_navigation(kb_dir, monkeypatch):
-    from openkb import frontmatter
-    from openkb.application.documents import import_document
-
-    sends = []
+def test_short_import_preserves_summary_and_assembles_navigation(kb_dir):
+    wiki = kb_dir / "wiki"
     first = "# Capacity\n\nModel K supports 36 slots under the recorded condition."
-
-    def response(**kwargs):
-        sends.append(kwargs["messages"])
-        prompt = str(kwargs["messages"])
-        if "Based on the summary above" in prompt:
-            result = {"concepts": {"create": [{"name": "capacity"}]}}
-        elif "Write a summary page" in prompt:
-            result = {"description": "Capacity condition", "content": first}
-        else:
-            result = {"description": "Capacity", "content": "# Capacity\n\nRecorded condition."}
-        return SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    message=SimpleNamespace(content=json.dumps(result)), finish_reason="stop"
-                )
-            ],
-            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
-        )
-
-    async def asynchronous(**kwargs):
-        return response(**kwargs)
-
-    monkeypatch.setattr("litellm.completion", response)
-    monkeypatch.setattr("litellm.acompletion", asynchronous)
-    source = kb_dir / "capacity.txt"
-    source.write_text(first)
-    assert import_document(kb_dir, source).status == "added"
-    body = frontmatter.split((kb_dir / "wiki/summaries/capacity.md").read_text())[1]
+    atomic_write_text(wiki / "sources/capacity.md", first)
+    publish_compile_results(
+        wiki,
+        "capacity",
+        _plan(wiki, {"create": [{"name": "capacity"}]}),
+        summary=first,
+        rewrite_summary=True,
+        concept_results=[("capacity", "# Capacity\n\nRecorded condition.", False, "Capacity")],
+    )
+    body = frontmatter.split((wiki / "summaries/capacity.md").read_text())[1]
     assert body.lstrip().startswith(first)
     assert "- [[concepts/capacity]]" in body
-    assert len(sends) == 3
 
 
 @pytest.mark.parametrize("repaired", [False, True])
-def test_short_summary_format_repair_is_bounded_before_publication(kb_dir, monkeypatch, repaired):
-    from openkb import frontmatter
-    from openkb.application.documents import import_document
-
-    summaries = []
+def test_short_summary_format_repair_is_bounded_before_publication(kb_dir, repaired):
     content = "# Capacity\n\nModel K has 36 slots under supervision."
-
-    def response(**kwargs):
-        if "Based on the summary above" in str(kwargs["messages"]):
-            raw = json.dumps({"concepts": {}, "entities": {}})
-        else:
-            summaries.append(kwargs["messages"])
-            raw = json.dumps({"description": "Capacity", "content": content})
-            if not repaired or len(summaries) == 1:
-                raw += '\n{"type": "json_object"}'
-        return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=raw), finish_reason="stop")],
-            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
-        )
-
-    async def asynchronous(**kwargs):
-        return response(**kwargs)
-
-    monkeypatch.setattr("litellm.completion", response)
-    monkeypatch.setattr("litellm.acompletion", asynchronous)
-    source = kb_dir / "capacity.txt"
-    source.write_text(content)
-    result = import_document(kb_dir, source)
-    assert len(summaries) == 2
+    malformed = (
+        json.dumps({"description": "Capacity", "content": content}) + '\n{"type":"json_object"}'
+    )
+    with pytest.raises(PageResponseError, match="summary_invalid_json") as failure:
+        validate_page_delivery(malformed, response_protocol="summary-page-json")
+    repair = page_repair_message(
+        failure.value.code, str(failure.value), response_protocol="summary-page-json"
+    )
+    assert "one JSON object" in repair["content"]
+    assert "Do not append a second object" in repair["content"]
+    checkpoints = _checkpoints(kb_dir)
+    checkpoints.claim_repair("summary", "request")
+    with pytest.raises(PageResponseError):
+        checkpoints.claim_repair("summary", "request")
     summary = kb_dir / "wiki/summaries/capacity.md"
     if repaired:
-        assert result.status == "added", result
-        assert "page_response_repaired" in result.quality
+        raw = validate_page_delivery(
+            json.dumps({"description": "Capacity", "content": content}),
+            response_protocol="summary-page-json",
+        )
+        publish_compile_results(
+            kb_dir / "wiki",
+            "capacity",
+            _plan(kb_dir / "wiki", {}),
+            summary=json.loads(raw)["content"],
+            rewrite_summary=True,
+        )
         assert frontmatter.split(summary.read_text())[1].strip() == content
     else:
-        assert result.status == "failed", result
-        assert "summary_invalid_json" in result.quality
+        with pytest.raises(PageResponseError, match="summary_invalid_json"):
+            validate_page_delivery(malformed, response_protocol="summary-page-json")
         assert not summary.exists()
 
 
@@ -409,19 +431,13 @@ def test_short_summary_format_repair_is_bounded_before_publication(kb_dir, monke
 @pytest.mark.parametrize("cancelled", [False, True])
 async def test_summary_repair_releases_sdk_client_on_failure(kb_dir, monkeypatch, cancelled):
     import asyncio
+    from types import SimpleNamespace
 
     import httpx
     import litellm
 
-    from openkb.agent.compiler import compile_short_doc
-    from openkb.compilation_report import CompilationIncomplete
+    from ultrakb.agent.compiler import compile_short_doc
 
-    raw = '{"content": "# Summary\\n\\nSupported facts."}\n{"type": "json_object"}'
-    reply = SimpleNamespace(
-        choices=[SimpleNamespace(message=SimpleNamespace(content=raw), finish_reason="stop")],
-        usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
-    )
-    monkeypatch.setattr(litellm, "completion", lambda **kwargs: reply)
     client = httpx.AsyncClient()
     monkeypatch.setitem(
         litellm.in_memory_llm_clients_cache.cache_dict,
@@ -429,172 +445,134 @@ async def test_summary_repair_releases_sdk_client_on_failure(kb_dir, monkeypatch
         SimpleNamespace(client=client),
     )
 
-    async def response(**kwargs):
-        if cancelled:
-            raise asyncio.CancelledError
-        return reply
+    def interrupted(*args, **kwargs):
+        raise asyncio.CancelledError if cancelled else OSError("Local delivery connection closed")
 
-    monkeypatch.setattr(litellm, "acompletion", response)
+    monkeypatch.setattr("ultrakb.agent.compiler._llm_call", interrupted)
     source = kb_dir / "wiki/sources/summary-failure.md"
-    source.write_text("# Source\n\nSupported facts.")
+    atomic_write_text(source, "# Source\n\nSupported facts.")
     try:
-        with pytest.raises(asyncio.CancelledError if cancelled else CompilationIncomplete):
-            await compile_short_doc("summary-failure", source, kb_dir, "gpt-4o")
+        with pytest.raises(asyncio.CancelledError if cancelled else OSError):
+            await compile_short_doc("summary-failure", source, kb_dir, "deepseek/deepseek-flash")
         assert client.is_closed
         assert not (kb_dir / "wiki/summaries/summary-failure.md").exists()
     finally:
         await client.aclose()
 
 
-def test_entity_type_requires_generation_confirmation(kb_dir, monkeypatch):
-    from openkb import frontmatter
-    from openkb.application.documents import import_document
+def test_entity_type_requires_generation_confirmation(kb_dir):
+    from ultrakb.agent.page_delivery import confirmed_entity_type
 
-    source = kb_dir / "component.txt"
-    source.write_text("River Valve is a flow-control component.")
-    compile_boundary(
-        monkeypatch,
-        {
-            "entities": {
-                "create": [{"name": "river-valve", "title": "River Valve", "type": "organization"}]
-            }
-        },
-        [],
+    plan = _plan(
+        kb_dir / "wiki", {"entities": {"create": [{"name": "river-valve", "type": "organization"}]}}
     )
-    assert import_document(kb_dir, source).status == "added"
-    page = frontmatter.parse((kb_dir / "wiki/entities/river-valve.md").read_text())
-    assert page["type"] == "Other"
+    assert plan.entities.create[0]["type"] == "organization"
+    delivered = {
+        "description": "Flow control",
+        "content": "# River Valve\n\nRiver Valve is a flow-control component.",
+    }
+    actual_type = confirmed_entity_type(delivered, frozenset(_ENTITY_TYPE_LIST))
+    assert actual_type == "other"
+    publish_compile_results(
+        kb_dir / "wiki",
+        "component",
+        plan,
+        summary="Component.",
+        entity_results=[
+            ("river-valve", delivered["content"], delivered["description"], actual_type)
+        ],
+    )
+    assert (
+        frontmatter.parse((kb_dir / "wiki/entities/river-valve.md").read_text())["type"] == "Other"
+    )
 
 
-def test_import_update_keeps_prior_conditions_and_adds_all_new_sections(kb_dir, monkeypatch):
-    from openkb import frontmatter
-    from openkb.application.documents import import_document
-
+def test_import_update_keeps_prior_conditions_and_adds_all_new_sections(kb_dir):
     old = (
         "# Conditions\n\nModel A: 12 slots during winter.\n\n"
         "| Object | Limit |\n| --- | --- |\n| Model C | 72 hours |\n"
     )
-    updating = False
-
-    def response(**kwargs):
-        prompt = str(kwargs["messages"])
-        if "Based on the summary above" in prompt:
-            result = {"concepts": {("update" if updating else "create"): [{"name": "limits"}]}}
-        elif updating:
-            blocks = next(
-                (
-                    message["content"]
-                    for message in kwargs["messages"]
-                    if isinstance(message.get("content"), str)
-                    and message["content"].startswith("Temporary editable page blocks:\n")
-                ),
-                None,
-            )
-            if blocks:
-                data = json.loads(blocks.split("\n", 1)[1].split("\n\n", 1)[0])
-                result = {
-                    "base_sha256": data["base_sha256"],
-                    "description": "Conditions",
-                    "edits": [
-                        {
-                            "block_id": data["blocks"][-1]["id"],
-                            "operation": "insert_after",
-                            "content": "\n\nModel B: 36 slots.\n\nMaintenance: 48 hours.\n",
-                        }
-                    ],
-                }
-            else:
-                result = {
-                    "description": "Conditions",
-                    "content": "# Conditions\n\nModel B: 36 slots.",
-                }
-        else:
-            result = {"description": "Conditions", "content": old}
-        return SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    message=SimpleNamespace(content=json.dumps(result)), finish_reason="stop"
-                )
-            ],
-            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
-        )
-
-    async def asynchronous(**kwargs):
-        return response(**kwargs)
-
-    monkeypatch.setattr("litellm.completion", response)
-    monkeypatch.setattr("litellm.acompletion", asynchronous)
-    first = kb_dir / "winter.txt"
-    first.write_text(old)
-    assert import_document(kb_dir, first).status == "added"
-    updating = True
-    second = kb_dir / "irrigation.txt"
-    second.write_text("Model B: 36 slots.\nMaintenance: 48 hours.")
-    assert import_document(kb_dir, second).status == "added"
-    body = frontmatter.split((kb_dir / "wiki/concepts/limits.md").read_text())[1]
+    wiki = kb_dir / "wiki"
+    original = '---\nsources: ["summaries/winter.md"]\n---\n\n' + old
+    atomic_write_text(wiki / "concepts/limits.md", original)
+    patch = PageUpdate(original)
+    result = patch.apply(
+        json.dumps(
+            {
+                "base_sha256": patch.digest,
+                "description": "Conditions",
+                "edits": [
+                    {
+                        "block_id": patch.request()["blocks"][-1]["id"],
+                        "operation": "insert_after",
+                        "content": "\n\nModel B: 36 slots.\n\nMaintenance: 48 hours.\n",
+                    }
+                ],
+            }
+        ),
+        current=original,
+    )
+    publish_compile_results(
+        wiki,
+        "irrigation",
+        _plan(wiki, {"update": [{"name": "limits"}]}),
+        summary="New conditions.",
+        concept_results=[("limits", result["content"], True, result["description"])],
+    )
+    body = frontmatter.split((wiki / "concepts/limits.md").read_text())[1]
     assert old in body
     assert "Model B: 36 slots." in body
     assert "Maintenance: 48 hours." in body
 
 
-def test_import_blocks_proven_numeric_conflict_after_one_page_repair(kb_dir, monkeypatch):
-    from openkb.application.documents import import_document
-
+def test_import_blocks_proven_numeric_conflict_after_one_page_repair(kb_dir):
     table = (
         "# Limits\n\n| Object | Attribute | Condition | Value |\n"
         "| --- | --- | --- | --- |\n| River Valve | Latency | Winter | {} |\n"
     )
-    page_sends = []
-    compile_boundary(monkeypatch, {"concepts": {"create": [{"name": "latency"}]}}, [])
+    failure = None
+    checkpoints = _checkpoints(kb_dir)
+    for attempt in range(2):
+        with pytest.raises(PageResponseError, match="page_numeric_conflict") as raised:
+            validate_page_delivery(
+                json.dumps({"description": "Latency", "content": table.format("24 ms")}),
+                numeric_sources=[table.format("12 ms")],
+            )
+        failure = raised.value
+        if attempt == 0:
+            checkpoints.claim_repair("page", "request")
+            assert (
+                "page_numeric_conflict"
+                in page_repair_message(failure.code, str(failure))["content"]
+            )
+    with pytest.raises(PageResponseError):
+        checkpoints.claim_repair("page", "request")
+    wiki = kb_dir / "wiki"
+    publish_compile_results(
+        wiki,
+        "latency",
+        _plan(wiki, {"create": [{"name": "latency"}]}),
+        summary="Latency.",
+        concept_results=[failure],
+    )
+    assert not (wiki / "concepts/latency.md").exists()
 
-    async def response(**kwargs):
-        page_sends.append(kwargs)
-        return SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    message=SimpleNamespace(
-                        content=json.dumps(
-                            {"description": "Latency", "content": table.format("24 ms")}
-                        )
-                    ),
-                    finish_reason="stop",
-                )
-            ],
-            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
-        )
 
-    monkeypatch.setattr("litellm.acompletion", response)
-    source = kb_dir / "latency.txt"
-    source.write_text(table.format("12 ms"))
-    result = import_document(kb_dir, source)
-    assert result.status == "failed"
-    assert "page_numeric_conflict" in result.quality
-    assert not (kb_dir / "wiki/concepts/latency.md").exists()
-    assert len(page_sends) == 2
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize("changed", [False, True])
-async def test_long_block_compile_receives_only_selected_frozen_image(
-    kb_dir, tmp_path, monkeypatch, changed
-):
+def test_long_block_compile_receives_only_selected_frozen_image(kb_dir, tmp_path, changed):
     from PIL import Image
 
-    from openkb.agent.compiler import _compile_concepts
-    from openkb.agent.source_windows import CompileSourceWindows
-    from openkb.block_package import freeze_block_package
-    from openkb.inputs import prepared_input
-    from openkb.llm_images import request_image_digests
-    from openkb.locks import atomic_write_json, atomic_write_text
-    from openkb.text_source import freeze_markdown
+    from ultrakb.block_package import freeze_block_package
+    from ultrakb.inputs import prepared_input
+    from ultrakb.llm_images import request_image_digests
+    from ultrakb.text_source import freeze_markdown
 
     for name, color in [("first.png", "red"), ("other.png", "blue")]:
         Image.new("RGB", (4, 4), color).save(tmp_path / name)
     source = tmp_path / "manual.md"
     source.write_text(
         "# Selected\n\n![Selected figure](first.png)\n\n"
-        "# Unrelated\n\n![Unrelated figure](other.png)\n",
-        encoding="utf-8",
+        "# Unrelated\n\n![Unrelated figure](other.png)\n"
     )
     wiki = kb_dir / "wiki"
     with prepared_input(source) as ready:
@@ -603,97 +581,74 @@ async def test_long_block_compile_receives_only_selected_frozen_image(
     atomic_write_text(path, frozen.text)
     atomic_write_json(path.with_suffix(".content.json"), frozen.model_dump(mode="json"))
     freeze_block_package(path, "manual")
-    end = frozen.text.index("# Unrelated")
-    item = {"name": "selected", "reading_locations": {"chars": f"0:{end}"}}
+    item = {
+        "name": "selected",
+        "reading_locations": {"chars": f"0:{frozen.text.index('# Unrelated')}"},
+    }
     if changed:
-        from openkb.agent.page_response import PageResponseError
-
         Image.new("RGB", (4, 4), "green").save(wiki / "sources/images/manual/first.png")
         with pytest.raises(PageResponseError, match="changed"):
             CompileSourceWindows(wiki, "manual").prepare(item, long=True)
-        return
-    requests = []
-    compile_boundary(
-        monkeypatch,
-        {"concepts": {"create": [item]}},
-        requests,
-    )
-    await _compile_concepts(
-        wiki,
-        kb_dir,
-        "test-model",
-        {"role": "system", "content": "You are a wiki compilation agent."},
-        {"role": "user", "content": "Long source navigation; read selected originals."},
-        "Figure navigation",
-        "manual",
-        1,
-        doc_type="pageindex",
-        source_windows=CompileSourceWindows(wiki, "manual"),
-    )
-    assert request_image_digests(requests) == set()
-    assert "first.png" in str(requests)
-    assert "data:image/" not in str(requests)
+    else:
+        request = _page_request(CompileSourceWindows(wiki, "manual"), item, long=True)
+        assert request_image_digests([request]) == set()
+        assert "first.png" in str(request)
+        context = CompileSourceWindows(wiki, "manual").prepare(item, long=True)
+        assert "other.png" not in "".join(w["content"] for w in context.windows)
+        assert "data:image/" not in str(request)
 
 
 @pytest.mark.parametrize("suggestions", [None, {"pages": "3"}, {"pages": [3]}, {"pages": "9"}])
-def test_long_import_reads_native_windows_from_confirmed_locations(
-    kb_dir, physical_pdf, pdf_model, monkeypatch, suggestions
-):
-    from openkb.application.documents import import_document
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
-
-    apply_kb_config_patch(
-        kb_dir, KbConfigPatchRequest(kb=str(kb_dir), config={"pdf_short_max_pages": 0})
+def test_long_import_reads_native_windows_from_confirmed_locations(kb_dir, suggestions):
+    wiki = kb_dir / "wiki"
+    atomic_write_text(
+        wiki / "sources/manual.json",
+        json.dumps(
+            [
+                {"page": page, "unit_kind": "page", "content": text}
+                for page, text in [
+                    (1, "Physical page one."),
+                    (2, "Physical page two."),
+                    (3, "Physical page three."),
+                ]
+            ]
+        ),
     )
-    # PageIndex retains its real algorithm and this fixture's provider boundary.
-    import litellm
-
-    index_response = litellm.completion
-    requests = []
-    item = {"name": "last-section", "title": "Last section"}
+    reader = CompileSourceWindows(
+        wiki,
+        "manual",
+        navigation=[
+            {"node_id": str(n), "title": f"Section {n}", "start_index": n, "end_index": n}
+            for n in range(1, 4)
+        ],
+    )
+    item = {"name": "last-section"}
     if suggestions:
         item["reading_locations"] = suggestions
-    plan_requests = []
-
-    def plan(messages):
-        plan_requests.append(messages)
-        if suggestions is None and len(plan_requests) == 2:
-            return {"concepts": {"create": [{**item, "reading_locations": {"pages": "3"}}]}}
-        return {"concepts": {"create": [item]}}
-
-    compile_boundary(monkeypatch, plan, requests)
-    compile_response = litellm.completion
-
-    def routed(**kwargs):
-        prompt = str(kwargs["messages"])
-        if any(s in prompt for s in ("wiki compilation agent", "Original source windows")):
-            return compile_response(**kwargs)
-        return index_response(**kwargs)
-
-    async def async_routed(**kwargs):
-        return routed(**kwargs)
-
-    monkeypatch.setattr("litellm.completion", routed)
-    monkeypatch.setattr("litellm.acompletion", async_routed)
-    imported = import_document(kb_dir, physical_pdf)
+    plan = _plan(wiki, {"create": [item]})
+    if suggestions is None:
+        assert "reading_locations" in reader.validate_updates(plan, long=True)
+        item["reading_locations"] = {"pages": "3"}
     if suggestions == {"pages": "9"}:
-        assert imported.status == "failed"
-        assert not (kb_dir / "wiki/concepts/last-section.md").exists()
+        with pytest.raises((PageResponseError, ValueError)):
+            reader.prepare(plan.concepts.create[0], long=True)
+        assert not (wiki / "concepts/last-section.md").exists()
         return
-    assert imported.status == "added", imported
-    assert len(plan_requests) == (2 if suggestions is None else 1)
-    page = next(m for m in requests if "Write the concept page" in str(m))
-    assert "Physical page three." in str(page)
-    assert '"unit_kind": "page"' in str(page)
-    assert "coverage" in str(page)
-    assert "sha256" in str(page)
+    request = _page_request(reader, item, long=True)
+    assert "Physical page three." in str(request)
+    assert "Physical page one." not in str(request)
+    assert '"unit_kind": "page"' in str(request)
+    assert "coverage" in str(request)
+    assert "sha256" in str(request)
 
 
-def test_workbook_page_request_preserves_sparse_native_rows(kb_dir, monkeypatch):
+def test_workbook_page_request_preserves_sparse_native_rows(kb_dir, processing_only):
     from openpyxl import Workbook
 
-    from openkb.application.documents import import_document
+    from ultrakb.ingest_records import UnitRevision
+    from ultrakb.normalization import normalization_id, read_normalization
+    from ultrakb.source_catalog import read_record
+    from ultrakb.unit_publication import list_source_units
 
     book = Workbook()
     sheet = book.active
@@ -706,20 +661,14 @@ def test_workbook_page_request_preserves_sparse_native_rows(kb_dir, monkeypatch)
     sheet["A12"] = "仅用于冬季"
     source = kb_dir / "设备.xlsx"
     book.save(source)
-    sends = []
-    compile_boundary(
-        monkeypatch, {"entities": {"create": [{"name": "pump", "type": "product"}]}}, sends
+    retained = processing_only(source)
+    [unit] = list_source_units(kb_dir, retained.source_id)
+    revision = read_record(kb_dir, "unit-revisions", unit.target_revision_id, UnitRevision)
+    directory, saved = read_normalization(
+        kb_dir, normalization_id(revision.source_revision_id, revision.processing_fingerprint)
     )
-    assert import_document(kb_dir, source).status == "added"
-    page = next(s for s in sends if "Write the entity page" in str(s))
-    original = next(
-        block["text"]
-        for m in page
-        if isinstance(m["content"], list)
-        for block in m["content"]
-        if block.get("text", "").startswith("Current original:")
-    )
-    payload = json.loads(original.split("\n", 1)[1])
+    reader = CompileSourceWindows(directory / "wiki", unit.doc_name)
+    payload = reader.current_original_evidence()
     rows = {r["row"]: r["cells"] for r in payload["worksheet_rows"]}
     assert [c["coordinate"] for c in rows[2]] == ["A2", "C2"]
     assert [c["coordinate"] for c in rows[9]] == ["A9", "C9", "F9"]
@@ -732,47 +681,34 @@ def test_workbook_page_request_preserves_sparse_native_rows(kb_dir, monkeypatch)
     assert len(rows) == 3
 
 
-def test_short_update_rereads_a_published_long_source(kb_dir, physical_pdf, pdf_model, monkeypatch):
-    from openkb.application.documents import import_document
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
-
-    apply_kb_config_patch(
-        kb_dir, KbConfigPatchRequest(kb=str(kb_dir), config={"pdf_short_max_pages": 0})
+def test_short_update_rereads_a_published_long_source(kb_dir):
+    wiki = kb_dir / "wiki"
+    atomic_write_text(
+        wiki / "sources/long.json",
+        json.dumps(
+            [
+                {
+                    "page": 1,
+                    "unit_kind": "page",
+                    "content": "Physical page three. Last section facts.",
+                }
+            ]
+        ),
     )
-    import litellm
-
-    index_response = litellm.completion
-    requests = []
-    compile_boundary(
-        monkeypatch,
-        {"concepts": {"create": [{"name": "last-section", "reading_locations": {"pages": "3"}}]}},
-        requests,
+    atomic_write_text(
+        wiki / "summaries/long.md", "---\nfull_text: sources/long.json\n---\nGenerated navigation."
     )
-    compile_response = litellm.completion
-
-    def routed(**kwargs):
-        return (
-            compile_response
-            if "wiki compilation agent" in str(kwargs["messages"])
-            else index_response
-        )(**kwargs)
-
-    async def asynchronous(**kwargs):
-        return routed(**kwargs)
-
-    monkeypatch.setattr("litellm.completion", routed)
-    monkeypatch.setattr("litellm.acompletion", asynchronous)
-    assert import_document(kb_dir, physical_pdf).status == "added"
-    source = kb_dir / "new.txt"
-    source.write_text("Last section: an additional condition is recorded here.")
-    requests.clear()
-    compile_boundary(
-        monkeypatch,
-        {"concepts": {"update": [{"name": "last-section", "title": "Last section"}]}},
-        requests,
+    atomic_write_text(
+        wiki / "concepts/last-section.md",
+        "---\nsources: [summaries/long.md]\n---\n# Last section\n\nPhysical page three.",
     )
-    assert import_document(kb_dir, source).status == "added"
-    update = next(m for m in requests if "Update the concept page" in str(m))
-    assert "Physical page three." in str(update)
-    assert "additional condition" in str(update)
+    atomic_write_text(
+        wiki / "sources/new.md", "Last section: an additional condition is recorded here."
+    )
+    request = _page_request(
+        CompileSourceWindows(wiki, "new"),
+        {"name": "last-section", "title": "Last section"},
+        action="update",
+    )
+    assert "Physical page three." in str(request)
+    assert "additional condition" in str(request)

@@ -13,6 +13,25 @@ class SubtreeQualityError(IndexQualityError):
     local_recovery_exhausted = True
 
 
+def requires_local_correction(accuracy, incorrect_results, *, policy=None, boundary=None):
+    """A bounded source section must try local correction even below the global threshold."""
+    return bool((policy or boundary or accuracy > 0.6) and len(incorrect_results) > 0)
+
+
+def require_corrected_navigation(incorrect_results, policy=None):
+    """Uncorrected anchors cannot become a successful navigation of any source kind."""
+    if not incorrect_results:
+        return
+    from .block_policy import BlockContractError
+    from .page_parts_policy import PagePartsContractError, PagePartsPolicy
+
+    if getattr(policy, 'unit_kind', None) == 'block':
+        raise BlockContractError("Block correction attempts exhausted")
+    if isinstance(policy, PagePartsPolicy):
+        raise PagePartsContractError("Unverified slide anchors after correction")
+    raise IndexQualityError("Unverified physical-page anchors after correction")
+
+
 def compact(value):
     return re.sub(r"\s+", "", value).casefold()
 
@@ -93,6 +112,36 @@ def title_line_positions(item, page_list, start_index=1):
                 matches.append({'unit': number, 'range': [offset, offset + len(line.rstrip())]})
             offset += len(line)
     return matches
+
+
+def finish_title_verification(item, response, page_list, start_index=1, boundary=None):
+    """Apply a delivered heading-role verdict without inventing source coordinates."""
+    page_number, title = item["physical_index"], item["title"]
+    if 'answer' in response:
+        answer = response['answer']
+    else:
+        answer = 'no'
+    if boundary:
+        # A model establishes heading role, not physical coordinates. Native
+        # positions plus confirmed parent bounds can prove membership even
+        # when printed page labels mislead the model's separate membership claim.
+        positions = title_line_positions(item, page_list, start_index)
+        current = [position for position in positions if position['unit'] == page_number]
+        proved = (boundary.start_confirmed and boundary.end_confirmed and len(current) == 1
+                  and all(boundary.contains(position) for position in positions))
+        if (positions and boundary.start_confirmed and boundary.end_confirmed
+                and not any(boundary.contains(position) for position in current)):
+            answer = 'no'
+        elif not proved and response.get('belongs_to_parent') is not True:
+            answer = 'no'
+    return {'list_index': item['list_index'], 'answer': answer, 'title': title, 'page_number': page_number}
+
+
+def physical_child_entries(boundary, entries, page_list, start_index=1):
+    """Remove only the first proposal whose native identity proves this parent root."""
+    if entries and boundary.is_parent_root(entries[0], page_list, start_index):
+        return entries[1:]
+    return entries
 
 
 @dataclass(frozen=True)
@@ -183,8 +232,14 @@ class SectionBoundary:
 
 
 def prepare_entries(entries, page_list, start_index=1, boundary=None, density=4):
-    if not isinstance(entries, list) or not entries:
-        raise IndexQualityError('Physical navigation must be a nonempty entry list')
+    if not isinstance(entries, list):
+        raise IndexQualityError('Physical navigation must be an entry list')
+    if not entries:
+        if boundary or start_index != 1:
+            raise IndexQualityError('Subtree navigation must be a nonempty entry list')
+        # The extraction prompt requires original headings. An empty root
+        # proposal is legitimate for unheaded prose, not heading evidence.
+        return []
     if len(entries) > density * len(page_list):
         raise IndexQualityError('Physical navigation exceeds the configured node density')
     accepted, seen = [], set()
@@ -217,6 +272,14 @@ def prepare_entries(entries, page_list, start_index=1, boundary=None, density=4)
     if not accepted:
         raise IndexQualityError('No original headings belong to the requested section')
     return accepted
+
+
+def document_range_entry(page_list):
+    """Coarse navigation for an empty root outline, without a heading claim."""
+    if not page_list or not any(page[0].strip() for page in page_list):
+        raise IndexQualityError('Document navigation requires original source text')
+    return {'structure': '0', 'title': 'Document', 'title_origin': 'generated',
+            'physical_index': 1, 'appear_start': 'yes'}
 
 
 def merge_continuation(previous, incoming):

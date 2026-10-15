@@ -5,20 +5,24 @@ from zipfile import ZipFile
 
 import pytest
 
-pytest_plugins = ("test_office_import", "test_workbook_import")
+pytest_plugins = (
+    "test_office_import",
+    "block_fixtures",
+    "workbook_fixtures",
+    "processing_fixtures",
+)
 
 
 def test_embedded_workbook_recovery_requires_retry_for_uncreated_sheets(
-    kb_dir, writer_document, three_sheets, pdf_model, monkeypatch
+    kb_dir, writer_document, three_sheets, pdf_model, monkeypatch, processing_only
 ):
-    import openkb.application.ingestion as ingestion
-    from openkb.application.documents import import_document
-    from openkb.application.pending import pending_status, process_pending, retry_pending_job
-    from openkb.unit_publication import list_source_units, read_unit_publication
+    import ultrakb.application.ingestion as ingestion
+    from ultrakb.application.pending import pending_status, process_pending, retry_pending_job
+    from ultrakb.unit_publication import list_source_units, read_unit_publication
 
     with ZipFile(writer_document, "a") as package:
         package.writestr("word/embeddings/book.xlsx", three_sheets.read_bytes())
-    import_document(kb_dir, writer_document)
+    processing_only(writer_document)
     process_pending(kb_dir, max_jobs=1)
     original = ingestion.process_import_unit
     count = 0
@@ -52,16 +56,16 @@ def test_embedded_workbook_recovery_requires_retry_for_uncreated_sheets(
 
 @pytest.mark.parametrize("delete_sheets", [False, True])
 def test_all_confirmed_empty_sheets_refresh_retires_current_but_retains_history(
-    kb_dir, three_sheets, pdf_model, delete_sheets
+    kb_dir, three_sheets, delete_sheets
 ):
+    from office_publication_fixtures import publish_workbook
     from openpyxl import load_workbook
 
-    from openkb.application.documents import import_document
-    from openkb.application.refresh import refresh_knowledge_view, refresh_status
-    from openkb.application.views import view_scope
-    from openkb.unit_publication import read_head, wiki_versions
+    from ultrakb.application.refresh import refresh_knowledge_view, refresh_status
+    from ultrakb.application.views import view_scope
+    from ultrakb.unit_publication import read_head, wiki_versions
 
-    first = import_document(
+    first = publish_workbook(
         kb_dir,
         three_sheets,
     )
@@ -77,7 +81,7 @@ def test_all_confirmed_empty_sheets_refresh_retires_current_but_retains_history(
         del book["Beta"]
         del book["Gamma"]
     book.save(three_sheets)
-    updated = import_document(
+    updated = publish_workbook(
         kb_dir,
         three_sheets,
     )
@@ -94,15 +98,15 @@ def test_all_confirmed_empty_sheets_refresh_retires_current_but_retains_history(
     assert wiki_versions(kb_dir, history.wiki_dir) == old_pages
 
 
-def test_refresh_does_not_retire_unfinished_workbook_sheets(kb_dir, three_sheets, pdf_model):
+def test_refresh_does_not_retire_unfinished_workbook_sheets(kb_dir, three_sheets):
+    from office_publication_fixtures import publish_workbook
     from openpyxl import load_workbook
 
-    from openkb.application.documents import import_document
-    from openkb.application.refresh import refresh_knowledge_view
-    from openkb.application.views import view_scope
-    from openkb.unit_publication import read_head, wiki_versions
+    from ultrakb.application.refresh import refresh_knowledge_view
+    from ultrakb.application.views import view_scope
+    from ultrakb.unit_publication import read_head, wiki_versions
 
-    first = import_document(
+    first = publish_workbook(
         kb_dir,
         three_sheets,
     )
@@ -116,7 +120,7 @@ def test_refresh_does_not_retire_unfinished_workbook_sheets(kb_dir, three_sheets
     with ZipFile(three_sheets, "w") as archive:
         for name, body in parts.items():
             archive.writestr(name, body)
-    updated = import_document(
+    updated = publish_workbook(
         kb_dir,
         three_sheets,
     )

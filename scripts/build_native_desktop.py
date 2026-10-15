@@ -37,7 +37,7 @@ def main():
         run("build_desktop.py")
         return
 
-    lock = json.loads((ROOT / "openkb/office/runtime-lock.json").read_text("utf-8"))
+    lock = json.loads((ROOT / "ultrakb/office/runtime-lock.json").read_text("utf-8"))
     cache = args.cache_dir.resolve() / "office"
     cache.mkdir(parents=True, exist_ok=True)
     artifacts = []

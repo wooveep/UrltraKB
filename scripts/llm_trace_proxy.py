@@ -19,7 +19,7 @@ from urllib.parse import unquote
 
 import httpx
 
-from openkb.locks import atomic_write_json
+from ultrakb.locks import atomic_write_json
 
 
 def utc_now() -> str:
@@ -163,7 +163,7 @@ class AuditProxy(AbstractContextManager):
             record = {
                 "request_id": request_id,
                 "document": self.document,
-                "step": unquote(handler.headers.get("X-OpenKB-Step", "pageindex-or-agent")),
+                "step": unquote(handler.headers.get("X-UltraKB-Step", "pageindex-or-agent")),
                 "started_at": utc_now(),
                 "status": "pending",
                 "model": request.get("model"),

@@ -2,12 +2,14 @@ import json
 
 import pytest
 
+pytest_plugins = ("live_llm", "model_service_fixtures", "test_layers", "pytester")
+
 
 @pytest.fixture(autouse=True)
 def _reset_extra_headers():
     """Keep the process-wide LLM extra-headers / timeout / parallel-tool-calls
     stashes from leaking across tests."""
-    from openkb.config import set_extra_headers, set_parallel_tool_calls, set_timeout
+    from ultrakb.config import set_extra_headers, set_parallel_tool_calls, set_timeout
 
     yield
     set_extra_headers({})
@@ -28,12 +30,12 @@ def kb_dir(tmp_path):
     (tmp_path / "wiki" / "explorations").mkdir(parents=True)
     (tmp_path / "wiki" / "reports").mkdir(parents=True)
 
-    # .openkb state directory
-    openkb_dir = tmp_path / ".openkb"
-    openkb_dir.mkdir()
-    from openkb.kb_format import KB_FORMAT
+    # .ultrakb state directory
+    ultrakb_dir = tmp_path / ".ultrakb"
+    ultrakb_dir.mkdir()
+    from ultrakb.kb_format import KB_FORMAT
 
-    (openkb_dir / "format.json").write_text(json.dumps(KB_FORMAT))
+    (ultrakb_dir / "format.json").write_text(json.dumps(KB_FORMAT))
 
     config_yaml = """\
 version: "0.1.0"
@@ -45,8 +47,8 @@ model_capacity:
   max_input_tokens: 65536
   tokenizer_model: gpt-4o-mini
 """
-    (openkb_dir / "config.yaml").write_text(config_yaml)
-    (openkb_dir / "hashes.json").write_text(json.dumps({}))
+    (ultrakb_dir / "config.yaml").write_text(config_yaml)
+    (ultrakb_dir / "hashes.json").write_text(json.dumps({}))
 
     return tmp_path
 

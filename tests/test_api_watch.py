@@ -12,15 +12,15 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from openkb.api import create_app
-from openkb.application.documents import AddFileResult
+from ultrakb.api import create_app
+from ultrakb.application.documents import AddFileResult
 
 
 def _client(monkeypatch, token: str | None = "secret") -> TestClient:
     if token is None:
-        monkeypatch.delenv("OPENKB_API_TOKEN", raising=False)
+        monkeypatch.delenv("ULTRAKB_API_TOKEN", raising=False)
     else:
-        monkeypatch.setenv("OPENKB_API_TOKEN", token)
+        monkeypatch.setenv("ULTRAKB_API_TOKEN", token)
     return TestClient(create_app())
 
 
@@ -33,7 +33,7 @@ def _use_named_kb(monkeypatch, kb_dir, name: str = "test-kb") -> str:
         assert kb == name
         return kb_dir
 
-    monkeypatch.setattr("openkb.api_helpers.resolve_kb_alias", resolve)
+    monkeypatch.setattr("ultrakb.api_helpers.resolve_kb_alias", resolve)
     return name
 
 
@@ -51,13 +51,13 @@ def _events_from_sse(text: str) -> list[dict[str, Any]]:
 
 def _mock_add(monkeypatch, status: str = "added"):
     monkeypatch.setattr(
-        "openkb.watch_service._add_for_api",
+        "ultrakb.watch_service._add_for_api",
         lambda path, kb, bundle=None, **kwargs: AddFileResult(path.name, str(path), status, "msg"),
     )
 
 
 def test_watch_endpoints_require_token(monkeypatch, kb_dir):
-    """Auth is opt-in, but once OPENKB_API_TOKEN is set the watch endpoints
+    """Auth is opt-in, but once ULTRAKB_API_TOKEN is set the watch endpoints
     reject unauthenticated requests (401 at the dependency, before any watcher
     side effects)."""
     client = _client(monkeypatch, token="secret")
@@ -183,8 +183,8 @@ def test_watch_events_disconnect_terminates(monkeypatch, kb_dir):
     import asyncio
     from unittest.mock import AsyncMock, MagicMock
 
-    from openkb.api_helpers import _stream_watch_events
-    from openkb.watch_service import WatchRegistry
+    from ultrakb.api_helpers import _stream_watch_events
+    from ultrakb.watch_service import WatchRegistry
 
     reg = WatchRegistry()
     reg.start("t", kb_dir, debounce=0.1)
@@ -214,10 +214,10 @@ def test_watch_events_default_timeout_terminates(monkeypatch, kb_dir):
     import asyncio
     from unittest.mock import AsyncMock, MagicMock
 
-    from openkb.api_helpers import _stream_watch_events
-    from openkb.watch_service import WatchRegistry
+    from ultrakb.api_helpers import _stream_watch_events
+    from ultrakb.watch_service import WatchRegistry
 
-    monkeypatch.setattr("openkb.api_watch_events._WATCH_SSE_TIMEOUT", 0.05)
+    monkeypatch.setattr("ultrakb.api_watch_events._WATCH_SSE_TIMEOUT", 0.05)
 
     reg = WatchRegistry()
     reg.start("t", kb_dir, debounce=0.1)

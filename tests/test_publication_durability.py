@@ -6,17 +6,17 @@ from pathlib import Path
 
 import pytest
 
-from openkb.ingest_records import KnowledgeHead, KnowledgeRevision
-from openkb.lifecycle import current_generation
-from openkb.locks import kb_ingest_lock
-from openkb.refresh_publication import RefreshProposal, commit_refresh
-from openkb.unit_publication import wiki_versions
+from ultrakb.ingest_records import KnowledgeHead, KnowledgeRevision
+from ultrakb.lifecycle import current_generation
+from ultrakb.locks import kb_ingest_lock
+from ultrakb.refresh_publication import RefreshProposal, commit_refresh
+from ultrakb.unit_publication import wiki_versions
 
 pytest_plugins = ("test_pdf_readback",)
 
 
 def _trace_retirement(monkeypatch, old, publication):
-    from openkb import locks, mutation
+    from ultrakb import locks, mutation
 
     events = []
     sync, unlink, write = locks._fsync_directory, Path.unlink, publication.write_record
@@ -49,11 +49,11 @@ def _assert_flushed_before_head(events, old):
 
 
 def test_refresh_flushes_retired_page_directory_before_head_commit(kb_dir, monkeypatch):
-    from openkb import refresh_publication
+    from ultrakb import refresh_publication
 
     old = kb_dir / "wiki/summaries/retired.md"
     old.write_text("# Old knowledge")
-    staging = kb_dir / ".openkb/staging/refresh"
+    staging = kb_dir / ".ultrakb/staging/refresh"
     (staging / "wiki").mkdir(parents=True)
     proposal = RefreshProposal(
         proposal_id=uuid.uuid4().hex,
@@ -77,7 +77,7 @@ def test_refresh_flushes_retired_page_directory_before_head_commit(kb_dir, monke
         conflicts=(),
     )
     events = _trace_retirement(monkeypatch, old, refresh_publication)
-    with kb_ingest_lock(kb_dir / ".openkb"):
+    with kb_ingest_lock(kb_dir / ".ultrakb"):
         result = commit_refresh(kb_dir, staging, proposal)
     assert result.status == "completed" and not old.exists()
     _assert_flushed_before_head(events, old)
@@ -87,12 +87,12 @@ def test_refresh_flushes_retired_page_directory_before_head_commit(kb_dir, monke
 def test_unit_publication_flushes_deletions_or_rolls_back(
     kb_dir, monkeypatch, pdf_model, fail_flush
 ):
-    from openkb import locks, unit_publication
-    from openkb.agent import compiler
-    from openkb.application.documents import import_document
-    from openkb.application.recompilation import recompile_document
-    from openkb.application.views import view_scope
-    from openkb.unit_publication import read_head
+    from ultrakb import locks, unit_publication
+    from ultrakb.agent import compiler
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.recompilation import recompile_document
+    from ultrakb.application.views import view_scope
+    from ultrakb.unit_publication import read_head
 
     source = kb_dir / "manual.txt"
     source.write_text("Fixture instructions.")

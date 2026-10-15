@@ -5,34 +5,35 @@ import json
 import pytest
 from test_native_table_projection import TABLE
 
-pytest_plugins = ("test_vendor_sdk",)
 
+def test_short_import_projects_tables_into_summary_and_planning(kb_dir):
+    from test_source_qualification import freeze_source
 
-def test_short_import_projects_tables_into_summary_and_planning(kb_dir, model_service):
-    from test_vendor_sdk import response
+    from ultrakb.agent.compile_messages import planning_messages
+    from ultrakb.agent.compiler import short_document_messages
+    from ultrakb.agent.evidence_payload import project_evidence
+    from ultrakb.text_source import read_text_selection
 
-    from openkb.application.documents import import_document
-
-    (kb_dir / ".env").write_text(f"LLM_API_KEY=fixture\nOPENAI_API_BASE={model_service.url}\n")
-    (kb_dir / ".openkb/config.yaml").write_text(
-        "model: openai/gpt-4o-mini\nlanguage: en\nmodel_policy:\n  retries: 0\n  max_calls: 2\n"
-    )
     original = "\n\n".join(TABLE.replace("Group", f"Group {n}") for n in range(6)) + "\n"
-    incoming = kb_dir / "incoming.md"
-    incoming.write_text(original)
-    for output in ({"description": "Six feature tables", "content": "# Features\nGroups."}, {}):
-        model_service.replies.append(
-            (200, response({"role": "assistant", "content": json.dumps(output)}))
-        )
-
-    result = import_document(kb_dir, incoming)
-
-    assert result.status == "added", result.message
-    assert len(model_service.requests) == 2
-    originals = list((kb_dir / "wiki/sources").glob("*.md"))
-    assert len(originals) == 1 and originals[0].read_text() == original
-    for request in model_service.requests:
-        content = request["messages"][1]["content"]
+    _, frozen = freeze_source(kb_dir, kb_dir, "md", original)
+    evidence = project_evidence(read_text_selection(frozen.model_dump(mode="json")))
+    summary_messages = short_document_messages(
+        "manual",
+        original,
+        "",
+        "en",
+        original_evidence=evidence,
+    )
+    plan_messages = planning_messages(
+        summary_messages[0],
+        summary_messages[1],
+        "Existing summary for feature tables.",
+        concept_briefs="",
+        entity_briefs="",
+    )
+    # Both project stages carry exactly the same native table projection.
+    for messages in (summary_messages, plan_messages):
+        content = messages[1]["content"]
         text = content if isinstance(content, str) else "".join(item["text"] for item in content)
         assert original in text
         structure = json.loads(text.split("Original structure (native-tables-v1):\n", 1)[1])
@@ -45,6 +46,7 @@ def test_short_import_projects_tables_into_summary_and_planning(kb_dir, model_se
             assert cells["r4c3"]["value"] == ""
             start, end = cells["r2c1"]["native_location"]["source_spans"][0]
             assert original[start:end] == f'<td rowspan="3">Group {n}</td>'
+    assert (kb_dir / "wiki/sources/manual.md").read_text() == original
 
 
 @pytest.mark.parametrize(
@@ -61,9 +63,9 @@ def test_short_source_projection_distinguishes_image_references_from_examples(
 ):
     from test_original_structure import frozen_text
 
-    from openkb.agent.compiler import short_document_messages
-    from openkb.agent.evidence_payload import project_evidence
-    from openkb.text_source import read_text_selection
+    from ultrakb.agent.compiler import short_document_messages
+    from ultrakb.agent.evidence_payload import project_evidence
+    from ultrakb.text_source import read_text_selection
 
     evidence = project_evidence(read_text_selection(frozen_text(kb_dir, original)))
     content = short_document_messages("manual", original, "", "en", original_evidence=evidence)[1][
@@ -75,3 +77,37 @@ def test_short_source_projection_distinguishes_image_references_from_examples(
     assert ("figure_interpretation" in structure) is has_figure
     if has_figure:
         assert "Pixels have not been interpreted" in structure["figure_interpretation"]
+
+
+@pytest.mark.asyncio
+async def test_real_short_table_summary_keeps_the_header_value_relationship(
+    kb_dir, monkeypatch, live_llm
+):
+    from test_source_qualification import freeze_source
+
+    from ultrakb.agent.compiler import _llm_call_page_async, short_document_messages
+    from ultrakb.agent.evidence_payload import project_evidence
+    from ultrakb.agent.page_response import parse_page
+    from ultrakb.text_source import read_text_selection
+
+    original = (
+        "<table><tr><th>Product</th><th>Credits</th></tr><tr><td>Orion</td><td>17</td></tr></table>"
+    )
+    _, frozen = freeze_source(kb_dir, kb_dir, "md", original)
+    evidence = project_evidence(read_text_selection(frozen.model_dump(mode="json")))
+    messages = short_document_messages("manual", original, "", "en", original_evidence=evidence)
+    live_llm.install(monkeypatch)
+    received = await _llm_call_page_async(
+        "deepseek/deepseek-flash",
+        messages,
+        "summary",
+        bundle=live_llm.credentials,
+        response_protocol="summary-page-json",
+        response_format={"type": "json_object"},
+        max_tokens=256,
+        numeric_sources=[original],
+    )
+    content = parse_page(received, strict=True)["content"].lower()
+    assert "orion" in content and "17" in content and "credit" in content
+    assert "native-tables-v1" in str(live_llm.calls[-1]["messages"])
+    assert (kb_dir / "wiki/sources/manual.md").read_text() == original

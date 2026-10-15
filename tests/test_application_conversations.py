@@ -3,73 +3,64 @@
 import asyncio
 
 import pytest
-from agents import RawResponsesStreamEvent, Runner
-from openai.types.responses import ResponseTextDeltaEvent
+from agents import Runner
+from application_llm_fixtures import real_application_model  # noqa: F401
 
-from openkb.agent.chat_session import ChatSession, load_session
-from openkb.application.conversations import continue_conversation
-from openkb.application.execution import ExecutionContext
+from ultrakb.agent.chat_session import ChatSession, load_session
+from ultrakb.application.conversations import continue_conversation
+from ultrakb.application.execution import ExecutionContext
 
 
 @pytest.fixture(autouse=True)
 def original_for_conversation(kb_dir):
-    (kb_dir / "wiki/sources/fixture.md").write_text("A source available for model reading.")
+    from ultrakb.config import load_config, save_config
+    from ultrakb.locks import atomic_write_text
+
+    atomic_write_text(kb_dir / "wiki/sources/fixture.md", "The recorded answer is 42.")
+    path = kb_dir / ".ultrakb/config.yaml"
+    config = load_config(path)
+    config.update(model="deepseek/deepseek-flash", language="en")
+    config["role_generation"] = {"answer": {"max_tokens": 256, "reasoning_effort": "none"}}
+    save_config(path, config)
 
 
 @pytest.mark.asyncio
 async def test_concurrent_continuations_reload_completed_history(kb_dir, monkeypatch):
     first_running, finish_first, second_waiting = asyncio.Event(), asyncio.Event(), asyncio.Event()
-    session = ChatSession.new(kb_dir, "openai/original", "zh")
+    session = ChatSession.new(kb_dir, "deepseek/deepseek-flash", "en")
     session.record_turn("Original", "Saved", [])
     inputs = []
+    genuine_run = Runner.run_streamed
 
-    class ModelRun:
-        is_complete = False
-        final_output = "Answer"
+    def observe(agent, history, **options):
+        inputs.append(history)
+        delivered = genuine_run(agent, history, **options)
+        genuine_events = delivered.stream_events
 
-        def __init__(self, history):
-            self.history = history
-            inputs.append(history)
-
-        async def stream_events(self):
-            question = self.history[-1]["content"][-1]["text"]
+        async def events():
+            question = history[-1]["content"][-1]["text"]
             if question == "First":
                 first_running.set()
                 await finish_first.wait()
-            yield RawResponsesStreamEvent(
-                data=ResponseTextDeltaEvent(
-                    type="response.output_text.delta",
-                    delta="Answer",
-                    content_index=0,
-                    item_id="message",
-                    output_index=0,
-                    sequence_number=0,
-                    logprobs=[],
-                )
-            )
-            self.is_complete = True
+            async for event in genuine_events():
+                yield event
 
-        def to_input_list(self):
-            return self.history + [{"role": "assistant", "content": "Answer"}]
+        delivered.stream_events = events
+        return delivered
 
-    monkeypatch.setattr(Runner, "run_streamed", lambda agent, history, **kw: ModelRun(history))
+    monkeypatch.setattr(Runner, "run_streamed", observe)
     first = asyncio.create_task(continue_conversation(kb_dir, "First", session_id=session.id))
-    await asyncio.wait_for(first_running.wait(), 5)
+    await asyncio.wait_for(first_running.wait(), 30)
     context = ExecutionContext(
         on_event=lambda event: second_waiting.set() if event.get("stage") == "waiting" else None
     )
     second = asyncio.create_task(
-        continue_conversation(
-            kb_dir,
-            "Second",
-            session_id=session.id,
-            context=context,
-        )
+        continue_conversation(kb_dir, "Second", session_id=session.id, context=context)
     )
-    await asyncio.wait_for(second_waiting.wait(), 5)
+    await asyncio.wait_for(second_waiting.wait(), 30)
     assert len(inputs) == 1
     finish_first.set()
-    outcomes = await asyncio.wait_for(asyncio.gather(first, second), 5)
+    outcomes = await asyncio.wait_for(asyncio.gather(first, second), 90)
     assert [result.turn_count for result in outcomes] == [2, 3]
     assert len(inputs[1]) == 1 and inputs[1][0]["role"] == "user"
     content = inputs[1][0]["content"]
@@ -78,98 +69,65 @@ async def test_concurrent_continuations_reload_completed_history(kb_dir, monkeyp
     assert "Saved" not in content[0]["text"]
     saved = load_session(kb_dir, session.id)
     assert saved.user_turns == ["Original", "First", "Second"]
-    assert saved.model == "openai/original"
-    assert saved.language == "zh"
+    assert saved.model == "deepseek/deepseek-flash"
+    assert saved.language == "en"
 
 
 @pytest.mark.asyncio
 async def test_saved_answer_excludes_tool_narration_and_explicit_reasoning(kb_dir, monkeypatch):
-    from evidence_model import read_fixture, review_response
+    from markdown_it import MarkdownIt
 
-    from openkb.application.conversations import read_conversation
+    from ultrakb.agent.answer_text import visible_answer
+    from ultrakb.application.conversations import read_conversation
+    from ultrakb.locks import atomic_write_text
 
-    (kb_dir / "wiki/sources/fixture.md").write_text("Use `<think>` literally.")
+    # Literal syntax and explicit reasoning are parser inputs, not replacement replies.
+    raw = "<think>private deliberation</think>\n**可见回答**\n\nUse `<think>` literally."
+    assert visible_answer(raw) == "**可见回答**\n\nUse `<think>` literally."
+    atomic_write_text(kb_dir / "wiki/sources/fixture.md", "Use `<think>` literally.")
+    actual = []
+    genuine_run = Runner.run_streamed
 
-    class ModelRun:
-        is_complete = False
-        final_output = (
-            "<think>private deliberation</think>\n**可见回答**\n\nUse `<think>` literally."
-        )
+    def observe(*args, **options):
+        delivered = genuine_run(*args, **options)
+        actual.append(delivered)
+        return delivered
 
-        def __init__(self, agent):
-            self.agent = agent
-
-        async def stream_events(self):
-            await read_fixture(self.agent)
-            for index, text in enumerate(("I will inspect the sources. ", self.final_output)):
-                yield RawResponsesStreamEvent(
-                    data=ResponseTextDeltaEvent(
-                        type="response.output_text.delta",
-                        delta=text,
-                        content_index=0,
-                        item_id=f"message-{index}",
-                        output_index=0,
-                        sequence_number=index,
-                        logprobs=[],
-                    )
-                )
-            self.is_complete = True
-
-        def to_input_list(self):
-            return [{"role": "assistant", "content": self.final_output}]
-
-    monkeypatch.setattr(Runner, "run_streamed", lambda agent, *args, **kwargs: ModelRun(agent))
-
-    async def review(agent, input, **kwargs):
-        return review_response(input)
-
-    monkeypatch.setattr(Runner, "run", review)
-    result = await continue_conversation(kb_dir, "请回答")
-    assert result.status == "completed"
-    assert "**可见回答**" in result.answer and "Use `<think>` literally." in result.answer
-    assert "I will inspect" not in result.answer
-    assert "private deliberation" not in result.answer
+    monkeypatch.setattr(Runner, "run_streamed", observe)
+    question = (
+        "Read sources/fixture.md once and quote its sentence exactly beneath "
+        "the heading **可见回答**."
+    )
+    result = await continue_conversation(kb_dir, question)
+    assert result.status == "completed", result.error
+    visible_blocks = [
+        "".join(child.content for child in token.children or [] if child.type == "text")
+        for token in MarkdownIt().parse(result.answer)
+        if token.type == "inline"
+    ]
+    assert "可见回答" in visible_blocks
+    assert "Use `<think>` literally." in result.answer
+    assert "I will inspect" not in result.answer and "private deliberation" not in result.answer
+    assert result.answer == visible_answer(actual[-1].final_output)
     saved = read_conversation(kb_dir, result.session_id)
-    assert saved.turns == (("请回答", result.answer),)
+    assert saved.turns == ((question, result.answer),)
 
 
 @pytest.mark.asyncio
-async def test_interrupted_submission_survives_reopen_without_a_completed_model_turn(
-    kb_dir, monkeypatch
-):
-    from openkb.application.conversations import read_conversation
+async def test_interrupted_submission_survives_reopen_without_a_completed_model_turn(kb_dir):
+    from ultrakb.application.conversations import read_conversation
 
     stopped = False
 
-    class ModelRun:
-        is_complete = False
-        final_output = "Answer"
-
-        def cancel(self, **kwargs):
-            self.is_complete = True
-
-        async def stream_events(self):
-            nonlocal stopped
+    def cancel_after_real_delta(event):
+        nonlocal stopped
+        if event.get("event") == "delta":
             stopped = True
-            yield RawResponsesStreamEvent(
-                data=ResponseTextDeltaEvent(
-                    type="response.output_text.delta",
-                    delta="<think>unfinished private work",
-                    content_index=0,
-                    item_id="message",
-                    output_index=0,
-                    sequence_number=0,
-                    logprobs=[],
-                )
-            )
-            self.is_complete = True
 
-        def to_input_list(self):
-            return []
-
-    monkeypatch.setattr(Runner, "run_streamed", lambda *args, **kwargs: ModelRun())
     result = await continue_conversation(
-        kb_dir, "请保留这个问题", context=ExecutionContext(cancelled=lambda: stopped)
+        kb_dir,
+        "请保留这个问题",
+        context=ExecutionContext(cancelled=lambda: stopped, on_event=cancel_after_real_delta),
     )
     assert result.status == "stopped"
     restored = read_conversation(kb_dir, result.session_id)
@@ -179,7 +137,7 @@ async def test_interrupted_submission_survives_reopen_without_a_completed_model_
 
     stopped = False
     result = await continue_conversation(kb_dir, "接着问", session_id=result.session_id)
-    assert result.status == "completed"
+    assert result.status == "completed", result.error
     restored = read_conversation(kb_dir, result.session_id)
     assert result.answer_outcome == "answered"
     assert restored.turns == (("接着问", result.answer),)
@@ -187,14 +145,14 @@ async def test_interrupted_submission_survives_reopen_without_a_completed_model_
 
 
 def test_queued_question_survives_restart_without_replaying_model_work(kb_dir, tmp_path):
-    from openkb.application.conversations import read_conversation
-    from openkb.desktop.chat_outbox import ChatOutbox
-    from openkb.locks import kb_ingest_lock
+    from ultrakb.application.conversations import read_conversation
+    from ultrakb.desktop.chat_outbox import ChatOutbox
+    from ultrakb.locks import kb_ingest_lock
 
     session = ChatSession.new(kb_dir, "", "")
     directory = tmp_path / "desktop-outbox"
     # Accepting a question must not wait for the long-running model's KB lease.
-    with kb_ingest_lock(kb_dir / ".openkb"):
+    with kb_ingest_lock(kb_dir / ".ultrakb"):
         ChatOutbox(directory).accept(kb_dir, session.id, "排队后被停止的问题", new=True)
         assert not session.path.exists()
     restarted = ChatOutbox(directory)
@@ -208,8 +166,8 @@ def test_queued_question_survives_restart_without_replaying_model_work(kb_dir, t
 
 @pytest.mark.parametrize("new", [False, True])
 def test_outbox_recovery_deduplicates_committed_answer_and_respects_deletion(kb_dir, tmp_path, new):
-    from openkb.application.sessions import delete_conversation
-    from openkb.desktop.chat_outbox import ChatOutbox
+    from ultrakb.application.sessions import delete_conversation
+    from ultrakb.desktop.chat_outbox import ChatOutbox
 
     session = ChatSession.new(kb_dir, "openai/test", "zh")
     outbox = ChatOutbox(tmp_path / "outbox")
@@ -232,15 +190,15 @@ def test_recovered_submissions_keep_acceptance_order_and_original_turn_position(
 ):
     from types import SimpleNamespace
 
-    from openkb.application.conversations import read_conversation
-    from openkb.application.sessions import export_conversation
-    from openkb.desktop.chat_outbox import ChatOutbox
+    from ultrakb.application.conversations import read_conversation
+    from ultrakb.application.sessions import export_conversation
+    from ultrakb.desktop.chat_outbox import ChatOutbox
 
     session = ChatSession.new(kb_dir, "openai/test", "zh")
     session.record_turn("原始问题", "原始回答", [])
     identities = iter(["f" * 32, "0" * 32])
     monkeypatch.setattr(
-        "openkb.desktop.chat_outbox.uuid4", lambda: SimpleNamespace(hex=next(identities))
+        "ultrakb.desktop.chat_outbox.uuid4", lambda: SimpleNamespace(hex=next(identities))
     )
     outbox = ChatOutbox(tmp_path / "outbox")
     outbox.accept(kb_dir, session.id, "先提交", new=False, after_turn=1)
@@ -264,8 +222,8 @@ def test_recovered_submissions_keep_acceptance_order_and_original_turn_position(
 def test_old_kb_submissions_do_not_block_recreated_kb_history(kb_dir, tmp_path, tmp_path_factory):
     import shutil
 
-    from openkb.application.conversations import read_conversation
-    from openkb.desktop.chat_outbox import ChatOutbox
+    from ultrakb.application.conversations import read_conversation
+    from ultrakb.desktop.chat_outbox import ChatOutbox
 
     old = ChatSession.new(kb_dir, "", "")
     outbox = ChatOutbox(tmp_path_factory.mktemp("chat-settings"))
@@ -282,8 +240,8 @@ def test_old_kb_submissions_do_not_block_recreated_kb_history(kb_dir, tmp_path, 
 
 
 def test_deferred_recovery_orders_question_before_already_started_later_attempt(kb_dir, tmp_path):
-    from openkb.application.conversations import read_conversation
-    from openkb.desktop.chat_outbox import ChatOutbox
+    from ultrakb.application.conversations import read_conversation
+    from ultrakb.desktop.chat_outbox import ChatOutbox
 
     session = ChatSession.new(kb_dir, "openai/test", "zh")
     session.record_turn("之前的问题", "之前的回答", [])
@@ -301,30 +259,14 @@ def test_deferred_recovery_orders_question_before_already_started_later_attempt(
 
 
 @pytest.mark.asyncio
-async def test_retry_recovered_submission_keeps_initial_model_binding(
-    kb_dir, tmp_path, monkeypatch
-):
-    from openkb.config import resolve_effective_config
-    from openkb.desktop.chat_outbox import ChatOutbox
+async def test_retry_recovered_submission_keeps_initial_model_binding(kb_dir, tmp_path):
+    from ultrakb.config import resolve_effective_config
+    from ultrakb.desktop.chat_outbox import ChatOutbox
 
     session = ChatSession.new(kb_dir, "", "")
     outbox = ChatOutbox(tmp_path / "outbox")
     accepted = outbox.accept(kb_dir, session.id, "重试排队的问题", new=True)
     outbox.recover(kb_dir)
-
-    class ModelRun:
-        is_complete = False
-        final_output = "重试后的回答"
-
-        async def stream_events(self):
-            self.is_complete = True
-            if False:
-                yield
-
-        def to_input_list(self):
-            return [{"role": "assistant", "content": self.final_output}]
-
-    monkeypatch.setattr(Runner, "run_streamed", lambda *args, **kwargs: ModelRun())
     result = await continue_conversation(
         kb_dir,
         "重试排队的问题",
@@ -332,7 +274,7 @@ async def test_retry_recovered_submission_keeps_initial_model_binding(
         attempt_id=accepted.id,
         submission_order=accepted.order,
     )
-    assert result.status == "completed"
+    assert result.status == "completed", result.error
     config = resolve_effective_config(kb_dir)[0]
     saved = load_session(kb_dir, session.id)
     assert (saved.model, saved.language) == (config["model"], config["language"])

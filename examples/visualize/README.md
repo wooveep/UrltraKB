@@ -1,6 +1,6 @@
 # Visualize
 
-`openkb visualize` renders your wiki's `[[wikilink]]` graph as a self-contained,
+`ultrakb visualize` renders your wiki's `[[wikilink]]` graph as a self-contained,
 interactive HTML page — a fast way to *see* how knowledge connects across the
 documents you've ingested.
 
@@ -9,7 +9,7 @@ documents you've ingested.
 > between the **3D / mind-map / radial** modes; click a node to inspect it.
 
 ```bash
-openkb visualize
+ultrakb visualize
 ```
 
 ```text
@@ -21,11 +21,11 @@ By default it opens the page in your browser after generating. For headless
 environments (CI, a remote box), skip the launch:
 
 ```bash
-openkb visualize --no-open
+ultrakb visualize --no-open
 ```
 
 > **Prerequisite:** you need a compiled wiki. With nothing ingested yet, it tells
-> you to run `openkb add` first. The [`graph.html`](graph.html) here was built from
+> you to run `ultrakb add` first. The [`graph.html`](graph.html) here was built from
 > the wiki in [`../commands/sample-wiki/`](../commands/sample-wiki/).
 
 ---
@@ -52,8 +52,8 @@ Switch between these from buttons in the page:
 | Mode | Layout |
 | --- | --- |
 | **3D** *(default)* | Force-directed "nebula" in 3D — orbit, zoom, and drag-to-pin nodes. |
-| **mind-map** | Horizontal tree: OpenKB → documents (summaries) → concepts. |
-| **radial** | OpenKB at the hub, documents on spokes, concepts radiating out; zoom/pan. |
+| **mind-map** | Horizontal tree: UltraKB → documents (summaries) → concepts. |
+| **radial** | UltraKB at the hub, documents on spokes, concepts radiating out; zoom/pan. |
 
 The page also has search (filter by label), a type legend you can toggle, a
 spacing slider, and a node inspector — click a node to see its description,
@@ -67,9 +67,9 @@ sources, and links.
 the loop:
 
 ```bash
-openkb add ~/papers/        # ingest a batch
-openkb lint --fix           # repair any dangling links so the graph is clean
-openkb visualize            # see the shape of what you've built
+ultrakb add ~/papers/        # ingest a batch
+ultrakb lint --fix           # repair any dangling links so the graph is clean
+ultrakb visualize            # see the shape of what you've built
 ```
 
 A sparse graph with many orphans usually means documents aren't sharing concepts

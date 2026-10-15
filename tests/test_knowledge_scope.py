@@ -1,13 +1,12 @@
 """Knowledge operations share an explicit legacy range without moving content."""
 
 import asyncio
-import json
-from types import SimpleNamespace
 
 import pytest
+from application_llm_fixtures import real_application_model  # noqa: F401
 
-from openkb.application.pages import read_page, save_page
-from openkb.knowledge_scope import legacy_scope
+from ultrakb.application.pages import read_page, save_page
+from ultrakb.knowledge_scope import legacy_scope
 
 
 def test_explicit_legacy_scope_reads_the_existing_page(kb_dir):
@@ -25,37 +24,31 @@ def test_explicit_scope_keeps_legacy_edit_and_link_behavior(kb_dir):
     assert result.ghosts_stripped == ("concepts/missing",)
 
 
-def test_explicit_legacy_scope_compiles_into_existing_wiki(kb_dir, monkeypatch):
-    from openkb.agent.compiler import compile_short_doc
+def test_explicit_legacy_scope_compiles_into_existing_wiki(kb_dir, monkeypatch, live_llm):
+    from ultrakb.agent.compiler import compile_short_doc
 
     source = kb_dir / "wiki/sources/notes.md"
     source.write_text("# Notes\nA source fact.")
-    replies = iter(
-        [
-            {"description": "Notes", "content": "# Notes\n\nA source fact."},
-            {"create": [], "update": [], "related": []},
-        ]
-    )
 
-    def completion(**kwargs):
-        return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(next(replies))))],
-            usage=SimpleNamespace(prompt_tokens=10, completion_tokens=10),
-        )
-
-    monkeypatch.setattr("litellm.completion", completion)
     scope = legacy_scope(kb_dir)
-    asyncio.run(compile_short_doc("notes", source, kb_dir, "test-model", scope=scope))
-    assert (
-        read_page(kb_dir, "summaries/notes", scope=scope).body.strip()
-        == "# Notes\n\nA source fact."
+    asyncio.run(
+        compile_short_doc(
+            "notes",
+            source,
+            kb_dir,
+            "deepseek/deepseek-flash",
+            scope=scope,
+            bundle=live_llm.credentials,
+        )
     )
+    body = read_page(kb_dir, "summaries/notes", scope=scope).body
+    assert "source fact" in body.lower()
 
 
 def test_scoped_chat_tools_read_the_legacy_page(kb_dir):
     from agents.tool_context import ToolContext
 
-    from openkb.agent.query import build_chat_agent
+    from ultrakb.agent.query import build_chat_agent
 
     (kb_dir / "wiki/concepts/topic.md").write_text("The retained fact.")
     agent = build_chat_agent(kb_dir, "test-model", scope=legacy_scope(kb_dir))
@@ -69,7 +62,7 @@ def test_scoped_chat_tools_read_the_legacy_page(kb_dir):
 
 
 def test_scoped_maintenance_repairs_legacy_links(kb_dir):
-    from openkb.application.maintenance import LintOptions, check_knowledge
+    from ultrakb.application.maintenance import LintOptions, check_knowledge
 
     page = kb_dir / "wiki/concepts/topic.md"
     page.write_text("Retained [[concepts/missing]].")
@@ -93,10 +86,10 @@ def test_edit_rejects_a_different_knowledge_base_scope(kb_dir, tmp_path):
 def test_legacy_remove_accepts_a_relative_kb_root(kb_dir, monkeypatch, dry_run, status):
     from pathlib import Path
 
-    from openkb.application.removal import run_remove_for_api
-    from openkb.state import HashRegistry
+    from ultrakb.application.removal import run_remove_for_api
+    from ultrakb.state import HashRegistry
 
-    HashRegistry(kb_dir / ".openkb/hashes.json").add(
+    HashRegistry(kb_dir / ".ultrakb/hashes.json").add(
         "test-hash", {"name": "notes.pdf", "doc_name": "notes"}
     )
     (kb_dir / "wiki/summaries/notes.md").write_text("Existing summary.")

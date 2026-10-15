@@ -19,33 +19,39 @@ import pytest
     ],
 )
 def test_invalid_page_response_keeps_its_reason(raw, code):
-    from openkb.agent.compiler import _page_fields
-    from openkb.agent.page_response import PageResponseError
+    from ultrakb.agent.compiler import _page_fields
+    from ultrakb.agent.page_response import PageResponseError
 
     with pytest.raises(PageResponseError, match=code):
         _page_fields(raw)
 
 
-@pytest.mark.asyncio
-async def test_page_repair_is_local_and_bounded(monkeypatch):
-    from openkb.agent.compiler import _llm_call_page_async
-    from openkb.compilation_report import collect_compile_report
+def test_page_repair_instruction_is_local_and_keeps_its_validation_reason():
+    from ultrakb.agent.page_response import PageResponseError, page_repair_message, parse_page
 
-    calls = []
+    with pytest.raises(PageResponseError) as invalid:
+        parse_page('{"content":"one"}\n{"note":"two"}')
+    assert invalid.value.code == "page_multiple_objects"
+    correction = page_repair_message(invalid.value.code, "entity: API: " + str(invalid.value))
+    assert correction["role"] == "user"
+    assert "entity: API" in correction["content"]
+    assert "page_multiple_objects" in correction["content"]
+    assert "Do not append a second object or note" in correction["content"]
+    assert parse_page('{"content":"repaired"}')["content"] == "repaired"
 
-    async def response(model, messages, step, **kwargs):
-        calls.append((step, messages))
-        return '{"content":"one"}\n{"note":"two"}' if len(calls) == 1 else '{"content":"repaired"}'
 
-    monkeypatch.setattr("openkb.agent.compiler._llm_call_async", response)
-    with collect_compile_report() as report:
-        assert (
-            json.loads(await _llm_call_page_async("test", [], "entity: API"))["content"]
-            == "repaired"
-        )
-    assert [step for step, _ in calls] == ["entity: API", "entity: API"]
-    assert "page_multiple_objects" in calls[1][1][-1]["content"]
-    assert report.quality == ["page_response_repaired"] and not report.unfinished
+def test_update_repair_keeps_required_evidence_and_only_changes_necessary_blocks():
+    from ultrakb.agent.page_response import page_repair_message
+
+    correction = page_repair_message(
+        "page_invalid_source_ranges", "Missing original evidence", page_update=True
+    )["content"]
+    assert "page_invalid_source_ranges" in correction
+    assert "captured base_sha256" in correction
+    assert "including type and source_ranges when requested" in correction
+    assert "only supplied source range IDs" in correction
+    assert "every range that supports the returned edits" in correction
+    assert "omit unchanged blocks" in correction
 
 
 def _entry(number):
@@ -58,31 +64,22 @@ def _entry(number):
     }
 
 
-def test_full_continuation_is_corrected_without_duplicate_append(monkeypatch):
-    from pageindex.index import page_index
-    from pageindex.index.page_parts_policy import PagePartsPolicy
+def test_full_continuation_is_rejected_before_duplicate_append():
+    from pageindex.index.page_parts_policy import PagePartsContractError, PagePartsPolicy
 
-    policy = PagePartsPolicy({"unit_count": 103, "page_parts": [{"body": "A", "notes": ""}] * 103})
-    previous = [_entry(n) for n in range(1, 52)]
-    full = [_entry(n) for n in range(1, 103)]
-    incremental = full[51:]
-    calls = []
-
-    def response(**kwargs):
-        calls.append(kwargs["prompt"])
-        return json.dumps(full if len(calls) == 1 else incremental), "finished"
-
-    monkeypatch.setattr(page_index, "llm_completion", response)
-    part = "\n".join(f"<physical_index_{n}> A" for n in range(52, 104))
-    result = page_index.generate_toc_continue(previous, part, "test", policy)
-    assert result == incremental and len(previous) == 51
-    assert len(calls) == 2 and "duplicate/conflicting" in calls[-1]
-    assert len({item["structure"] for item in previous + result}) == 102
+    policy = PagePartsPolicy({"unit_count": 3, "page_parts": [{"body": "A", "notes": ""}] * 3})
+    previous = [_entry(1)]
+    full = [_entry(1), _entry(2), _entry(3)]
+    incremental = full[1:]
+    part = "<physical_index_2> A\n<physical_index_3> A"
+    with pytest.raises(PagePartsContractError, match="duplicate/conflicting"):
+        policy.validate_chunk(previous, full, part)
+    policy.validate_chunk(previous, incremental, part)
+    assert previous == [_entry(1)] and len(incremental) == 2
 
 
 @pytest.mark.parametrize("mode", ["duplicate", "modified", "wrong_anchor", "wrong_page", "order"])
-def test_continuation_failure_is_not_silently_deduplicated(monkeypatch, mode):
-    from pageindex.index import page_index
+def test_continuation_failure_is_not_silently_deduplicated(mode):
     from pageindex.index.page_parts_policy import PagePartsContractError, PagePartsPolicy
 
     policy = PagePartsPolicy({"unit_count": 3, "page_parts": [{"body": "A", "notes": ""}] * 3})
@@ -97,16 +94,10 @@ def test_continuation_failure_is_not_silently_deduplicated(monkeypatch, mode):
         added = [_entry(3)]
     else:
         previous, added = [_entry(3)], [_entry(2)]
-    calls = []
-
-    def response(**kwargs):
-        calls.append(kwargs)
-        return json.dumps(added), "finished"
-
-    monkeypatch.setattr(page_index, "llm_completion", response)
-    with pytest.raises(PagePartsContractError, match="slide_toc_continue"):
-        page_index.generate_toc_continue(previous, "<physical_index_2> A", "test", policy)
-    assert len(calls) == 2
+    saved = json.dumps(previous)
+    with pytest.raises(PagePartsContractError, match="slide_toc_chunk"):
+        policy.validate_chunk(previous, added, "<physical_index_2> A")
+    assert json.dumps(previous) == saved
 
 
 @pytest.mark.parametrize("kind", ["corrupt", "scan", "blank"])
@@ -115,8 +106,8 @@ def test_unreadable_pdf_distinguishes_corruption_from_retained_no_text(
 ):
     import pymupdf
 
-    from openkb.application.documents import import_document
-    from openkb.source_catalog import list_sources
+    from ultrakb.application.documents import import_document
+    from ultrakb.source_catalog import list_sources
 
     path = tmp_path / "problem.pdf"
     if kind == "corrupt":
@@ -146,8 +137,8 @@ def test_unreadable_pdf_distinguishes_corruption_from_retained_no_text(
 def test_valid_hidden_text_and_blank_page_are_preserved(tmp_path):
     import pymupdf
 
-    from openkb.import_text import require_pdf_text
-    from openkb.pdf_recognition import recognize_pdf
+    from ultrakb.import_text import require_pdf_text
+    from ultrakb.pdf_recognition import recognize_pdf
 
     path = tmp_path / "valid.pdf"
     with pymupdf.open() as pdf:

@@ -13,7 +13,7 @@ import pytest
 
 
 def _url_worker(*args):
-    from openkb.runtime.worker import run_unit
+    from ultrakb.runtime.worker import run_unit
 
     def fetch(url, root, **kwargs):
         path = root / "raw/article.md"
@@ -21,57 +21,26 @@ def _url_worker(*args):
         path.write_text("# Privately downloaded source\n", encoding="utf-8")
         return path
 
-    with patch("openkb.url_ingest.fetch_url_to_raw", side_effect=fetch):
+    with patch("ultrakb.url_ingest.fetch_url_to_raw", side_effect=fetch):
         run_unit(*args)
 
 
-def _with_observed_input(args, model_action):
-    """Observe real preparation and inject process failure only at the model boundary."""
+def _with_observed_input(args, input_action):
+    """Exercise prepared-input ownership without needing document generation."""
     from contextlib import contextmanager
-    from types import SimpleNamespace
 
-    from openkb.application.documents import prepared_input
-    from openkb.runtime.worker import run_unit
-
-    retained = []
+    from ultrakb.application.documents import prepared_input
+    from ultrakb.locks import LockCancelled
+    from ultrakb.runtime.worker import run_unit
 
     @contextmanager
     def observe(path):
         with prepared_input(path) as ready:
-            retained.append(ready)
-            yield ready
+            input_action(ready)
+            raise LockCancelled("Input lifecycle observation completed")
+            yield ready  # Retain the actual context-manager interface.
 
-    def completion(**kwargs):
-        model_action(retained[-1])
-        return SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    message=SimpleNamespace(
-                        content=json.dumps(
-                            {
-                                "description": "Fixture",
-                                "content": "Retained input",
-                                "create": [],
-                                "update": [],
-                                "related": [],
-                            }
-                        )
-                    ),
-                    finish_reason="stop",
-                )
-            ],
-            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
-        )
-
-    async def acompletion(**kwargs):
-        return completion(**kwargs)
-
-    os.environ["OPENAI_API_KEY"] = "fixture-key"
-    with (
-        patch("openkb.application.documents.prepared_input", side_effect=observe),
-        patch("litellm.completion", side_effect=completion),
-        patch("litellm.acompletion", side_effect=acompletion),
-    ):
+    with patch("ultrakb.application.documents.prepared_input", side_effect=observe):
         run_unit(*args)
 
 
@@ -88,13 +57,13 @@ def _crash_with_fixed_input(*args):
 
 
 def _doomed_url_parent(kb, history, evidence):
-    import openkb.runtime.tasks as tasks
-    from openkb.locks import kb_ingest_lock
-    from openkb.runtime.requests import ImportUrl
+    import ultrakb.runtime.tasks as tasks
+    from ultrakb.locks import kb_ingest_lock
+    from ultrakb.runtime.requests import ImportUrl
 
     with patch.object(tasks, "run_unit", _url_worker):
         manager = tasks.TaskManager(history_dir=history, max_workers=1)
-        with kb_ingest_lock(kb / ".openkb"):
+        with kb_ingest_lock(kb / ".ultrakb"):
             task = manager.submit(kb, [ImportUrl("https://example.invalid/article")])
             deadline = time.monotonic() + 20
             while time.monotonic() < deadline:
@@ -111,7 +80,7 @@ def _doomed_url_parent(kb, history, evidence):
 
 
 def test_restart_discards_orphaned_url_preparation_and_preserves_live_instance(kb_dir, tmp_path):
-    from openkb.runtime.tasks import TaskManager
+    from ultrakb.runtime.tasks import TaskManager
 
     history = tmp_path / "history"
     unrelated = history / ".inputs" / ("f" * 32) / "data/keep.md"
@@ -151,8 +120,8 @@ def test_restart_discards_orphaned_url_preparation_and_preserves_live_instance(k
 
 
 def test_worker_crash_reclaims_fixed_document_and_images(kb_dir, tmp_path):
-    import openkb.runtime.tasks as tasks
-    from openkb.runtime.requests import ImportFile
+    import ultrakb.runtime.tasks as tasks
+    from ultrakb.runtime.requests import ImportFile
 
     source = tmp_path / "source.md"
     image = tmp_path / "figure.png"
@@ -180,7 +149,7 @@ def test_completed_units_do_not_exhaust_cleanup_handles(tmp_path):
 import resource
 import sys
 from pathlib import Path
-from openkb.runtime.input_store import InputStore, child_preparation
+from ultrakb.runtime.input_store import InputStore, child_preparation
 
 store = InputStore(Path(sys.argv[1]))
 for index in range(80):
@@ -205,7 +174,7 @@ assert not store.group.exists()
 def _holding_worker(*args):
     from inspect import signature
 
-    from openkb.runtime.worker import run_unit
+    from ultrakb.runtime.worker import run_unit
 
     prepared_dir = signature(run_unit).bind(*args).arguments["prepared_dir"]
 
@@ -227,8 +196,8 @@ def _holding_worker(*args):
 
 
 def _doomed_active_parent(kb, history, source):
-    import openkb.runtime.tasks as tasks
-    from openkb.runtime.requests import ImportFile
+    import ultrakb.runtime.tasks as tasks
+    from ultrakb.runtime.requests import ImportFile
 
     with patch.object(tasks, "run_unit", _holding_worker):
         manager = tasks.TaskManager(history_dir=history, max_workers=1)
@@ -245,7 +214,7 @@ def _doomed_active_parent(kb, history, source):
 
 
 def test_active_worker_retains_input_after_parent_crash(kb_dir, tmp_path):
-    from openkb.runtime.tasks import TaskManager
+    from ultrakb.runtime.tasks import TaskManager
 
     source = tmp_path / "original.md"
     source.write_text("# Input still needed by an active worker\n", encoding="utf-8")

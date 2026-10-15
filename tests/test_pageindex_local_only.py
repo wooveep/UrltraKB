@@ -56,12 +56,12 @@ def test_service_sdk_is_unavailable():
 
 
 def test_cli_rejects_retired_service_import_before_ingestion(monkeypatch):
-    from openkb.cli import cli
+    from ultrakb.cli import cli
 
     def unexpected_ingestion(*args, **kwargs):
         raise AssertionError("Retired import option must never start ingestion")
 
-    monkeypatch.setattr("openkb.cli.add_single_file", unexpected_ingestion)
+    monkeypatch.setattr("ultrakb.cli.add_single_file", unexpected_ingestion)
     result = CliRunner().invoke(cli, ["add", "--from-pageindex-cloud", "doc-123"])
     assert result.exit_code == 2
     assert "No such option" in result.output

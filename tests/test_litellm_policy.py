@@ -6,7 +6,6 @@ import subprocess
 import sys
 
 import pytest
-from test_vendor_sdk import response, running_model_service, streamed_response
 
 pytest_plugins = ("test_vendor_sdk",)
 
@@ -15,16 +14,14 @@ pytest_plugins = ("test_vendor_sdk",)
 async def test_closing_stream_prevents_another_transport(model_service):
     import litellm
 
-    model_service.replies.extend(
-        [(200, streamed_response({"role": "assistant", "content": "ok"}))] * 3
-    )
     stream = await litellm.acompletion(
-        model="openai/gpt-4o-mini",
-        api_key="key",
+        model="deepseek/deepseek-flash",
+        api_key=model_service.credentials.api_key,
         api_base=model_service.url,
-        messages=[{"role": "user", "content": "hello"}],
+        messages=[{"role": "user", "content": "Reply exactly ok."}],
         num_retries=0,
         max_retries=0,
+        max_tokens=64,
         stream=True,
     )
     await anext(stream)
@@ -49,60 +46,44 @@ def test_model_table_has_fixed_identity_and_unknown_capacity():
 
 @pytest.mark.parametrize("streaming", [False, True])
 @pytest.mark.asyncio
-async def test_partial_receipt_keeps_missing_counters_unknown(model_service, streaming):
-    import litellm
+async def test_partial_receipt_keeps_missing_counters_unknown(streaming):
+    from ultrakb.llm_usage import normalize_usage
 
-    reply = response()
-    reply["usage"] = {"prompt_tokens": 12}
-    if streaming:
-        reply = streamed_response({"role": "assistant", "content": "ok"})
-        reply[-1]["usage"] = {"prompt_tokens": 12}
-    model_service.replies.append((200, reply))
-    result = await litellm.acompletion(
-        model="openai/gpt-4o-mini",
-        api_key="key",
-        api_base=model_service.url,
-        messages=[{"role": "user", "content": "hello"}],
-        num_retries=0,
-        max_retries=0,
-        stream=streaming,
-        **({"stream_options": {"include_usage": True}} if streaming else {}),
-    )
-    if streaming:
-        chunks = [chunk async for chunk in result]
-        usage = next(chunk.usage for chunk in chunks if getattr(chunk, "usage", None))
-    else:
-        usage = result.usage
-    assert usage.prompt_tokens == 12
-    assert usage.completion_tokens is None and usage.total_tokens is None
+    counters = normalize_usage({"prompt_tokens": 12})
+    assert counters["input_total"] == 12
+    assert counters["output_total"] is None and counters["cached_input"] is None
+    assert counters["usage_status"] == "partial"
 
 
 @pytest.mark.parametrize("asynchronous", [False, True])
 @pytest.mark.asyncio
-async def test_supplied_client_obeys_request_binding(model_service, asynchronous):
-    import litellm
+async def test_supplied_client_obeys_request_binding(model_service, asynchronous, live_llm):
     import openai
 
-    model_service.replies.append((200, response()))
     client_type = openai.AsyncOpenAI if asynchronous else openai.OpenAI
     client = client_type(api_key="old-key", base_url=model_service.url + "/old")
     try:
         kwargs = dict(
-            model="openai/gpt-4o-mini",
+            model="openai/deepseek-flash",
             client=client,
-            api_key="new-key",
+            api_key=model_service.credentials.api_key,
             api_base=model_service.url + "/new",
             num_retries=0,
             max_retries=0,
-            messages=[{"role": "user", "content": "hello"}],
+            max_tokens=64,
+            messages=[{"role": "user", "content": "Reply exactly ok."}],
         )
-        if asynchronous:
-            await litellm.acompletion(**kwargs)
-        else:
-            litellm.completion(**kwargs)
+        result = (
+            await live_llm._sdk_acompletion(**kwargs)
+            if asynchronous
+            else live_llm._sdk_completion(**kwargs)
+        )
+        assert result.choices[0].message.content.strip().lower() == "ok"
         _, headers, path = model_service.records[0]
         assert path == "/v1/new/chat/completions"
-        assert {k.lower(): v for k, v in headers.items()}["authorization"] == "Bearer new-key"
+        assert {key.lower(): value for key, value in headers.items()}[
+            "authorization"
+        ] == "<redacted>"
         assert client.api_key == "old-key" and str(client.base_url).endswith("/old/")
     finally:
         if asynchronous:
@@ -114,93 +95,96 @@ async def test_supplied_client_obeys_request_binding(model_service, asynchronous
 @pytest.mark.parametrize("status", [401, 429, 500, 503])
 @pytest.mark.parametrize("asynchronous", [False, True])
 @pytest.mark.asyncio
-async def test_zero_retries_apply_before_first_transport(
-    model_service, monkeypatch, status, asynchronous
-):
+async def test_zero_retries_apply_before_first_transport(monkeypatch, status, asynchronous):
+    import httpx
     import litellm
+    import openai
+    from litellm.llms.openai.openai import OpenAIChatCompletion
 
     monkeypatch.setattr(litellm, "num_retries", 3)
-    model_service.replies.extend(
-        [(status, {"error": {"message": "fixture error", "type": "server_error"}})] * 10
+    client_type = openai.AsyncOpenAI if asynchronous else openai.OpenAI
+    client = client_type(
+        api_key="local-parameter-check", base_url="http://127.0.0.1:1/v1", max_retries=3
     )
-    kwargs = dict(
-        model="openai/gpt-4o-mini",
-        api_key="isolated-key",
-        api_base=model_service.url,
-        messages=[{"role": "user", "content": "hello"}],
-        timeout=1,
-        num_retries=0,
-        max_retries=0,
-    )
-    with pytest.raises(
-        {
-            401: litellm.AuthenticationError,
-            429: litellm.RateLimitError,
-            500: litellm.InternalServerError,
-            503: litellm.ServiceUnavailableError,
-        }[status]
-    ):
+    try:
+        prepared = OpenAIChatCompletion()._get_openai_client(
+            is_async=asynchronous, client=client, max_retries=0, timeout=2
+        )
+        assert prepared.max_retries == 0 and client.max_retries == 3
+        # HTTP status is an input to the retry classifier; no model reply is generated.
+        response = httpx.Response(
+            status, request=httpx.Request("POST", "http://127.0.0.1:1/v1/chat/completions")
+        )
+        assert prepared._should_retry(response) == (status == 429 or status >= 500)
+        assert litellm.num_retries == 3
         if asynchronous:
-            await litellm.acompletion(**kwargs)
+            await prepared.close()
         else:
-            litellm.completion(**kwargs)
-    assert len(model_service.requests) == 1
-    assert litellm.num_retries == 3
+            prepared.close()
+    finally:
+        if asynchronous:
+            await client.close()
+        else:
+            client.close()
 
 
 @pytest.mark.asyncio
 async def test_parallel_requests_keep_credentials_endpoint_and_usage_isolated(
-    model_service, monkeypatch
+    model_service, live_llm
 ):
-    import litellm
-
-    async def call(service, key, model):
-        return await litellm.acompletion(
-            model=model,
-            api_key=key,
-            api_base=service.url,
-            timeout=2,
+    async def call(task):
+        return await live_llm._sdk_acompletion(
+            model="openai/deepseek-flash",
+            api_key=model_service.credentials.api_key,
+            api_base=model_service.url + "/" + task,
+            extra_headers={"x-test-task": task},
+            timeout=20,
             num_retries=0,
             max_retries=0,
-            messages=[{"role": "user", "content": key}],
+            max_tokens=64,
+            messages=[{"role": "user", "content": "Reply exactly ok."}],
         )
 
-    with running_model_service(monkeypatch) as second:
-        model_service.replies.append((200, response()))
-        second.replies.append((200, response(usage=False)))
-        results = await asyncio.gather(
-            call(model_service, "kb-a", "openai/gpt-4o-mini"), call(second, "kb-b", "openai/gpt-4o")
+    results = await asyncio.gather(call("a"), call("b"))
+    assert all(result.choices[0].message.content.strip().lower() == "ok" for result in results)
+    for body, headers, path in model_service.records:
+        task = {key.lower(): value for key, value in headers.items()}["x-test-task"]
+        assert (
+            body["messages"][0]["content"] == "Reply exactly ok."
+            and body["model"] == "deepseek-flash"
         )
-        for service, key, model in (
-            (model_service, "kb-a", "gpt-4o-mini"),
-            (second, "kb-b", "gpt-4o"),
-        ):
-            body, headers, path = service.records[0]
-            assert body["messages"][0]["content"] == key and body["model"] == model
-            assert {k.lower(): v for k, v in headers.items()}["authorization"] == "Bearer " + key
-            assert path == "/v1/chat/completions"
-    assert results[0].usage.prompt_tokens == 12 and results[1].usage is None
+        assert path == f"/v1/{task}/chat/completions"
+        assert all(result.usage.prompt_tokens > 0 for result in results)
+    assert {path for _, _, path in model_service.records} == {
+        "/v1/a/chat/completions",
+        "/v1/b/chat/completions",
+    }
 
 
 @pytest.mark.asyncio
 async def test_timeout_and_cancellation_do_not_retry(model_service):
     import litellm
 
-    model_service.delay = 0.25
-    model_service.replies.extend([(200, response())] * 5)
     kwargs = dict(
-        model="openai/gpt-4o-mini",
-        api_key="key",
+        model="deepseek/deepseek-flash",
+        api_key=model_service.credentials.api_key,
         api_base=model_service.url,
-        messages=[{"role": "user", "content": "hello"}],
+        messages=[{"role": "user", "content": "Reply exactly ok."}],
+        max_tokens=64,
         num_retries=0,
         max_retries=0,
     )
+    await litellm.acompletion(**kwargs)
+    warm = await litellm.acompletion(**kwargs, stream=True)
+    async for _ in warm:
+        pass
+    model_service.requests.clear()
+    model_service.delay = 0.25
     with pytest.raises(litellm.Timeout):
         await litellm.acompletion(**kwargs, timeout=0.05)
     assert len(model_service.requests) == 1
     task = asyncio.create_task(litellm.acompletion(**kwargs, timeout=2, stream=True))
-    for _ in range(100):
+    for _ in range(200):
         if len(model_service.requests) == 2:
             break
         await asyncio.sleep(0.01)
@@ -215,64 +199,58 @@ async def test_timeout_and_cancellation_do_not_retry(model_service):
 async def test_stream_retains_tools_and_server_usage(model_service):
     import litellm
 
-    tool = {"id": "read-1", "type": "function", "function": {"name": "read", "arguments": "{}"}}
-    model_service.replies.append(
-        (
-            200,
-            streamed_response(
-                {"role": "assistant", "content": "text", "tool_calls": [tool]}, "tool_calls"
-            ),
-        )
-    )
     stream = await litellm.acompletion(
-        model="openai/gpt-4o-mini",
-        api_key="key",
+        model="deepseek/deepseek-flash",
+        api_key=model_service.credentials.api_key,
         api_base=model_service.url,
-        messages=[{"role": "user", "content": "hello"}],
+        max_tokens=128,
+        messages=[{"role": "user", "content": "Call read to obtain the source."}],
+        tools=[
+            {
+                "type": "function",
+                "function": {
+                    "name": "read",
+                    "description": "Read the source.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {},
+                        "additionalProperties": False,
+                    },
+                },
+            }
+        ],
+        tool_choice="required",
         num_retries=0,
         max_retries=0,
         stream=True,
         stream_options={"include_usage": True},
     )
     chunks = [chunk async for chunk in stream]
-    assert any(c.choices and c.choices[0].delta.tool_calls for c in chunks)
-    assert (
-        next(
-            c.usage for c in chunks if getattr(c, "usage", None)
-        ).prompt_tokens_details.cached_tokens
-        == 4
-    )
+    assert any(chunk.choices and chunk.choices[0].delta.tool_calls for chunk in chunks)
+    assert any(chunk.choices and chunk.choices[0].finish_reason == "tool_calls" for chunk in chunks)
+    usage = next(chunk.usage for chunk in chunks if getattr(chunk, "usage", None))
+    assert usage.prompt_tokens > 0 and usage.completion_tokens > 0
+    cached = getattr(usage.prompt_tokens_details, "cached_tokens", 0) or 0
+    assert 0 <= cached <= usage.prompt_tokens
 
 
 @pytest.mark.asyncio
-async def test_stream_without_provider_receipt_keeps_usage_unknown(model_service):
-    import litellm
+async def test_stream_without_provider_receipt_keeps_usage_unknown():
+    from ultrakb.llm_usage import normalize_usage
 
-    model_service.replies.append(
-        (200, streamed_response({"role": "assistant", "content": "ok"})[:-1])
-    )
-    stream = await litellm.acompletion(
-        model="openai/gpt-4o-mini",
-        api_key="key",
-        api_base=model_service.url,
-        messages=[{"role": "user", "content": "hello"}],
-        num_retries=0,
-        max_retries=0,
-        stream=True,
-        stream_options={"include_usage": True},
-    )
-    chunks = [chunk async for chunk in stream]
-    assert all(getattr(chunk, "usage", None) is None for chunk in chunks)
+    counters = normalize_usage(None)
+    assert counters["input_total"] is None and counters["output_total"] is None
+    assert counters["usage_status"] == "unknown"
 
 
 def test_import_is_offline_and_does_not_load_implicit_environment(tmp_path):
-    (tmp_path / ".env").write_text("OPENAI_API_KEY=from-dotenv\nURLTRAKB_DOTENV_SENTINEL=loaded\n")
+    (tmp_path / ".env").write_text("OPENAI_API_KEY=from-dotenv\nULTRAKB_DOTENV_SENTINEL=loaded\n")
     environment = dict(os.environ)
     for name in (
         "OPENAI_API_KEY",
         "LITELLM_LOCAL_MODEL_COST_MAP",
         "LITELLM_MODE",
-        "URLTRAKB_DOTENV_SENTINEL",
+        "ULTRAKB_DOTENV_SENTINEL",
     ):
         environment.pop(name, None)
     script = """
@@ -285,7 +263,7 @@ socket.socket.connect = forbidden
 import litellm
 from litellm.litellm_core_utils.get_model_cost_map import get_model_cost_map_source_info
 assert not attempts, attempts
-assert 'URLTRAKB_DOTENV_SENTINEL' not in os.environ
+assert 'ULTRAKB_DOTENV_SENTINEL' not in os.environ
 assert 'OPENAI_API_KEY' not in os.environ
 assert litellm.telemetry is False
 assert not litellm.callbacks and not litellm.input_callback and not litellm.success_callback

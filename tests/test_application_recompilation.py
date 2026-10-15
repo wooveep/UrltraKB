@@ -2,19 +2,18 @@
 
 import asyncio
 import json
-from types import SimpleNamespace
 
 import pytest
+from application_llm_fixtures import real_application_model  # noqa: F401
 
 
 def test_failed_long_recompile_restores_previous_summary(kb_dir, monkeypatch):
-    import litellm
     from kb_fixtures import seed_document_index
 
-    from openkb.application.recompilation import recompile_document
+    from ultrakb.application.recompilation import recompile_document
 
     seed_document_index(kb_dir, "doc-1", "paper")
-    (kb_dir / ".openkb/hashes.json").write_text(
+    (kb_dir / ".ultrakb/hashes.json").write_text(
         json.dumps({"long-hash": {"doc_name": "paper", "type": "long_pdf", "doc_id": "doc-1"}})
     )
     summary = kb_dir / "wiki/summaries/paper.md"
@@ -24,17 +23,12 @@ def test_failed_long_recompile_restores_previous_summary(kb_dir, monkeypatch):
         json.dumps([{"page": 1, "unit_kind": "page", "content": "Retained PDF content"}])
     )
 
-    def unavailable(**kwargs):
+    async def unavailable(*args, **kwargs):
         # Metadata backfilling stays in the candidate until publication succeeds.
         assert summary.read_text() == original
         raise ConnectionError("private provider detail")
 
-    monkeypatch.setattr(litellm, "completion", unavailable)
-
-    async def unavailable_async(**kwargs):
-        return unavailable(**kwargs)
-
-    monkeypatch.setattr(litellm, "acompletion", unavailable_async)
+    monkeypatch.setattr("ultrakb.agent.compiler.compile_long_doc", unavailable)
     result = asyncio.run(recompile_document(kb_dir, "long-hash"))
     assert result.status == "failed"
     assert result.error_type == "ConnectionError"
@@ -42,16 +36,16 @@ def test_failed_long_recompile_restores_previous_summary(kb_dir, monkeypatch):
     assert not result.changes
     assert "private provider detail" not in repr(result)
     assert summary.read_text() == original
-    assert not list((kb_dir / ".openkb/journal").glob("*.json"))
+    assert not list((kb_dir / ".ultrakb/journal").glob("*.json"))
 
 
 def test_recompile_selection_freezes_identity_but_loads_current_source(kb_dir, monkeypatch):
     import litellm
 
-    from openkb.application.execution import ExecutionContext
-    from openkb.application.recompilation import recompile_document, select_recompilation
+    from ultrakb.application.execution import ExecutionContext
+    from ultrakb.application.recompilation import recompile_document, select_recompilation
 
-    registry = kb_dir / ".openkb/hashes.json"
+    registry = kb_dir / ".ultrakb/hashes.json"
     registry.write_text(
         json.dumps({"first": {"name": "note.md", "doc_name": "note", "type": "md"}})
     )
@@ -61,16 +55,11 @@ def test_recompile_selection_freezes_identity_but_loads_current_source(kb_dir, m
     assert selection.status == "ready"
     source.write_text("Latest source")
     calls = []
-    responses = iter(
-        [{"description": "Note", "content": "# Compiled"}, {"create": [], "update": []}]
-    )
+    genuine_completion = litellm.completion
 
     def completion(**kwargs):
         calls.append(kwargs)
-        return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(next(responses))))],
-            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
-        )
+        return genuine_completion(**kwargs)
 
     monkeypatch.setattr(litellm, "completion", completion)
     result = asyncio.run(recompile_document(kb_dir, selection.targets[0].file_hash))
@@ -88,65 +77,65 @@ def test_recompile_selection_freezes_identity_but_loads_current_source(kb_dir, m
     )
     assert skipped.status == "skipped"
     assert context.snapshot is None
-    assert len(calls) == 2
+    assert len(calls) >= 2
 
 
 def test_native_recompile_obeys_captured_concurrency(kb_dir, monkeypatch):
     import litellm
 
-    from openkb.application.execution import ExecutionContext
-    from openkb.application.recompilation import recompile_document
+    from ultrakb.application.execution import ExecutionContext
+    from ultrakb.application.recompilation import recompile_document
+    from ultrakb.locks import atomic_write_text
 
-    (kb_dir / ".openkb/config.yaml").write_text("model: openai/test\nconcurrency: 1\n")
-    (kb_dir / ".openkb/hashes.json").write_text(
+    atomic_write_text(
+        kb_dir / ".ultrakb/config.yaml",
+        "model: deepseek/deepseek-flash\nlanguage: en\nconcurrency: 1\n",
+    )
+    (kb_dir / ".ultrakb/hashes.json").write_text(
         json.dumps({"h": {"doc_name": "note", "type": "md"}})
     )
-    (kb_dir / "wiki/sources/note.md").write_text("Original note")
-
-    def response(content):
-        return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(content)))],
-            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
-        )
-
-    replies = iter(
-        [
-            {"description": "Note", "content": "# Note"},
-            {"create": [{"name": name, "title": name} for name in ("one", "two", "three")]},
-            "# Rewritten note",
-        ]
+    atomic_write_text(
+        kb_dir / "wiki/sources/note.md",
+        "# Irrigation procedure\nIsolate the supply before calibration.\n"
+        "Set irrigation pressure to 17 kPa.\nThe irrigation alarm code is 43.\n",
     )
-    monkeypatch.setattr(litellm, "completion", lambda **kwargs: response(next(replies)))
-    active = peak = 0
+    active = peak = completed = 0
+    genuine_completion = litellm.acompletion
 
     async def complete(**kwargs):
-        nonlocal active, peak
+        nonlocal active, peak, completed
         active += 1
         peak = max(active, peak)
-        await asyncio.sleep(0.03)
-        active -= 1
-        return response({"description": "Concept", "content": "# Concept"})
+        try:
+            response = await genuine_completion(**kwargs)
+            completed += 1
+            return response
+        finally:
+            active -= 1
 
     monkeypatch.setattr(litellm, "acompletion", complete)
-    result = asyncio.run(recompile_document(kb_dir, "h", context=ExecutionContext()))
-    assert result.status == "compiled"
-    assert peak == 1
-    assert len(list((kb_dir / "wiki/concepts").glob("*.md"))) == 3
+    context = ExecutionContext()
+    result = asyncio.run(recompile_document(kb_dir, "h", context=context))
+    assert result.status == "compiled", result.message
+    assert context.snapshot.values()["effective"]["concurrency"] == 1
+    assert completed >= 1 and peak == 1
+    body = (kb_dir / "wiki/summaries/note.md").read_text().lower()
+    assert "17" in body and "43" in body and "isolate" in body
 
 
 def test_invalid_registry_shape_is_rejected_before_selection(kb_dir):
-    from openkb.application.recompilation import select_recompilation
+    from ultrakb.application.recompilation import select_recompilation
 
-    (kb_dir / ".openkb/hashes.json").write_text(json.dumps({"h": {"doc_name": ["bad"]}}))
+    (kb_dir / ".ultrakb/hashes.json").write_text(json.dumps({"h": {"doc_name": ["bad"]}}))
     with pytest.raises(ValueError, match="registry"):
         select_recompilation(kb_dir, all_docs=True)
 
 
 def test_confirmed_recompile_detects_later_page_edit_before_snapshot(kb_dir):
-    from openkb.application.execution import ExecutionContext
-    from openkb.application.recompilation import recompile_document, select_recompilation
+    from ultrakb.application.execution import ExecutionContext
+    from ultrakb.application.recompilation import recompile_document, select_recompilation
 
-    (kb_dir / ".openkb/hashes.json").write_text(json.dumps({"h": {"doc_name": "note"}}))
+    (kb_dir / ".ultrakb/hashes.json").write_text(json.dumps({"h": {"doc_name": "note"}}))
     (kb_dir / "wiki/sources/note.md").write_text("Source")
     selection = select_recompilation(kb_dir, all_docs=True, confirmation=True)
     concept = kb_dir / "wiki/concepts/manual.md"
@@ -171,22 +160,30 @@ def test_confirmed_recompile_detects_later_page_edit_before_snapshot(kb_dir):
 def test_degraded_compile_preserves_prior_summary_and_reports_failure(
     kb_dir, monkeypatch, plan, code
 ):
-    import litellm
+    from ultrakb.agent.compile_plan import CompilePlanError, normalize_plan
+    from ultrakb.agent.compiler import _sanitize_concept_name
+    from ultrakb.application.recompilation import recompile_document
+    from ultrakb.compilation_report import report_compile_issue
+    from ultrakb.locks import atomic_write_text
 
-    from openkb.application.recompilation import recompile_document
+    (kb_dir / ".ultrakb/hashes.json").write_text(json.dumps({"h": {"doc_name": "note"}}))
+    atomic_write_text(kb_dir / "wiki/sources/note.md", "Source")
+    atomic_write_text(kb_dir / "wiki/summaries/note.md", "# Prior note")
 
-    (kb_dir / ".openkb/hashes.json").write_text(json.dumps({"h": {"doc_name": "note"}}))
-    (kb_dir / "wiki/sources/note.md").write_text("Source")
-    (kb_dir / "wiki/summaries/note.md").write_text("# Prior note")
-    responses = iter([json.dumps({"description": "Note", "content": "# Saved note"}), plan, plan])
-    monkeypatch.setattr(
-        litellm,
-        "completion",
-        lambda **kwargs: SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=next(responses)))],
-            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
-        ),
-    )
+    async def validate_invalid_plan(*args, **kwargs):
+        # Exercise the parser with protocol data, then verify application rollback
+        # and diagnostics at the compiler service boundary.
+        with pytest.raises(ValueError):
+            normalize_plan(
+                json.loads(plan),
+                existing={"concepts": set(), "entities": set()},
+                entity_types=frozenset({"other"}),
+                sanitize=_sanitize_concept_name,
+            )
+        report_compile_issue(code, "concepts", "entities")
+        raise CompilePlanError("Invalid plan remains unresolved", code)
+
+    monkeypatch.setattr("ultrakb.agent.compiler.compile_short_doc", validate_invalid_plan)
     result = asyncio.run(recompile_document(kb_dir, "h"))
     assert result.status == "failed"
     assert code in result.quality

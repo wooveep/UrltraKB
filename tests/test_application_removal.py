@@ -10,12 +10,12 @@ from unittest.mock import patch
 
 import pytest
 
-from openkb.application.removal import preview_removal, remove_document
-from openkb.state import HashRegistry
+from ultrakb.application.removal import preview_removal, remove_document
+from ultrakb.state import HashRegistry
 
 
 def seed(kb: Path) -> None:
-    (kb / ".openkb/hashes.json").write_text(
+    (kb / ".ultrakb/hashes.json").write_text(
         json.dumps(
             {
                 "hash-paper": {
@@ -49,35 +49,35 @@ def test_changed_plan_requires_another_confirmation(kb_dir):
 
 def test_wiki_failure_rolls_back_before_registry_commit(kb_dir):
     seed(kb_dir)
-    with patch("openkb.agent.compiler.remove_doc_from_index", side_effect=OSError("write failed")):
+    with patch("ultrakb.agent.compiler.remove_doc_from_index", side_effect=OSError("write failed")):
         with pytest.raises(OSError):
             remove_document(kb_dir, "hash-paper")
     assert (kb_dir / "wiki/summaries/paper.md").read_text() == "# Paper\n"
     assert (kb_dir / "wiki/sources/paper.md").exists()
-    assert "hash-paper" in HashRegistry(kb_dir / ".openkb/hashes.json").all_entries()
+    assert "hash-paper" in HashRegistry(kb_dir / ".ultrakb/hashes.json").all_entries()
 
 
 def seed_index(kb: Path) -> Path:
     from test_condb_pageindex import indexed_document
 
-    from openkb.condb_storage import ConDBPageIndexStorage
-    from openkb.index_location import IndexLocation
+    from ultrakb.condb_storage import ConDBPageIndexStorage
+    from ultrakb.index_location import IndexLocation
 
     seed(kb)
-    registry = kb / ".openkb/hashes.json"
+    registry = kb / ".ultrakb/hashes.json"
     value = json.loads(registry.read_text())
     value["hash-paper"].update(type="long_pdf", doc_id="pi-paper")
     registry.write_text(json.dumps(value))
-    blob = kb / ".openkb/files/default/pi-paper.pdf"
+    blob = kb / ".ultrakb/files/default/pi-paper.pdf"
     blob.parent.mkdir(parents=True)
     blob.write_bytes(b"retained input")
-    storage = ConDBPageIndexStorage(IndexLocation.package(kb / ".openkb"))
+    storage = ConDBPageIndexStorage(IndexLocation.package(kb / ".ultrakb"))
     try:
         storage.get_or_create_collection("default")
         storage.save_document(
             "default",
             "pi-paper",
-            indexed_document(kb / ".openkb/files", name="paper", identity="pi-paper"),
+            indexed_document(kb / ".ultrakb/files", name="paper", identity="pi-paper"),
         )
     finally:
         storage.close()
@@ -91,7 +91,7 @@ def test_local_index_cleanup_uses_no_model_and_changes_no_environment(kb_dir):
         result = remove_document(kb_dir, "hash-paper")
     assert result.status == "removed" and not blob.exists()
     assert dict(os.environ) == before
-    with sqlite3.connect(kb_dir / ".openkb/context.sqlite") as db:
+    with sqlite3.connect(kb_dir / ".ultrakb/context.sqlite") as db:
         assert db.execute("SELECT count(*) FROM okb_documents").fetchone()[0] == 0
 
 
@@ -104,7 +104,7 @@ def test_registry_failure_restores_index_and_raw_for_manual_retry(kb_dir):
     assert blob.read_bytes() == b"retained input"
     assert (kb_dir / "raw/paper.pdf").exists()
     assert not (kb_dir / "wiki/summaries/paper.md").exists()
-    with sqlite3.connect(kb_dir / ".openkb/context.sqlite") as db:
+    with sqlite3.connect(kb_dir / ".ultrakb/context.sqlite") as db:
         assert db.execute("SELECT count(*) FROM okb_documents").fetchone()[0] == 1
     assert remove_document(kb_dir, "hash-paper").status == "removed"
 
@@ -113,7 +113,7 @@ def test_registry_cannot_direct_deletion_outside_raw(kb_dir):
     seed(kb_dir)
     outside = kb_dir.parent / "unrelated.txt"
     outside.write_text("keep")
-    registry = kb_dir / ".openkb/hashes.json"
+    registry = kb_dir / ".ultrakb/hashes.json"
     value = json.loads(registry.read_text())
     value["hash-paper"]["raw_path"] = str(outside)
     registry.write_text(json.dumps(value))
@@ -146,18 +146,18 @@ def test_image_deletion_failure_cannot_commit_success(kb_dir):
             raise PermissionError("cannot delete images")
         return original(path, *args, **kwargs)
 
-    from openkb.mutation import RecoveryRequired
+    from ultrakb.mutation import RecoveryRequired
 
     with patch("shutil.rmtree", side_effect=fail_images):
         with pytest.raises((PermissionError, RecoveryRequired)):
             remove_document(kb_dir, "hash-paper")
-    assert "hash-paper" in json.loads((kb_dir / ".openkb/hashes.json").read_text())
+    assert "hash-paper" in json.loads((kb_dir / ".ultrakb/hashes.json").read_text())
     assert (kb_dir / "raw/paper.pdf").exists()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX symlink fixture")
 def test_api_removal_rejects_index_directory_pointing_outside_kb(kb_dir):
-    from openkb.application.removal import run_remove_for_api
+    from ultrakb.application.removal import run_remove_for_api
 
     blob = seed_index(kb_dir)
     outside = kb_dir.parent / "foreign-index"
@@ -170,11 +170,11 @@ def test_api_removal_rejects_index_directory_pointing_outside_kb(kb_dir):
 
 
 def test_failed_final_rollback_keeps_committed_wiki_facts_in_blocked_receipt(kb_dir):
-    from openkb.application.execution import ExecutionContext
-    from openkb.mutation import MutationSnapshot, repair_marker
-    from openkb.runtime.records import UnitIdentity, UnitResult
-    from openkb.runtime.requests import RemoveDocument
-    from openkb.runtime.worker import _execute
+    from ultrakb.application.execution import ExecutionContext
+    from ultrakb.mutation import MutationSnapshot, repair_marker
+    from ultrakb.runtime.records import UnitIdentity, UnitResult
+    from ultrakb.runtime.requests import RemoveDocument
+    from ultrakb.runtime.worker import _execute
 
     seed_index(kb_dir)
     original_rollback = MutationSnapshot.rollback
@@ -192,7 +192,7 @@ def test_failed_final_rollback_keeps_committed_wiki_facts_in_blocked_receipt(kb_
     assert result.status == "blocked" and repair_marker(kb_dir).exists()
     assert "deleted: wiki/summaries/paper.md" in result.result.changes
     assert "knowledge_base_repair" in result.unfinished
-    with patch("openkb.application.removal.remove_document", return_value=result):
+    with patch("ultrakb.application.removal.remove_document", return_value=result):
         receipt = _execute(
             RemoveDocument("hash-paper", "confirmed"),
             UnitIdentity(task_id="a" * 32, unit_id="0", kb_dir=str(kb_dir), request_hash="b" * 64),

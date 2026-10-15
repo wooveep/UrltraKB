@@ -1,11 +1,12 @@
-"""Disconnecting an HTTP observer must not release the SDK's write lease early."""
+"""An HTTP observer keeps the operation's lease until cancelled work settles.
+
+Actual SDK cancellation is covered by test_chat_session. This adapter contract
+uses an application operation and preparation activity, with no model responses.
+"""
 
 import asyncio
-from unittest.mock import AsyncMock
 
 import pytest
-from agents import RawResponsesStreamEvent, Runner
-from openai.types.responses import ResponseTextDeltaEvent
 
 
 @pytest.mark.asyncio
@@ -13,72 +14,59 @@ from openai.types.responses import ResponseTextDeltaEvent
 async def test_disconnect_waits_for_sdk_cleanup_even_after_repeated_cancel(
     kb_dir, monkeypatch, endpoint
 ):
-    from openkb.agent.chat_session import list_sessions, load_session
-    from openkb.api_helpers import _stream_chat, _stream_query
-    from openkb.api_models import ChatRequest, QueryRequest
-    from openkb.locks import async_kb_lock
+    from ultrakb.agent.chat_session import ChatSession, list_sessions, load_session
+    from ultrakb.api_helpers import _stream_chat, _stream_query
+    from ultrakb.api_models import ChatRequest, QueryRequest
+    from ultrakb.locks import async_kb_lock
 
-    (kb_dir / "wiki/sources/cancellation-fixture.md").write_text("Readable original.")
     stopping, release, finished, acquired = (asyncio.Event() for _ in range(4))
-    started = asyncio.Event()
-    pending = asyncio.Event()
+    started, pending = asyncio.Event(), asyncio.Event()
 
-    class Run:
-        is_complete = False
-        final_output = "Must not become a completed answer"
-
-        async def stream_events(self):
+    async def operation(root, question=None, *, context, new_session_id=None, **kwargs):
+        if endpoint == "chat":
+            session = ChatSession.new(root, "", "", identity=new_session_id)
+            session.save()
+        async with async_kb_lock(root / ".ultrakb", exclusive=True):
             try:
-                started.set()
-                yield RawResponsesStreamEvent(
-                    data=ResponseTextDeltaEvent(
-                        type="response.output_text.delta",
-                        delta="Partial progress",
-                        item_id="answer",
-                        output_index=0,
-                        content_index=0,
-                        sequence_number=0,
-                        logprobs=[],
-                    )
-                )
-                pending.set()
-                await release.wait()
-                self.is_complete = True
+                with context.activity("preparing"):
+                    started.set()
+                    pending.set()
+                    await release.wait()
+            except asyncio.CancelledError:
+                stopping.set()
+                while not release.is_set():
+                    try:
+                        await asyncio.shield(release.wait())
+                    except asyncio.CancelledError:
+                        continue
+                raise
             finally:
                 finished.set()
 
-        def cancel(self, *, mode):
-            assert mode == "after_turn"
-            stopping.set()
+    monkeypatch.setattr(
+        "ultrakb.application.conversations."
+        + ("ask_question" if endpoint == "query" else "continue_conversation"),
+        operation,
+    )
 
-        def to_input_list(self):
-            return []
+    class Request:
+        async def is_disconnected(self):
+            if not started.is_set():
+                return False
+            await pending.wait()
+            return True
 
-    monkeypatch.setattr(Runner, "run_streamed", lambda *args, **kwargs: Run())
-    request = AsyncMock()
-
-    # Disconnect after the SDK actually starts, independent of progress-event
-    # count and cold model setup; keep the three-second cancellation assertion.
-    async def disconnected():
-        if not started.is_set():
-            return False
-        # The fixture must have an outstanding SDK wait before disconnecting;
-        # closing a generator paused at yield has no asynchronous work to settle.
-        await pending.wait()
-        return True
-
-    request.is_disconnected.side_effect = disconnected
     stream = (
-        _stream_query(QueryRequest(kb="test", question="Hi", save=True), kb_dir, request)
+        _stream_query(QueryRequest(kb="test", question="Hi", save=True), kb_dir, Request())
         if endpoint == "query"
-        else _stream_chat(ChatRequest(kb="test", message="Hi"), kb_dir, request)
+        else _stream_chat(ChatRequest(kb="test", message="Hi"), kb_dir, Request())
     )
 
     async def consume():
         return [frame async for frame in stream]
 
     async def other_writer():
-        async with async_kb_lock(kb_dir / ".openkb", exclusive=True):
+        async with async_kb_lock(kb_dir / ".ultrakb", exclusive=True):
             acquired.set()
 
     consumer = asyncio.create_task(consume())
@@ -91,8 +79,7 @@ async def test_disconnect_waits_for_sdk_cleanup_even_after_repeated_cancel(
         await asyncio.sleep(0.03)
         consumer.cancel()
         await asyncio.sleep(0.03)
-        assert not consumer.done()
-        assert not acquired.is_set()
+        assert not consumer.done() and not acquired.is_set()
         release.set()
         with pytest.raises(asyncio.CancelledError):
             await asyncio.wait_for(consumer, 3)

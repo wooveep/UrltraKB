@@ -59,7 +59,7 @@ def _inflated_boxes(monkeypatch, *, malformed=False, cross_column=False):
 def test_public_pdf_conversion_uses_local_font_metrics_for_cell_membership(
     tmp_path, monkeypatch, rotation
 ):
-    from openkb.images import convert_pdf_to_pages
+    from ultrakb.images import convert_pdf_to_pages
 
     source = tmp_path / "native.pdf"
     _source(source, rotation)
@@ -81,7 +81,7 @@ def test_public_pdf_conversion_uses_local_font_metrics_for_cell_membership(
 
 @pytest.mark.parametrize("case", ["invalid_metrics", "horizontal_crossing"])
 def test_font_metrics_do_not_authorize_ambiguous_cell_assignments(tmp_path, monkeypatch, case):
-    from openkb.images import convert_pdf_to_pages
+    from ultrakb.images import convert_pdf_to_pages
 
     source = tmp_path / "native.pdf"
     _source(source, 0)

@@ -6,7 +6,7 @@ import pymupdf
 import pytest
 from PIL import Image
 
-from openkb.images import (
+from ultrakb.images import (
     convert_pdf_to_pages,
     convert_pdf_with_images,
     extract_pdf_images,

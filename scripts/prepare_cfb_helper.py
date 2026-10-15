@@ -13,7 +13,7 @@ from pathlib import Path
 import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = ROOT / "openkb/cfb_helper/rust-helper"
+SOURCE = ROOT / "ultrakb/cfb_helper/rust-helper"
 
 
 def digest(path):
@@ -22,7 +22,7 @@ def digest(path):
 
 def source_archive(output, material):
     """Ship an offline rebuildable source tree, including the entire locked closure."""
-    with tempfile.TemporaryDirectory(prefix="openkb-cfb-vendor-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="ultrakb-cfb-vendor-") as temporary:
         vendor = Path(temporary) / "vendor"
         subprocess.run(
             ["cargo", "vendor", "--locked", "--versioned-dirs", str(vendor)],
@@ -62,7 +62,7 @@ def verify_materials():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", type=Path, default=ROOT / "openkb/cfb_helper/assets/runtime")
+    parser.add_argument("--output", type=Path, default=ROOT / "ultrakb/cfb_helper/assets/runtime")
     parser.add_argument("--check-target", help="Compile-check another target without installing it")
     args = parser.parse_args()
     verify_materials()
@@ -74,7 +74,7 @@ def main():
     if sys.platform not in {"linux", "win32"}:
         raise ValueError("Native helper supports Linux and Windows")
     subprocess.run(["cargo", "build", "--release", "--locked"], cwd=SOURCE, check=True)
-    name = "openkb-cfb.exe" if sys.platform == "win32" else "openkb-cfb"
+    name = "ultrakb-cfb.exe" if sys.platform == "win32" else "ultrakb-cfb"
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     shutil.copy2(SOURCE / "target/release" / name, output / name)
@@ -86,7 +86,7 @@ def main():
     manifest = {
         "schema_version": 1,
         "platform": sys.platform,
-        "version": "openkb-cfb 1.0.0 cfb 0.15.0",
+        "version": "ultrakb-cfb 1.0.0 cfb 0.15.0",
         "binary": name,
         "sha256": digest(output / name),
         "toolchain": "1.95.0",

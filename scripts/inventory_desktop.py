@@ -35,17 +35,17 @@ def normalized(name: str) -> str:
 class Inputs:
     def __init__(self, source: Path, identity: dict) -> None:
         self.source = source
-        self.assets = source / "openkb/rendering/assets"
+        self.assets = source / "ultrakb/rendering/assets"
         self.components: dict[str, dict] = {}
         self.owners: dict[Path, tuple[str, str]] = {}
         self.used: set[str] = set()
-        self.openkb = self.add("openkb", identity["version"], commit=identity["commit"])
+        self.ultrakb = self.add("ultrakb", identity["version"], commit=identity["commit"])
         self.python = self.add("runtime/CPython", platform.python_version())
         for dist in metadata.distributions():
             name, version = dist.metadata["Name"], dist.version
             key = (
-                self.openkb
-                if normalized(name) == "openkb"
+                self.ultrakb
+                if normalized(name) == "ultrakb"
                 else self.add(
                     "python/" + normalized(name),
                     version,
@@ -68,7 +68,7 @@ class Inputs:
                 upstream_repository=provenance["repository"],
                 upstream_commit=provenance["commit"],
             )
-        self.npm = json.loads((source / "openkb/rendering/package-lock.json").read_text("utf-8"))[
+        self.npm = json.loads((source / "ultrakb/rendering/package-lock.json").read_text("utf-8"))[
             "packages"
         ]
         for name, item in self.npm.items():
@@ -90,14 +90,14 @@ class Inputs:
         self.renderer = self.add(
             "build/native-renderer",
             identity["version"],
-            source="openkb/rendering/rust-helper",
-            lock_sha256=digest(source / "openkb/rendering/rust-helper/Cargo.lock"),
+            source="ultrakb/rendering/rust-helper",
+            lock_sha256=digest(source / "ultrakb/rendering/rust-helper/Cargo.lock"),
         )
         self.generated = self.add(
             "build/desktop-assets",
             identity["version"],
             source="scripts/prepare_desktop_assets.py",
-            lock_sha256=digest(source / "openkb/rendering/package-lock.json"),
+            lock_sha256=digest(source / "ultrakb/rendering/package-lock.json"),
         )
         self.vocabulary = self.add(
             "resource/tiktoken-vocabularies",
@@ -159,22 +159,22 @@ class Inputs:
                 "mathjax_render.mjs",
                 "process_guard.mjs",
             }:
-                original = self.source / "openkb/rendering" / relative
+                original = self.source / "ultrakb/rendering" / relative
                 if digest(original) != digest(path):
                     raise ValueError(f"Copied rendering source changed: {relative}")
-                return self.openkb, "openkb/rendering/" + relative
+                return self.ultrakb, "ultrakb/rendering/" + relative
             if relative in {"manifest.json", "node_modules/.package-lock.json"}:
-                return self.generated, "openkb/rendering/assets/" + relative
+                return self.generated, "ultrakb/rendering/assets/" + relative
             for name, item in self.npm.items():
                 for executable in item.get("bin", {}):
                     if relative in {
                         f"node_modules/.bin/{executable}{suffix}" for suffix in ("", ".cmd", ".ps1")
                     }:
-                        return self.generated, "openkb/rendering/assets/" + relative
+                        return self.generated, "ultrakb/rendering/assets/" + relative
             raise ValueError(f"Unrecognized generated rendering asset: {relative}")
         if path.is_relative_to(self.source / "assets/fonts"):
             relative = path.relative_to(self.source).as_posix()
-            return self.application_fonts.get(path.name, self.openkb), relative
+            return self.application_fonts.get(path.name, self.ultrakb), relative
         if path in self.owners:
             return self.owners[path]
         if path.is_relative_to(self.source / "packaging/desktop/build/token-cache"):
@@ -185,8 +185,8 @@ class Inputs:
             raise ValueError(f"Unmapped generated input: {path.name}")
         if path.is_relative_to(self.source):
             relative = path.relative_to(self.source).as_posix()
-            if relative.startswith(("openkb/", "skills/", "packaging/desktop/")):
-                return self.openkb, relative
+            if relative.startswith(("ultrakb/", "skills/", "packaging/desktop/")):
+                return self.ultrakb, relative
         if path.is_relative_to(Path(sys.base_prefix).resolve()):
             return self.python, path.relative_to(Path(sys.base_prefix).resolve()).as_posix()
         if sys.platform == "linux" and path.is_relative_to(Path("/usr/lib")):
@@ -213,9 +213,9 @@ def inventory(source: Path, program: Path, analysis: Path) -> dict:
 
     source, program = source.resolve(), program.resolve()
     identity = verify_source(source)
-    if metadata.version("openkb") != identity["version"]:
+    if metadata.version("ultrakb") != identity["version"]:
         raise ValueError("Use the environment that installed this exact source export")
-    installed = json.loads((program / "_internal/openkb/_build_info.json").read_text("utf-8"))
+    installed = json.loads((program / "_internal/ultrakb/_build_info.json").read_text("utf-8"))
     if installed != identity:
         raise ValueError("Frozen identity does not match exported source")
     toc = ast.literal_eval(analysis.read_text(encoding="utf-8"))
@@ -267,7 +267,7 @@ def inventory(source: Path, program: Path, analysis: Path) -> dict:
     files = []
     expected_executables = {
         name + (".exe" if os.name == "nt" else "")
-        for name in ("UrltraKB", "UrltraKBCLI", "UrltraKBAPI", "UrltraKBVerify")
+        for name in ("UltraKB", "UltraKBCLI", "UltraKBAPI", "UltraKBVerify")
     }
     found_executables = set()
     embedded_bootstrap = {}
@@ -378,7 +378,7 @@ def main() -> None:
     args = parser.parse_args()
     packaging = args.source / "packaging/desktop"
     result = inventory(
-        args.source, packaging / "dist/UrltraKB", packaging / "build/freeze/desktop/Analysis-00.toc"
+        args.source, packaging / "dist/UltraKB", packaging / "build/freeze/desktop/Analysis-00.toc"
     )
     with args.output.open("x", encoding="utf-8", newline="\n") as stream:
         json.dump(result, stream, indent=2, ensure_ascii=False)

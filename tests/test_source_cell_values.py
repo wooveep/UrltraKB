@@ -6,10 +6,10 @@ import pytest
 from test_answer_evidence_regression import agent_for, invoke
 from test_source_qualification import freeze_source
 
-from openkb.agent.evidence_payload import project_evidence
-from openkb.agent.source_windows import CompileSourceWindows
-from openkb.block_package import freeze_block_package, read_block_selection
-from openkb.text_source import read_text_selection
+from ultrakb.agent.evidence_payload import project_evidence
+from ultrakb.agent.source_windows import CompileSourceWindows
+from ultrakb.block_package import freeze_block_package, read_block_selection
+from ultrakb.text_source import read_text_selection
 
 
 @pytest.mark.asyncio

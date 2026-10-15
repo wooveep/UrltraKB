@@ -1,23 +1,25 @@
-"""Tests for the /skill new slash command inside openkb chat."""
+"""Tests for the /skill new slash command inside ultrakb chat."""
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+import shlex
 
 import pytest
 from prompt_toolkit.styles import Style
 
-from openkb.agent.chat import _handle_slash
-from openkb.agent.chat_session import ChatSession
+from ultrakb.agent.chat import _handle_slash
+from ultrakb.agent.chat_session import ChatSession
+
+pytest_plugins = ("test_vendor_sdk",)
 
 
 def _make_kb(tmp_path):
-    (tmp_path / ".openkb").mkdir()
-    (tmp_path / ".openkb" / "config.yaml").write_text("model: gpt-4o-mini\n")
+    (tmp_path / ".ultrakb").mkdir()
+    (tmp_path / ".ultrakb" / "config.yaml").write_text("model: gpt-4o-mini\n")
     from kb_fixtures import mark_current_kb
 
     mark_current_kb(tmp_path)
-    (tmp_path / ".openkb" / "chats").mkdir()
+    (tmp_path / ".ultrakb" / "chats").mkdir()
     (tmp_path / "wiki" / "concepts").mkdir(parents=True)
     (tmp_path / "wiki" / "summaries").mkdir(parents=True)
     (tmp_path / "wiki" / "index.md").write_text("# index\n")
@@ -28,23 +30,18 @@ def _make_kb(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_slash_skill_new_calls_generator(tmp_path):
-    kb = _make_kb(tmp_path)
-    session = ChatSession.new(kb, "gpt-4o-mini", "en")
+async def test_slash_skill_new_calls_generator(kb_dir, model_service):
+    from short_generation import assert_formatter_delivery, retained_formatter
+
+    kb = kb_dir
+    intent = retained_formatter(kb, model_service.credentials)
+    session = ChatSession.new(kb, "deepseek/deepseek-flash", "en")
     style = Style.from_dict({})
 
-    async def fake_run(kb_dir, skill_name, intent, model, **_kw):
-        target = kb_dir / "output" / "skills" / skill_name
-        target.mkdir(parents=True, exist_ok=True)
-        (target / "SKILL.md").write_text(
-            f"---\nname: {skill_name}\ndescription: t\n---\n\n# {skill_name}\n"
-        )
-
-    with patch("openkb.skill.generator.run_skill_create", new=AsyncMock(side_effect=fake_run)):
-        action = await _handle_slash('/skill new demo "test intent"', kb, session, style)
+    action = await _handle_slash("/skill new demo " + shlex.quote(intent), kb, session, style)
 
     assert action is None  # continues chat session
-    assert (kb / "output" / "skills" / "demo" / "SKILL.md").exists()
+    assert_formatter_delivery(kb, "demo", model_service)
     assert (kb / ".claude-plugin" / "marketplace.json").exists()
 
 
@@ -73,13 +70,13 @@ async def test_slash_skill_unknown_subcommand(tmp_path):
 async def test_slash_skill_new_rejects_empty_wiki(tmp_path):
     """Chat / slash command must catch freshly-init'd KBs (no compiled content)."""
     kb = tmp_path
-    (kb / ".openkb").mkdir()
-    (kb / ".openkb" / "config.yaml").write_text("model: gpt-4o-mini\n")
+    (kb / ".ultrakb").mkdir()
+    (kb / ".ultrakb" / "config.yaml").write_text("model: gpt-4o-mini\n")
     from kb_fixtures import mark_current_kb
 
     mark_current_kb(kb)
-    (kb / ".openkb" / "chats").mkdir()
-    # Empty wiki/ — exactly what `openkb init` creates
+    (kb / ".ultrakb" / "chats").mkdir()
+    # Empty wiki/ — exactly what `ultrakb init` creates
     (kb / "wiki" / "concepts").mkdir(parents=True)
     (kb / "wiki" / "summaries").mkdir(parents=True)
     (kb / "wiki" / "index.md").write_text("# index\n")
@@ -95,7 +92,7 @@ async def test_slash_skill_new_rejects_empty_wiki(tmp_path):
 def test_preflight_gate_counts_entities(tmp_path):
     """The wiki-content gate must accept a KB whose only compiled content
     lives in entities/ (no concept or summary pages yet)."""
-    from openkb.cli import _preflight_skill_new
+    from ultrakb.cli import _preflight_skill_new
 
     kb = tmp_path
     (kb / "wiki" / "entities").mkdir(parents=True)

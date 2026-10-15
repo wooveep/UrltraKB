@@ -1,0 +1,744 @@
+"""FastAPI REST service for UltraKB query and chat."""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import logging
+import os
+from contextlib import asynccontextmanager
+from typing import Any
+
+import litellm
+from agents import set_tracing_disabled
+from dotenv import load_dotenv
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+    status,
+)
+from fastapi.responses import StreamingResponse
+from starlette.concurrency import run_in_threadpool
+
+from ultrakb.api_config import apply_kb_config_patch, read_kb_config
+from ultrakb.api_config_router import config_router
+from ultrakb.api_documents_router import documents_router
+from ultrakb.api_graph import graph_router
+from ultrakb.api_helpers import (
+    _answer_error_response,
+    _configure_cors,
+    _init_kb_for_api,
+    _iter_deck,
+    _iter_skill,
+    _parse_stream_form,
+    _reserve_add_uploads,
+    _resolve_kb,
+    _run_add_uploads,
+    _stream_add_uploads,
+    _stream_chat,
+    _stream_deck,
+    _stream_query,
+    _stream_recompile,
+    _stream_remove,
+    _stream_skill,
+    _stream_watch_events,
+    _write_add_uploads,
+    require_bearer_token,
+)
+from ultrakb.api_kbs import _list_knowledge_bases
+from ultrakb.api_kbs_router import kbs_router
+from ultrakb.api_lint import run_lint_report
+from ultrakb.api_models import (
+    AddResponse,
+    ChatRequest,
+    ChatResponse,
+    ChatSessionDeleteRequest,
+    ChatSessionDeleteResponse,
+    ChatSessionListResponse,
+    ChatSessionLoadRequest,
+    ChatSessionLoadResponse,
+    DeckRequest,
+    DeckResponse,
+    EnvWritten,
+    InitRequest,
+    InitResponse,
+    KbConfigPatchRequest,
+    KbConfigResponse,
+    KbListResponse,
+    KbRequest,
+    LintRequest,
+    LintResponse,
+    ListResponse,
+    MetaResponse,
+    QueryRequest,
+    QueryResponse,
+    RecompileRequest,
+    RecompileResponse,
+    RemoveRequest,
+    RemoveResponse,
+    SkillRequest,
+    SkillResponse,
+    StatusResponse,
+    WatchStartRequest,
+    WatchStatusResponse,
+)
+from ultrakb.api_output import output_router
+from ultrakb.api_pages_router import pages_router
+from ultrakb.api_pending import pending_router
+from ultrakb.api_recompile import iter_recompile
+from ultrakb.api_views import resolve_api_scope
+from ultrakb.application.knowledge_bases import get_kb_list, get_kb_status
+from ultrakb.application.removal import run_remove_for_api
+from ultrakb.config import (
+    resolve_init_kb_dir,
+    validate_kb_name,
+)
+from ultrakb.watch_service import WatchRegistry
+
+logger = logging.getLogger(__name__)
+
+
+def create_app() -> FastAPI:
+    # One registry per app instance so each TestClient is isolated.
+    # Keep process-wide setup inside create_app() so importing the module
+    # does not mutate global state for tests or library consumers.
+    set_tracing_disabled(True)
+    litellm.suppress_debug_info = True
+    load_dotenv()
+
+    registry = WatchRegistry()
+
+    # Per-KB asyncio locks for async mutation endpoints (lint/recompile).
+    # kb_ingest_lock tracks reentrancy in threading.local, but the event loop
+    # runs all requests on one thread, so concurrent same-KB mutations are
+    # mis-counted as re-entrant and bypass mutual exclusion. An asyncio.Lock
+    # serializes same-KB mutations *before* they enter the threading lock,
+    # eliminating the hazard without touching locks.py.
+    kb_mutation_locks: dict[str, asyncio.Lock] = {}
+
+    def _kb_mutation_lock(kb: str) -> asyncio.Lock:
+        lock = kb_mutation_locks.get(kb)
+        if lock is None:
+            lock = asyncio.Lock()
+            kb_mutation_locks[kb] = lock
+        return lock
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        # Auth is opt-in (see require_bearer_token). Warn once at server startup
+        # when no token is configured, so an exposed deployment is never
+        # silently world-open. Fires for every launch path (uvicorn/gunicorn/
+        # the ultrakb-api CLI); harmless on loopback. (create_app() can't see the
+        # bind host under a factory launch, so this is host-agnostic.)
+        if not os.environ.get("ULTRAKB_API_TOKEN"):
+            logger.warning(
+                "ULTRAKB_API_TOKEN is not set — the REST API is unauthenticated. "
+                "This is fine for local use; set ULTRAKB_API_TOKEN to require a "
+                "bearer token before exposing the server on a reachable interface."
+            )
+        try:
+            yield
+        finally:
+            await asyncio.to_thread(registry.stop_all)
+
+    app = FastAPI(title="UltraKB API", lifespan=lifespan)
+
+    from ultrakb.api_distribution import install_distribution_routes
+
+    install_distribution_routes(app)
+
+    _configure_cors(app)
+    app.include_router(graph_router)
+    from ultrakb.api_artifacts_router import artifacts_router
+
+    app.include_router(output_router)
+    app.include_router(artifacts_router)
+    app.include_router(config_router)
+    app.include_router(kbs_router)
+    app.include_router(pages_router)
+    app.include_router(documents_router)
+    app.include_router(pending_router)
+    from ultrakb.api_refresh import refresh_router
+
+    app.include_router(refresh_router)
+
+    @app.get("/api/v1/kbs", response_model=KbListResponse)
+    async def list_kbs_endpoint(
+        _: None = Depends(require_bearer_token),
+    ) -> KbListResponse:
+        return KbListResponse(**(await asyncio.to_thread(_list_knowledge_bases)))
+
+    @app.get("/api/v1/meta", response_model=MetaResponse)
+    async def meta_endpoint(
+        _: None = Depends(require_bearer_token),
+    ) -> MetaResponse:
+        from ultrakb import __version__
+
+        return MetaResponse(version=__version__)
+
+    @app.get("/api/v1/kb/config", response_model=KbConfigResponse)
+    async def kb_config_get_endpoint(
+        kb: str = Query(...),
+        _: None = Depends(require_bearer_token),
+    ) -> KbConfigResponse:
+        return await run_in_threadpool(read_kb_config, (await asyncio.to_thread(_resolve_kb, kb)))
+
+    @app.patch("/api/v1/kb/config", response_model=KbConfigResponse)
+    async def kb_config_patch_endpoint(
+        request: KbConfigPatchRequest,
+        _: None = Depends(require_bearer_token),
+    ) -> KbConfigResponse:
+        # The merge-PATCH is a read-modify-write over config.yaml + .env; hold
+        # the per-KB mutation lock so two concurrent patches cannot drop fields.
+        kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
+        async with _kb_mutation_lock(request.kb):
+            await run_in_threadpool(apply_kb_config_patch, kb_dir, request)
+        return await run_in_threadpool(read_kb_config, kb_dir)
+
+    @app.post("/api/v1/init", response_model=InitResponse)
+    async def init_endpoint(
+        request: InitRequest,
+        _: None = Depends(require_bearer_token),
+    ) -> InitResponse:
+        try:
+            kb_name = validate_kb_name(request.kb)
+            kb_dir = await asyncio.to_thread(resolve_init_kb_dir, kb_name, request.path)
+            # Run lock-holding work in a threadpool so each request gets its
+            # own threading.local (kb_ingest_lock reentrancy is per-thread)
+            # and the event loop is not blocked by file I/O / flock.
+            result = await run_in_threadpool(
+                _init_kb_for_api,
+                kb_dir,
+                kb_name,
+                model=request.model,
+                api_key=request.api_key,
+                openai_api_base=request.openai_api_base,
+            )
+        except (ValueError, FileExistsError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            ) from exc
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Init failed: {exc}",
+            ) from exc
+
+        return InitResponse(
+            kb=kb_name,
+            created=bool(result["created"]),
+            env_written=EnvWritten(**result["env_written"]),
+            message=str(result["message"]),
+        )
+
+    @app.post("/api/v1/add", response_model=AddResponse)
+    async def add_endpoint(
+        kb: str = Form(...),
+        stream: str = Form("true"),
+        files: list[UploadFile] = File(default=[]),
+        download_remote_assets: bool | None = Form(None),
+        _: None = Depends(require_bearer_token),
+    ) -> Any:
+        resolved_kb_dir = await asyncio.to_thread(_resolve_kb, kb)
+        if not files:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No files uploaded.",
+            )
+        # Transfer privately; each complete input is published and consumed
+        # together under the shared KB lease by the application adapter.
+        reserved = await run_in_threadpool(_reserve_add_uploads, resolved_kb_dir, files)
+        saved_uploads = await _write_add_uploads(reserved, files)
+        if _parse_stream_form(stream):
+            from ultrakb.api_uploads import UploadStreamingResponse
+
+            return UploadStreamingResponse(
+                _stream_add_uploads(
+                    kb,
+                    resolved_kb_dir,
+                    saved_uploads,
+                    download_remote_assets=download_remote_assets,
+                ),
+                uploads=saved_uploads,
+                media_type="text/event-stream",
+            )
+        return await _run_add_uploads(
+            kb,
+            resolved_kb_dir,
+            saved_uploads,
+            download_remote_assets=download_remote_assets,
+        )
+
+    @app.post("/api/v1/query", response_model=QueryResponse)
+    async def query_endpoint(
+        request: QueryRequest,
+        fastapi_request: Request,
+        _: None = Depends(require_bearer_token),
+    ) -> Any:
+        kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
+        selected = await resolve_api_scope(kb_dir, request.view_id)
+        if request.stream:
+            return StreamingResponse(
+                _stream_query(request, kb_dir, fastapi_request), media_type="text/event-stream"
+            )
+        from ultrakb.application.conversations import ask_question
+
+        try:
+            result = await ask_question(kb_dir, request.question, save=request.save, scope=selected)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Query failed: {exc}") from exc
+        if result.status != "completed":
+            return _answer_error_response(result)
+        return QueryResponse(
+            answer=result.answer,
+            usage=result.usage,
+            model_usage=result.model_usage,
+            image_coverage=result.image_coverage,
+            saved_path=result.saved_path,
+            answer_outcome=result.answer_outcome,
+        )
+
+    @app.post("/api/v1/chat", response_model=ChatResponse)
+    async def chat_endpoint(
+        request: ChatRequest,
+        fastapi_request: Request,
+        _: None = Depends(require_bearer_token),
+    ) -> Any:
+        kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
+        selected = await resolve_api_scope(kb_dir, request.view_id)
+        from ultrakb.application.conversations import continue_conversation
+        from ultrakb.application.sessions import load_conversation
+
+        # Fail before opening an SSE response for a missing or mismatched session.
+        if request.session_id:
+            try:
+                await asyncio.to_thread(
+                    load_conversation,
+                    kb_dir,
+                    request.session_id,
+                    view_id=selected.view_id if selected else None,
+                )
+            except FileNotFoundError as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+            except ValueError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+        if request.stream:
+            return StreamingResponse(
+                _stream_chat(request, kb_dir, fastapi_request), media_type="text/event-stream"
+            )
+        try:
+            result = await continue_conversation(
+                kb_dir, request.message, session_id=request.session_id, scope=selected
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Chat failed: {exc}") from exc
+        if result.status != "completed":
+            return _answer_error_response(result)
+        return ChatResponse(
+            session_id=result.session_id,
+            answer=result.answer,
+            turn_count=result.turn_count,
+            context=result.context,
+            usage=result.usage,
+            model_usage=result.model_usage,
+            image_coverage=result.image_coverage,
+            answer_outcome=result.answer_outcome,
+        )
+
+    @app.post("/api/v1/chat/sessions", response_model=ChatSessionListResponse)
+    async def chat_sessions_endpoint(
+        request: KbRequest,
+        _: None = Depends(require_bearer_token),
+    ) -> ChatSessionListResponse:
+        kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
+        from ultrakb.application.sessions import list_conversations
+
+        try:
+            sessions = await asyncio.to_thread(list_conversations, kb_dir, view_id=request.view_id)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"List sessions failed: {exc}",
+            ) from exc
+        return ChatSessionListResponse(kb=request.kb, sessions=sessions)
+
+    @app.post("/api/v1/chat/sessions/load", response_model=ChatSessionLoadResponse)
+    async def chat_session_load_endpoint(
+        request: ChatSessionLoadRequest,
+        _: None = Depends(require_bearer_token),
+    ) -> ChatSessionLoadResponse:
+        kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
+        from ultrakb.application.sessions import load_conversation
+
+        try:
+            session = await asyncio.to_thread(
+                load_conversation, kb_dir, request.session_id, view_id=request.view_id
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Chat session not found: {request.session_id}",
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Load session failed: {exc}",
+            ) from exc
+        return ChatSessionLoadResponse(
+            session_id=session.id,
+            title=session.title,
+            turn_count=session.turn_count,
+            user_turns=session.user_turns,
+            assistant_texts=session.assistant_texts,
+            assistant_traces=session.assistant_traces,
+            answer_outcomes=session.answer_outcomes,
+        )
+
+    @app.post("/api/v1/chat/sessions/delete", response_model=ChatSessionDeleteResponse)
+    async def chat_session_delete_endpoint(
+        request: ChatSessionDeleteRequest,
+        _: None = Depends(require_bearer_token),
+    ) -> ChatSessionDeleteResponse:
+        kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
+        from ultrakb.application.sessions import delete_conversation
+
+        try:
+            result = await run_in_threadpool(
+                delete_conversation,
+                kb_dir,
+                request.session_id,
+                view_id=request.view_id or "legacy",
+            )
+            deleted = result.status == "deleted"
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Delete session failed: {exc}",
+            ) from exc
+        if not deleted:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Chat session not found: {request.session_id}",
+            )
+        return ChatSessionDeleteResponse(deleted=True)
+
+    @app.post("/api/v1/list", response_model=ListResponse)
+    async def list_endpoint(
+        request: KbRequest,
+        _: None = Depends(require_bearer_token),
+    ) -> ListResponse:
+        kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
+        try:
+            return ListResponse(
+                **await run_in_threadpool(
+                    get_kb_list, kb_dir, scope=await resolve_api_scope(kb_dir, request.view_id)
+                )
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"List failed: {exc}",
+            ) from exc
+
+    @app.post("/api/v1/status", response_model=StatusResponse)
+    async def status_endpoint(
+        request: KbRequest,
+        _: None = Depends(require_bearer_token),
+    ) -> StatusResponse:
+        kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
+        try:
+            return StatusResponse(
+                **await run_in_threadpool(
+                    get_kb_status, kb_dir, scope=await resolve_api_scope(kb_dir, request.view_id)
+                )
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Status failed: {exc}",
+            ) from exc
+
+    @app.post("/api/v1/lint", response_model=LintResponse)
+    async def lint_endpoint(
+        request: LintRequest,
+        _: None = Depends(require_bearer_token),
+    ) -> LintResponse:
+        kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
+        try:
+            # Only fix=True mutations need serialization; read-only lint
+            # (fix=False) is a report and may run concurrently.
+            if request.fix:
+                async with _kb_mutation_lock(request.kb):
+                    return LintResponse(
+                        **await run_lint_report(
+                            kb_dir,
+                            fix=True,
+                            scope=await resolve_api_scope(kb_dir, request.view_id),
+                        )
+                    )
+            return LintResponse(
+                **await run_lint_report(
+                    kb_dir,
+                    fix=False,
+                    scope=await resolve_api_scope(kb_dir, request.view_id),
+                )
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Lint failed: {exc}",
+            ) from exc
+
+    @app.post("/api/v1/remove", response_model=RemoveResponse)
+    async def remove_endpoint(
+        request: RemoveRequest,
+        _: None = Depends(require_bearer_token),
+    ) -> Any:
+        kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
+        if request.stream:
+            return StreamingResponse(
+                _stream_remove(request, kb_dir),
+                media_type="text/event-stream",
+            )
+        result = await run_in_threadpool(
+            run_remove_for_api,
+            kb_dir,
+            request.identifier,
+            keep_raw=request.keep_raw,
+            keep_empty=request.keep_empty,
+            dry_run=request.dry_run,
+            scope=await resolve_api_scope(kb_dir, request.view_id),
+        )
+        status_value = result.get("status")
+        if status_value == "not_found":
+            raise HTTPException(
+                status_code=404, detail=result.get("message", "Document not found.")
+            )
+        if status_value == "multiple":
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": "Identifier matches multiple documents.",
+                    "candidates": result.get("candidates", []),
+                },
+            )
+        return RemoveResponse(**result)
+
+    @app.post("/api/v1/recompile", response_model=RecompileResponse)
+    async def recompile_endpoint(
+        request: RecompileRequest,
+        fastapi_request: Request,
+        _: None = Depends(require_bearer_token),
+    ) -> Any:
+        kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
+        if request.stream:
+            lock = _kb_mutation_lock(request.kb)
+            return StreamingResponse(
+                _stream_recompile(request, kb_dir, lock, fastapi_request),
+                media_type="text/event-stream",
+            )
+        # Aggregate the async generator into a single JSON response. Terminal
+        # errors map to HTTP codes; the final event carries the aggregate.
+        targets: list[dict] | None = None
+        candidates: list[dict[str, str]] | None = None
+        error_code: int | None = None
+        error_message: str | None = None
+        result: dict = {}
+        async with _kb_mutation_lock(request.kb):
+            async for event in iter_recompile(
+                kb_dir,
+                request.doc_name,
+                unit_id=request.unit_id,
+                all_docs=request.all_docs,
+                dry_run=request.dry_run,
+                scope=await resolve_api_scope(kb_dir, request.view_id),
+                refresh_schema=request.refresh_schema,
+            ):
+                name = event.get("event")
+                if name == "plan":
+                    targets = event.get("targets", [])
+                elif name == "error":
+                    error_code = event.get("code", 500)
+                    error_message = event.get("message", "Recompile failed.")
+                    candidates = event.get("candidates")
+                elif name == "final":
+                    result = event
+        if error_code is not None:
+            if error_code == 409 and candidates is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail={"message": error_message, "candidates": candidates},
+                )
+            raise HTTPException(status_code=error_code, detail=error_message)
+        return RecompileResponse(
+            status=result.get("status", "done"),
+            total=result.get("total", 0),
+            recompiled=result.get("recompiled", 0),
+            skipped=result.get("skipped", 0),
+            blocked=result.get("blocked", 0),
+            partial=result.get("partial", 0),
+            docs=result.get("docs", []),
+            targets=targets,
+            candidates=candidates,
+        )
+
+    @app.post("/api/v1/watch/start", response_model=WatchStatusResponse)
+    async def watch_start_endpoint(
+        request: WatchStartRequest,
+        _: None = Depends(require_bearer_token),
+    ) -> WatchStatusResponse:
+        kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
+        try:
+            (await asyncio.to_thread(registry.start, request.kb, kb_dir, debounce=request.debounce))
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Watch start failed: {exc}",
+            ) from exc
+        return WatchStatusResponse(**(await asyncio.to_thread(registry.status, request.kb)))
+
+    @app.post("/api/v1/watch/stop", response_model=WatchStatusResponse)
+    async def watch_stop_endpoint(
+        request: KbRequest,
+        _: None = Depends(require_bearer_token),
+    ) -> WatchStatusResponse:
+        (await asyncio.to_thread(_resolve_kb, request.kb))
+        if not (await asyncio.to_thread(registry.stop, request.kb)):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No active watcher for KB: {request.kb}",
+            )
+        # Return the real post-stop status. If the worker was mid-compile and
+        # entered draining mode, status() reports active=True; otherwise it
+        # reports active=False after the watcher has been removed.
+        return WatchStatusResponse(**(await asyncio.to_thread(registry.status, request.kb)))
+
+    @app.post("/api/v1/watch/status", response_model=WatchStatusResponse)
+    async def watch_status_endpoint(
+        request: KbRequest,
+        _: None = Depends(require_bearer_token),
+    ) -> WatchStatusResponse:
+        (await asyncio.to_thread(_resolve_kb, request.kb))
+        return WatchStatusResponse(**(await asyncio.to_thread(registry.status, request.kb)))
+
+    @app.get("/api/v1/watch/events")
+    async def watch_events_endpoint(
+        request: Request,
+        kb: str = Query(..., min_length=1),
+        max_events: int | None = Query(default=None, ge=1),
+        timeout_seconds: float | None = Query(default=None, ge=0),
+        _: None = Depends(require_bearer_token),
+    ) -> Any:
+        (await asyncio.to_thread(_resolve_kb, kb))
+        return StreamingResponse(
+            _stream_watch_events(registry, kb, max_events, timeout_seconds, request),
+            media_type="text/event-stream",
+        )
+
+    @app.post("/api/v1/deck", response_model=DeckResponse)
+    async def deck_endpoint(
+        request: DeckRequest,
+        fastapi_request: Request,
+        _: None = Depends(require_bearer_token),
+    ) -> Any:
+        kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
+        if request.stream:
+            lock = _kb_mutation_lock(request.kb)
+            return StreamingResponse(
+                _stream_deck(request, kb_dir, lock, fastapi_request),
+                media_type="text/event-stream",
+            )
+        error_code: int | None = None
+        error_message: str | None = None
+        result: dict = {}
+        async with _kb_mutation_lock(request.kb):
+            async for event in _iter_deck(request, kb_dir):
+                name = event.get("event")
+                if name == "error":
+                    error_code = event.get("code", 500)
+                    error_message = event.get("message", "Deck generation failed.")
+                elif name == "final":
+                    result = event
+        if error_code is not None:
+            raise HTTPException(status_code=error_code, detail=error_message)
+        return DeckResponse(name=result["name"], status=result["status"], path=result["path"])
+
+    @app.post("/api/v1/skill", response_model=SkillResponse)
+    async def skill_endpoint(
+        request: SkillRequest,
+        fastapi_request: Request,
+        _: None = Depends(require_bearer_token),
+    ) -> Any:
+        kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
+        if request.stream:
+            lock = _kb_mutation_lock(request.kb)
+            return StreamingResponse(
+                _stream_skill(request, kb_dir, lock, fastapi_request),
+                media_type="text/event-stream",
+            )
+        error_code: int | None = None
+        error_message: str | None = None
+        result: dict = {}
+        async with _kb_mutation_lock(request.kb):
+            async for event in _iter_skill(request, kb_dir):
+                name = event.get("event")
+                if name == "error":
+                    error_code = event.get("code", 500)
+                    error_message = event.get("message", "Skill generation failed.")
+                elif name == "final":
+                    result = event
+        if error_code is not None:
+            raise HTTPException(status_code=error_code, detail=error_message)
+        return SkillResponse(name=result["name"], status=result["status"], path=result["path"])
+
+    # Preserve the established JSON error shape for unknown API paths.
+    @app.api_route(
+        "/api/{path:path}",
+        methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"],
+    )
+    async def api_not_found(path: str) -> Any:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Not found",
+        )
+
+    return app
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Run the UltraKB REST API.")
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=7566)
+    parser.add_argument("--reload", action="store_true")
+    args = parser.parse_args()
+
+    import uvicorn
+
+    # Use the factory so uvicorn can reload a fresh app instance and so the
+    # module can be imported without triggering global side effects.
+    uvicorn.run(
+        "ultrakb.api:create_app",
+        host=args.host,
+        port=args.port,
+        reload=args.reload,
+        factory=True,
+    )
+
+
+if __name__ == "__main__":
+    main()

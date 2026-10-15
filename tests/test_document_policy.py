@@ -2,12 +2,12 @@
 
 import pytest
 
-pytest_plugins = ("test_pdf_readback", "block_fixtures")
+pytest_plugins = ("test_pdf_readback", "block_fixtures", "processing_fixtures")
 
 
 @pytest.fixture(autouse=True)
 def isolated_settings(tmp_path, monkeypatch):
-    from openkb import config
+    from ultrakb import config
 
     monkeypatch.setattr(config, "GLOBAL_CONFIG_DIR", tmp_path / "settings")
     monkeypatch.setattr(config, "GLOBAL_CONFIG_PATH", tmp_path / "settings/global.yaml")
@@ -19,9 +19,9 @@ def capacity_without_defaults(kb_dir):
     """Capacity-policy cases start without the general fixture's explicit model limit."""
     import yaml
 
-    from openkb.locks import atomic_write_text
+    from ultrakb.locks import atomic_write_text
 
-    path = kb_dir / ".openkb/config.yaml"
+    path = kb_dir / ".ultrakb/config.yaml"
     values = yaml.safe_load(path.read_text())
     values.pop("model_capacity")
     atomic_write_text(path, yaml.safe_dump(values))
@@ -31,13 +31,13 @@ def capacity_without_defaults(kb_dir):
 def test_import_capacity_keeps_captured_local_tokenizer(kb_dir, tmp_path, operation):
     from tokenizers import Tokenizer, models
 
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
-    from openkb.config_state import capture_config
-    from openkb.execution_capacity import select_execution_mode
-    from openkb.locks import kb_ingest_lock
-    from openkb.normalization import normalization_fingerprint
-    from openkb.processing_policy import classify_markdown_tokens
+    from ultrakb.application.settings import apply_kb_config_patch
+    from ultrakb.application.settings_data import KbConfigPatchRequest
+    from ultrakb.config_state import capture_config
+    from ultrakb.execution_capacity import select_execution_mode
+    from ultrakb.locks import kb_ingest_lock
+    from ultrakb.normalization import normalization_fingerprint
+    from ultrakb.processing_policy import classify_markdown_tokens
 
     asset = tmp_path / "tokenizer.json"
     Tokenizer(models.WordLevel({"[UNK]": 0, "note": 1}, unk_token="[UNK]")).save(str(asset))
@@ -53,7 +53,7 @@ def test_import_capacity_keeps_captured_local_tokenizer(kb_dir, tmp_path, operat
             },
         ),
     )
-    with kb_ingest_lock(kb_dir / ".openkb"):
+    with kb_ingest_lock(kb_dir / ".ultrakb"):
         snapshot = capture_config(kb_dir)
     with snapshot.activate():
         before = normalization_fingerprint(kb_dir)
@@ -71,23 +71,19 @@ def test_import_capacity_keeps_captured_local_tokenizer(kb_dir, tmp_path, operat
     "page_count,length,mode",
     [(9, "short", "full"), (10, "short", "full"), (11, "long", "segmented")],
 )
-def test_pdf_default_boundary(kb_dir, physical_pdf, pdf_model, page_count, length, mode):
+def test_pdf_default_boundary(kb_dir, physical_pdf, processing_only, page_count, length, mode):
     import pymupdf
 
-    from openkb.application.documents import import_document
-    from openkb.documents import read_document_source
+    from ultrakb.documents import read_document_source
 
     with pymupdf.open(physical_pdf) as pdf:
         for _ in range(page_count - 3):
             pdf.new_page(pno=2)
         pdf.saveIncr()
-    pdf_model.last_page = page_count
-    result = import_document(
-        kb_dir,
-        physical_pdf,
-    )
-    assert result.status == "added", result.message
+    result = processing_only(physical_pdf)
     source = read_document_source(kb_dir, result.source_id)
+    assert source["knowledge_revision_id"] is None
+    assert (kb_dir / source["original_path"]).read_bytes() == physical_pdf.read_bytes()
     assert (source["length_class"], source["execution_mode"]) == (length, mode)
     assert source["processing"]["measurement_value"] == page_count
 
@@ -125,22 +121,22 @@ def test_pdf_default_boundary(kb_dir, physical_pdf, pdf_model, page_count, lengt
 def test_settings_preserve_pdf_policy_precedence_and_snapshot(
     kb_dir, global_values, kb_values, limit, origin, key, forced
 ):
-    from openkb.application.settings import (
+    from ultrakb.application.settings import (
         apply_global_config_patch,
         apply_kb_config_patch,
         read_settings_view,
     )
-    from openkb.application.settings_data import GlobalConfigPatchRequest, KbConfigPatchRequest
-    from openkb.config import resolve_effective_config
-    from openkb.config_state import capture_config
-    from openkb.locks import kb_ingest_lock
+    from ultrakb.application.settings_data import GlobalConfigPatchRequest, KbConfigPatchRequest
+    from ultrakb.config import resolve_effective_config
+    from ultrakb.config_state import capture_config
+    from ultrakb.locks import kb_ingest_lock
 
     apply_global_config_patch(GlobalConfigPatchRequest(config=global_values))
     apply_kb_config_patch(kb_dir, KbConfigPatchRequest(kb=str(kb_dir), config=kb_values))
     view = read_settings_view(kb_dir)
     assert (view.values.pdf_short_max_pages, view.sources["pdf_short_max_pages"]) == (limit, origin)
     assert view.values.pdf_limit.key == key and view.values.pdf_limit.legacy_force_index == forced
-    with kb_ingest_lock(kb_dir / ".openkb"):
+    with kb_ingest_lock(kb_dir / ".ultrakb"):
         snapshot = capture_config(kb_dir)
     apply_global_config_patch(GlobalConfigPatchRequest(config={"pdf_short_max_pages": 50}))
     with snapshot.activate():
@@ -159,7 +155,7 @@ def test_settings_preserve_pdf_policy_precedence_and_snapshot(
 def test_short_pdf_uses_only_known_execution_capacity(
     kb_dir,
     physical_pdf,
-    pdf_model,
+    processing_only,
     model,
     capacity,
     status,
@@ -167,35 +163,24 @@ def test_short_pdf_uses_only_known_execution_capacity(
     endpoint,
     capacity_without_defaults,
 ):
-    from openkb.application.documents import import_document
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
-    from openkb.documents import read_document_source
+    from ultrakb.application.settings import apply_kb_config_patch
+    from ultrakb.application.settings_data import KbConfigPatchRequest
+    from ultrakb.config import LlmCredentialBundle
+    from ultrakb.documents import read_document_source
 
     apply_kb_config_patch(
         kb_dir,
         KbConfigPatchRequest(kb=str(kb_dir), config={"model": model, "model_capacity": capacity}),
     )
-    # Application sends use the captured task binding, so the tested endpoint
-    # must be present in that snapshot as well as in the conversion preflight.
-    (kb_dir / ".env").write_text(
-        "LLM_API_KEY=fixture\n" + (f"OPENAI_API_BASE={endpoint}\n" if endpoint else "")
-    )
-    result = import_document(
-        kb_dir,
+    # This is local admission policy, including unknown endpoint/tokenizer
+    # cases. Actual conversion is retained while generation has zero allowance.
+    result = processing_only(
         physical_pdf,
+        bundle=LlmCredentialBundle(api_key="local-capacity-test", base_url=endpoint),
     )
-    if status == "insufficient":
-        assert result.status == "failed"
-        assert "document_summary_capacity_exceeded" in result.message
-        source = read_document_source(kb_dir, result.source_id)
-        assert source["knowledge_revision_id"] is None
-        assert (kb_dir / source["original_path"]).read_bytes() == physical_pdf.read_bytes()
-        assert result.model_usage["current"]["stages"].get("document-summary:1", 0) == 0
-        source = {**source, **source["target_processing"]}
-    else:
-        assert result.status == "added", result.message
-        source = read_document_source(kb_dir, result.source_id)
+    source = read_document_source(kb_dir, result.source_id)
+    assert source["knowledge_revision_id"] is None
+    assert (kb_dir / source["original_path"]).read_bytes() == physical_pdf.read_bytes()
     assert (source["length_class"], source["execution_mode"]) == ("short", mode)
     processing = source.get("processing") or source["target_processing"]
     assert processing["capacity_status"] == status
@@ -209,15 +194,15 @@ def test_short_segmented_recompile_retains_decision_and_adapters(
 
     from click.testing import CliRunner
 
-    from openkb.api_models import DocumentItem, DocumentSourceResponse
-    from openkb.application.documents import import_document
-    from openkb.application.knowledge_bases import get_kb_list
-    from openkb.application.recompilation import recompile_document, select_recompilation
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
-    from openkb.cli import cli
-    from openkb.documents import read_document_source
-    from openkb.ingest_result import describe_ingest
+    from ultrakb.api_models import DocumentItem, DocumentSourceResponse
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.knowledge_bases import get_kb_list
+    from ultrakb.application.recompilation import recompile_document, select_recompilation
+    from ultrakb.application.settings import apply_kb_config_patch
+    from ultrakb.application.settings_data import KbConfigPatchRequest
+    from ultrakb.cli import cli
+    from ultrakb.documents import read_document_source
+    from ultrakb.ingest_result import describe_ingest
 
     apply_kb_config_patch(
         kb_dir,
@@ -252,8 +237,8 @@ def test_short_segmented_recompile_retains_decision_and_adapters(
 
 
 def test_invalid_boolean_policy_never_changes_settings(kb_dir):
-    from openkb.application.settings import apply_kb_config_patch, read_settings_view
-    from openkb.application.settings_data import KbConfigPatchRequest
+    from ultrakb.application.settings import apply_kb_config_patch, read_settings_view
+    from ultrakb.application.settings_data import KbConfigPatchRequest
 
     before = read_settings_view(kb_dir)
     with pytest.raises(ValueError):
@@ -268,13 +253,15 @@ def test_failed_compile_keeps_target_processing_visible(
     kb_dir, physical_pdf, pdf_model, monkeypatch, previous_success
 ):
     import litellm
+    from publication_fixtures import publish_document
 
-    from openkb.application.documents import import_document
-    from openkb.application.knowledge_bases import get_kb_list
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
-    from openkb.documents import read_document_source
-    from openkb.ingest_result import describe_ingest
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.knowledge_bases import get_kb_list
+    from ultrakb.application.settings import apply_kb_config_patch
+    from ultrakb.application.settings_data import KbConfigPatchRequest
+    from ultrakb.config import resolve_credential_bundle
+    from ultrakb.documents import read_document_source
+    from ultrakb.ingest_result import describe_ingest
 
     def capacity(limit):
         apply_kb_config_patch(
@@ -286,7 +273,16 @@ def test_failed_compile_keeps_target_processing_visible(
         )
 
     capacity(100000)
-    first = import_document(kb_dir, physical_pdf) if previous_success else None
+    first = (
+        publish_document(kb_dir, physical_pdf, None, bundle=resolve_credential_bundle(kb_dir))
+        if previous_success
+        else None
+    )
+    before = None
+    if first:
+        assert first.status == "added", first.message
+        before = read_document_source(kb_dir, first.source_id)
+        assert before["processing"]["input_limit"] == 100000
     capacity(200000)
 
     async def unavailable(*args, **kwargs):
@@ -298,7 +294,7 @@ def test_failed_compile_keeps_target_processing_visible(
     monkeypatch.setattr(litellm, "completion", unavailable_sync)
     monkeypatch.setattr(litellm, "acompletion", unavailable)
     if first:
-        from openkb.application.reprocessing import preview_reprocessing, reprocess_source
+        from ultrakb.application.reprocessing import preview_reprocessing, reprocess_source
 
         preview = preview_reprocessing(kb_dir, first.source_id)
         result = reprocess_source(kb_dir, first.source_id, version=preview["version"])
@@ -312,7 +308,12 @@ def test_failed_compile_keeps_target_processing_visible(
         first.units[0].knowledge_revision_id if first else None
     )
     assert reader["target_processing"]["input_limit"] == 200000
-    assert reader["processing"]["input_limit"] == (100000 if previous_success else 200000)
+    if before:
+        assert reader["processing"] == before["processing"]
+        assert reader["content"] == before["content"]
+        assert reader["source_revision_id"] == before["source_revision_id"]
+    else:
+        assert reader["processing"] == reader["target_processing"]
     assert get_kb_list(kb_dir)["documents"][0]["target_processing"] == reader["target_processing"]
 
 
@@ -320,12 +321,12 @@ def test_failed_compile_keeps_target_processing_visible(
 def test_capacity_patch_preserves_unspecified_nested_values(
     kb_dir, global_layer, capacity_without_defaults
 ):
-    from openkb.application.settings import (
+    from ultrakb.application.settings import (
         apply_global_config_patch,
         apply_kb_config_patch,
         read_settings_view,
     )
-    from openkb.application.settings_data import GlobalConfigPatchRequest, KbConfigPatchRequest
+    from ultrakb.application.settings_data import GlobalConfigPatchRequest, KbConfigPatchRequest
 
     def patch(values):
         if global_layer:

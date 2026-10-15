@@ -1,10 +1,10 @@
-"""Tests for openkb.frontmatter — the shared frontmatter helper module."""
+"""Tests for ultrakb.frontmatter — the shared frontmatter helper module."""
 
 from __future__ import annotations
 
 import yaml
 
-from openkb import frontmatter as fm
+from ultrakb import frontmatter as fm
 
 
 class TestKvLine:

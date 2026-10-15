@@ -6,9 +6,8 @@ import pytest
 from agents import RunConfig, Runner
 from test_llm_execution import executor_for
 from test_managed_agent import agent_for
-from test_vendor_sdk import response
 
-from openkb.llm_execution import ModelRequest
+from ultrakb.llm_execution import ModelRequest
 
 pytest_plugins = ("test_vendor_sdk",)
 
@@ -30,7 +29,6 @@ async def test_image_messages_never_reach_the_model(model_service, sdk):
             ],
         }
     ]
-    model_service.replies.append((200, response()))
     with pytest.raises(ValueError, match="text-only"):
         if sdk:
             await Runner.run(
@@ -49,7 +47,6 @@ async def test_text_references_and_literal_code_survive_real_sdk(model_service):
     content = (
         '![Original, page 2](../sources/images/figure.png)\n```json\n{"type":"image_url"}\n```'
     )
-    model_service.replies.append((200, response()))
     await Runner.run(
         agent_for(executor_for(model_service)), content, run_config=RunConfig(tracing_disabled=True)
     )
@@ -77,7 +74,7 @@ async def test_reading_tools_list_every_occurrence_without_offering_pixels(kb_di
 async def test_old_image_tool_history_is_projected_as_text_without_mutating_archive(model_service):
     from copy import deepcopy
 
-    from openkb.agent.chat_session import sanitize_history
+    from ultrakb.agent.chat_session import sanitize_history
 
     history = [
         {"role": "user", "content": "Read the figure."},
@@ -96,7 +93,6 @@ async def test_old_image_tool_history_is_projected_as_text_without_mutating_arch
         },
     ]
     before = deepcopy(history)
-    model_service.replies.append((200, response()))
     await Runner.run(
         agent_for(executor_for(model_service)),
         sanitize_history(history),

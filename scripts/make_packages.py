@@ -63,7 +63,7 @@ def main() -> None:
     environment["UV_PROJECT_ENVIRONMENT"] = str(source / ".venv")
     suffix = ".exe" if os.name == "nt" else ""
     python = source / (".venv/Scripts/python.exe" if os.name == "nt" else ".venv/bin/python")
-    program = source / "packaging/desktop/dist/UrltraKB"
+    program = source / "packaging/desktop/dist/UltraKB"
     inventory = workspace / "inventory.json"
     destination = args.dist_dir.resolve() / commit[:12]
 
@@ -111,7 +111,18 @@ def main() -> None:
             "-r",
             "packaging/desktop/build-requirements.txt",
         )
-        run(python, "-m", "pytest", "tests/test_desktop_verification_dialogs.py", "-q")
+        run(
+            python,
+            "-m",
+            "pytest",
+            "tests/test_desktop_verification_dialogs.py",
+            "tests/test_connection_question_readiness.py",
+            "tests/test_setup_question_capacity.py",
+            "tests/test_connection_capacity.py",
+            "-m",
+            "not live",
+            "-q",
+        )
         if target.name in {"macos-arm64", "windows-x64"}:
             run(
                 python,
@@ -144,7 +155,7 @@ def main() -> None:
         if not inventory.is_file():
             parser.error("run make desktop for this COMMIT before make verify")
         evidence = Path(tempfile.mkdtemp(prefix="acceptance-", dir=workspace)) / "result"
-        run(program / ("UrltraKBVerify" + suffix), "--output", evidence)
+        run(program / ("UltraKBVerify" + suffix), "--output", evidence)
         logger.info("Acceptance evidence: %s", evidence)
     elif args.stage == "bundle":
         if not inventory.is_file():
@@ -167,7 +178,7 @@ def main() -> None:
         if not inventory.is_file():
             parser.error("run make desktop for this COMMIT before make release")
         materials = Path(args.materials).resolve()
-        companion = destination / f"UrltraKB-{identity['version']}-materials.zip"
+        companion = destination / f"UltraKB-{identity['version']}-materials.zip"
         run(
             python,
             "scripts/package_desktop.py",

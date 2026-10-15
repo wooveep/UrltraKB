@@ -1,8 +1,8 @@
 """Sanity tests for the built-in deck-editorial skill.
 
 After the skill-system refactor the deck prompt moved from
-``openkb/prompts/deck_create.md`` (a ``str.format``-style template) to
-``skills/openkb-deck-editorial/SKILL.md`` (a standalone Anthropic-style
+``ultrakb/prompts/deck_create.md`` (a ``str.format``-style template) to
+``skills/ultrakb-deck-editorial/SKILL.md`` (a standalone Anthropic-style
 skill with YAML frontmatter that ``run_skill`` loads directly). These
 tests pin the structural anchors the validator and generator depend on.
 """
@@ -11,9 +11,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from openkb.agent.skills import _parse_frontmatter
+from ultrakb.agent.skills import _parse_frontmatter
 
-SKILL_MD = Path(__file__).resolve().parent.parent / "skills" / "openkb-deck-editorial" / "SKILL.md"
+SKILL_MD = Path(__file__).resolve().parent.parent / "skills" / "ultrakb-deck-editorial" / "SKILL.md"
 
 
 def _load() -> tuple[dict, str]:
@@ -23,7 +23,7 @@ def _load() -> tuple[dict, str]:
 def test_skill_file_present_and_substantive():
     assert SKILL_MD.is_file(), f"skill file missing at {SKILL_MD}"
     meta, body = _load()
-    assert meta.get("name") == "openkb-deck-editorial"
+    assert meta.get("name") == "ultrakb-deck-editorial"
     assert isinstance(meta.get("description"), str) and len(meta["description"]) > 40
     assert len(body) > 1000, "skill body is suspiciously short"
 

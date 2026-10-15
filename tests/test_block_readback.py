@@ -5,17 +5,17 @@ from pathlib import Path
 
 import pytest
 
-pytest_plugins = ("block_fixtures",)
+pytest_plugins = ("block_fixtures", "processing_fixtures")
 pytestmark = pytest.mark.usefixtures("wide_short_prompt")
 
 
 def test_short_text_can_use_blocks_and_recompile_its_retained_original(
     kb_dir, tmp_path, block_model
 ):
-    from openkb.application.documents import import_document
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
-    from openkb.documents import read_document_source
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.settings import apply_kb_config_patch
+    from ultrakb.application.settings_data import KbConfigPatchRequest
+    from ultrakb.documents import read_document_source
 
     apply_kb_config_patch(
         kb_dir,
@@ -35,14 +35,14 @@ def test_short_text_can_use_blocks_and_recompile_its_retained_original(
     assert any("CONTENT BLOCK STRUCTURE" in prompt for prompt in block_model)
     from click.testing import CliRunner
 
-    from openkb.cli import cli
+    from ultrakb.cli import cli
 
     output = CliRunner().invoke(
         cli, ["--kb-dir", str(kb_dir), "source", result.source_id, "--blocks", "1"]
     )
     assert output.exit_code == 0, output.output
     assert json.loads(output.output)["block_range"] == [1]
-    from openkb.application.recompilation import recompile_document, select_recompilation
+    from ultrakb.application.recompilation import recompile_document, select_recompilation
 
     source.unlink()
     selection = select_recompilation(kb_dir, "greeting", confirmation=True)
@@ -58,7 +58,7 @@ def test_short_text_can_use_blocks_and_recompile_its_retained_original(
 
 
 def test_block_package_recovers_full_tree_ranges_and_assets_without_external_inputs(
-    kb_dir, tmp_path, block_model
+    kb_dir, tmp_path, block_model, live_llm
 ):
     import shutil
     import sqlite3
@@ -67,13 +67,15 @@ def test_block_package_recovers_full_tree_ranges_and_assets_without_external_inp
     from figure_fixtures import png_bytes
     from pageindex import IndexConfig
 
-    from openkb.application.documents import import_document
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
-    from openkb.block_package import create_index_client
-    from openkb.condb_storage import ConDBPageIndexStorage
-    from openkb.documents import read_document_source
-    from openkb.index_location import IndexLocation
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.settings import apply_kb_config_patch
+    from ultrakb.application.settings_data import KbConfigPatchRequest
+    from ultrakb.block_package import create_index_client
+    from ultrakb.condb_storage import ConDBPageIndexStorage
+    from ultrakb.documents import read_document_source
+    from ultrakb.index_llm import PageIndexLLM
+    from ultrakb.index_location import IndexLocation
+    from ultrakb.llm_execution import CompletionExecutor, RoleBindings
 
     apply_kb_config_patch(
         kb_dir,
@@ -95,7 +97,15 @@ def test_block_package_recovers_full_tree_ranges_and_assets_without_external_inp
             storage_path=str(store),
             storage=database,
             model="gpt-4o",
-            index_config=IndexConfig(if_add_node_summary=True),
+            index_config=IndexConfig(
+                if_add_node_summary=False,
+                if_add_doc_description=False,
+                llm_client=PageIndexLLM(
+                    CompletionExecutor(
+                        RoleBindings("deepseek/deepseek-flash", live_llm.credentials)
+                    )
+                ),
+            ),
         )
         identity = client.collection().add(str(package))
     moved = tmp_path / "moved-index"
@@ -111,7 +121,10 @@ def test_block_package_recovers_full_tree_ranges_and_assets_without_external_inp
         blocks = collection.get_block_content(identity, "1")
         assert before["page_count"] is None and before["block_count"] == 1
         assert before["structure"][0]["title_origin"] == "generated"
-        assert before["structure"][0]["anchor"]["excerpt"] == "hello"
+        anchor = before["structure"][0]["anchor"]
+        start, end = anchor["range"]
+        assert "hello" in anchor["excerpt"]
+        assert before["metadata"]["source"]["text"][start:end] == anchor["excerpt"]
         assert before["structure"][0]["text"] == saved["content"]
         asset = next(iter(blocks[0]["assets"].values()))
         assert Path(asset["path"]).read_bytes() == picture
@@ -128,14 +141,13 @@ def test_block_package_recovers_full_tree_ranges_and_assets_without_external_inp
 
 
 def test_structural_blocks_cover_code_tables_and_unicode_without_adding_display_text(
-    kb_dir, block_model
+    kb_dir, processing_only
 ):
     import unicodedata
 
-    from openkb.application.documents import import_document
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
-    from openkb.documents import read_document_source
+    from ultrakb.application.settings import apply_kb_config_patch
+    from ultrakb.application.settings_data import KbConfigPatchRequest
+    from ultrakb.documents import read_document_source
 
     apply_kb_config_patch(
         kb_dir,
@@ -145,8 +157,7 @@ def test_structural_blocks_cover_code_tables_and_unicode_without_adding_display_
     )
     source = Path(__file__).parent / "fixtures/content-blocks.md"
     original = source.read_bytes().decode("utf-8")
-    result = import_document(kb_dir, source)
-    assert result.status == "added", result.message
+    result = processing_only(source)
     saved = read_document_source(kb_dir, result.source_id)
     assert saved["content"] == original and saved["block_count"] > 2
     cursor = 0
@@ -165,88 +176,60 @@ def test_structural_blocks_cover_code_tables_and_unicode_without_adding_display_
 
 
 @pytest.mark.parametrize("corrected", [True, False])
-def test_generated_section_labels_must_resolve_to_real_original_anchors(
-    kb_dir, tmp_path, block_model, monkeypatch, corrected
-):
-    import litellm
+def test_generated_section_labels_must_resolve_to_real_original_anchors(corrected):
+    from pageindex.index.block_policy import BlockContractError, BlockPolicy
 
-    from openkb.application.documents import import_document
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
-    from openkb.documents import read_document_source
-
-    original_completion = litellm.completion
-
-    def completion(**kwargs):
-        result = original_completion(**kwargs)
-        prompt = str(kwargs["messages"])
-        if "CONTENT BLOCK STRUCTURE" in prompt and (not corrected or "Correct ONLY" not in prompt):
-            entries = json.loads(result.choices[0].message.content)
-            entries[0]["anchor"]["excerpt"] = "Invented evidence"
-            result.choices[0].message.content = json.dumps(entries)
-        return result
-
-    async def acompletion(**kwargs):
-        return completion(**kwargs)
-
-    monkeypatch.setattr(litellm, "completion", completion)
-    monkeypatch.setattr(litellm, "acompletion", acompletion)
-    apply_kb_config_patch(
-        kb_dir,
-        KbConfigPatchRequest(
-            kb=str(kb_dir), config={"model": "gpt-4o", "model_capacity": {"max_input_tokens": 4000}}
-        ),
+    text = "hello world"
+    policy = BlockPolicy(
+        {
+            "unit_count": 1,
+            "source": {"text": text, "blocks": [{"ordinal": 1, "source_spans": [[0, 11]]}]},
+        }
     )
-    path = tmp_path / "anchors.md"
-    path.write_text("hello world", encoding="utf-8")
-    result = import_document(kb_dir, path)
-    assert result.status == ("added" if corrected else "failed"), result.message
-    assert any("Correct ONLY" in prompt for prompt in block_model)
-    if not corrected:
-        assert sum("Correct ONLY" in prompt for prompt in block_model) == 1
-        assert "BlockContractError" in result.message
-    saved = read_document_source(kb_dir, result.source_id, blocks="1")
-    assert saved["content"] == "hello world"
+    entry = {
+        "structure": "1",
+        "title": "Greeting",
+        "title_origin": "generated",
+        "physical_index": 1,
+        "anchor": {
+            "unit": 1,
+            "part": "body",
+            "range": [0, 5],
+            "excerpt": "hello" if corrected else "Invented evidence",
+        },
+    }
+    if corrected:
+        policy.validate_order([entry])
+        assert policy.valid(entry)
+    else:
+        assert policy.validate_entry(entry) == "excerpt_mismatch"
+        with pytest.raises(BlockContractError, match="Unverified content-block anchors"):
+            policy.validate_order([entry])
+    assert policy.text == text
 
 
-def test_unheaded_original_anchor_can_normalize_its_label_without_model_repair(
-    kb_dir, tmp_path, block_model, monkeypatch
-):
-    import litellm
+def test_unheaded_original_anchor_can_normalize_its_label_without_model_repair():
+    from pageindex.index.block_policy import BlockPolicy
 
-    from openkb.application.documents import import_document
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
-    from openkb.documents import read_document_source
-
-    original_completion = litellm.completion
-
-    def completion(**kwargs):
-        result = original_completion(**kwargs)
-        if "CONTENT BLOCK STRUCTURE" in str(kwargs["messages"]):
-            entries = json.loads(result.choices[0].message.content)
-            entries[0]["title_origin"] = "original"
-            result.choices[0].message.content = json.dumps(entries)
-        return result
-
-    async def acompletion(**kwargs):
-        return completion(**kwargs)
-
-    monkeypatch.setattr(litellm, "completion", completion)
-    monkeypatch.setattr(litellm, "acompletion", acompletion)
-    apply_kb_config_patch(
-        kb_dir,
-        KbConfigPatchRequest(
-            kb=str(kb_dir), config={"model": "gpt-4o", "model_capacity": {"max_input_tokens": 4000}}
-        ),
+    policy = BlockPolicy(
+        {
+            "unit_count": 1,
+            "source": {
+                "text": "hello world",
+                "blocks": [{"ordinal": 1, "source_spans": [[0, 11]]}],
+            },
+        }
     )
-    path = tmp_path / "unheaded.md"
-    path.write_text("hello world", encoding="utf-8")
-    result = import_document(kb_dir, path)
-    assert result.status == "added", result.message
-    assert not any("Correct ONLY" in prompt for prompt in block_model)
-    saved = read_document_source(kb_dir, result.source_id, blocks="1")
-    assert saved["content"] == "hello world"
+    entry = {
+        "structure": "1",
+        "title": "Greeting",
+        "title_origin": "original",
+        "physical_index": 1,
+        "anchor": {"unit": 1, "part": "body", "range": [0, 5], "excerpt": "hello"},
+    }
+    assert policy.normalize_title_origin(entry)
+    assert policy.valid(entry) and entry["title_origin"] == "generated"
+    assert entry["anchor"] == {"unit": 1, "part": "body", "range": [0, 5], "excerpt": "hello"}
 
 
 def test_declared_heading_rejects_a_fabricated_original_title():
@@ -281,12 +264,11 @@ def test_declared_heading_rejects_a_fabricated_original_title():
 
 
 def test_unicode_line_separator_does_not_move_markdown_heading_coordinates(
-    kb_dir, tmp_path, block_model
+    kb_dir, tmp_path, processing_only
 ):
-    from openkb.application.documents import import_document
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
-    from openkb.documents import read_document_source
+    from ultrakb.application.settings import apply_kb_config_patch
+    from ultrakb.application.settings_data import KbConfigPatchRequest
+    from ultrakb.documents import read_document_source
 
     apply_kb_config_patch(
         kb_dir,
@@ -296,8 +278,7 @@ def test_unicode_line_separator_does_not_move_markdown_heading_coordinates(
     )
     path = tmp_path / "unicode.md"
     path.write_text("hello\u2028world\n# 正文\n内容\n", encoding="utf-8")
-    result = import_document(kb_dir, path)
-    assert result.status == "added", result.message
+    result = processing_only(path)
     saved = read_document_source(kb_dir, result.source_id, blocks="1")
     heading = saved["units"][0]["headings"][0]
     assert heading["title"] == "正文" and heading["source_span"] == [12, 17]
@@ -305,12 +286,11 @@ def test_unicode_line_separator_does_not_move_markdown_heading_coordinates(
 
 @pytest.mark.parametrize("part,context", [("code", "fence_open"), ("table", "table_header")])
 def test_nested_structures_keep_display_context_when_their_original_spans_split(
-    kb_dir, tmp_path, block_model, part, context, wide_short_prompt
+    kb_dir, tmp_path, processing_only, part, context, wide_short_prompt
 ):
-    from openkb.application.documents import import_document
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
-    from openkb.documents import read_document_source
+    from ultrakb.application.settings import apply_kb_config_patch
+    from ultrakb.application.settings_data import KbConfigPatchRequest
+    from ultrakb.documents import read_document_source
 
     apply_kb_config_patch(
         kb_dir,
@@ -327,8 +307,7 @@ def test_nested_structures_keep_display_context_when_their_original_spans_split(
     original = "hello\n\n" + "\n".join("> " + line for line in natural.splitlines()) + "\n"
     path = tmp_path / "nested.md"
     path.write_text(original, encoding="utf-8")
-    result = import_document(kb_dir, path)
-    assert result.status == "added", result.message
+    result = processing_only(path)
     saved = read_document_source(kb_dir, result.source_id)
     assert saved["content"] == original
     assert any(
@@ -337,142 +316,82 @@ def test_nested_structures_keep_display_context_when_their_original_spans_split(
 
 
 def test_query_reads_content_blocks_with_pinned_original_ranges(
-    kb_dir, tmp_path, block_model, monkeypatch
+    kb_dir, tmp_path, block_model, live_llm
 ):
     import asyncio
 
-    from litellm import ModelResponse
-
-    from openkb.agent.query import run_query
-    from openkb.application.documents import import_document
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
+    from ultrakb.agent.query import build_run_config_from_bundle, run_query
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.settings import apply_kb_config_patch
+    from ultrakb.application.settings_data import KbConfigPatchRequest
 
     apply_kb_config_patch(
         kb_dir,
         KbConfigPatchRequest(
-            kb=str(kb_dir), config={"model": "gpt-4o", "model_capacity": {"max_input_tokens": 4000}}
+            kb=str(kb_dir),
+            config={
+                "model": "deepseek/deepseek-flash",
+                "model_capacity": {"max_input_tokens": 4000},
+            },
         ),
     )
     path = tmp_path / "greeting.md"
     path.write_text("hello world", encoding="utf-8")
     imported = import_document(kb_dir, path)
     assert imported.status == "added", imported.message
-
-    async def model(**kwargs):
-        from evidence_model import provider_review
-
-        if reviewed := provider_review(kwargs):
-            return reviewed
-        outputs = [item["content"] for item in kwargs["messages"] if item["role"] == "tool"]
-        message = (
-            {"content": outputs[-1]}
-            if outputs
-            else {
-                "tool_calls": [
-                    {
-                        "id": "read-block",
-                        "type": "function",
-                        "function": {
-                            "name": "get_block_content",
-                            "arguments": json.dumps(
-                                {
-                                    "doc_name": "greeting",
-                                    "blocks": "1",
-                                    "view_id": imported.units[0].view_id,
-                                }
-                            ),
-                        },
-                    }
-                ]
-            }
-        )
-        return ModelResponse(
-            choices=[
-                {
-                    "message": {"role": "assistant", **message},
-                    "finish_reason": "stop" if outputs else "tool_calls",
-                }
-            ]
-        )
-
-    monkeypatch.setattr("litellm.acompletion", model)
-    answer = asyncio.run(run_query("Read the first original block", kb_dir, "gpt-4o"))
-    assert '"content": "hello world"' in answer
-    assert '"source_spans": [[0, 11]]' in answer and imported.source_revision_id in answer
-
-
-def test_model_correction_cannot_choose_a_different_trusted_section_index(
-    kb_dir, tmp_path, block_model, monkeypatch
-):
-    import litellm
-
-    from openkb.application.documents import import_document
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
-    from openkb.block_package import create_index_client
-    from openkb.condb_storage import ConDBPageIndexStorage
-    from openkb.documents import read_document_source
-    from openkb.index_location import IndexLocation
-
-    original_completion = litellm.completion
-
-    def completion(**kwargs):
-        response = original_completion(**kwargs)
-        prompt = str(kwargs["messages"])
-        if "CONTENT BLOCK STRUCTURE" in prompt:
-            if "Correct ONLY" in prompt:
-                entries = [
-                    {
-                        "structure": "1",
-                        "title": "Greeting",
-                        "title_origin": "generated",
-                        "physical_index": 1,
-                        "list_index": 1,
-                        "is_valid": True,
-                        "anchor": {"unit": 1, "part": "body", "range": [0, 5], "excerpt": "hello"},
-                    }
-                ]
-            else:
-                entries = [
-                    {
-                        "structure": "1",
-                        "title": "Unverified section",
-                        "title_origin": "generated",
-                        "physical_index": 1,
-                        "anchor": {"unit": 1, "part": "body", "range": [0, 5], "excerpt": "FAKEX"},
-                    },
-                    {
-                        "structure": "2",
-                        "title": "World",
-                        "title_origin": "generated",
-                        "physical_index": 1,
-                        "anchor": {"unit": 1, "part": "body", "range": [6, 11], "excerpt": "world"},
-                    },
-                ]
-            response.choices[0].message.content = json.dumps(entries)
-        return response
-
-    async def acompletion(**kwargs):
-        return completion(**kwargs)
-
-    monkeypatch.setattr(litellm, "completion", completion)
-    monkeypatch.setattr(litellm, "acompletion", acompletion)
     apply_kb_config_patch(
         kb_dir,
         KbConfigPatchRequest(
-            kb=str(kb_dir), config={"model": "gpt-4o", "model_capacity": {"max_input_tokens": 4000}}
+            kb=str(kb_dir), config={"model_capacity": {"max_input_tokens": 65536}}
         ),
     )
-    path = tmp_path / "correction.md"
-    path.write_text("hello world", encoding="utf-8")
-    result = import_document(kb_dir, path)
-    assert result.status == "added", result.message
-    saved = read_document_source(kb_dir, result.source_id)
-    store = (kb_dir / saved["base_path"]).parent.parent / "index"
-    with ConDBPageIndexStorage(IndexLocation.package(store)) as database:
-        collection = create_index_client(
-            storage_path=str(store), storage=database, model="gpt-4o"
-        ).collection()
-        tree = collection.get_document(collection.list_documents()[0]["doc_id"])["structure"]
-        assert [node["anchor"]["excerpt"] for node in tree] == ["hello", "world"]
+    config = build_run_config_from_bundle("deepseek/deepseek-flash", live_llm.credentials)
+    config.tracing_disabled = True
+    first = len(live_llm.requests)
+    answer = asyncio.run(
+        run_query(
+            "Read and quote only the first original content block of greeting.",
+            kb_dir,
+            "deepseek/deepseek-flash",
+            bundle=live_llm.credentials,
+            run_config=config,
+        )
+    )
+    assert "hello world" in answer.lower()
+    delivered = [
+        message["content"]
+        for request in live_llm.requests[first:]
+        for message in request["messages"]
+        if message["role"] == "tool"
+    ]
+    assert any(
+        '"source_spans": [[0, 11]]' in content and imported.source_revision_id in content
+        for content in delivered
+    )
+
+
+def test_model_correction_cannot_choose_a_different_trusted_section_index():
+    from pageindex.index.block_policy import BlockPolicy
+
+    policy = BlockPolicy(
+        {
+            "unit_count": 1,
+            "source": {
+                "text": "hello world",
+                "blocks": [{"ordinal": 1, "source_spans": [[0, 11]]}],
+            },
+        }
+    )
+    delivered = {
+        "structure": "99",
+        "title": "Greeting",
+        "title_origin": "generated",
+        "physical_index": 1,
+        "list_index": 1,
+        "is_valid": True,
+        "anchor": {"unit": 1, "part": "body", "range": [0, 5], "excerpt": "hello"},
+    }
+    parsed = policy.parse_correction([delivered], 1, 1)
+    assert set(parsed) == {"title", "title_origin", "physical_index", "anchor"}
+    assert parsed["anchor"]["excerpt"] == "hello"
+    assert "list_index" not in parsed and "is_valid" not in parsed and "structure" not in parsed

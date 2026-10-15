@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from openkb.cli import save_exploration
+from ultrakb.cli import save_exploration
 
 
 def test_save_exploration_cjk_question_gets_hash_slug(tmp_path):

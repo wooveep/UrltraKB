@@ -5,24 +5,22 @@ import time
 
 import pytest
 
-pytest_plugins = ("test_pdf_readback",)
+pytest_plugins = ("processing_fixtures",)
 
 
 @pytest.mark.parametrize("error_type", [ValueError, SystemExit])
 def test_failed_model_call_stops_progress_before_next_cli_response(
-    kb_dir, pdf_model, monkeypatch, error_type
+    kb_dir, processing_only, monkeypatch, error_type
 ):
     from click.testing import CliRunner
 
-    import openkb.documents as documents
-    from openkb.agent import compiler
-    from openkb.application.documents import import_document
-    from openkb.cli import cli
+    import ultrakb.documents as documents
+    from ultrakb.agent import compiler
+    from ultrakb.cli import cli
 
     source = kb_dir / "progress.txt"
     source.write_text("Retained source for a subsequent read.")
-    first = import_document(kb_dir, source)
-    assert first.status == "added", first.message
+    first = processing_only(source)
     spinners = []
     original = compiler._Spinner
 

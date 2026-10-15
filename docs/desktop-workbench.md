@@ -1,16 +1,17 @@
-# UrltraKB workbench: design and source acceptance
+# UltraKB workbench: design and source acceptance
 
 This implements [issue #12](https://github.com/wooveep/UrltraKB/issues/12).
 The accepted Qt Widgets, shared application interfaces, isolated task workers and
-browser-free rendering architecture remain in place. The desktop uses the display
-name **UrltraKB**, while `openkb`, Python package/distribution names, `.openkb`,
-Qt `OpenKB/OpenKB` settings identity, CLI and REST contracts remain compatible.
-Portable entry points and archive roots use `UrltraKB`; original third-party notices are retained.
+browser-free rendering architecture remain in place. The desktop display name is
+**UltraKB**. Python packages and CLI entry points use `ultrakb`, KB state lives in
+`.ultrakb`, and Qt settings use the `UltraKB/UltraKB` identity. For older data,
+follow the [name-switch guidance](../README.md#名称切换与旧数据).
+Portable entry points and archive roots use `UltraKB`; original third-party notices are retained.
 
 ## Composition
 
-- `brand.py` and bundled original SVGs separate display identity from compatibility
-  identifiers. Asset provenance is in `openkb/desktop/assets/brand/README.md`.
+- `brand.py` and bundled original SVGs define the display identity and artwork.
+  Asset provenance is in `ultrakb/desktop/assets/brand/README.md`.
 - `appearance.py` applies a shared palette and native control styling. Follow
   System is the initial choice; explicit Light/Dark and sidebar preference are
   stored as application-local Qt settings, separately from credentials and KBs.
@@ -46,6 +47,56 @@ Portable entry points and archive roots use `UrltraKB`; original third-party not
   current page. Global status leads to details and manual retry; shutdown selects
   Tasks and leaves observation and cooperative stop usable while disabling new work.
 
+## 首次配置与可用性复核（2026-10-15）
+
+首次启动且没有已登记知识库时，打开独立的五步向导：**选择服务商 → 连接服务 →
+选择与测试模型 → 设置知识库 → 确认创建**。已有知识库使用三步连接向导，直接编辑、
+验证当前知识库实际使用的连接。向导不再嵌入高级设置页，也不再同时展示全局和本库两套表单。
+流程组织参考 [Hermes 的模型配置入口](https://github.com/NousResearch/hermes-agent/blob/main/hermes_cli/setup.py)。
+
+- 已验证的全局连接直接复用，新建知识库从知识库参数开始。只有最终点击“创建知识库”
+  才创建目录；创建后进入“资料”，引导导入第一份资料。
+- 自定义服务填写 API 地址和 Key；模型步骤可主动获取服务的模型列表，服务未提供列表时
+  仍可手填名称。获取列表不保存草稿、不发送知识库内容。模型在连接测试通过后才标记可用。
+- “保存并测试连接”明确区分保存与验证；失败留在当前步骤，显示可重试的说明。
+  返回保留输入，取消保留已保存的设置。也可以显式选择稍后连接、先创建空库。
+- 新知识库继承全局连接；已有库的补配置作用于当前库。验证身份只由实际模型、凭据、
+  地址和请求选项决定，来源标签用于解释继承关系，不使相同连接失效。
+  旧版验证记录在实际连接一致时迁移复用；真实模型、密钥或地址变化仍要求重新测试。
+- 已验证连接可立即排队；设置保存会使界面缓存失效，实际执行在取得知识库锁后再次检查
+  所捕获配置的验证记录，避免绕过真实连接检查。成功后只提交一次原问题。取消、切换知识库或关闭原界面，
+  不会让过期测试结果触发原操作。普通设置中的测试成功也会刷新概览状态。
+- 向导共用应用的浅色／深色主题，使用 8px 间距倍数、单一主按钮和明确步骤标题。
+  输入及操作支持键盘焦点，主要点击区域至少 44 个逻辑像素；正文可滚动，底部操作保持可见。
+
+本轮发现与处理范围：
+
+| 优先级 | 现象及影响 | 处理情况 |
+| --- | --- | --- |
+| P0 | 相同连接从全局继承变成本库显式值后，被当成未验证，发送再次弹配置 | 已修复验证身份；增加旧记录迁移和实际发送回归 |
+| P0 | 引导测试全局连接，问答却使用本库覆盖，用户无法理解为何测试成功仍不能继续 | 已改为验证当前目标库；新建前使用全局默认 |
+| P1 | 完整设置表单、来源下拉和多种保存按钮混在首次引导中，认知负荷过高 | 已拆为独立步骤；高级设置仍放在日常设置中 |
+| P1 | “测试并继续”在日常设置中没有继续目标；概览始终显示“继续配置 / 原操作” | 已明确保存／测试文案；概览按待续操作显示按钮，连接就绪后隐藏配置入口 |
+| P1 | 新库创建后下一步不明确 | 已在确认页说明后续动作，并在创建成功后进入资料页 |
+| P1 | 资料搜索立即重绘结果且清空勾选；知识搜索逐键遍历全部节点 | 待优化：输入防抖；筛选变化时立即禁用批量动作，再统一更新结果与选择，避免误操作。未声称已测出性能退化 |
+| P2 | 资料列表首次加载主要依靠“正在读取”文字，空态和加载态的视觉区分不足 | 待优化：首次加载使用骨架占位；刷新已有列表时保留内容和位置 |
+| P2 | 全局普通控件热区尚未全部达到 44px；高级设置仍含 JSON 和来源术语 | 待优化：统一全局尺寸，补充结构化高级表单；本次只完成向导的热区和文案 |
+
+原生 Qt 验收使用隔离的设置和知识库，以及本机回环 HTTP 服务；连接测试执行真实 SDK
+文本与工具调用，问答验收到生产 `Conversations.send` 的请求提交边界。验证包含模型列表获取、
+失败重试、返回保留输入、确认前取消不建库、继承复用、相同值的本库覆盖、密钥变化后的重新验证、
+原问题只提交一次、浅色／深色和 480／720px 窗口，并以 100% 和 125% 缩放运行。
+这属于源码级 Qt 验收，没有调用付费模型，也没有重新构建或验收 Windows 安装包。
+
+```bash
+.venv/bin/pytest -q tests/test_connection_reuse.py tests/test_model_catalog.py \
+  tests/test_model_connections.py tests/test_onboarding.py \
+  tests/test_desktop_config_inheritance.py tests/test_setup_wizard.py
+.venv/bin/python scripts/verify_setup_wizard.py --headless --output /tmp/ultrakb-setup
+QT_SCALE_FACTOR=1.25 .venv/bin/python scripts/verify_setup_wizard.py \
+  --headless --output /tmp/ultrakb-setup-125
+```
+
 ## Reproduce source acceptance
 
 Use the existing pinned development and desktop dependencies plus the prepared
@@ -55,19 +106,19 @@ No paid model endpoint or real credentials are used.
 
 ```bash
 .venv/bin/pytest -q tests/test_desktop_workbench.py tests/test_desktop_lifecycle.py
-QT_QPA_PLATFORM=offscreen .venv/bin/python -m openkb.desktop.verification \
-  --workbench --output /tmp/urltrakb-workbench
-QT_QPA_PLATFORM=offscreen .venv/bin/python -m openkb.desktop.verification \
-  --workbench-restart /tmp/urltrakb-workbench --output /tmp/urltrakb-restart
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m ultrakb.desktop.verification \
+  --workbench --output /tmp/ultrakb-workbench
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m ultrakb.desktop.verification \
+  --workbench-restart /tmp/ultrakb-workbench --output /tmp/ultrakb-restart
 QT_QPA_PLATFORM=offscreen QT_SCALE_FACTOR=1.5 .venv/bin/python \
-  -m openkb.desktop.verification --workbench --output /tmp/urltrakb-hidpi
+  -m ultrakb.desktop.verification --workbench --output /tmp/ultrakb-hidpi
 QT_QPA_PLATFORM=offscreen .venv/bin/python scripts/verify_desktop_model.py \
-  --urls --output /tmp/urltrakb-business
-QT_QPA_PLATFORM=offscreen .venv/bin/python -m openkb.desktop.verification \
-  --corpus tests/fixtures/native-render-corpus.json --output /tmp/urltrakb-corpus
+  --urls --output /tmp/ultrakb-business
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m ultrakb.desktop.verification \
+  --corpus tests/fixtures/native-render-corpus.json --output /tmp/ultrakb-corpus
 .venv/bin/ruff check .
 .venv/bin/ruff format --check .
-.venv/bin/mypy openkb
+.venv/bin/mypy ultrakb
 .venv/bin/pytest
 ```
 

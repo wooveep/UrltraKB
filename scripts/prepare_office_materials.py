@@ -10,8 +10,8 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from openkb.office.inventory import digest
-from openkb.office.runtime import validate_runtime
+from ultrakb.office.inventory import digest
+from ultrakb.office.runtime import validate_runtime
 
 
 def add_office_materials(runtime: Path, source: Path, inputs: Path, plan: Path, output: Path):
@@ -33,7 +33,7 @@ def add_office_materials(runtime: Path, source: Path, inputs: Path, plan: Path, 
             target = staging / "licenses" / name
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(runtime / name, target)
-        shutil.copy2(runtime / "openkb-office.json", staging / "office-manifest.json")
+        shutil.copy2(runtime / "ultrakb-office.json", staging / "office-manifest.json")
         (staging / "NOTICE.txt").write_text(
             f"LibreOffice {manifest.version}, build {manifest.build_id}\n"
             f"Official complete binary distribution: {manifest.archive.url}\n"
@@ -45,7 +45,7 @@ def add_office_materials(runtime: Path, source: Path, inputs: Path, plan: Path, 
             "and source references.\n"
             "Build/staging rule: scripts/prepare_office_runtime.py "
             "in the committed application source.\n"
-            "Windows launcher source: openkb/office/launcher (Rust 1.95.0, no external crates).\n",
+            "Windows launcher source: ultrakb/office/launcher (Rust 1.95.0, no external crates).\n",
             encoding="utf-8",
         )
         members = {kind: [] for kind in ("source", "licenses", "notice", "components")}

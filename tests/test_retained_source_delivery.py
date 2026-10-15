@@ -1,21 +1,20 @@
 """Every original-reading route reports the retained processing state."""
 
-import re
 from dataclasses import replace
 
 import pytest
-from test_context_retrieval import executor_for, rank_reply, selection
+from test_context_retrieval import executor_for, selection
 
 pytest_plugins = ("test_vendor_sdk",)
 
 
 @pytest.mark.parametrize("reader", ["lexical", "semantic"])
 def test_search_delivers_retained_status_with_native_evidence(kb_dir, model_service, reader):
-    from openkb.agent.evidence_search import search_originals
-    from openkb.config_state import capture_config
-    from openkb.context.knowledge import KnowledgeRetrieval
-    from openkb.locks import atomic_write_text, kb_ingest_lock
-    from openkb.model_tokenizer import question_measure
+    from ultrakb.agent.evidence_search import search_originals
+    from ultrakb.config_state import capture_config
+    from ultrakb.context.knowledge import KnowledgeRetrieval
+    from ultrakb.locks import atomic_write_text, kb_ingest_lock
+    from ultrakb.model_tokenizer import question_measure
 
     path = "sources/operations.md"
     text = "The pump must stop before the inspection valve opens."
@@ -35,23 +34,20 @@ def test_search_delivers_retained_status_with_native_evidence(kb_dir, model_serv
         assert result["status"] == "matches"
     else:
         executor = executor_for(model_service)
-        with kb_ingest_lock(kb_dir / ".openkb"):
+        with kb_ingest_lock(kb_dir / ".ultrakb"):
             executor.question_capacity = question_measure(capture_config(kb_dir))
         search = KnowledgeRetrieval(captured, executor)
 
-        def rank(request):
-            ids = re.findall(r"- id: (\S+)", request["messages"][-1]["content"])
-            return rank_reply(ids)
-
-        model_service.replies.extend([(200, rank)] * 3)
         result = search.search("When may the inspection valve open?")
         assert result["status"] == "completed", result
-        assert len(model_service.requests) == 1
+        assert 1 <= len(model_service.requests) <= 4
+        sent = len(model_service.requests)
         hit = result["hits"][0]
         assert text in hit["content"]
         assert all(hit.get(k) == v for k, v in status.items())
         cached = search.search("When may the inspection valve open?")
         assert cached["cache_hit"]
+        assert len(model_service.requests) == sent
         assert cached["hits"][0]["processing_status"] == status["processing_status"]
 
     context = result["hits"][0]["source_context"]

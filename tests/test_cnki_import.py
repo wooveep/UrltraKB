@@ -1,8 +1,5 @@
 """Public admission, normalization and readback share one CNKI PDF."""
 
-import json
-from types import SimpleNamespace
-
 import pymupdf
 import pytest
 
@@ -11,7 +8,7 @@ pytest_plugins = ("cnki_fixtures", "test_pdf_readback")
 
 @pytest.fixture
 def conversions(monkeypatch):
-    from openkb.cnki.convert import convert_cnki
+    from ultrakb.cnki.convert import convert_cnki
 
     calls = []
 
@@ -19,15 +16,15 @@ def conversions(monkeypatch):
         calls.append(args)
         return convert_cnki(*args, **kwargs)
 
-    monkeypatch.setattr("openkb.cnki.convert.convert_cnki", conversion)
+    monkeypatch.setattr("ultrakb.cnki.convert.convert_cnki", conversion)
     return calls
 
 
-def test_cnki_preflight_and_publication_use_one_conversion(kb_dir, monkeypatch):
-    from openkb.application.documents import import_document
-    from openkb.cnki.convert import convert_cnki
-    from openkb.documents import read_document_source
-    from openkb.state import HashRegistry
+def test_cnki_preflight_and_publication_use_one_conversion(kb_dir, monkeypatch, pdf_model):
+    from ultrakb.application.documents import import_document
+    from ultrakb.cnki.convert import convert_cnki
+    from ultrakb.documents import read_document_source
+    from ultrakb.state import HashRegistry
 
     with pymupdf.open() as pdf:
         pdf.new_page().insert_text((72, 72), "Original CNKI content.")
@@ -45,15 +42,7 @@ def test_cnki_preflight_and_publication_use_one_conversion(kb_dir, monkeypatch):
         calls.append(args)
         return convert_cnki(*args, **kwargs)
 
-    monkeypatch.setattr("openkb.cnki.convert.convert_cnki", conversion)
-    replies = iter([{"description": "CNKI paper", "content": "Original CNKI content."}, {}])
-    monkeypatch.setattr(
-        "litellm.completion",
-        lambda **kwargs: SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(next(replies))))],
-            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
-        ),
-    )
+    monkeypatch.setattr("ultrakb.cnki.convert.convert_cnki", conversion)
     result = import_document(kb_dir, source)
     assert result.status == "added", result.message
     assert len(calls) == 1
@@ -76,9 +65,9 @@ def test_model_retry_and_recompile_reuse_the_retained_conversion(
 ):
     import asyncio
 
-    from openkb.application.documents import import_document
-    from openkb.application.recompilation import recompile_document
-    from openkb.documents import read_document_source
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.recompilation import recompile_document
+    from ultrakb.documents import read_document_source
 
     with monkeypatch.context() as failed:
 
@@ -103,14 +92,14 @@ def test_model_retry_and_recompile_reuse_the_retained_conversion(
 def test_changed_converter_requires_explicit_reprocessing_and_history_keeps_old_pdf(
     kb_dir, cnki_source, conversions, pdf_model, monkeypatch
 ):
-    from openkb.application.documents import import_document
-    from openkb.application.reprocessing import preview_reprocessing, reprocess_source
-    from openkb.documents import read_document_source
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.reprocessing import preview_reprocessing, reprocess_source
+    from ultrakb.documents import read_document_source
 
     first = import_document(kb_dir, cnki_source)
     assert first.status == "added", first.message
     before = read_document_source(kb_dir, first.source_id)
-    monkeypatch.setattr("openkb.cnki.runtime.CNKI_POLICY", "cnki-pdf-fixture-next")
+    monkeypatch.setattr("ultrakb.cnki.runtime.CNKI_POLICY", "cnki-pdf-fixture-next")
     assert import_document(kb_dir, cnki_source).status == "skipped"
     assert len(conversions) == 1
     cnki_source.unlink()
@@ -136,8 +125,8 @@ def test_changed_converter_requires_explicit_reprocessing_and_history_keeps_old_
 def test_conversion_failure_retains_original_without_publishing_knowledge(
     kb_dir, cnki_source, monkeypatch, failure
 ):
-    from openkb.application.documents import import_document
-    from openkb.documents import read_document_source
+    from ultrakb.application.documents import import_document
+    from ultrakb.documents import read_document_source
 
     if failure == "unsupported":
         cnki_source.write_bytes(b"HN\0\0unsupported container")
@@ -159,10 +148,10 @@ def test_pending_recovered_cnki_shares_one_conversion(
 ):
     from zipfile import ZipFile
 
-    from openkb.application.documents import import_document
-    from openkb.application.pending import pending_status, process_pending
-    from openkb.documents import read_document_source
-    from openkb.source_catalog import list_sources
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.pending import pending_status, process_pending
+    from ultrakb.documents import read_document_source
+    from ultrakb.source_catalog import list_sources
 
     outer = tmp_path / "container.docx"
     with ZipFile(outer, "w") as package:
@@ -186,10 +175,10 @@ def test_pending_recovered_cnki_shares_one_conversion(
 def test_long_cnki_uses_the_same_physical_pdf_pipeline(
     kb_dir, physical_pdf, pdf_model, conversions, tmp_path
 ):
-    from openkb.application.documents import import_document
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
-    from openkb.documents import read_document_source
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.settings import apply_kb_config_patch
+    from ultrakb.application.settings_data import KbConfigPatchRequest
+    from ultrakb.documents import read_document_source
 
     key = b"FZHMEI"
     source = tmp_path / "long-paper.caj"

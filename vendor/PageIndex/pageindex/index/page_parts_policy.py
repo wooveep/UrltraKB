@@ -4,7 +4,7 @@ import copy
 import json
 import re
 
-PAGE_PARTS_INDEX_POLICY = "physical-slide-navigation-v3"
+PAGE_PARTS_INDEX_POLICY = "physical-slide-navigation-v4"
 
 
 class PagePartsContractError(ValueError):
@@ -129,6 +129,8 @@ class PagePartsPolicy:
 
     def prepare_navigation(self, items, first, last):
         self.require_navigation_text(first, last)
+        for item in items:
+            self.normalize_anchor(item)
         structures = [item.get("structure") for item in items]
         if any(structures.count(value) > 1 for value in structures):
             raise ValueError("Slide sections must have distinct IDs in original order")
@@ -180,6 +182,8 @@ create additional pages. Use either part for navigation while retaining its doma
 Navigation titles are generated, not original source headings: title_origin="generated".
 Every title needs an exact original anchor: unit ordinal, part="body" or "notes",
 range=[start,end] in zero-based Unicode code points within THAT part, and exact excerpt.
+Select a short, unique, verbatim excerpt from that part. Its location is verified
+against the frozen original; never paraphrase the excerpt or change its part/unit.
 Do not anchor on generated page or notes labels. Return a JSON list of
 {structure:"1.1", title, title_origin:"generated", physical_index:integer,
 anchor:{unit:integer, part:"body"|"notes", range:[start,end], excerpt:"exact original"}}.
@@ -219,6 +223,8 @@ words. Do not anchor on them or use them as evidence of nonempty original text.
         ordinals = {int(number) for number in re.findall(r"<physical_index_(\d+)>", part)}
         if any(item.get("physical_index") not in ordinals for item in incoming):
             raise PagePartsContractError("slide_toc_chunk: anchor is outside the current chunk")
+        for item in incoming:
+            self.normalize_anchor(item)
         try:
             # Textless placeholders are removed later, but still require valid coordinates.
             retained = [
@@ -244,6 +250,43 @@ words. Do not anchor on them or use them as evidence of nonempty original text.
                 raise ValueError("New entries must follow the previous original positions")
         except (ValueError, KeyError, TypeError) as error:
             raise PagePartsContractError(f"slide_toc_chunk: {error}") from error
+
+    def normalize_anchor(self, item):
+        """Resolve an exact, unique quote inside its declared original part.
+
+        Generated labels and media syntax never establish source coordinates.
+        A mismatched unit/part, ambiguous quote or malformed range still needs
+        the normal bounded correction. No model-selected attribution is changed.
+        """
+        if self.valid(item):
+            return
+        number, anchor = item.get("physical_index"), item.get("anchor")
+        if (
+            type(number) is not int
+            or not 1 <= number <= len(self.parts)
+            or not isinstance(anchor, dict)
+            or type(anchor.get("unit")) is not int
+            or anchor["unit"] != number
+            or anchor.get("part") not in {"body", "notes"}
+        ):
+            return
+        span, excerpt = anchor.get("range"), anchor.get("excerpt")
+        if (
+            not isinstance(span, list)
+            or len(span) != 2
+            or any(type(value) is not int for value in span)
+            or not 0 <= span[0] < span[1]
+            or not isinstance(excerpt, str)
+            or not excerpt.strip()
+        ):
+            return
+        text = self.parts[number - 1][anchor["part"]]
+        start = text.find(excerpt)
+        if start < 0 or text.find(excerpt, start + 1) >= 0:
+            return
+        candidate = {**item, "anchor": {**anchor, "range": [start, start + len(excerpt)]}}
+        if self.valid(candidate):
+            item["anchor"] = candidate["anchor"]
 
     def valid(self, item, start_index=1, count=None):
         if (
@@ -341,10 +384,13 @@ words. Do not anchor on them or use them as evidence of nonempty original text.
         if self._textless_entry(item, first, last):
             raise PagePartsContractError("Textless slide entry requires navigation preprocessing")
         prompt = self.prompt("\n".join(self.render(i) for i in range(first, last + 1)))
-        prompt += "\nCorrect ONLY this entry's anchor/title; return one list entry:\n" + json.dumps(
+        prompt += "\nCorrect ONLY this entry's anchor/title; return a JSON array with exactly "
+        prompt += "one entry, not a bare JSON object:\n" + json.dumps(
             item
         )
         result = extract(await complete(model=model, prompt=prompt))
+        if isinstance(result, list) and len(result) == 1 and isinstance(result[0], dict):
+            self.normalize_anchor(result[0])
         if (
             isinstance(result, list)
             and len(result) == 1

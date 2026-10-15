@@ -1,128 +1,137 @@
-"""Bounded document-summary recovery keeps native coverage and task consumption."""
+"""Summary splitting and durable recovery use small source inputs and real generation."""
 
 import json
 
 import pytest
-from test_vendor_sdk import response
-
-pytest_plugins = ("test_vendor_sdk",)
 
 
-def truncated_reply(request):
-    reply = response({"role": "assistant", "content": ""})
-    reply["choices"][0]["finish_reason"] = "length"
-    return reply
+def retained_summary(kb_dir, source_kind):
+    from ultrakb.agent.document_summary import SYSTEM_TEMPLATE, summary_messages
+    from ultrakb.agent.source_windows import CompileSourceWindows
+    from ultrakb.locks import atomic_write_text
 
-
-def complete_reply(request):
-    batch = json.loads(request["messages"][1]["content"].split("\n", 1)[1])
-    return response(
-        {
-            "role": "assistant",
-            "content": json.dumps(
-                {
-                    "description": "Operating conditions",
-                    "sections": [
-                        {
-                            "id": section["id"],
-                            "content": batch["content"][section["start"] : section["end"]],
-                        }
-                        for section in batch["output_sections"]
-                    ],
-                }
-            ),
-        }
+    original = "Keep the inlet closed.\n\nOnly reopen after inspection."
+    suffix = "md" if source_kind == "text" else "json"
+    atomic_write_text(
+        kb_dir / f"wiki/sources/manual.{suffix}",
+        original
+        if source_kind == "text"
+        else json.dumps(
+            [
+                {"page": 1, "unit_kind": "page", "content": original},
+            ]
+        ),
     )
+    summary = kb_dir / "wiki/summaries/manual.md"
+    atomic_write_text(
+        summary, f"---\nfull_text: sources/manual.{suffix}\n---\nPrevious successful result."
+    )
+    reader = CompileSourceWindows(kb_dir / "wiki", "manual", navigation=[])
+    system = {"role": "system", "content": SYSTEM_TEMPLATE.format(language="en")}
+    parent = next(reader.iter_document_windows(fits=lambda _: True))
+    messages = summary_messages(system, "manual", parent)
+    return original, summary, reader, system, parent, messages
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("source_kind", ["text", "pages"])
 @pytest.mark.parametrize("stop_at", ["completed_child", "split_preparation", "received_repair"])
 async def test_split_summary_resumes_completed_child_with_original_task_allowance(
-    kb_dir, model_service, source_kind, stop_at, monkeypatch
+    kb_dir, source_kind, stop_at, monkeypatch, live_llm
 ):
-    from openkb.agent.compiler import compile_long_doc
-    from openkb.application.execution import ExecutionContext
-    from openkb.locks import LockCancelled, kb_ingest_lock
+    from test_document_summary import generate_summary
 
-    (kb_dir / ".env").write_text(f"LLM_API_KEY=fixture\nOPENAI_API_BASE={model_service.url}\n")
-    (kb_dir / ".openkb/config.yaml").write_text(
-        "model: openai/gpt-4o-mini\nlanguage: en\nmodel_policy:\n  max_calls: 5\n  retries: 0\n"
+    from ultrakb.agent.compiler import _write_summary
+    from ultrakb.agent.document_summary import (
+        build_document_summary,
+        summary_messages,
+        window_sections,
     )
-    original = (
-        "# Start\n\n"
-        + "Keep the inlet closed.\n\n" * 200
-        + "# Tail\n\nOnly reopen after inspection."
-    )
-    suffix = "md" if source_kind == "text" else "json"
-    (kb_dir / f"wiki/sources/manual.{suffix}").write_text(
-        original
-        if source_kind == "text"
-        else json.dumps([{"page": 1, "unit_kind": "page", "content": original}])
-    )
-    summary = kb_dir / "wiki/summaries/manual.md"
-    summary.write_text(f"---\nfull_text: sources/manual.{suffix}\n---\nPrevious successful result.")
+    from ultrakb.compile_checkpoints import CompileCheckpoints, digest
+    from ultrakb.llm_execution import CompletionExecutor, ModelCallPolicy, RoleBindings
+    from ultrakb.locks import LockCancelled
+    from ultrakb.model_task import TaskJournal, read_task
+
+    original, summary, reader, system, parent, messages = retained_summary(kb_dir, source_kind)
     before = summary.read_bytes()
-    from openkb.agent.source_windows import CompileSourceWindows
-
-    actual_split = CompileSourceWindows.split_document_window
-    import litellm
-
-    actual_completion = litellm.acompletion
-    stopped_after_response = False
-
-    async def cancel_received(**kwargs):
-        nonlocal stopped_after_response
-        result = await actual_completion(**kwargs)
-        if len(model_service.requests) == 2:
-            stopped_after_response = True
-        return result
-
+    live_llm.install(monkeypatch)
+    stopped = False
+    bindings = RoleBindings("deepseek/deepseek-flash", live_llm.credentials)
+    policy = ModelCallPolicy(max_calls=5, retries=0, cancelled=lambda: stopped)
+    executor = CompletionExecutor(bindings, policy)
+    # The old task allowance is a persisted recovery input, independent of
+    # this run's provider invoices. No long or truncated model output is requested.
+    historical_used = 3 if stop_at == "completed_child" else 2
+    executor.budget.restore(historical_used, {"compile": historical_used})
+    journal = TaskJournal(kb_dir, executor)
+    checkpoints = CompileCheckpoints(
+        kb_dir, journal.record, {"document": "manual"}, {"protocol": "summary-json"}
+    )
+    checkpoints.claim_repair("summary:1", digest(messages))
     if stop_at == "received_repair":
-        monkeypatch.setattr(litellm, "acompletion", cancel_received)
+        stopped = True
+    with executor.activate():
+        checkpoints.record_failure("summary:1", digest(messages), "page_truncated_response")
+    stopped = False
+    assert checkpoints.failure_code("summary:1", digest(messages)) == "page_truncated_response"
 
-    def cancel_split(self, window):
-        raise LockCancelled("Stop after truncated repair before split checkpoint")
+    async def forbidden(*args):
+        raise AssertionError("No generation is allowed while the local split is interrupted")
 
     if stop_at == "split_preparation":
-        monkeypatch.setattr(CompileSourceWindows, "split_document_window", cancel_split)
 
-    def interrupted():
-        return (
-            stopped_after_response
-            or stop_at == "completed_child"
-            and any(
-                record.get("entries", {}).get("summary:1.1", {}).get("state") == "accepted"
-                for path in (kb_dir / ".openkb/compile-checkpoints").rglob("manifest.json")
-                for record in [json.loads(path.read_text())]
-            )
+        def interrupted_split(window):
+            raise LockCancelled("Local cancellation before writing the split marker")
+
+        with monkeypatch.context() as patch:
+            patch.setattr(reader, "split_document_window", interrupted_split)
+            with executor.activate(), pytest.raises(LockCancelled):
+                await build_document_summary(
+                    reader,
+                    system_message=system,
+                    generate=forbidden,
+                    fits=lambda _: True,
+                    checkpoints=checkpoints,
+                )
+    children = reader.split_document_window(parent)
+    signatures = [digest(summary_messages(system, "manual", child)) for child in children]
+    assert len(children) == 2
+    if stop_at == "completed_child":
+        checkpoints.save("summary-split:1", digest(messages), signatures)
+        accepted = {
+            "description": "First accepted condition",
+            "sections": [
+                {
+                    "id": section["id"],
+                    "content": children[0]["content"][section["start"] : section["end"]],
+                }
+                for section in window_sections(children[0])
+            ],
+        }
+        checkpoints.save("summary:1.1", signatures[0], accepted)
+
+    resumed = CompletionExecutor(bindings, policy)
+    TaskJournal(kb_dir, resumed, resume=journal.record.task_id)
+    restored = CompileCheckpoints(
+        kb_dir, journal.record, {"document": "manual"}, checkpoints.conditions
+    )
+    sent = []
+
+    async def generate(request, stage, originals, sections):
+        sent.append(request)
+        return await generate_summary(request, stage, originals, sections, live_llm)
+
+    with resumed.activate():
+        draft = await build_document_summary(
+            reader,
+            system_message=system,
+            generate=generate,
+            fits=lambda _: True,
+            checkpoints=restored,
         )
-
-    model_service.replies.extend(
-        [(200, truncated_reply)] * 2
-        + [(200, complete_reply)] * 2
-        + [(200, response({"role": "assistant", "content": "{}"}))]
-    )
-    first = ExecutionContext(cancelled=interrupted)
-    with kb_ingest_lock(kb_dir / ".openkb"), first.begin(kb_dir):
-        with pytest.raises(LockCancelled):
-            await compile_long_doc("manual", summary, "id", kb_dir, "ignored", navigation=[])
-    assert (
-        len(model_service.requests)
-        == first.executor.calls
-        == (3 if stop_at == "completed_child" else 2)
-    )
+    assert len(sent) == (1 if stop_at == "completed_child" else 2)
+    assert resumed.calls == read_task(kb_dir, journal.record.task_id).used == 4
     assert summary.read_bytes() == before
-    monkeypatch.setattr(CompileSourceWindows, "split_document_window", actual_split)
-    monkeypatch.setattr(litellm, "acompletion", actual_completion)
-    resumed = ExecutionContext(resume_model_task_id=first.model_task.record.task_id)
-    with kb_ingest_lock(kb_dir / ".openkb"), resumed.begin(kb_dir):
-        await compile_long_doc("manual", summary, "id", kb_dir, "ignored", navigation=[])
-    assert len(model_service.requests) == resumed.executor.calls == 5
-    children = [
-        json.loads(request["messages"][1]["content"].split("\n", 1)[1])
-        for request in model_service.requests[2:4]
-    ]
     expected = original if source_kind == "text" else "[Physical page 1]\n\n" + original
     assert "".join(child["content"] for child in children) == expected
     assert children[0]["selection_offset"] == 0
@@ -133,101 +142,226 @@ async def test_split_summary_resumes_completed_child_with_original_task_allowanc
     else:
         assert children[0]["page_spans"][-1]["end"] == children[1]["page_spans"][0]["start"]
         assert children[-1]["page_spans"][-1]["end"] == len(original)
-    assert all(c["primary"] is False for child in children for c in child["supplementary_context"])
-    assert "Only reopen after inspection." in summary.read_text()
+    assert all(
+        context["primary"] is False
+        for child in children
+        for context in child["supplementary_context"]
+    )
+    with resumed.activate():
+        cached = await build_document_summary(
+            reader,
+            system_message=system,
+            generate=forbidden,
+            fits=lambda _: True,
+            checkpoints=restored,
+        )
+    assert cached == draft and resumed.calls == 4
+    _write_summary(
+        kb_dir / "wiki",
+        "manual",
+        draft.markdown,
+        doc_type="pageindex",
+        description=draft.description,
+        full_text=f"sources/manual.{'md' if source_kind == 'text' else 'json'}",
+    )
+    saved = summary.read_text().lower()
+    assert "inspection" in saved and "inlet" in saved and "closed" in saved
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("failure", ["child_length", "parent_protocol", "allowance"])
-async def test_summary_recovery_stops_without_another_split_or_fresh_allowance(
-    kb_dir, model_service, failure
-):
-    from openkb.agent.compiler import compile_long_doc
-    from openkb.application.execution import ExecutionContext
-    from openkb.compilation_report import CompilationIncomplete
-    from openkb.llm_execution import ModelBudgetExceeded
-    from openkb.locks import kb_ingest_lock
+def test_summary_recovery_stops_without_another_split_or_fresh_allowance(kb_dir, failure):
+    from types import SimpleNamespace
 
-    (kb_dir / ".env").write_text(f"LLM_API_KEY=fixture\nOPENAI_API_BASE={model_service.url}\n")
-    limit = 4 if failure == "allowance" else 8
-    (kb_dir / ".openkb/config.yaml").write_text(
-        "model: openai/gpt-4o-mini\nlanguage: en\nmodel_policy:\n"
-        f"  max_calls: {limit}\n  retries: 0\n"
+    from ultrakb.agent.document_summary import summary_messages
+    from ultrakb.agent.page_delivery import validate_page_delivery
+    from ultrakb.agent.page_response import PageResponseError
+    from ultrakb.compile_checkpoints import CompileCheckpoints, digest
+    from ultrakb.config import LlmCredentialBundle
+    from ultrakb.llm_execution import (
+        CompletionExecutor,
+        ModelBudgetExceeded,
+        ModelCallPolicy,
+        RoleBindings,
     )
-    (kb_dir / "wiki/sources/manual.md").write_text("Keep the inlet closed.\n\n" * 100)
-    summary = kb_dir / "wiki/summaries/manual.md"
-    summary.write_text("---\nfull_text: sources/manual.md\n---\nPrevious successful result.")
+    from ultrakb.model_task import TaskJournal
+
+    _, summary, reader, system, parent, messages = retained_summary(kb_dir, "text")
     before = summary.read_bytes()
-    reply = (
-        response({"role": "assistant", "content": "{}"})
-        if failure == "parent_protocol"
-        else truncated_reply
+    task = SimpleNamespace(task_id="a" * 32, parent_task_id=None)
+    checkpoints = CompileCheckpoints(
+        kb_dir, task, {"document": "manual"}, {"protocol": "summary-json"}
     )
-    model_service.replies.extend([(200, reply)] * 8)
-    error = ModelBudgetExceeded if failure == "allowance" else CompilationIncomplete
-    first = ExecutionContext()
-    with kb_ingest_lock(kb_dir / ".openkb"), first.begin(kb_dir):
-        with pytest.raises(error):
-            await compile_long_doc("manual", summary, "id", kb_dir, "ignored", navigation=[])
-    sends = 4 if failure == "child_length" else 2
-    assert len(model_service.requests) == first.executor.calls == sends
-    assert summary.read_bytes() == before
-    resumed = ExecutionContext(resume_model_task_id=first.model_task.record.task_id)
-    with kb_ingest_lock(kb_dir / ".openkb"), resumed.begin(kb_dir):
-        with pytest.raises(error):
-            await compile_long_doc("manual", summary, "id", kb_dir, "ignored", navigation=[])
-    assert len(model_service.requests) == resumed.executor.calls == sends
+    key, signature = "summary:1", digest(messages)
+    if failure == "parent_protocol":
+        with pytest.raises(PageResponseError):
+            validate_page_delivery(
+                "{}", response_protocol="summary-json", expected_sections=("section-1",)
+            )
+    else:
+        children = reader.split_document_window(parent)
+        assert len(children) == 2
+        key, signature = "summary:1.1", digest(summary_messages(system, "manual", children[0]))
+        checkpoints.save(
+            "summary-split:1",
+            digest(messages),
+            [digest(summary_messages(system, "manual", child)) for child in children],
+        )
+    checkpoints.claim_repair(key, signature)
+    checkpoints.record_failure(
+        key,
+        signature,
+        "summary_invalid_json" if failure == "parent_protocol" else "page_truncated_response",
+    )
+    restored = CompileCheckpoints(kb_dir, task, {"document": "manual"}, checkpoints.conditions)
+    with pytest.raises(PageResponseError, match="compile_repair_exhausted"):
+        restored.require_generation(key, signature)
+    if failure == "allowance":
+        bindings = RoleBindings("deepseek/deepseek-flash", LlmCredentialBundle())
+        policy = ModelCallPolicy(max_calls=4, retries=0)
+        executor = CompletionExecutor(bindings, policy)
+        executor.budget.restore(4, {"compile": 4})
+        journal = TaskJournal(kb_dir, executor)
+        resumed = CompletionExecutor(bindings, policy)
+        TaskJournal(kb_dir, resumed, resume=journal.record.task_id)
+        with pytest.raises(ModelBudgetExceeded):
+            resumed.budget.require("compile", 1)
+        assert resumed.calls == 4
+    assert restored.load(key, signature) is None
     assert summary.read_bytes() == before
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "model,limit,generation",
-    [
-        ("openai/gpt-4o-mini", 5000, ""),
-        (
-            "deepseek/deepseek-chat",
-            4995,
-            "role_generation:\n  compile:\n    reasoning_effort: none\n",
-        ),
-    ],
+    "model,limit", [("openai/gpt-4o-mini", 1800), ("deepseek/deepseek-chat", 1795)]
 )
+@pytest.mark.asyncio
 async def test_summary_window_admits_its_length_repair_before_using_the_allowance(
-    kb_dir, model_service, model, limit, generation
+    kb_dir, model, limit
 ):
-    from openkb.agent.compiler import compile_long_doc
-    from openkb.application.execution import ExecutionContext
-    from openkb.locks import kb_ingest_lock
+    import hashlib
 
-    (kb_dir / ".env").write_text(f"LLM_API_KEY=fixture\nOPENAI_API_BASE={model_service.url}\n")
-    (kb_dir / ".openkb/config.yaml").write_text(
-        f"model: {model}\nlanguage: en\nmodel_capacity:\n"
-        f"  max_input_tokens: {limit}\n  tokenizer_model: gpt-4o-mini\n"
-        "model_policy:\n  max_calls: 20\n  retries: 0\n" + generation
+    from ultrakb.agent.document_summary import (
+        SYSTEM_TEMPLATE,
+        build_document_summary,
+        summary_capacity,
+        summary_messages,
+        window_sections,
     )
+    from ultrakb.agent.page_response import PageResponseError, page_repair_message
+    from ultrakb.agent.source_windows import CompileSourceWindows
+    from ultrakb.compile_checkpoints import digest
+    from ultrakb.config import LlmCredentialBundle
+    from ultrakb.execution_capacity import capacity_policy
+    from ultrakb.llm_execution import CompletionExecutor, ModelCallPolicy, RoleBindings
+    from ultrakb.locks import atomic_write_text
+    from ultrakb.model_tokenizer import TokenMeasure
+
     original = (
-        "Operating context must be reviewed before continuing.\n\n" * 3000
-        if model.startswith("deepseek/")
-        else "The operating condition must be retained.\n\n" * 1800
-        + "Only reopen after inspection."
+        "Before maintenance, close the inlet and verify that pressure is zero.\n\n"
+        "If inspection detects a leak, keep the inlet closed and replace the damaged seal.\n\n"
+        "Only reopen after inspection confirms the seal is intact "
+        "and the operator records approval."
     )
-    (kb_dir / "wiki/sources/manual.md").write_text(original)
-    summary = kb_dir / "wiki/summaries/manual.md"
-    summary.write_text("---\nfull_text: sources/manual.md\n---\nPrevious result.")
+    source_path = kb_dir / "wiki/sources/manual.md"
+    atomic_write_text(source_path, original)
+    source_bytes = source_path.read_bytes()
+    reader = CompileSourceWindows(kb_dir / "wiki", "manual")
+    system = {"role": "system", "content": SYSTEM_TEMPLATE.format(language="en")}
+    config = {
+        "model": model,
+        "model_capacity": {"max_input_tokens": limit, "tokenizer_model": "gpt-4o-mini"},
+    }
+    fits = summary_capacity(config, custom_endpoint=False)
+    measure = TokenMeasure(capacity_policy(config, custom_endpoint=False))
 
-    def reply(request):
-        if "Based on the summary above" in str(request):
-            return response({"role": "assistant", "content": "{}"})
-        return complete_reply(request)
+    def admitted(window):
+        messages = summary_messages(system, "manual", window)
+        correction = page_repair_message(
+            "page_truncated_response",
+            "Incomplete summary receipt",
+            response_protocol="summary-json",
+            expected_sections=tuple(s["id"] for s in window_sections(window)),
+        )
+        return fits(messages) and fits([*messages, correction])
 
-    model_service.replies.extend([(200, truncated_reply)] + [(200, reply)] * 19)
-    context = ExecutionContext()
-    with kb_ingest_lock(kb_dir / ".openkb"), context.begin(kb_dir):
-        await compile_long_doc("manual", summary, "id", kb_dir, "ignored", navigation=[])
-    original_messages = model_service.requests[0]["messages"]
-    repair_messages = model_service.requests[1]["messages"]
-    assert len(repair_messages) == len(original_messages) + 1
-    assert repair_messages[:-1] == original_messages
-    assert "failed validation (page_truncated_response)" in str(model_service.requests[1])
-    assert context.executor.calls == len(model_service.requests)
-    assert original.strip().splitlines()[-1] in summary.read_text()
+    windows = list(reader.iter_document_windows(fits=admitted))
+    assert windows
+    assert "".join(window["content"] for window in windows) == original
+    cursor = 0
+    reconstructed = []
+    for window in windows:
+        assert window["selection_offset"] == cursor
+        assert window["sha256"] == hashlib.sha256(source_bytes).hexdigest()
+        parts = []
+        for start, end in window["source_spans"]:
+            assert start == cursor
+            assert start < end <= len(original)
+            parts.append(original[start:end])
+            cursor = end
+        assert window["content"] == "".join(parts)
+        reconstructed.extend(parts)
+        original_messages = summary_messages(system, "manual", window)
+        signature = digest(original_messages)
+        correction = page_repair_message(
+            "page_truncated_response",
+            "Incomplete summary receipt",
+            response_protocol="summary-json",
+            expected_sections=tuple(s["id"] for s in window_sections(window)),
+        )
+        repair_messages = [*original_messages, correction]
+        assert len(repair_messages) == len(original_messages) + 1
+        assert repair_messages[:-1] == original_messages
+        assert digest(repair_messages[:-1]) == signature
+        assert "failed validation (page_truncated_response)" in str(correction)
+        assert (
+            measure.payload_tokens(
+                {"messages": repair_messages, "response_format": {"type": "json_object"}}
+            )
+            <= limit
+        )
+    assert cursor == len(original)
+    assert "".join(reconstructed) == original
+
+    # Admission must include the correction envelope even when the original
+    # request fits. This boundary needs no model response or spent allowance.
+    parent = next(reader.iter_document_windows(fits=lambda _: True))
+    messages = summary_messages(system, "manual", parent)
+    normal_tokens = measure.payload_tokens(
+        {"messages": messages, "response_format": {"type": "json_object"}}
+    )
+    tight_fits = summary_capacity(
+        {
+            **config,
+            "model_capacity": {
+                **config["model_capacity"],
+                "max_input_tokens": normal_tokens,
+            },
+        },
+        custom_endpoint=False,
+    )
+    assert tight_fits(messages)
+    correction = page_repair_message(
+        "page_truncated_response",
+        "Incomplete summary receipt",
+        response_protocol="summary-json",
+        expected_sections=tuple(s["id"] for s in window_sections(parent)),
+    )
+    assert not tight_fits([*messages, correction])
+
+    async def forbidden_generation(*args):
+        raise AssertionError("Capacity admission must finish before requesting generation")
+
+    executor = CompletionExecutor(
+        RoleBindings(model, LlmCredentialBundle()), ModelCallPolicy(max_calls=2, retries=0)
+    )
+    with (
+        executor.activate(),
+        pytest.raises(PageResponseError, match="document_summary_capacity_exceeded"),
+    ):
+        await build_document_summary(
+            reader,
+            system_message=system,
+            generate=forbidden_generation,
+            fits=tight_fits,
+        )
+    assert executor.calls == 0
+    assert source_path.read_bytes() == source_bytes

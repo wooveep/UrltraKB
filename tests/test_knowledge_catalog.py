@@ -1,7 +1,7 @@
 """The reading catalog contains knowledge rather than wiki maintenance internals."""
 
-from openkb.application.knowledge import list_knowledge
-from openkb.locks import atomic_write_text
+from ultrakb.application.knowledge import list_knowledge
+from ultrakb.locks import atomic_write_text
 
 
 def test_knowledge_catalog_uses_titles_descriptions_and_excludes_internal_files(kb_dir):

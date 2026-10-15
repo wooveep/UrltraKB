@@ -40,7 +40,7 @@ def test_native_inventory_attributes_editable_pageindex_to_its_source(monkeypatc
     monkeypatch.syspath_prepend(str(ROOT / "scripts"))
     from scripts.inventory_desktop import Inputs
 
-    inputs = Inputs(ROOT, {"version": metadata.version("openkb"), "commit": "fixture"})
+    inputs = Inputs(ROOT, {"version": metadata.version("ultrakb"), "commit": "fixture"})
     component, path = inputs.owner(ROOT / "vendor/PageIndex/pageindex/client.py")
     assert component == "python/pageindex@0.3.0.dev3+urltrakb.13"
     assert path == "vendor/PageIndex/pageindex/client.py"

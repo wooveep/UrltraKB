@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import yaml
 
-from openkb.config import resolve_credential_bundle, resolve_per_request_overrides
+from ultrakb.config import resolve_credential_bundle, resolve_per_request_overrides
 
 
 def _write_config(kb_dir: object, config: dict) -> None:
-    """Write a config dict to ``.openkb/config.yaml``."""
-    openkb_dir = kb_dir / ".openkb"
-    openkb_dir.mkdir(parents=True, exist_ok=True)
-    (openkb_dir / "config.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
+    """Write a config dict to ``.ultrakb/config.yaml``."""
+    ultrakb_dir = kb_dir / ".ultrakb"
+    ultrakb_dir.mkdir(parents=True, exist_ok=True)
+    (ultrakb_dir / "config.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
 
 
 def test_litellm_extra_headers_overrides_top_level():
@@ -84,7 +84,7 @@ def test_bundle_has_no_litellm_settings_field():
     """The bundle must not carry litellm_settings (process global, not isolatable)."""
     import dataclasses
 
-    from openkb.config import LlmCredentialBundle
+    from ultrakb.config import LlmCredentialBundle
 
     field_names = {f.name for f in dataclasses.fields(LlmCredentialBundle)}
     assert "litellm_settings" not in field_names

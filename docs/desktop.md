@@ -1,6 +1,6 @@
-# UrltraKB native desktop guide
+# UltraKB native desktop guide
 
-The desktop opens local knowledge bases in their existing format. It uses Qt
+The desktop opens local knowledge bases in the current UltraKB format. It uses Qt
 Widgets for its interface and local static rendering for mathematics and Mermaid.
 The CLI and independent REST API use the same application operations and data.
 The desktop defines the common business behavior; terminal output, HTTP responses
@@ -12,10 +12,10 @@ recorded source revisions; this branch has separate source-level validation.
 
 ## Launch and data locations
 
-On Windows 11 x86_64, unpack the complete program directory and run `UrltraKB.exe`.
-On Debian 13.6 x86_64 GNOME/X11, extract the program archive and run `UrltraKB`.
-Runtime archives and their top-level directory are named **UrltraKB**. Full
-source/build materials are a separate `UrltraKB-VERSION-materials.zip` download;
+On Windows 11 x86_64, unpack the complete program directory and run `UltraKB.exe`.
+On Debian 13.6 x86_64 GNOME/X11, extract the program archive and run `UltraKB`.
+Runtime archives and their top-level directory are named **UltraKB**. Full
+source/build materials are a separate `UltraKB-VERSION-materials.zip` download;
 licenses and the companion archive checksum remain available in About.
 Keep the program's resources together. No developer Python, Node or Rust runtime
 is needed to run a complete portable build. Other Linux desktops, Wayland,
@@ -27,9 +27,10 @@ their full paths. Two KBs may share a directory name; select by path. Switching
 the active KB changes what you browse and where new work is submitted. It does
 not stop work already submitted for another KB.
 
-Knowledge-base configuration remains in `.openkb/config.yaml`, KB credentials in
-its `.env`, and completed conversations in `.openkb/chats`. Global configuration
-uses the existing OpenKB user configuration directory. Task summaries and
+Knowledge-base configuration remains in `.ultrakb/config.yaml`, KB credentials in
+its `.env`, and completed conversations in `.ultrakb/chats`. Global configuration
+uses `~/.config/ultrakb/`. Older data requires the
+[name-switch procedure](../README.md#名称切换与旧数据). Task summaries and
 directory lifecycle records also live outside the program directory. Replacing
 program files after a full exit does not move or delete these data.
 
@@ -53,20 +54,94 @@ page; task outputs belong to their task on **任务**, including tasks from anot
 
 **设置 → 外观** offers **跟随系统** (default), **浅色**, and **深色**. The selected
 mode applies to all pages and newly opened dialogs. Appearance and sidebar
-choices use the existing Qt `OpenKB/OpenKB` application identity in the user's
+choices use the Qt `UltraKB/UltraKB` application identity in the user's
 platform settings, separately from KB/model/credential configuration. The reader's
 zoom is available on the Knowledge page and applies to content previews as well.
+
+New knowledge bases dynamically inherit the global model connection and defaults.
+**设置 → 所有知识库** changes the global defaults; **当前知识库** shows each effective
+value and its origin. Choose **设置本库覆盖** for an independent value, or **恢复继承**
+to remove it. Existing explicit overrides remain in place. Credentials resolve
+from the KB, then the startup environment, then global settings. The settings page
+explains when startup credentials take precedence over a saved global value;
+API keys are never read back. Ordinary CLI and HTTP creation also inherit defaults.
+
+The connection section offers a few documented service examples and keeps manual
+model/address entry. **高级参数** reveals capacity, recovery, PDF and Office controls.
+Selecting the OpenAI or DeepSeek example also fills a conservative capacity preset,
+so the first import and question can proceed without editing advanced parameters.
+The preset belongs to that exact model; a different manually entered model needs
+its own capacity declaration. Custom and local services retain explicit limits.
+**保存设置** saves independently of testing. **测试并继续** first saves pending choices,
+then uses small synthetic input to check text and one function-call round trip,
+with a request limit, a 20-second deadline and **取消测试**. It sends no KB content.
+A pass shows its time and capability scope and can be reused by inheriting KBs;
+changing the effective connection invalidates that pass. Opening settings does
+not probe the service. A failure explains how to recover, keeps the saved choices
+and allows local browsing. CLI and HTTP operations keep their existing entry flow.
 
 See [implementation and evidence](desktop-workbench.md) for the scope, assets,
 actual application screenshots and reproducible source acceptance commands.
 
+An empty KB can be created and browsed before configuring a model. The first
+model operation opens a connection guide with global defaults and explicit KB
+overrides. **稍后继续** preserves the empty KB, saved settings and original input;
+**概览** offers a continuation button. A successful test resumes the captured
+operation once, with its original target KB. Switching KBs pauses this continuation;
+return to that KB to resume. Closing the originating panel prevents its operation
+from submitting. The worker checks the effective connection again after acquiring
+the KB lease, so a changed connection cannot reuse an earlier verification.
+
 ## Import and maintain knowledge
 
-Import files, folders, or URLs from **资料** (Documents). Supported document inputs
+The import area keeps the submitted KB path, progress and **查看导入任务详情** visible.
+After usable content is available, **开始提问** opens the chat. If you switched KBs,
+**切回导入目标并提问** explicitly returns to the original target. Completion updates
+the notice without changing your page or current KB. A partial result can use
+available content while task details explain unfinished work. With no usable
+content, the notice directs you to task details and the document's recovery menu.
+
+Use **导入资料** on **资料** (Documents) for files; its menu also accepts folders
+and URLs. **导入选项** folds the less frequent image-download override. Search by
+name or filter by reading/processing state. Each row offers **阅读** and **更多**;
+the latter includes details, retry, regeneration, reprocessing and reviewed removal.
+Unavailable commands explain their reason on selection and in the menu. Technical
+processing fields appear in details. **知识维护** on Knowledge provides whole-KB
+regeneration, updates and proposal review; **任务 → 待处理工作** opens durable jobs.
+Supported document inputs
 include PDF, Markdown, Word, PowerPoint, Excel, HTML, text, CSV, CAJ and KDH. Each task
 shows its KB, current stage and individual outcomes. An already indexed input
 may be skipped. A batch can retain completed documents while reporting failed
 or unprocessed ones.
+
+Checkboxes select the explicit batch independently of the focused row. **全选当前结果**
+and Ctrl+A while the table has focus select only the filtered rows; shortcuts inside
+search stay in that field. Changing a filter clears checked items with a notice.
+Sorting and refresh retain typed identities; disappeared documents leave the selection.
+The batch bar shows selected/applicable counts and skip reasons. **重新生成知识**
+rechecks and confirms the exact applicable subset before submission; row menus say
+**仅此资料** and preserve the checkbox set. **重试未完成项** reviews unfinished
+source/worksheet targets and excludes completed ones. Independent local failures
+allow the next item; model authentication, permission, missing-model and quota
+faults stop that batch's remaining work. Stopping waits for active cleanup and
+preserves commits. Task details distinguish exclusions, attempted failures,
+unconfirmed outcomes and unstarted items. A batch retains its first captured
+settings; later changes affect new operations.
+
+**移除所选资料** reviews the aggregate effect of withdrawing new Sources, including
+pages that will lose all effective sources. Originals, images and historical
+snapshots remain; affected knowledge shows pending refresh and withdrawn sources
+are excluded from current answer evidence. The confirmed version is rechecked under
+the KB write lease, and each Source has its own transaction. Stop or failure retains
+completed withdrawals and reports unexecuted items. This operation makes no model
+calls and never deletes external originals. Mixed batches show separate Source
+withdrawal and legacy cleanup consequences and require both group confirmations.
+Only legacy documents offer **保留原始文件副本** and **保留失去来源的空页面**;
+changing an option recalculates the whole preview and clears confirmation.
+Shared legacy files and pages are aggregated across the selection, while referenced
+images and immutable Source history stay protected. Task details record committed
+cleanup, failed phases and unexecuted items. Legacy cleanup can make old links
+unreadable; the UI makes no migration or undo promise.
 
 Local CAJ/KDH files retain their original name and bytes. Supported CAJ, KDH
 and embedded PDF content becomes an internal PDF for the ordinary import
@@ -143,14 +218,44 @@ while the KB is busy. Recovery transfers them into the conversation without
 replaying model requests; interrupted submissions remain in the timeline
 with an unfinished notice and are never counted as completed model turns.
 
-Below the composer, **本对话 tokens** shows reported cumulative input cache hits,
-input cache misses, output tokens and reasoning tokens, including model requests
-made while using tools. The model is asked to return streaming usage; counters
-update as each request reports its usage, not as each character appears. Output
-already includes reasoning tokens. **—** means no usable count was reported;
-older conversations are not retrospectively estimated. Counts are saved with the
-conversation, including reported requests from an unfinished turn. SDK/provider
-normalization may report zero for unsupported detail fields.
+Messages and the composer stretch with the workspace; the assistant answer has no
+surrounding card border and user questions use a light background. Wide tables and
+code scroll inside their reader, while figures and display formulas fit its width.
+Other knowledge readers keep their existing reading width. The input has no footer
+hint or cumulative usage counter. Activity and unfinished notices sit beside the
+corresponding answer. Enter sends, Shift+Enter adds a line, and confirming an input
+method composition keeps that action inside the composer. Reading earlier messages
+preserves scroll position during streaming; switching chats preserves drafts.
+
+Each committed answer has keyboard-accessible **复制** and **字符** actions below
+its body. Copy uses that answer's retained Markdown and existing citations, with
+success or retry feedback. Character counts use the actual rendered text, including
+punctuation, code and tables, excluding whitespace and Markdown formatting. Combining
+characters and emoji clusters count as one; flag pairs follow
+[Unicode UAX #29](https://www.unicode.org/reports/tr29/#Grapheme_Cluster_Boundary_Rules).
+Graphical formulas and images count as zero text characters; visible source fallback
+or alternative text counts when it is actually displayed. Details show only reported
+usage belonging to that exchange. Older records without it say **未提供单条模型用量**;
+cumulative conversation usage is never substituted. Streaming and unfinished notices
+have no completed-answer statistics, and statistics make no model requests.
+
+Choose **提问** on a document row to prefer that document in the current KB.
+The chat header names the KB and focused documents, with **取消关注** and a
+recovery entrance. This preference still allows retrieval from other relevant
+documents in the same KB. Partially processed workbooks can use completed sheets;
+failed and pending sheets remain explicit. Documents without usable content offer
+reading, reprocessing or retry from their row's **更多** menu.
+
+**出处（N）** below each completed answer expands references actually present in
+its Markdown, deduplicated by Source identity or legacy registry identity. A focus
+label or tool activity alone never creates an answer citation. Original-reading
+receipts distinguish references with returned evidence from links alone. Body
+links and **核对原文** open the captured version; **返回回答** restores the answer's
+scroll position. Missing or changed retained evidence shows a recovery message
+instead of silently substituting another revision. Older answers without snapshots
+say so and can only offer current readable references, without claiming historical
+provenance. Saved summaries and knowledge pages remain identified as generated
+content rather than originals.
 
 Code fences use selectable syntax colors in both themes. The delimiter's final
 line ending does not create a blank code line; intentional internal blank lines
@@ -236,9 +341,29 @@ For a manual update, finish explicit Quit, replace the complete program director
 with the new version, then reopen your existing KB locations. Do not replace
 program files while background work is still running.
 
+## Command locations after the desktop update
+
+| Task | Current entrance |
+| --- | --- |
+| Import files, folders or URLs | 资料 → 导入资料 menu |
+| Reading and focused questions | Document row → 阅读 / 提问 |
+| Details, reprocessing and single-document maintenance | Document row → 更多 |
+| Retry or remove an explicit group | Check rows → 重试未完成项 / 移除所选资料 |
+| Recompile the explicit group | Check rows → 重新生成知识 |
+| Whole-KB maintenance and knowledge refresh | 知识 → maintenance menu / 检查与修复 |
+| Task results, stop and retry | 任务, or 查看导入任务详情 for the captured import |
+| Directory watching | 任务 → 目录监听 |
+| Model connection and advanced defaults | 设置 → global or current KB tab |
+| Answer copy, characters and evidence | Below that answer → 复制 / 字符 / 出处 |
+
+The source acceptance matrix for this update is
+[A01–A24](validation/desktop-ux-A01-A24-2026-10-15.md). It distinguishes native
+desktop interaction, offline tests and real-service runs, including platform
+limits and retained evidence.
+
 ## Version, source and licenses
 
-Open **Application menu (⋯) → 关于 UrltraKB · 源码与许可** to inspect and copy the
+Open **Application menu (⋯) → 关于 UltraKB · 源码与许可** to inspect and copy the
 installed version, source commit, material filenames and SHA256 checksums. The
 license tab displays original copyright and license texts without opening a
 browser. The material-directory button locates the matching source archives,

@@ -1,8 +1,5 @@
 """Shared model-I/O fixture for frozen block integration tests."""
 
-import json
-from types import SimpleNamespace
-
 import pytest
 
 
@@ -14,7 +11,7 @@ def wide_short_prompt(monkeypatch):
     this route with a one-token model limit. Keep the later planning schema
     usable too: an oversized shared schema cannot succeed in either route.
     """
-    from openkb.agent import compiler
+    from ultrakb.agent import compiler
 
     original = compiler.short_document_messages
 
@@ -27,45 +24,18 @@ def wide_short_prompt(monkeypatch):
 
 
 @pytest.fixture
-def block_model(monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "fixture-key")
+def block_model(monkeypatch, live_llm):
+    live_llm.install(monkeypatch)
     requests = []
 
+    # Observe exactly what the compiler prepared without changing the reply.
     def completion(**kwargs):
-        prompt = "\n".join(str(m.get("content", "")) for m in kwargs["messages"])
-        requests.append(prompt)
-        if "CONTENT BLOCK STRUCTURE" in prompt:
-            response = [
-                {
-                    "structure": "1",
-                    "title": "A greeting",
-                    "title_origin": "generated",
-                    "physical_index": 1,
-                    "anchor": {"unit": 1, "part": "body", "range": [0, 5], "excerpt": "hello"},
-                }
-            ]
-        else:
-            response = {
-                "description": "Greeting",
-                "content": "A greeting.",
-                "create": [],
-                "update": [],
-                "related": [],
-            }
-        from compile_responses import summary_reply
-
-        response = summary_reply(kwargs["messages"], response)
-        return SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    message=SimpleNamespace(content=json.dumps(response)), finish_reason="stop"
-                )
-            ],
-            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
-        )
+        requests.append("\n".join(str(m.get("content", "")) for m in kwargs["messages"]))
+        return live_llm.completion(**kwargs)
 
     async def acompletion(**kwargs):
-        return completion(**kwargs)
+        requests.append("\n".join(str(m.get("content", "")) for m in kwargs["messages"]))
+        return await live_llm.acompletion(**kwargs)
 
     monkeypatch.setattr("litellm.completion", completion)
     monkeypatch.setattr("litellm.acompletion", acompletion)

@@ -6,7 +6,7 @@ import pytest
 
 
 def test_explicit_unchanged_result_keeps_the_captured_page():
-    from openkb.agent.page_updates import PageUpdate, UnchangedPage
+    from ultrakb.agent.page_updates import PageUpdate, UnchangedPage
 
     original = "---\ntype: Concept\n---\n# Conditions\n\nOnly during winter.\n"
     update = PageUpdate(original)
@@ -26,8 +26,8 @@ def test_explicit_unchanged_result_keeps_the_captured_page():
 
 
 def test_metadata_only_update_preserves_body_and_validates_entity_type():
-    from openkb.agent.page_response import PageResponseError
-    from openkb.agent.page_updates import PageUpdate
+    from ultrakb.agent.page_response import PageResponseError
+    from ultrakb.agent.page_updates import PageUpdate
 
     original = "---\ntype: product\ndescription: Wrong object\n---\n# Device\n\nRetained body.\n"
     update = PageUpdate(original, allowed_types=frozenset({"product", "other"}))
@@ -43,7 +43,7 @@ def test_metadata_only_update_preserves_body_and_validates_entity_type():
 
 @pytest.mark.parametrize("returned_type", ["Work", "work", "Other"])
 def test_updates_use_the_same_type_vocabulary_as_published_frontmatter(returned_type):
-    from openkb.agent.page_updates import PageUpdate
+    from ultrakb.agent.page_updates import PageUpdate
 
     original = "---\ntype: Work\ndescription: Manual\n---\n# Manual\n\nOld rule.\n"
     patch = PageUpdate(original, allowed_types=frozenset({"work", "other"}))
@@ -62,8 +62,8 @@ def test_updates_use_the_same_type_vocabulary_as_published_frontmatter(returned_
 
 @pytest.mark.parametrize("bad", ["extra", "empty", "shape", "hash", "stale"])
 def test_unchanged_requires_a_valid_frozen_page_and_only_its_declared_fields(bad):
-    from openkb.agent.page_response import PageResponseError
-    from openkb.agent.page_updates import PageUpdate
+    from ultrakb.agent.page_response import PageResponseError
+    from ultrakb.agent.page_updates import PageUpdate
 
     original = "# Conditions\n\nOnly during winter.\n"
     update = PageUpdate(original)
@@ -82,7 +82,7 @@ def test_unchanged_requires_a_valid_frozen_page_and_only_its_declared_fields(bad
 
 @pytest.mark.parametrize("newline", ["\n", "\r\n"])
 def test_patch_keeps_unedited_tables_fences_and_whitespace(newline):
-    from openkb.agent.page_updates import PageUpdate
+    from ultrakb.agent.page_updates import PageUpdate
 
     body = (
         "\n# Valve\n\nCapacity: 12 litres.\n\n"
@@ -117,8 +117,8 @@ def test_patch_keeps_unedited_tables_fences_and_whitespace(newline):
 
 @pytest.mark.parametrize("bad", ["base", "block", "conflict", "operation", "stale"])
 def test_patch_rejects_uncertain_targets_and_changed_pages(bad):
-    from openkb.agent.page_response import PageResponseError
-    from openkb.agent.page_updates import PageUpdate
+    from ultrakb.agent.page_response import PageResponseError
+    from ultrakb.agent.page_updates import PageUpdate
 
     original = "# Conditions\n\nOnly during winter.\n"
     update = PageUpdate(original)
@@ -138,7 +138,7 @@ def test_patch_rejects_uncertain_targets_and_changed_pages(bad):
 
 
 def test_untouched_duplicate_numeric_bindings_survive_an_unrelated_insert():
-    from openkb.agent.page_updates import PageUpdate
+    from ultrakb.agent.page_updates import PageUpdate
 
     table = (
         "| Object | Condition | Latency |\n| --- | --- | --- |\n"
@@ -168,7 +168,7 @@ def test_untouched_duplicate_numeric_bindings_survive_an_unrelated_insert():
 
 
 def test_link_filtering_only_changes_new_edits():
-    from openkb.agent.page_updates import PageUpdate
+    from ultrakb.agent.page_updates import PageUpdate
 
     original = "# Context\n\nRetained [[concepts/old-target]] relationship.\n"
     update = PageUpdate(original, known_targets={"concepts/allowed"})
@@ -192,65 +192,46 @@ def test_link_filtering_only_changes_new_edits():
     assert "New invalid and [[concepts/allowed]]." in result["content"]
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("stale", [False, True])
-async def test_compiler_patch_repair_is_bounded_at_transport(monkeypatch, stale):
-    from types import SimpleNamespace
+def test_compiler_patch_repair_is_bounded_at_transport(kb_dir, stale):
+    from test_compile_windows import _checkpoints
 
-    from openkb.agent.compiler import _llm_call_page_async
-    from openkb.agent.page_response import PageResponseError
-    from openkb.agent.page_updates import PageUpdate
+    from ultrakb.agent.page_delivery import validate_page_delivery
+    from ultrakb.agent.page_response import PageResponseError, page_repair_message
+    from ultrakb.agent.page_updates import PageUpdate
 
     original = "# Conditions\n\nWinter rule.\n"
     update = PageUpdate(original)
     data = update.request()
-    sends = []
-
-    async def response(**kwargs):
-        sends.append(kwargs)
-        reply = {
-            "base_sha256": "bad" if len(sends) == 1 else data["base_sha256"],
-            "edits": [
-                {
-                    "block_id": data["blocks"][-1]["id"],
-                    "operation": "insert_after",
-                    "content": "\nNew supported condition.\n",
-                }
-            ],
-        }
-        return SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    message=SimpleNamespace(content=json.dumps(reply)), finish_reason="stop"
-                )
-            ],
-            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+    edit = {
+        "block_id": data["blocks"][-1]["id"],
+        "operation": "insert_after",
+        "content": "\nNew supported condition.\n",
+    }
+    checkpoints = _checkpoints(kb_dir)
+    initial = json.dumps({"base_sha256": "bad", "edits": [edit]})
+    expected = "page_update_stale" if stale else "page_update_invalid"
+    with pytest.raises(PageResponseError, match=expected) as failure:
+        validate_page_delivery(
+            initial, page_update=update, read_current=lambda: "Human change." if stale else original
         )
-
-    monkeypatch.setattr("litellm.acompletion", response)
     if stale:
-        with pytest.raises(PageResponseError, match="page_update_stale"):
-            await _llm_call_page_async(
-                "test-model",
-                [update.message()],
-                "update",
-                page_update=update,
-                read_current=lambda: "Human change.",
-            )
-        assert len(sends) == 1
+        assert not checkpoints.path.exists()
     else:
+        correction = page_repair_message(failure.value.code, str(failure.value), page_update=True)
+        assert "captured base_sha256" in correction["content"]
+        checkpoints.claim_repair("page", "same-request")
         result = json.loads(
-            await _llm_call_page_async(
-                "test-model",
-                [update.message()],
-                "update",
+            validate_page_delivery(
+                json.dumps({"base_sha256": data["base_sha256"], "edits": [edit]}),
                 page_update=update,
                 read_current=lambda: original,
             )
         )
         assert "Winter rule." in result["content"]
         assert "New supported condition." in result["content"]
-        assert len(sends) == 2
+        with pytest.raises(PageResponseError, match="compile_repair_exhausted"):
+            checkpoints.claim_repair("page", "same-request")
 
 
 @pytest.mark.parametrize(
@@ -258,7 +239,7 @@ async def test_compiler_patch_repair_is_bounded_at_transport(monkeypatch, stale)
     [("0.012 s", "checked_numeric_subset"), ("24 ms", "conflict"), ("12 kg", "conflict")],
 )
 def test_numeric_table_check_binds_object_attribute_unit_and_condition(value, status):
-    from openkb.agent.page_updates import check_numeric_subset
+    from ultrakb.agent.page_updates import check_numeric_subset
 
     table = (
         "# Limits\n\n| Object | Attribute | Condition | Value |\n"
@@ -278,13 +259,13 @@ def test_numeric_table_check_binds_object_attribute_unit_and_condition(value, st
     ],
 )
 def test_numeric_check_allows_derived_values_and_limits_arithmetic(equation, status):
-    from openkb.agent.page_updates import check_numeric_subset
+    from ultrakb.agent.page_updates import check_numeric_subset
 
     assert check_numeric_subset(equation, ["Inputs are seven and five."])["status"] == status
 
 
 def test_numeric_check_leaves_ambiguous_bindings_and_unchanged_old_content_alone():
-    from openkb.agent.page_updates import check_numeric_subset
+    from ultrakb.agent.page_updates import check_numeric_subset
 
     template = "Object: 42\nCondition: Winter\nLatency: {}\n"
     assert (

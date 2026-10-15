@@ -2,24 +2,29 @@
 
 from collections import Counter
 
-import pytest
-
-pytest_plugins = ("test_office_import", "block_fixtures")
+pytest_plugins = ("test_office_import", "block_fixtures", "workbook_fixtures")
 
 
-@pytest.fixture
-def three_sheets(tmp_path):
-    from openpyxl import Workbook
-
-    book = Workbook()
-    book.active.title = "Alpha"
-    book.active["A1"] = "ALPHA_SHEET"
-    book.create_sheet("Beta")["A1"] = "BETA_SHEET"
-    book.create_sheet("Gamma")["A1"] = "GAMMA_SHEET"
-    book["Gamma"].sheet_state = "hidden"
-    path = tmp_path / "three.xlsx"
-    book.save(path)
-    return path
+def worksheet_prompt_markers(messages, markers=("ALPHA_SHEET", "BETA_SHEET", "GAMMA_SHEET")):
+    """Observe the current source, excluding earlier publications in wiki context."""
+    text = []
+    for message in messages:
+        content = message.get("content")
+        if isinstance(content, list):
+            content = "\n".join(
+                block.get("text", "") for block in content if isinstance(block, dict)
+            )
+        if isinstance(content, str):
+            text.append(content)
+    original = next(
+        (
+            content
+            for content in text
+            if content.startswith(("New document: ", "Original document: "))
+        ),
+        "\n".join(text),
+    )
+    return [marker for marker in markers if marker in original]
 
 
 def test_one_sheet_failure_keeps_other_publications_and_retry_skips_them(
@@ -27,21 +32,19 @@ def test_one_sheet_failure_keeps_other_publications_and_retry_skips_them(
 ):
     import litellm
 
-    from openkb.application.documents import import_document
-    from openkb.application.sources import source_inventory
-    from openkb.documents import read_document_source
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.sources import source_inventory
+    from ultrakb.documents import read_document_source
 
     original = litellm.completion
     calls = Counter()
     fail = True
 
     def completion(**kwargs):
-        prompt = str(kwargs["messages"])
-        for sheet in ("ALPHA_SHEET", "BETA_SHEET", "GAMMA_SHEET"):
-            if sheet in prompt:
-                calls[sheet] += 1
-                if fail and sheet == "BETA_SHEET":
-                    raise ValueError("Fixture model rejects only Beta")
+        for sheet in worksheet_prompt_markers(kwargs["messages"]):
+            calls[sheet] += 1
+            if fail and sheet == "BETA_SHEET":
+                raise ValueError("Local transport rejects only Beta")
         return original(**kwargs)
 
     async def acompletion(**kwargs):
@@ -63,12 +66,11 @@ def test_one_sheet_failure_keeps_other_publications_and_retry_skips_them(
     fail = False
     resumed = import_document(kb_dir, three_sheets)
     assert resumed.status == "added", resumed.message
-    assert calls["ALPHA_SHEET"] == before["ALPHA_SHEET"]
-    assert calls["GAMMA_SHEET"] == before["GAMMA_SHEET"]
     assert calls["BETA_SHEET"] > before["BETA_SHEET"]
-    assert units["Gamma"].knowledge_revision_id == next(
-        item.knowledge_revision_id for item in resumed.units if item.name == "Gamma"
-    )
+    for name in ("Alpha", "Gamma"):
+        saved = next(item for item in resumed.units if item.name == name)
+        assert saved.knowledge_revision_id == units[name].knowledge_revision_id
+        assert saved.model_usage["current"]["requests"] == 0
     sources = source_inventory(kb_dir)
     assert len(sources) == 1 and len(sources[0]["units"]) == 3
 
@@ -77,27 +79,33 @@ def test_segmented_sheet_keeps_cell_locations_and_recompiles_offline(
     kb_dir, three_sheets, pdf_model, monkeypatch, wide_short_prompt
 ):
     import asyncio
-    import json
-    from types import SimpleNamespace
 
     import litellm
+    from openpyxl import load_workbook
 
-    from openkb.application.documents import import_document
-    from openkb.application.recompilation import recompile_document, select_recompilation
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
-    from openkb.documents import read_document_source
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.recompilation import recompile_document, select_recompilation
+    from ultrakb.application.settings import apply_kb_config_patch
+    from ultrakb.application.settings_data import KbConfigPatchRequest
+    from ultrakb.documents import read_document_source
 
+    # Only Gamma's real segmented generation and cached offline recompilation
+    # are under test. XLSX requires a visible sheet beside the hidden target.
+    book = load_workbook(three_sheets)
+    book["Alpha"]["A1"] = None
+    book.remove(book["Beta"])
+    book.save(three_sheets)
+    book.close()
     apply_kb_config_patch(
         kb_dir,
         KbConfigPatchRequest(
             # Planning and cell provenance fit; the wide short prompt selects
             # segmented execution without making the shared schema unusable.
             kb=str(kb_dir),
-            config={"model": "gpt-4o", "model_capacity": {"max_input_tokens": 4000}},
+            config={"model_capacity": {"max_input_tokens": 4000, "tokenizer_model": "gpt-4o-mini"}},
         ),
     )
-    original = litellm.completion
+    original, async_original = litellm.completion, litellm.acompletion
     structures = []
 
     def completion(**kwargs):
@@ -105,49 +113,28 @@ def test_segmented_sheet_keeps_cell_locations_and_recompiles_offline(
         if "CONTENT BLOCK STRUCTURE" not in prompt:
             return original(**kwargs)
         structures.append(prompt)
-        marker, start = next(
-            (marker, start)
-            for marker, start in (("ALPHA_SHEET", 40), ("BETA_SHEET", 39), ("GAMMA_SHEET", 39))
-            if marker in prompt
-        )
-        return SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    message=SimpleNamespace(
-                        content=json.dumps(
-                            [
-                                {
-                                    "structure": "1",
-                                    "title": "Worksheet",
-                                    "title_origin": "generated",
-                                    "physical_index": 1,
-                                    "anchor": {
-                                        "unit": 1,
-                                        "part": "body",
-                                        "range": [start, start + len(marker)],
-                                        "excerpt": marker,
-                                    },
-                                }
-                            ]
-                        )
-                    ),
-                    finish_reason="stop",
-                )
-            ],
-            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
-        )
+        return original(**kwargs)
 
     async def acompletion(**kwargs):
-        return completion(**kwargs)
+        if "CONTENT BLOCK STRUCTURE" in str(kwargs["messages"]):
+            structures.append(str(kwargs["messages"]))
+        return await async_original(**kwargs)
 
     monkeypatch.setattr(litellm, "completion", completion)
     monkeypatch.setattr(litellm, "acompletion", acompletion)
     imported = import_document(kb_dir, three_sheets)
     assert imported.status == "added", imported.message
+    units = {unit.name: unit for unit in imported.units}
+    assert {name: unit.status for name, unit in units.items()} == {
+        "Alpha": "empty",
+        "Gamma": "completed",
+    }
+    assert units["Alpha"].model_usage["current"]["requests"] == 0
     gamma = next(unit for unit in imported.units if unit.name == "Gamma")
     saved = read_document_source(kb_dir, imported.source_id, unit_id=gamma.unit_id, blocks="1")
     assert saved["execution_mode"] == "segmented" and saved["length_class"] == "short"
-    assert saved["sheet"]["name"] == "Gamma"
+    assert saved["sheet"]["name"] == "Gamma" and saved["sheet"]["state"] == "hidden"
+    assert saved["content"] and structures
     assert any(
         item.get("sheet_cell", {}).get("cell", {}).get("coordinate") == "A1"
         for item in saved["origin_locators"]
@@ -168,19 +155,18 @@ def test_segmented_sheet_keeps_cell_locations_and_recompiles_offline(
     assert again["content"] == saved["content"]
 
 
-def test_sparse_sheet_preserves_types_formulas_hidden_cells_and_disjoint_ranges(
-    kb_dir, tmp_path, pdf_model
-):
+def test_sparse_sheet_preserves_types_formulas_hidden_cells_and_disjoint_ranges(kb_dir, tmp_path):
     import json
     from datetime import date
     from zipfile import ZIP_DEFLATED, ZipFile
 
+    from office_publication_fixtures import publish_workbook
     from openpyxl import Workbook
     from openpyxl.styles import Font
 
-    from openkb.application.documents import import_document
-    from openkb.documents import read_document_source
+    from ultrakb.documents import read_document_source
 
+    # Typed-cell and pinned-reader assertions consume the real retained worksheet.
     path = tmp_path / "sparse.xlsx"
     book = Workbook()
     sheet = book.active
@@ -206,7 +192,7 @@ def test_sparse_sheet_preserves_types_formulas_hidden_cells_and_disjoint_ranges(
     with ZipFile(path, "w", ZIP_DEFLATED) as archive:
         for name, value in parts.items():
             archive.writestr(name, value)
-    imported = import_document(kb_dir, path)
+    imported = publish_workbook(kb_dir, path)
     assert imported.status == "added", imported.message
     saved = read_document_source(kb_dir, imported.source_id, unit_id=imported.units[0].unit_id)
     cells = {
@@ -227,14 +213,14 @@ def test_sparse_sheet_preserves_types_formulas_hidden_cells_and_disjoint_ranges(
     )
     assert "0012" in selected["content"] and "TAIL_VALUE" in selected["content"]
     assert "=B2+1" not in selected["content"]
-    # The model uses the same retained source through a compact, pinned reader.
+    # The query tool uses the same retained source through its pinned reader.
     import asyncio
 
     from agents import Agent
     from test_answer_evidence_regression import invoke
 
-    from openkb.agent.query_evidence import restrict_query_agent
-    from openkb.application.query_views import resolve_query_views
+    from ultrakb.agent.query_evidence import restrict_query_agent
+    from ultrakb.application.query_views import resolve_query_views
 
     selection = resolve_query_views(kb_dir, "Read worksheet values")
     view = selection.views[0]
@@ -279,28 +265,72 @@ def test_sparse_sheet_preserves_types_formulas_hidden_cells_and_disjoint_ranges(
     assert len(selected["source_spans"]) == 3
 
 
-def test_workbook_upload_cli_and_single_sheet_recompilation(kb_dir, three_sheets, pdf_model):
+def test_workbook_upload_cli_and_single_sheet_recompilation(
+    kb_dir, three_sheets, pdf_model, monkeypatch, live_llm
+):
     import asyncio
     import json
+    from contextlib import contextmanager
 
     from click.testing import CliRunner
     from fastapi.testclient import TestClient
+    from office_publication_fixtures import publish_workbook
 
-    from openkb.api import create_app
-    from openkb.application.recompilation import recompile_document, select_recompilation
-    from openkb.application.sources import source_inventory
-    from openkb.cli import cli
-    from openkb.config import register_kb_alias
+    from ultrakb.api import create_app
+    from ultrakb.api_helpers import published_input
+    from ultrakb.application.recompilation import recompile_document, select_recompilation
+    from ultrakb.application.sources import source_inventory
+    from ultrakb.cli import cli
+    from ultrakb.config import register_kb_alias, resolve_credential_bundle
+    from ultrakb.source_catalog import read_source_revision
 
     register_kb_alias("sheets", kb_dir)
+    prepared = []
+    uploaded_bytes = three_sheets.read_bytes()
+
+    @contextmanager
+    def arrange_other_sheets(*args, **kwargs):
+        # Keep actual upload ownership/admission and its three-sheet identity.
+        # Other-sheet history is domain state; Gamma uses the real compiler in
+        # both the API upload and the selected-sheet recompilation below.
+        with published_input(*args, **kwargs) as owned:
+            call_start = len(live_llm.calls)
+            prior = publish_workbook(
+                kb_dir,
+                owned.path,
+                bundle=resolve_credential_bundle(kb_dir),
+                sheet_names=("Alpha", "Beta"),
+                record_model_task=False,
+            )
+            assert prior.status == "added", prior.message
+            assert {unit.name for unit in prior.units} == {"Alpha", "Beta"}
+            assert all(unit.status == "completed" for unit in prior.units)
+            assert len(live_llm.calls) == call_start
+            prepared.append(prior)
+            yield owned
+
+    monkeypatch.setattr("ultrakb.api_helpers.published_input", arrange_other_sheets)
+    upload_call_start = len(live_llm.calls)
     with TestClient(create_app()) as client:
         result = client.post(
             "/api/v1/add",
             data={"kb": "sheets", "stream": "false"},
-            files={"files": ("three.xlsx", three_sheets.read_bytes())},
+            files={"files": ("three.xlsx", uploaded_bytes)},
         ).json()["files"][0]
         assert result["status"] == "added", result
+        assert result["source_id"] == prepared[0].source_id
+        assert result["source_revision_id"] == prepared[0].source_revision_id
+        frozen = read_source_revision(kb_dir, result["source_revision_id"])
+        assert (kb_dir / frozen.original).read_bytes() == uploaded_bytes
+        assert {item["name"] for item in result["units"]} == {"Alpha", "Beta", "Gamma"}
         gamma = next(item for item in result["units"] if item["name"] == "Gamma")
+        assert gamma["status"] == "completed"
+        assert gamma["model_usage"]["current"]["requests"] > 0
+        prior_ids = {unit.unit_id: unit.knowledge_revision_id for unit in prepared[0].units}
+        for unit in result["units"]:
+            if unit["name"] != "Gamma":
+                assert unit["knowledge_revision_id"] == prior_ids[unit["unit_id"]]
+                assert unit["model_usage"]["current"]["requests"] == 0
         response = client.post(
             "/api/v1/document/source",
             json={
@@ -312,6 +342,9 @@ def test_workbook_upload_cli_and_single_sheet_recompilation(kb_dir, three_sheets
         )
     assert response.status_code == 200, response.text
     assert response.json()["sheet"]["name"] == "Gamma"
+    assert response.json()["sheet"]["state"] == "hidden"
+    assert "GAMMA_SHEET" in response.json()["content"]
+    assert 1 <= len(live_llm.calls) - upload_call_start <= 16
     output = CliRunner().invoke(
         cli,
         [
@@ -332,12 +365,19 @@ def test_workbook_upload_cli_and_single_sheet_recompilation(kb_dir, three_sheets
         for unit in source_inventory(kb_dir)[0]["units"]
     }
     selected = select_recompilation(kb_dir, result["source_id"], confirmation=True)
+    recompile_call_start = len(live_llm.calls)
     again = asyncio.run(
         recompile_document(
             kb_dir, result["source_id"], unit_id=gamma["unit_id"], version=selected.version
         )
     )
     assert again.status == "compiled", again.message
+    recompile_calls = live_llm.calls[recompile_call_start:]
+    assert 1 <= len(recompile_calls) <= 16
+    assert all(
+        worksheet_prompt_markers(call["messages"]) == ["GAMMA_SHEET"] for call in recompile_calls
+    )
+    assert again.model_usage["current"]["requests"] > 0
     after = {
         unit["unit_id"]: unit["knowledge_revision_id"]
         for unit in source_inventory(kb_dir)[0]["units"]
@@ -351,20 +391,18 @@ def test_retry_one_failed_sheet_uses_retained_input_after_original_is_removed(
 ):
     import litellm
 
-    from openkb.application.documents import import_document
-    from openkb.application.workbook_actions import retry_worksheet
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.workbook_actions import retry_worksheet
 
     original = litellm.completion
     failed = {"BETA_SHEET", "GAMMA_SHEET"}
     calls = Counter()
 
     def completion(**kwargs):
-        prompt = str(kwargs["messages"])
-        for name in ("ALPHA_SHEET", "BETA_SHEET", "GAMMA_SHEET"):
-            if name in prompt:
-                calls[name] += 1
-                if name in failed:
-                    raise ValueError("Fixture refuses this sheet")
+        for name in worksheet_prompt_markers(kwargs["messages"]):
+            calls[name] += 1
+            if name in failed:
+                raise ValueError("Local transport rejects this sheet")
         return original(**kwargs)
 
     async def acompletion(**kwargs):
@@ -386,15 +424,15 @@ def test_retry_one_failed_sheet_uses_retained_input_after_original_is_removed(
     assert calls["GAMMA_SHEET"] == before["GAMMA_SHEET"]
 
 
-def test_historical_workbook_lists_only_its_published_sheet_names(kb_dir, three_sheets, pdf_model):
+def test_historical_workbook_lists_only_its_published_sheet_names(kb_dir, three_sheets):
+    from office_publication_fixtures import publish_workbook
     from openpyxl import load_workbook
 
-    from openkb.application.documents import import_document
-    from openkb.application.query_views import resolve_query_views
-    from openkb.application.sources import source_inventory
-    from openkb.documents import read_document_source
+    from ultrakb.application.query_views import resolve_query_views
+    from ultrakb.application.sources import source_inventory
+    from ultrakb.documents import read_document_source
 
-    first = import_document(kb_dir, three_sheets)
+    first = publish_workbook(kb_dir, three_sheets)
     pinned = next(
         view.scope
         for view in resolve_query_views(kb_dir, "Read all worksheets").views
@@ -404,7 +442,7 @@ def test_historical_workbook_lists_only_its_published_sheet_names(kb_dir, three_
     book["Alpha"].title = "Renamed"
     book.create_sheet("Delta")["A1"] = "NEW_SHEET"
     book.save(three_sheets)
-    updated = import_document(kb_dir, three_sheets)
+    updated = publish_workbook(kb_dir, three_sheets)
     assert updated.status == "added", updated.message
     historical = source_inventory(kb_dir, scope=pinned)[0]
     assert {unit["name"] for unit in historical["units"]} == {"Alpha", "Beta", "Gamma"}

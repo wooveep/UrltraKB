@@ -1,128 +1,81 @@
-"""Physical title proof and failed-subtree recovery through native meta_processor."""
+"""Local physical proof, real heading-role checks and bounded subtree recovery."""
 
 import importlib
 from types import SimpleNamespace
 
 import pytest
 
+pytest_plugins = ("native_index_fixtures",)
+
 
 @pytest.mark.asyncio
-async def test_unique_numbered_heading_moves_anchor_and_requires_role_verification(monkeypatch):
+async def test_unique_numbered_heading_moves_anchor_and_requires_role_verification(
+    native_index_llm, live_llm
+):
     engine = importlib.import_module("pageindex.index.page_index")
+    from pageindex.index.physical_sections import prepare_entries
+
     pages = [("See Pruning in chapter 2.\n", 10), ("2 Pruning\nCut above a bud.\n", 10)]
-    entries = [{"title": "Pruning", "structure": "2", "physical_index": 1}]
-    verified = []
-
-    def generated(*args, **kwargs):
-        return entries
-
-    async def verify(**kwargs):
-        verified.append(kwargs)
-        return '{"answer": "yes"}'
-
-    monkeypatch.setattr(engine, "process_no_toc", generated)
-    monkeypatch.setattr(engine, "llm_acompletion", verify)
-    result = await engine.meta_processor(
-        pages,
-        mode="process_no_toc",
-        opt=SimpleNamespace(model="fixture"),
-        logger=SimpleNamespace(info=lambda *a: None),
-    )
+    incoming = [{"title": "Pruning", "structure": "2", "physical_index": 1}]
+    result = prepare_entries(incoming, pages)
     assert result[0]["physical_index"] == 2
     assert result[0]["anchor"]["excerpt"] == "2 Pruning"
     assert result[0]["anchor"]["evidence"] == "text_match"
     assert result[0]["title_origin"] == "generated"
-    assert [call["usage_stage"] for call in verified] == ["verification"]
-    assert "<physical_index_2>\n2 Pruning" in verified[0]["prompt"]
-
-
-@pytest.mark.asyncio
-async def test_repeated_header_is_not_a_local_heading_proof(monkeypatch):
-    engine = importlib.import_module("pageindex.index.page_index")
-    pages = [("2 Pruning\nBody on this page.\n", 10)] * 2
-    called = []
-
-    async def verify(**kwargs):
-        called.append(kwargs)
-        return '{"answer": "no"}'
-
-    monkeypatch.setattr(engine, "llm_acompletion", verify)
-    result = await engine.check_title_appearance(
-        {"title": "Pruning", "structure": "2", "physical_index": 1, "list_index": 0}, pages
+    result[0]["list_index"] = 0
+    verified = await engine.check_title_appearance(result[0], pages)
+    assert verified["answer"] == "yes"
+    assert native_index_llm.calls == 1
+    assert any(
+        "<physical_index_2>\n2 Pruning" in message["content"]
+        for message in live_llm.calls[-1]["messages"]
     )
-    assert result["answer"] == "no"
-    assert len(called) == 1
+
+
+def test_repeated_header_is_not_a_local_heading_proof():
+    from pageindex.index.physical_sections import prepare_entries, unique_heading
+
+    pages = [("2 Pruning\nBody on this page.\n", 10)] * 2
+    proposed = {"title": "Pruning", "structure": "2", "physical_index": 1}
+    assert unique_heading(proposed, pages) is None
+    [accepted] = prepare_entries([proposed], pages)
+    assert "anchor" not in accepted
+    assert accepted["title_origin"] == "generated"
 
 
 @pytest.mark.asyncio
-async def test_shared_boundary_page_excludes_neighbor_chapter_before_paid_checks(monkeypatch):
+async def test_shared_boundary_page_excludes_neighbor_chapter_before_paid_checks(
+    native_index_llm, live_llm
+):
     engine = importlib.import_module("pageindex.index.page_index")
-    from pageindex.index.physical_sections import SectionBoundary
+    from pageindex.index.physical_sections import SectionBoundary, prepare_entries
 
     pages = [("1 Gardening\n1.1 Roses\nCare.\n2 Cooking\n2.1 Sauces\nStir.\n", 20)]
-    calls = []
-
-    def generated(*args, **kwargs):
-        calls.append("generation")
-        return [
-            {"title": "Roses", "structure": "1.1", "physical_index": 1},
-            {"title": "Sauces", "structure": "2.1", "physical_index": 1},
-        ]
-
-    async def verify(**kwargs):
-        calls.append("Roses role verification")
-        assert "The given section title is Roses." in kwargs["prompt"]
-        assert "2 Cooking" not in kwargs["prompt"] and "2.1 Sauces" not in kwargs["prompt"]
-        return '{"answer": "yes", "belongs_to_parent": true}'
-
-    monkeypatch.setattr(engine, "process_no_toc", generated)
-    monkeypatch.setattr(engine, "llm_acompletion", verify)
-    result = await engine.meta_processor(
-        pages,
-        mode="process_no_toc",
-        opt=SimpleNamespace(model="fixture"),
-        boundary=SectionBoundary("Gardening", (1, 0), (1, pages[0][0].index("2 Cooking"))),
-        logger=SimpleNamespace(info=lambda *a: None),
-    )
-    assert [item["title"] for item in result] == ["Roses"]
-    assert calls == ["generation", "Roses role verification"]
-
-
-@pytest.mark.asyncio
-async def test_low_accuracy_subtree_repairs_without_rebuilding_parent(monkeypatch):
-    engine = importlib.import_module("pageindex.index.page_index")
-    from pageindex.index.physical_sections import SectionBoundary
-
-    entries = [
-        {"title": f"Topic {i}", "physical_index": 20, "structure": str(i + 1)} for i in range(96)
+    boundary = SectionBoundary("Gardening", (1, 0), (1, pages[0][0].index("2 Cooking")))
+    incoming = [
+        {"title": "Roses", "structure": "1.1", "physical_index": 1},
+        {"title": "Sauces", "structure": "2.1", "physical_index": 1},
     ]
-    calls = []
+    result = prepare_entries(incoming, pages, boundary=boundary)
+    assert [item["title"] for item in result] == ["Roses"]
+    result[0]["list_index"] = 0
+    verified = await engine.check_title_appearance(result[0], pages, boundary=boundary)
+    assert verified["answer"] == "yes"
+    prompt = str(live_llm.calls[-1]["messages"])
+    assert "The given section title is Roses." in prompt
+    assert "2 Cooking" not in prompt and "2.1 Sauces" not in prompt
+    assert native_index_llm.calls == 1
 
-    def generated(*args, **kwargs):
-        calls.append("subtree generation")
-        return entries
 
-    async def verify(*args, **kwargs):
-        calls.append("96 anchor checks")
-        return 45 / 96, [{"list_index": i, "title": f"Topic {i}"} for i in range(45, 96)]
+def test_low_accuracy_subtree_repairs_without_rebuilding_parent():
+    from pageindex.index.physical_sections import SectionBoundary, requires_local_correction
 
-    async def repair(toc, *args, **kwargs):
-        calls.append("local correction")
-        return toc, []
-
-    monkeypatch.setattr(engine, "process_no_toc", generated)
-    monkeypatch.setattr(engine, "verify_toc", verify)
-    monkeypatch.setattr(engine, "fix_incorrect_toc_with_retries", repair)
-    result = await engine.meta_processor(
-        [("Body without unambiguous headings", 100)] * 55,
-        mode="process_no_toc",
-        start_index=20,
-        opt=SimpleNamespace(model="fixture"),
-        boundary=SectionBoundary("Parent", (20, 0), (75, 0)),
-        logger=SimpleNamespace(info=lambda *a: None),
-    )
-    assert len(result) == 96
-    assert calls == ["subtree generation", "96 anchor checks", "local correction"]
+    incorrect = [{"list_index": 1, "title": "Second section"}]
+    boundary = SectionBoundary("Parent", (1, 0), (3, 0))
+    assert requires_local_correction(0.5, incorrect, boundary=boundary)
+    assert not requires_local_correction(0.5, incorrect)
+    assert requires_local_correction(0.7, incorrect)
+    assert not requires_local_correction(1.0, [], boundary=boundary)
 
 
 def test_continuation_keeps_prefix_and_cross_page_heading_keeps_both_locations():
@@ -164,31 +117,25 @@ async def test_exhausted_subtree_never_falls_back_to_whole_document(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_model_verified_heading_without_offset_can_follow_local_anchor(monkeypatch):
+async def test_model_verified_heading_without_offset_can_follow_local_anchor(native_index_llm):
     engine = importlib.import_module("pageindex.index.page_index")
+    from pageindex.index.physical_sections import prepare_entries, validate_order
+
     pages = [("Introductory text.\n1 Gardening\nPruning\nCut above a bud.\n", 20)]
-    entries = [
+    incoming = [
         {"title": "Gardening", "structure": "1", "physical_index": 1},
         {"title": "Pruning", "structure": "1.1", "physical_index": 1},
     ]
-    verified = []
-
-    async def verify(**kwargs):
-        verified.append(kwargs["prompt"])
-        return '{"answer": "yes"}'
-
-    monkeypatch.setattr(engine, "process_no_toc", lambda *a, **kw: entries)
-    monkeypatch.setattr(engine, "llm_acompletion", verify)
-    result = await engine.meta_processor(
-        pages,
-        mode="process_no_toc",
-        opt=SimpleNamespace(model="fixture"),
-        logger=SimpleNamespace(info=lambda *a: None),
-    )
+    result = prepare_entries(incoming, pages)
     assert [item["title"] for item in result] == ["Gardening", "Pruning"]
     assert result[0]["anchor"]["range"][0] > 0
     assert "anchor" not in result[1]
-    assert len(verified) == 2
+    for number, item in enumerate(result):
+        item["list_index"] = number
+        verified = await engine.check_title_appearance(item, pages)
+        assert verified["answer"] == "yes"
+    validate_order(result, 1, len(pages))
+    assert native_index_llm.calls == 2
     assert all(item["title_origin"] == "generated" for item in result)
 
 

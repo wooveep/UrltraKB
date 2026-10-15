@@ -13,7 +13,7 @@ def _artifacts(tmp_path):
     for target, extension in TARGETS.items():
         folder = artifacts / target / "commit"
         folder.mkdir(parents=True)
-        stem = f"UrltraKB-1.0.0-{target}"
+        stem = f"UltraKB-1.0.0-{target}"
         receipt = {"version": "1.0.0", "commit": "a" * 40, "target": target}
         for suffix, key in [(extension, "installer_sha256"), ("-source.zip", "source_sha256")]:
             content = (target + suffix).encode()

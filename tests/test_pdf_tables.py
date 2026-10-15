@@ -5,7 +5,7 @@ from html.parser import HTMLParser
 import pymupdf
 import pytest
 
-from openkb.images import convert_pdf_to_pages, convert_pdf_with_images
+from ultrakb.images import convert_pdf_to_pages, convert_pdf_with_images
 
 
 class Tables(HTMLParser):
@@ -31,9 +31,11 @@ class Tables(HTMLParser):
             self.cell["text"] += data
 
 
-def merged_table_pdf(path):
+def merged_table_pdf(path, *, heading=None):
     with pymupdf.open() as doc:
         page = doc.new_page()
+        if heading is not None:
+            page.insert_text((60, 45), heading, fontsize=16)
         page.insert_text((60, 70), "Before the table: keep this condition.")
         for x in (60, 180, 300, 420):
             page.draw_line((x, 100), (x, 200))

@@ -1,4 +1,4 @@
-"""Tests for openkb.images — base64 extraction and relative image copy."""
+"""Tests for ultrakb.images — base64 extraction and relative image copy."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import io
 
 from PIL import Image
 
-from openkb.images import copy_relative_images, extract_base64_images
+from ultrakb.images import copy_relative_images, extract_base64_images
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -77,7 +77,7 @@ class TestExtractBase64Images:
         md = f"![alt](data:image/png;base64,{bad})"
         import logging
 
-        with caplog.at_level(logging.WARNING, logger="openkb.images"):
+        with caplog.at_level(logging.WARNING, logger="ultrakb.images"):
             issues = []
             result = extract_base64_images(md, "doc", images_dir, issues=issues)
         assert bad not in result
@@ -95,7 +95,7 @@ class TestExtractBase64Images:
         md = f"![good](data:image/png;base64,{b64})\n![bad](data:image/png;base64,{bad})"
         import logging
 
-        with caplog.at_level(logging.WARNING, logger="openkb.images"):
+        with caplog.at_level(logging.WARNING, logger="ultrakb.images"):
             result = extract_base64_images(md, "doc", images_dir)
         assert "![good](images/doc/img_001.png)" in result
         assert bad not in result
@@ -132,7 +132,7 @@ class TestCopyRelativeImages:
         md = "![missing](missing.png)"
         import logging
 
-        with caplog.at_level(logging.WARNING, logger="openkb.images"):
+        with caplog.at_level(logging.WARNING, logger="ultrakb.images"):
             result = copy_relative_images(md, source_dir, "doc", images_dir)
         assert result == md  # unchanged
         assert list(images_dir.iterdir()) == []

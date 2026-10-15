@@ -1,4 +1,4 @@
-"""Verify built SDK wheels/sdists and the complete OpenKB source distribution."""
+"""Verify built SDK wheels/sdists and the complete UltraKB source distribution."""
 
 from __future__ import annotations
 
@@ -93,9 +93,9 @@ def verify_artifacts(source: Path, dist: Path) -> dict:
                 "runtime_files_checked": len(runtime),
                 "original_license": True,
             }
-    candidates = list(dist.glob("openkb-*.tar.gz"))
+    candidates = list(dist.glob("ultrakb-*.tar.gz"))
     if len(candidates) != 1:
-        raise ValueError("Provide a dist directory with exactly one OpenKB source distribution")
+        raise ValueError("Provide a dist directory with exactly one UltraKB source distribution")
     path = candidates[0]
     require_files(archive_files(path), all_sources, path.name)
     report[path.name] = {

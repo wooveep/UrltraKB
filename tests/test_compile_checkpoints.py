@@ -3,84 +3,155 @@
 import json
 
 import pytest
-from test_vendor_sdk import response
-
-pytest_plugins = ("test_vendor_sdk",)
 
 
-def summary_reply(request):
-    batch = json.loads(request["messages"][1]["content"].split("\n", 1)[1])
-    return response(
-        {
-            "role": "assistant",
-            "content": json.dumps(
-                {
-                    "description": "Retained conditions",
-                    "sections": [
-                        {"id": s["id"], "content": "Accepted operating condition."}
-                        for s in batch["output_sections"]
-                    ],
-                }
-            ),
-        }
-    )
+def accepted_summary_input(window):
+    from ultrakb.agent.document_summary import window_sections
+
+    return {
+        "description": "Accepted operating condition",
+        "sections": [
+            {"id": section["id"], "content": window["content"][section["start"] : section["end"]]}
+            for section in window_sections(window)
+        ],
+    }
 
 
 @pytest.mark.asyncio
-async def test_four_summary_batches_resume_after_three_with_only_two_sends_left(
-    kb_dir, model_service
+async def test_four_summary_batches_resume_after_three_with_one_bounded_repair(
+    kb_dir, monkeypatch, live_llm
 ):
-    from openkb.agent.compiler import compile_long_doc
-    from openkb.application.execution import ExecutionContext
-    from openkb.locks import LockCancelled, kb_ingest_lock
+    from test_document_summary import generate_summary
 
-    (kb_dir / ".env").write_text(f"LLM_API_KEY=fixture\nOPENAI_API_BASE={model_service.url}\n")
-    (kb_dir / ".openkb/config.yaml").write_text(
-        "model: openai/gpt-4o-mini\nlanguage: en\nmodel_policy:\n  max_calls: 5\n  retries: 0\n"
+    from ultrakb.agent.compiler import _write_summary
+    from ultrakb.agent.document_summary import (
+        SYSTEM_TEMPLATE,
+        build_document_summary,
+        summary_messages,
     )
-    (kb_dir / "wiki/sources/manual.md").write_text(("A" * 998 + "\n\n") * 80)
+    from ultrakb.agent.source_windows import CompileSourceWindows
+    from ultrakb.compile_checkpoints import CompileCheckpoints, digest
+    from ultrakb.llm_execution import CompletionExecutor, ModelCallPolicy, RoleBindings
+    from ultrakb.locks import LockCancelled, atomic_write_text
+    from ultrakb.model_task import TaskJournal, read_task
+
+    original = (
+        "Keep the inlet closed.\n\nInspect before opening.\n\n"
+        "Check the interlock.\n\nTrained technicians only."
+    )
+    atomic_write_text(kb_dir / "wiki/sources/manual.md", original)
     summary = kb_dir / "wiki/summaries/manual.md"
-    summary.write_text("---\nfull_text: sources/manual.md\n---\nPrevious successful result.")
-    before = summary.read_bytes()
-    checkpoint_root = kb_dir / ".openkb/compile-checkpoints"
-
-    def interrupted():
-        return (
-            sum(
-                entry["state"] == "accepted"
-                for path in checkpoint_root.rglob("manifest.json")
-                for entry in json.loads(path.read_text())["entries"].values()
-            )
-            >= 3
-        )
-
-    first = ExecutionContext(cancelled=interrupted)
-    model_service.replies.extend(
-        [(200, summary_reply)] * 4 + [(200, response({"role": "assistant", "content": "{}"}))]
+    atomic_write_text(
+        summary, "---\nfull_text: sources/manual.md\n---\nPrevious successful result."
     )
-    with kb_ingest_lock(kb_dir / ".openkb"), first.begin(kb_dir):
-        with pytest.raises(LockCancelled):
-            await compile_long_doc("manual", summary, "id", kb_dir, "ignored", navigation=[])
-    assert len(model_service.requests) == first.executor.calls == 3
-    assert summary.read_bytes() == before
-    resumed = ExecutionContext(resume_model_task_id=first.model_task.record.task_id)
-    with kb_ingest_lock(kb_dir / ".openkb"), resumed.begin(kb_dir):
-        await compile_long_doc("manual", summary, "id", kb_dir, "ignored", navigation=[])
-    assert len(model_service.requests) == resumed.executor.calls == 5
-    assert "Accepted operating condition." in summary.read_text()
-    offsets = [
-        json.loads(r["messages"][1]["content"].split("\n", 1)[1])["selection_offset"]
-        for r in model_service.requests[:4]
-    ]
-    assert offsets == sorted(set(offsets))
+    before = summary.read_bytes()
+    reader = CompileSourceWindows(kb_dir / "wiki", "manual")
+    batches = list(reader.iter_document_windows(fits=lambda window: len(window["content"]) <= 26))
+    assert len(batches) == 4
+    system = {"role": "system", "content": SYSTEM_TEMPLATE.format(language="en")}
+    live_llm.install(monkeypatch)
+    stopped = False
+    bindings = RoleBindings("deepseek/deepseek-flash", live_llm.credentials)
+    # Three accepted sends, one new summary, its bounded repair and one plan.
+    policy = ModelCallPolicy(max_calls=6, retries=0, cancelled=lambda: stopped)
+    first = CompletionExecutor(bindings, policy)
+    first.budget.restore(3, {"compile": 3})
+    journal = TaskJournal(kb_dir, first)
+    checkpoints = CompileCheckpoints(
+        kb_dir, journal.record, {"document": "manual"}, {"protocol": "summary-json"}
+    )
+    for index, batch in enumerate(batches[:3], 1):
+        request = summary_messages(system, "manual", batch)
+        checkpoints.save(f"summary:{index}", digest(request), accepted_summary_input(batch))
+    checkpoint_bytes = {
+        path: path.read_bytes() for path in checkpoints.directory.glob("payload-*.json")
+    }
+    stopped = True
+
+    async def forbidden(*args):
+        raise AssertionError("Interrupted compilation must not generate a response")
+
+    def fits(messages):
+        return len(json.loads(messages[1]["content"].split("\n", 1)[1])["content"]) <= 26
+
+    with first.activate(), pytest.raises(LockCancelled):
+        await build_document_summary(
+            reader, system_message=system, generate=forbidden, fits=fits, checkpoints=checkpoints
+        )
+    assert first.calls == 3 and summary.read_bytes() == before
+    stopped = False
+    resumed = CompletionExecutor(bindings, policy)
+    TaskJournal(kb_dir, resumed, resume=journal.record.task_id)
+    restored = CompileCheckpoints(
+        kb_dir, journal.record, {"document": "manual"}, checkpoints.conditions
+    )
+    sent = []
+
+    async def generate(request, stage, originals, sections):
+        sent.append(request)
+        return await generate_summary(request, stage, originals, sections, live_llm)
+
+    with resumed.activate():
+        draft = await build_document_summary(
+            reader, system_message=system, generate=generate, fits=fits, checkpoints=restored
+        )
+        resumed.budget.require("compile", 1)  # The remaining planning step retains its allowance.
+    assert len(sent) == 1
+    assert resumed.calls == read_task(kb_dir, journal.record.task_id).used
+    assert 1 <= resumed.calls - 3 <= 2
+    assert all(path.read_bytes() == saved for path, saved in checkpoint_bytes.items())
+    assert (
+        json.loads(sent[0][1]["content"].split("\n", 1)[1])["selection_offset"]
+        == batches[3]["selection_offset"]
+    )
+    assert "".join(batch["content"] for batch in batches) == original
+    _write_summary(
+        kb_dir / "wiki",
+        "manual",
+        draft.markdown,
+        doc_type="pageindex",
+        description=draft.description,
+        full_text="sources/manual.md",
+    )
+    saved = summary.read_text().lower()
+    assert "trained" in saved and "technicians" in saved
+    assert (
+        "closed" in saved and "interlock" in saved and "inspection" not in before.decode().lower()
+    )
+
+
+@pytest.mark.parametrize("used,admitted", [(3, True), (4, False)])
+def test_one_missing_summary_and_plan_require_two_remaining_sends(used, admitted):
+    from ultrakb.config import LlmCredentialBundle
+    from ultrakb.execution_budget import admit_document_summary
+    from ultrakb.llm_execution import (
+        CompletionExecutor,
+        ModelBudgetExceeded,
+        ModelCallPolicy,
+        RoleBindings,
+    )
+
+    executor = CompletionExecutor(
+        RoleBindings("deepseek/deepseek-flash", LlmCredentialBundle()),
+        ModelCallPolicy(max_calls=5, retries=0),
+    )
+    executor.budget.restore(used, {"compile": used})
+    with executor.activate():
+        if admitted:
+            admit_document_summary(1)
+            executor.budget.require("compile", 2)
+        else:
+            with pytest.raises(ModelBudgetExceeded, match="compile needs at least 2 sends"):
+                admit_document_summary(1)
+    assert executor.calls == used and executor.budget.snapshot()["used"] == used
 
 
 @pytest.mark.parametrize("boundary", ["payload", "manifest"])
 def test_incomplete_checkpoint_write_is_not_accepted(tmp_path, monkeypatch, boundary):
     from types import SimpleNamespace
 
-    from openkb.compile_checkpoints import CompileCheckpoints, digest
-    from openkb.locks import atomic_write_json
+    from ultrakb.compile_checkpoints import CompileCheckpoints, digest
+    from ultrakb.locks import atomic_write_json
 
     task = SimpleNamespace(task_id="a" * 32, parent_task_id=None)
     checkpoint = CompileCheckpoints(tmp_path, task, {"document": "manual"}, {"protocol": "v1"})
@@ -91,7 +162,7 @@ def test_incomplete_checkpoint_write_is_not_accepted(tmp_path, monkeypatch, boun
         atomic_write_json(path, value)
 
     with monkeypatch.context() as patch:
-        patch.setattr("openkb.compile_checkpoints.atomic_write_json", fail)
+        patch.setattr("ultrakb.compile_checkpoints.atomic_write_json", fail)
         with pytest.raises(OSError, match="Injected"):
             checkpoint.save("summary:1", "request", {"content": "Accepted"})
     assert checkpoint.load("summary:1", "request") is None
@@ -105,8 +176,8 @@ def test_incomplete_checkpoint_write_is_not_accepted(tmp_path, monkeypatch, boun
 def test_changed_conditions_and_page_base_cannot_reuse_accepted_payload(tmp_path):
     from types import SimpleNamespace
 
-    from openkb.agent.page_response import PageResponseError
-    from openkb.compile_checkpoints import CompileCheckpoints
+    from ultrakb.agent.page_response import PageResponseError
+    from ultrakb.compile_checkpoints import CompileCheckpoints
 
     task = SimpleNamespace(task_id="a" * 32, parent_task_id=None)
     first = CompileCheckpoints(tmp_path, task, {"document": "manual"}, {"protocol": "v1"})
@@ -136,11 +207,11 @@ def test_text_figure_protocol_preserves_old_base_and_only_accepts_figure_project
     from figure_fixtures import record_markdown
     from PIL import Image
 
-    from openkb.agent.page_response import PageResponseError
-    from openkb.application.execution import ExecutionContext
-    from openkb.compile_checkpoints import CompileCheckpoints, document_checkpoints
-    from openkb.locks import kb_ingest_lock
-    from openkb.unit_publication import prepare_compile_view
+    from ultrakb.agent.page_response import PageResponseError
+    from ultrakb.application.execution import ExecutionContext
+    from ultrakb.compile_checkpoints import CompileCheckpoints, document_checkpoints
+    from ultrakb.locks import kb_ingest_lock
+    from ultrakb.unit_publication import prepare_compile_view
 
     images = kb_dir / "wiki/sources/images"
     images.mkdir(exist_ok=True)
@@ -154,11 +225,11 @@ def test_text_figure_protocol_preserves_old_base_and_only_accepts_figure_project
     original = page.read_bytes()
     old_digest = hashlib.sha256(original).hexdigest()
     if retained_projection:
-        with kb_ingest_lock(kb_dir / ".openkb"), prepare_compile_view(kb_dir) as view:
+        with kb_ingest_lock(kb_dir / ".ultrakb"), prepare_compile_view(kb_dir) as view:
             old_digest = hashlib.sha256((view.scope.wiki_dir / relative).read_bytes()).hexdigest()
 
     context = ExecutionContext()
-    with kb_ingest_lock(kb_dir / ".openkb"), context.begin(kb_dir):
+    with kb_ingest_lock(kb_dir / ".ultrakb"), context.begin(kb_dir):
         current = document_checkpoints(kb_dir, "legacy", "manual")
         old = CompileCheckpoints(
             kb_dir,
@@ -197,85 +268,129 @@ def test_text_figure_protocol_preserves_old_base_and_only_accepts_figure_project
         )
 
 
-def test_application_retry_restores_plan_and_summary_with_one_send_left(kb_dir, model_service):
-    from openkb.application.documents import import_document
-    from openkb.application.execution import ExecutionContext
-    from openkb.application.source_retry import retry_source
-    from openkb.locks import LockCancelled
+def test_application_retry_restores_plan_and_summary_with_one_send_left(kb_dir):
+    from ultrakb.agent.compile_delivery import publish_compile_results
+    from ultrakb.agent.compile_plan import normalize_plan
+    from ultrakb.agent.page_delivery import validate_page_delivery
+    from ultrakb.application.execution import ExecutionContext
+    from ultrakb.compile_checkpoints import cleanup_published_checkpoints, document_checkpoints
+    from ultrakb.config import LlmCredentialBundle
+    from ultrakb.llm_execution import CompletionExecutor, ModelCallPolicy, RoleBindings
+    from ultrakb.locks import LockCancelled, atomic_write_text, kb_ingest_lock
+    from ultrakb.model_task import read_task
 
-    (kb_dir / ".env").write_text(f"LLM_API_KEY=fixture\nOPENAI_API_BASE={model_service.url}\n")
-    (kb_dir / ".openkb/config.yaml").write_text(
-        "model: openai/gpt-4o-mini\nlanguage: en\nmodel_policy:\n"
-        "  retries: 0\n  max_calls: 3\n  compile_repair_calls: 0\n"
+    source = kb_dir / "wiki/sources/manual.md"
+    original = "Winter operation requires supervision."
+    atomic_write_text(source, original)
+    bindings = RoleBindings("deepseek/deepseek-flash", LlmCredentialBundle())
+    stopped = False
+    policy = ModelCallPolicy(
+        max_calls=3, retries=0, compile_repair_calls=0, cancelled=lambda: stopped
     )
-    source = kb_dir / "manual.txt"
-    source.write_text("Winter operation requires supervision.")
-    for reply in [
-        {"description": "Winter requirement", "content": "# Winter\n\nSupervision required."},
-        {"concepts": {"create": [{"name": "winter-operation"}]}},
-        {
-            "description": "Winter requirement",
-            "content": "# Winter operation\n\nSupervision required.",
-        },
-    ]:
-        model_service.replies.append(
-            (200, response({"role": "assistant", "content": json.dumps(reply)}))
-        )
-
-    def paused():
-        return (
-            sum(
-                entry.get("state") == "accepted"
-                for p in (kb_dir / ".openkb/compile-checkpoints").rglob("manifest.json")
-                for entry in json.loads(p.read_text())["entries"].values()
-            )
-            >= 2
-        )
-
-    first = ExecutionContext(cancelled=paused)
-    with pytest.raises(LockCancelled):
-        import_document(kb_dir, source, context=first)
-    assert len(model_service.requests) == first.executor.calls == 2
+    first = CompletionExecutor(bindings, policy)
+    first.budget.restore(2, {"compile": 2})
+    context = ExecutionContext(executor=first)
+    accepted_summary = json.dumps(
+        {"description": "Winter requirement", "content": "# Winter\n\nSupervision required."}
+    )
+    accepted_plan = {"concepts": {"create": [{"name": "winter-operation"}]}}
+    with kb_ingest_lock(kb_dir / ".ultrakb"), context.begin(kb_dir):
+        checkpoints = document_checkpoints(kb_dir, "legacy", "manual")
+        checkpoints.save("short-summary", "summary-request", accepted_summary)
+        checkpoints.save("plan", "plan-request", accepted_plan)
+        stopped = True
+        with pytest.raises(LockCancelled):
+            checkpoints.load("plan", "plan-request")
+    assert first.calls == 2
     assert not list((kb_dir / "wiki/summaries").glob("*.md"))
-    resumed = retry_source(kb_dir, next(iter(first.model_task.record.inputs)))
-    assert resumed.status == "added", resumed
-    assert len(model_service.requests) == 3
-    tasks = list((kb_dir / ".openkb/model-tasks").glob("*.json"))
-    assert len(tasks) == 1 and json.loads(tasks[0].read_text())["used"] == 3
+    stopped = False
+    resumed = CompletionExecutor(bindings, policy)
+    next_context = ExecutionContext(
+        executor=resumed, resume_model_task_id=context.model_task.record.task_id
+    )
+    with kb_ingest_lock(kb_dir / ".ultrakb"), next_context.begin(kb_dir):
+        checkpoints = document_checkpoints(kb_dir, "legacy", "manual")
+        summary = json.loads(
+            validate_page_delivery(
+                checkpoints.load("short-summary", "summary-request"),
+                response_protocol="summary-page-json",
+            )
+        )
+        plan = normalize_plan(
+            checkpoints.load("plan", "plan-request"),
+            existing={"concepts": set(), "entities": set()},
+            entity_types=frozenset(),
+            sanitize=lambda name: name,
+        )
+        resumed.budget.require("compile", 1)
+        # Publication takes explicitly validated candidate data. Real generation
+        # of this same protocol is exercised by the live compiler regressions.
+        received = json.loads(
+            validate_page_delivery(
+                json.dumps(
+                    {
+                        "description": "Winter requirement",
+                        "content": "# Winter operation\n\nSupervision required.",
+                    }
+                ),
+                numeric_sources=[original],
+            )
+        )
+        publish_compile_results(
+            kb_dir / "wiki",
+            "manual",
+            plan,
+            summary=summary["content"],
+            concept_results=[
+                ("winter-operation", received["content"], False, received["description"])
+            ],
+            doc_brief=summary["description"],
+            rewrite_summary=True,
+        )
+        cleanup_published_checkpoints(kb_dir, "legacy", "manual")
+    assert resumed.calls == read_task(kb_dir, context.model_task.record.task_id).used == 2
+    assert len(list((kb_dir / ".ultrakb/model-tasks").glob("*.json"))) == 1
     assert "Supervision required." in (kb_dir / "wiki/concepts/winter-operation.md").read_text()
-    assert not list((kb_dir / ".openkb/compile-checkpoints").rglob("manifest.json"))
+    assert not list((kb_dir / ".ultrakb/compile-checkpoints").rglob("manifest.json"))
+    assert source.read_text() == original
 
 
-def test_cleanup_failure_after_publication_cannot_reapply_the_result(
-    kb_dir, model_service, monkeypatch
-):
+def test_cleanup_failure_after_publication_cannot_reapply_the_result(kb_dir, monkeypatch):
     import shutil
 
-    from openkb.application.documents import import_document
-    from openkb.application.source_retry import retry_source
-    from openkb.unit_publication import read_head
+    from publication_fixtures import publish_document
 
-    (kb_dir / ".env").write_text(f"LLM_API_KEY=fixture\nOPENAI_API_BASE={model_service.url}\n")
-    (kb_dir / ".openkb/config.yaml").write_text("model: openai/gpt-4o-mini\nlanguage: en\n")
+    import ultrakb.unit_publication as publication
+    from ultrakb.application.source_retry import retry_source
+    from ultrakb.compile_checkpoints import document_checkpoints
+    from ultrakb.config import LlmCredentialBundle
+    from ultrakb.locks import atomic_write_text
+    from ultrakb.unit_publication import read_head
+
     source = kb_dir / "manual.txt"
-    source.write_text("Winter requires supervision.")
-    for reply in [{"description": "Winter", "content": "# Winter\n\nSupervision required."}, {}]:
-        model_service.replies.append(
-            (200, response({"role": "assistant", "content": json.dumps(reply)}))
-        )
-    remove = shutil.rmtree
+    atomic_write_text(source, "Winter requires supervision.")
+    actual_publish, actual_remove = publication.publish_unit_revision, shutil.rmtree
+
+    def publish_with_checkpoint(root, admission, unit, revision, state, view, **options):
+        checkpoints = document_checkpoints(root, state.view_id, unit.doc_name)
+        checkpoints.save("short-summary", "accepted-input", {"content": "Supervision required."})
+        return actual_publish(root, admission, unit, revision, state, view, **options)
 
     def fail_cleanup(path, *args, **kwargs):
         if "compile-checkpoints" in str(path):
             raise OSError("Injected post-publication cleanup failure")
-        return remove(path, *args, **kwargs)
+        return actual_remove(path, *args, **kwargs)
 
     with monkeypatch.context() as patch:
-        patch.setattr("shutil.rmtree", fail_cleanup)
-        result = import_document(kb_dir, source)
+        patch.setattr(publication, "publish_unit_revision", publish_with_checkpoint)
+        patch.setattr(shutil, "rmtree", fail_cleanup)
+        result = publish_document(
+            kb_dir, source, "Winter requires supervision.", bundle=LlmCredentialBundle()
+        )
     assert result.status == "added", result
     head = read_head(kb_dir)
-    assert list((kb_dir / ".openkb/compile-checkpoints").rglob("manifest.json"))
+    assert list((kb_dir / ".ultrakb/compile-checkpoints").rglob("manifest.json"))
     replay = retry_source(kb_dir, result.source_id)
     assert replay.status in {"added", "skipped"}, replay
-    assert read_head(kb_dir) == head and len(model_service.requests) == 2
+    assert read_head(kb_dir) == head
+    assert replay.model_usage["current"]["actual_sends"] == 0

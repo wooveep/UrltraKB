@@ -2,8 +2,8 @@
 
 import pytest
 
-from openkb.agent.evidence_payload import project_evidence, slice_evidence
-from openkb.markdown_images import image_references
+from ultrakb.agent.evidence_payload import project_evidence, slice_evidence
+from ultrakb.markdown_images import image_references
 
 
 def test_duplicate_html_attribute_keeps_source_and_native_position_together():
@@ -34,9 +34,9 @@ def test_literal_fence_keeps_its_meaning_in_slices_and_continuations():
 def test_document_pagination_parses_image_positions_once(kb_dir, monkeypatch):
     from test_original_structure import frozen_text
 
-    from openkb import markdown_images
-    from openkb.agent.source_windows import CompileSourceWindows
-    from openkb.locks import atomic_write_json
+    from ultrakb import markdown_images
+    from ultrakb.agent.source_windows import CompileSourceWindows
+    from ultrakb.locks import atomic_write_json
 
     text = ("Ordinary source paragraph.\n\n" * 2000) + "![real](figure.png)\n"
     wiki = kb_dir / "wiki"

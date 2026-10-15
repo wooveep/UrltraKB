@@ -23,7 +23,7 @@ SQLite 仅增加可选元数据列，旧记录不推断覆盖完整性。PDF 内
 
 内容块补丁（#84，`+urltrakb.3`）给原内容算法增加显式块定位策略：原文/生成标题
 分别验证真实锚点，块不套用 PDF 印刷页码与目录中点规则。结构转换保留定位元数据，
-原递归 AND 条件、节点原文摘要、描述及完整树保持。OpenKB 在共同客户端工厂注册
+原递归 AND 条件、节点原文摘要、描述及完整树保持。UltraKB 在共同客户端工厂注册
 冻结包解析器，缓存与恢复共用受管包；`get_block_content` 与物理页接口区分。
 
 幻灯片补丁（#89，`+urltrakb.4`）在固定 PDF 旁冻结原页备注与映射。`.okpi`
@@ -41,7 +41,7 @@ SQLite 仅增加可选元数据列，旧记录不推断覆盖完整性。PDF 内
 
 ```sh
 uv sync --frozen --extra desktop --extra api --extra dev
-uv run openkb-desktop
+uv run ultrakb-desktop
 ```
 
 `uv` 以 editable 方式安装本目录。修改 Python 文件后，新进程直接使用
@@ -51,7 +51,7 @@ uv run openkb-desktop
 pip install -e ./vendor/PageIndex -e ./vendor/ChatIndex -e ./vendor/ConDB -e ./vendor/LiteLLM -e ".[desktop,api,dev]"
 ```
 
-桌面和 CLI 均使用本地导入：`openkb add <文件、目录或网址>`。
+桌面和 CLI 均使用本地导入：`ultrakb add <文件、目录或网址>`。
 已取消按云端文档 ID 导入。历史导入资料的本地 Wiki、来源正文和删除操作
 继续受支持，不会请求远端原文。
 
@@ -68,12 +68,12 @@ uv build vendor/ConDB --wheel --out-dir dist
 uv build --wheel --out-dir dist
 ```
 
-分发时同时提供五个 wheel，以 `pip install --find-links /path/to/dist openkb` 安装。
+分发时同时提供五个 wheel，以 `pip install --find-links /path/to/dist ultrakb` 安装。
 构建后端固定为 `poetry-core==2.4.1`，本地版本后缀避免误装同名 PyPI 包。
 原生桌面完整构建方法见仓库的 `packaging/desktop/README.md`。
 
 运行时注入补丁（#111）提供 IndexLLM 同步/异步窄协议及不序列化的
-IndexConfig.llm_client。OpenKB 工厂强制注入；独立客户端仍可显式使用
+IndexConfig.llm_client。UltraKB 工厂强制注入；独立客户端仍可显式使用
 默认 LiteLLM。读取与存储不校验模型凭据，网络重试归调用方执行器；
 必需结构步骤异常会取消并等待同批任务，不再转换为空结果。
 SDK 来源版本、pageindex.document.v1 格式和 content-based-physical-v1
@@ -101,6 +101,6 @@ SDK 来源版本、pageindex.document.v1 格式和 content-based-physical-v1
 新建索引与旧策略分别记账；已发布索引仍按其冻结身份读取，不自动重建。
 缓存缺失时使用记录中的解析器与策略，而不是当前优先注册的解析器。
 
-OpenKB 客户端注册 `NativePdfParser`，与原文读取共用原生 PDF 表格、图片顺序和
+UltraKB 客户端注册 `NativePdfParser`，与原文读取共用原生 PDF 表格、图片顺序和
 软蒙版提取。独立 PageIndex 客户端保留上游 PDF 解析器；两者保存各自解析策略，
 不会在读取时把旧的扁平正文悄悄替换成新的结构化正文。

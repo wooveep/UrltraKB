@@ -6,10 +6,10 @@ pytest_plugins = ("pending_fixtures",)
 def test_spawn_discovery_and_history_cleanup_keep_committed_import_intents(
     kb_dir, embedded_docx, pdf_model
 ):
-    from openkb.application.documents import import_document
-    from openkb.application.pending import claim_pending_job, pending_status
-    from openkb.runtime.requests import RunPendingJob
-    from openkb.runtime.tasks import TaskManager
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.pending import claim_pending_job, pending_status
+    from ultrakb.runtime.requests import RunPendingJob
+    from ultrakb.runtime.tasks import TaskManager
 
     import_document(kb_dir, embedded_docx)
     job = claim_pending_job(kb_dir)
@@ -28,10 +28,10 @@ def test_spawn_discovery_and_history_cleanup_keep_committed_import_intents(
 def test_admission_freezes_effective_budget_and_reports_its_origin(
     kb_dir, embedded_docx, pdf_model
 ):
-    from openkb.application.documents import import_document
-    from openkb.application.pending import pending_status, process_pending
-    from openkb.application.settings import apply_kb_config_patch, read_kb_config
-    from openkb.application.settings_data import KbConfigPatchRequest
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.pending import pending_status, process_pending
+    from ultrakb.application.settings import apply_kb_config_patch, read_kb_config
+    from ultrakb.application.settings_data import KbConfigPatchRequest
 
     apply_kb_config_patch(
         kb_dir,
@@ -49,17 +49,17 @@ def test_admission_freezes_effective_budget_and_reports_its_origin(
 
 
 def test_stopping_not_started_job_is_not_redispatched(kb_dir, embedded_docx, pdf_model):
-    from openkb.application.documents import import_document
-    from openkb.application.pending import claim_pending_job, pending_status
-    from openkb.locks import kb_ingest_lock
-    from openkb.runtime.requests import RunPendingJob
-    from openkb.runtime.tasks import TaskManager
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.pending import claim_pending_job, pending_status
+    from ultrakb.locks import kb_ingest_lock
+    from ultrakb.runtime.requests import RunPendingJob
+    from ultrakb.runtime.tasks import TaskManager
 
     import_document(kb_dir, embedded_docx)
     job = claim_pending_job(kb_dir)
     manager = TaskManager(history_dir=kb_dir / "history", max_workers=1)
     try:
-        with kb_ingest_lock(kb_dir / ".openkb"):
+        with kb_ingest_lock(kb_dir / ".ultrakb"):
             task = manager.submit(kb_dir, [RunPendingJob(job["id"], job["dispatch_id"])])
             manager.stop(task)
         result = manager.wait(task, timeout=30)
@@ -71,13 +71,13 @@ def test_stopping_not_started_job_is_not_redispatched(kb_dir, embedded_docx, pdf
 
 
 def test_stopping_stale_pending_task_still_stops_the_runtime(kb_dir, embedded_docx, pdf_model):
-    from openkb.application.documents import import_document
-    from openkb.application.knowledge_bases import initialize_kb
-    from openkb.application.pending import claim_pending_job
-    from openkb.kb_admin import delete_kb
-    from openkb.lifecycle import exclusive_lifecycle
-    from openkb.runtime.requests import RunPendingJob
-    from openkb.runtime.tasks import TaskManager
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.knowledge_bases import initialize_kb
+    from ultrakb.application.pending import claim_pending_job
+    from ultrakb.kb_admin import delete_kb
+    from ultrakb.lifecycle import exclusive_lifecycle
+    from ultrakb.runtime.requests import RunPendingJob
+    from ultrakb.runtime.tasks import TaskManager
 
     import_document(kb_dir, embedded_docx)
     job = claim_pending_job(kb_dir)
@@ -89,7 +89,7 @@ def test_stopping_stale_pending_task_still_stops_the_runtime(kb_dir, embedded_do
             initialize_kb(kb_dir, seed_environment=False)
             manager.stop(task)
         assert manager.wait(task, timeout=20).state in {"stopped", "blocked"}
-        assert not (kb_dir / ".openkb/pending-control").exists()
+        assert not (kb_dir / ".ultrakb/pending-control").exists()
     finally:
         if "task" in locals():
             manager.wait(task, timeout=20)

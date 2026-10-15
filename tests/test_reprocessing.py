@@ -2,17 +2,78 @@
 
 import pytest
 
-pytest_plugins = ("test_workbook_import",)
+pytest_plugins = ("test_office_import", "block_fixtures", "workbook_fixtures")
+
+
+def _published_input(kb_dir, path, *, summary_text=None):
+    """Prepare manual domain state for policy checks from actual source text."""
+    from publication_fixtures import publish_document
+
+    from ultrakb.config import resolve_credential_bundle
+
+    if summary_text is not None:
+        body = summary_text
+    elif path.suffix == ".pdf":
+        import pymupdf
+
+        with pymupdf.open(path) as document:
+            body = "\n".join(page.get_text() for page in document)
+    else:
+        body = path.read_text("utf-8")
+    return publish_document(kb_dir, path, body, bundle=resolve_credential_bundle(kb_dir))
+
+
+def test_preview_domain_preparation_keeps_original_images_for_strict_compile_view(
+    kb_dir, tmp_path, pdf_model, live_llm
+):
+    import hashlib
+
+    from figure_fixtures import png_bytes
+
+    from ultrakb.documents import read_document_source
+    from ultrakb.figure_assets import retained_figures
+    from ultrakb.locks import kb_ingest_lock
+    from ultrakb.markdown_images import image_references
+    from ultrakb.source_catalog import read_source_revision
+    from ultrakb.unit_publication import prepare_compile_view
+
+    original_text = "Stable input\n![image](image.png)"
+    image = png_bytes()
+    path = tmp_path / "assets.md"
+    path.write_text(original_text, encoding="utf-8")
+    (tmp_path / "image.png").write_bytes(image)
+    requests = len(live_llm.calls)
+    first = _published_input(kb_dir, path, summary_text="Stable input")
+    assert first.status == "added", first.message
+    source = read_document_source(kb_dir, first.source_id)
+    original = read_source_revision(kb_dir, first.source_revision_id)
+    assert (kb_dir / original.original).read_text("utf-8") == original_text
+    [reference] = image_references(source["content"])
+    assert reference.alt == "image" and reference.source == "images/assets/image.png"
+    assert (kb_dir / source["base_path"] / reference.local_path).read_bytes() == image
+    [asset] = original.assets
+    assert asset.digest == hashlib.sha256(image).hexdigest()
+    assert asset.artifact is not None and (kb_dir / asset.artifact).read_bytes() == image
+    with kb_ingest_lock(kb_dir / ".ultrakb"), prepare_compile_view(kb_dir) as view:
+        # This is the actual strict figure-preservation boundary used by a
+        # reprocess. A relative source URL must never be copied into a summary.
+        [figure] = list(retained_figures(view.scope.wiki_dir).values())
+        assert figure.asset_digest == asset.digest
+        assert (view.scope.wiki_dir / figure.asset_path).read_bytes() == image
+        summary = view.scope.wiki_dir / f"summaries/{first.units[0].doc_name}.md"
+        assert "Stable input" in summary.read_text("utf-8")
+        assert "![image](image.png)" not in summary.read_text("utf-8")
+    assert len(live_llm.calls) == requests
 
 
 def test_ordinary_retry_keeps_the_saved_processing_policy(kb_dir, tmp_path, pdf_model):
-    from openkb.application.documents import import_document
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.settings import apply_kb_config_patch
+    from ultrakb.application.settings_data import KbConfigPatchRequest
 
     path = tmp_path / "note.md"
     path.write_text("Stable input", encoding="utf-8")
-    first = import_document(kb_dir, path)
+    first = _published_input(kb_dir, path)
     apply_kb_config_patch(
         kb_dir,
         KbConfigPatchRequest(kb=str(kb_dir), config={"model_capacity": {"max_input_tokens": 1100}}),
@@ -26,12 +87,11 @@ def test_ordinary_retry_keeps_the_saved_processing_policy(kb_dir, tmp_path, pdf_
 def test_preview_is_read_only_and_execution_retains_the_original_and_history(
     kb_dir, tmp_path, physical_pdf, pdf_model, monkeypatch, kind
 ):
-    from openkb.application.documents import import_document
-    from openkb.application.reprocessing import preview_reprocessing, reprocess_source
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
-    from openkb.documents import read_document_source
-    from openkb.source_catalog import read_source_revision
+    from ultrakb.application.reprocessing import preview_reprocessing, reprocess_source
+    from ultrakb.application.settings import apply_kb_config_patch
+    from ultrakb.application.settings_data import KbConfigPatchRequest
+    from ultrakb.documents import read_document_source
+    from ultrakb.source_catalog import read_source_revision
 
     path = physical_pdf
     if kind == "markdown":
@@ -40,7 +100,13 @@ def test_preview_is_read_only_and_execution_retains_the_original_and_history(
         path = tmp_path / "assets.md"
         (tmp_path / "image.png").write_bytes(png_bytes())
         path.write_text("Stable input\n![image](image.png)", encoding="utf-8")
-    first = import_document(kb_dir, path)
+    # The raw image URL is relative to the source directory. This manual
+    # summary needs only the source's text; native image bytes and references
+    # remain in the untouched retained original and processing projection.
+    first = _published_input(
+        kb_dir, path, summary_text="Stable input" if kind == "markdown" else None
+    )
+    assert first.status == "added", first.message
     before = read_document_source(kb_dir, first.source_id)
     original = read_source_revision(kb_dir, first.source_revision_id)
     path.unlink()
@@ -56,7 +122,7 @@ def test_preview_is_read_only_and_execution_retains_the_original_and_history(
     )
 
     def snapshot():
-        return {p: p.read_bytes() for p in (kb_dir / ".openkb/catalog").rglob("*.json")}
+        return {p: p.read_bytes() for p in (kb_dir / ".ultrakb/catalog").rglob("*.json")}
 
     saved = snapshot()
     with monkeypatch.context() as boundary:
@@ -91,9 +157,9 @@ def test_preview_is_read_only_and_execution_retains_the_original_and_history(
 def test_failed_conversion_retry_requires_preview_if_policy_changed(
     kb_dir, tmp_path, pdf_model, physical_pdf, monkeypatch
 ):
-    from openkb.application.documents import import_document
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.settings import apply_kb_config_patch
+    from ultrakb.application.settings_data import KbConfigPatchRequest
 
     path = tmp_path / "bad.pdf"
     path.write_bytes(physical_pdf.read_bytes())
@@ -101,7 +167,7 @@ def test_failed_conversion_retry_requires_preview_if_policy_changed(
     def conversion_failure(*args, **kwargs):
         raise ValueError("Fixture failed conversion after successful PDF text preflight")
 
-    monkeypatch.setattr("openkb.converter.convert_pdf_with_images", conversion_failure)
+    monkeypatch.setattr("ultrakb.converter.convert_pdf_with_images", conversion_failure)
     first = import_document(kb_dir, path)
     assert first.status == "failed"
     apply_kb_config_patch(
@@ -116,19 +182,22 @@ def test_workbook_reprocessing_preserves_failed_sheet_and_shared_unit_identities
     kb_dir, three_sheets, pdf_model, monkeypatch
 ):
     import litellm
+    from office_publication_fixtures import publish_workbook
+    from test_workbook_import import worksheet_prompt_markers
 
-    from openkb.application.documents import import_document
-    from openkb.application.reprocessing import preview_reprocessing, reprocess_source
-    from openkb.documents import read_document_source
+    from ultrakb.application.reprocessing import preview_reprocessing, reprocess_source
+    from ultrakb.config import resolve_credential_bundle
+    from ultrakb.documents import read_document_source
 
-    first = import_document(kb_dir, three_sheets)
+    first = publish_workbook(kb_dir, three_sheets, bundle=resolve_credential_bundle(kb_dir))
+    assert first.status == "added" and all(unit.status == "completed" for unit in first.units)
     preview = preview_reprocessing(kb_dir, first.source_id)
     assert preview["range"] == "all_worksheets" and len(preview["units"]) == 3
     complete = litellm.completion
 
     def reject_beta(**kwargs):
-        if "BETA_SHEET" in str(kwargs["messages"]):
-            raise ValueError("Fixture model fails Beta during reprocessing")
+        if "BETA_SHEET" in worksheet_prompt_markers(kwargs["messages"]):
+            raise ValueError("Local transport rejects Beta during reprocessing")
         return complete(**kwargs)
 
     async def areject_beta(**kwargs):
@@ -158,11 +227,13 @@ def test_workbook_reprocessing_preserves_failed_sheet_and_shared_unit_identities
 
 
 def test_ordinary_workbook_retry_does_not_reparse_a_lost_inventory(kb_dir, three_sheets, pdf_model):
-    from openkb.application.documents import import_document
-    from openkb.documents import read_document_source
+    from office_publication_fixtures import publish_workbook
 
-    first = import_document(kb_dir, three_sheets)
-    inventory = kb_dir / ".openkb/catalog/workbooks" / f"{first.source_revision_id}.json"
+    from ultrakb.application.documents import import_document
+    from ultrakb.documents import read_document_source
+
+    first = publish_workbook(kb_dir, three_sheets)
+    inventory = kb_dir / ".ultrakb/catalog/workbooks" / f"{first.source_revision_id}.json"
     inventory.unlink()
     again = import_document(kb_dir, three_sheets)
     assert again.status == "blocked" and "reprocess" in again.message.lower()
@@ -179,16 +250,16 @@ def test_cli_api_and_runtime_share_preview_and_stale_rejection(kb_dir, tmp_path,
     from click.testing import CliRunner
     from fastapi.testclient import TestClient
 
-    from openkb.api import create_app
-    from openkb.application.documents import import_document
-    from openkb.cli import cli
-    from openkb.config import register_kb_alias
-    from openkb.runtime.requests import ReprocessSource
-    from openkb.runtime.tasks import TaskManager
+    from ultrakb.api import create_app
+    from ultrakb.cli import cli
+    from ultrakb.config import register_kb_alias
+    from ultrakb.runtime.requests import ReprocessSource
+    from ultrakb.runtime.tasks import TaskManager
 
     path = tmp_path / "adapter.md"
     path.write_text("One shared operation", encoding="utf-8")
-    first = import_document(kb_dir, path)
+    first = _published_input(kb_dir, path)
+    assert first.status == "added", first.message
     command = CliRunner().invoke(cli, ["--kb-dir", str(kb_dir), "reprocess", first.source_id])
     assert command.exit_code == 0, command.output
     preview = json.loads(command.output)
@@ -219,14 +290,14 @@ def test_missing_normalization_can_be_reprocessed_but_missing_original_cannot(
 ):
     import shutil
 
-    from openkb.application.documents import import_document
-    from openkb.application.reprocessing import preview_reprocessing, reprocess_source
-    from openkb.source_catalog import read_source_revision
+    from ultrakb.application.reprocessing import preview_reprocessing, reprocess_source
+    from ultrakb.source_catalog import read_source_revision
 
     path = tmp_path / "repair.md"
     path.write_text("Original survives the missing processing cache", encoding="utf-8")
-    first = import_document(kb_dir, path)
-    shutil.rmtree(kb_dir / ".openkb/normalized")
+    first = _published_input(kb_dir, path)
+    assert first.status == "added", first.message
+    shutil.rmtree(kb_dir / ".ultrakb/normalized")
     preview = preview_reprocessing(kb_dir, first.source_id)
     assert preview["status"] == "ready"
     second = reprocess_source(kb_dir, first.source_id, version=preview["version"])
@@ -239,12 +310,15 @@ def test_missing_normalization_can_be_reprocessed_but_missing_original_cannot(
 def test_reprocessing_creates_an_independent_extraction_group(kb_dir, pdf_model):
     from pathlib import Path
 
-    from openkb.application.documents import import_document
-    from openkb.application.pending import pending_status, process_pending
-    from openkb.application.reprocessing import preview_reprocessing, reprocess_source
+    from office_publication_fixtures import publish_workbook
+
+    from ultrakb.application.pending import pending_status, process_pending
+    from ultrakb.application.reprocessing import preview_reprocessing, reprocess_source
+    from ultrakb.config import resolve_credential_bundle
 
     path = Path(__file__).parent / "fixtures/office/package-text.xls"
-    first = import_document(kb_dir, path)
+    first = publish_workbook(kb_dir, path, bundle=resolve_credential_bundle(kb_dir))
+    assert first.status == "added", first.message
     process_pending(kb_dir, max_jobs=1)
     old = pending_status(kb_dir)
     preview = preview_reprocessing(kb_dir, first.source_id)
@@ -257,68 +331,46 @@ def test_reprocessing_creates_an_independent_extraction_group(kb_dir, pdf_model)
     assert {job["id"]: job for job in current["jobs"] if job["id"] in old_jobs} == old_jobs
 
 
-def test_reprocessing_preserves_model_quality_and_unfinished_stages(
-    kb_dir, tmp_path, pdf_model, monkeypatch
-):
-    import json
-    from types import SimpleNamespace
+def test_reprocessing_preserves_model_quality_and_unfinished_stages():
+    from ultrakb.agent.compile_plan import normalize_plan
+    from ultrakb.compilation_report import (
+        collect_compile_report,
+        merge_compile_report,
+        report_compile_issue,
+    )
+    from ultrakb.ingest_result import IngestResult
 
-    from openkb.application.documents import import_document
-    from openkb.application.reprocessing import preview_reprocessing, reprocess_source
+    # Untrusted parser input is exercised directly, without asking a model to
+    # manufacture a malformed response or inventing a provider response.
+    with collect_compile_report() as report:
+        with pytest.raises(ValueError, match="create must be an array"):
+            normalize_plan(
+                {"create": "invalid-plan-shape", "update": [], "related": []},
+                existing={"concepts": set(), "entities": set()},
+                entity_types=frozenset({"other"}),
+                sanitize=lambda name: name,
+            )
+        report_compile_issue("malformed_plan_items", "concepts", "entities")
+        report_compile_issue("malformed_plan_items", "concepts")
 
-    path = tmp_path / "quality.md"
-    path.write_text("Quality signals", encoding="utf-8")
-    first = import_document(kb_dir, path)
-
-    def model(**kwargs):
-        from compile_responses import summary_reply
-
-        return SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    message=SimpleNamespace(
-                        content=json.dumps(
-                            summary_reply(
-                                kwargs["messages"],
-                                {
-                                    "description": "Fixture",
-                                    "content": "Body",
-                                    "create": "invalid-plan-shape",
-                                    "update": [],
-                                    "related": [],
-                                },
-                            )
-                        )
-                    ),
-                    finish_reason="stop",
-                )
-            ],
-            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
-        )
-
-    async def amodel(**kwargs):
-        return model(**kwargs)
-
-    monkeypatch.setattr("litellm.completion", model)
-    monkeypatch.setattr("litellm.acompletion", amodel)
-    preview = preview_reprocessing(kb_dir, first.source_id)
-    result = reprocess_source(kb_dir, first.source_id, version=preview["version"])
-    assert "malformed_plan_items" in result.quality
+    admitted = IngestResult("quality.md", "failed", (), quality=("retained_original",))
+    result = merge_compile_report(admitted, report)
+    assert result.quality == ("retained_original", "malformed_plan_items")
     assert set(result.unfinished) == {"concepts", "entities"}
+    assert admitted.quality == ("retained_original",) and not admitted.unfinished
 
 
 def test_execution_snapshot_must_match_the_reviewed_policy(kb_dir, physical_pdf, pdf_model):
-    from openkb.application.documents import import_document
-    from openkb.application.execution import ExecutionContext
-    from openkb.application.reprocessing import preview_reprocessing, reprocess_source
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
-    from openkb.config_state import capture_config
-    from openkb.locks import kb_ingest_lock
-    from openkb.source_catalog import read_source
+    from ultrakb.application.execution import ExecutionContext
+    from ultrakb.application.reprocessing import preview_reprocessing, reprocess_source
+    from ultrakb.application.settings import apply_kb_config_patch
+    from ultrakb.application.settings_data import KbConfigPatchRequest
+    from ultrakb.config_state import capture_config
+    from ultrakb.locks import kb_ingest_lock
+    from ultrakb.source_catalog import read_source
 
-    first = import_document(kb_dir, physical_pdf)
-    with kb_ingest_lock(kb_dir / ".openkb"):
+    first = _published_input(kb_dir, physical_pdf)
+    with kb_ingest_lock(kb_dir / ".ultrakb"):
         captured = capture_config(kb_dir)
     apply_kb_config_patch(
         kb_dir, KbConfigPatchRequest(kb=str(kb_dir), config={"pdf_short_max_pages": 12})
@@ -337,10 +389,10 @@ def test_execution_snapshot_must_match_the_reviewed_policy(kb_dir, physical_pdf,
 def test_retry_cannot_build_a_new_model_index_under_an_old_policy(
     kb_dir, physical_pdf, pdf_model, monkeypatch
 ):
-    from openkb.application.documents import import_document
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
-    from openkb.mutation import MutationSnapshot
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.settings import apply_kb_config_patch
+    from ultrakb.application.settings_data import KbConfigPatchRequest
+    from ultrakb.mutation import MutationSnapshot
 
     apply_kb_config_patch(
         kb_dir,
@@ -370,19 +422,23 @@ def test_office_preview_checks_capability_without_launch_and_recompile_keeps_pdf
 ):
     import asyncio
 
-    from openkb.application.documents import import_document
-    from openkb.application.recompilation import recompile_document
-    from openkb.application.reprocessing import preview_reprocessing
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
+    from saved_processing_publication import publish_saved_processing
 
-    first = import_document(kb_dir, writer_document)
+    from ultrakb.application.recompilation import recompile_document
+    from ultrakb.application.reprocessing import preview_reprocessing
+    from ultrakb.application.settings import apply_kb_config_patch
+    from ultrakb.application.settings_data import KbConfigPatchRequest
+    from ultrakb.config import resolve_credential_bundle
+
+    first = publish_saved_processing(
+        kb_dir, writer_document, bundle=resolve_credential_bundle(kb_dir)
+    )
     assert first.status == "added", first.message
 
     def forbidden(*args, **kwargs):
         raise AssertionError("Preview and recompile must not launch Office")
 
-    monkeypatch.setattr("openkb.office.runtime.probe", forbidden)
+    monkeypatch.setattr("ultrakb.office.runtime.probe", forbidden)
     assert preview_reprocessing(kb_dir, first.source_id)["status"] == "ready"
     apply_kb_config_patch(
         kb_dir,
@@ -396,14 +452,14 @@ def test_office_preview_checks_capability_without_launch_and_recompile_keeps_pdf
 
 
 def test_reprocessing_preserves_manual_edits_as_a_proposal(kb_dir, tmp_path, pdf_model):
-    from openkb.application.documents import import_document
-    from openkb.application.pages import read_page, save_page
-    from openkb.application.reprocessing import preview_reprocessing, reprocess_source
-    from openkb.application.views import view_scope
+    from ultrakb.application.pages import read_page, save_page
+    from ultrakb.application.reprocessing import preview_reprocessing, reprocess_source
+    from ultrakb.application.views import view_scope
 
     path = tmp_path / "manual-edit.md"
     path.write_text("Manual editing survives processing", encoding="utf-8")
-    first = import_document(kb_dir, path)
+    first = _published_input(kb_dir, path)
+    assert first.status == "added", first.message
     scope = view_scope(kb_dir, first.units[0].view_id)
     summary = "summaries/manual-edit"
     page = read_page(kb_dir, summary, scope=scope)
@@ -421,14 +477,13 @@ def test_reprocessing_preserves_manual_edits_as_a_proposal(kb_dir, tmp_path, pdf
 def test_admitted_reprocessing_request_keeps_policy_after_interrupted_planning(
     kb_dir, physical_pdf, pdf_model, monkeypatch
 ):
-    from openkb.application.documents import import_document
-    from openkb.application.reprocessing import preview_reprocessing, reprocess_source
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
-    from openkb.mutation import MutationSnapshot
-    from openkb.source_catalog import read_source
+    from ultrakb.application.reprocessing import preview_reprocessing, reprocess_source
+    from ultrakb.application.settings import apply_kb_config_patch
+    from ultrakb.application.settings_data import KbConfigPatchRequest
+    from ultrakb.mutation import MutationSnapshot
+    from ultrakb.source_catalog import read_source
 
-    first = import_document(kb_dir, physical_pdf)
+    first = _published_input(kb_dir, physical_pdf)
     preview = preview_reprocessing(kb_dir, first.source_id)
     commit = MutationSnapshot.mark_committed
 
@@ -454,45 +509,46 @@ def test_admitted_reprocessing_request_keeps_policy_after_interrupted_planning(
 def test_request_resume_rejects_foreign_source_revision(kb_dir, tmp_path, pdf_model):
     import json
 
-    from openkb.application.documents import import_document
-    from openkb.application.reprocessing import preview_reprocessing, reprocess_source
+    from processing_fixtures import source_processing_context
+
+    from ultrakb.application.reprocessing import preview_reprocessing, reprocess_source
+    from ultrakb.llm_execution import ModelBudgetExceeded
+    from ultrakb.source_catalog import read_source
 
     a = tmp_path / "alpha.md"
     b = tmp_path / "beta.md"
     a.write_text("Alpha genuine evidence", encoding="utf-8")
     b.write_text("Beta unrelated evidence", encoding="utf-8")
-    first = import_document(
-        kb_dir,
-        a,
-    )
-    other = import_document(
-        kb_dir,
-        b,
-    )
+    first = _published_input(kb_dir, a)
+    other = _published_input(kb_dir, b)
     preview = preview_reprocessing(kb_dir, other.source_id)
-    other_new = reprocess_source(kb_dir, other.source_id, version=preview["version"])
-    assert other_new.status == "added", other_new
-    record = kb_dir / ".openkb/catalog/sources" / f"{first.source_id}.json"
+    context = source_processing_context()
+    with pytest.raises(ModelBudgetExceeded):
+        reprocess_source(kb_dir, other.source_id, version=preview["version"], context=context)
+    assert context.executor.calls == 0
+    other_new_revision = read_source(kb_dir, other.source_id).target_revision_id
+    assert other_new_revision != other.source_revision_id
+    record = kb_dir / ".ultrakb/catalog/sources" / f"{first.source_id}.json"
     data = json.loads(record.read_text())
-    data["target_revision_id"] = other_new.source_revision_id
+    data["target_revision_id"] = other_new_revision
     record.write_text(json.dumps(data), encoding="utf-8")
-    before = {p: p.read_bytes() for p in (kb_dir / ".openkb/catalog").rglob("*.json")}
+    before = {p: p.read_bytes() for p in (kb_dir / ".ultrakb/catalog").rglob("*.json")}
     with pytest.raises(ValueError, match="same input"):
         preview_reprocessing(kb_dir, first.source_id)
     with pytest.raises(ValueError, match="same input"):
         reprocess_source(kb_dir, first.source_id, version=preview["version"])
-    after = {p: p.read_bytes() for p in (kb_dir / ".openkb/catalog").rglob("*.json")}
+    after = {p: p.read_bytes() for p in (kb_dir / ".ultrakb/catalog").rglob("*.json")}
     assert before == after
 
 
 def test_legacy_preview_does_not_accept_a_normalized_body_as_original(kb_dir):
-    from openkb.application.reprocessing import preview_reprocessing
-    from openkb.state import HashRegistry
+    from ultrakb.application.reprocessing import preview_reprocessing
+    from ultrakb.state import HashRegistry
 
     normalized = kb_dir / "wiki/sources/old.md"
     normalized.write_text("Only the old normalized body remains", encoding="utf-8")
     identity = HashRegistry.hash_file(normalized)
-    HashRegistry(kb_dir / ".openkb/hashes.json").add(
+    HashRegistry(kb_dir / ".ultrakb/hashes.json").add(
         identity,
         {
             "name": "old.md",

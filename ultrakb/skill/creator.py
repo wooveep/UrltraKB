@@ -1,0 +1,259 @@
+"""The skill-create agent.
+
+Builds on the same openai-agents-SDK + LiteLLM stack as the query agent
+in ``ultrakb.agent.query``. The differences:
+
+* System prompt comes from ``ultrakb/prompts/skill_create.md`` and is
+  interpolated with the user's intent and the target skill name.
+* Tools are scoped: the same deep-retrieval primitives the query agent
+  uses (``list``, ``read``, ``get_page_content``), plus
+  one write tool restricted to the target skill directory.
+* The runner verifies that ``SKILL.md`` was written before declaring
+  success — an agent that gets confused and never writes the required
+  output should fail loudly rather than silently produce an empty dir.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from agents import Agent, Runner, function_tool
+from agents.model_settings import ModelSettings
+
+from ultrakb.config import LlmCredentialBundle, resolve_model_settings
+from ultrakb.knowledge_scope import KnowledgeScope, legacy_scope, resolve_scope
+from ultrakb.prompts import load_prompt
+from ultrakb.schema import get_agents_md
+from ultrakb.skill import skill_dir
+from ultrakb.skill.tools import (
+    get_skill_page_content as _get_page_content_impl,
+)
+from ultrakb.skill.tools import (
+    list_wiki_dir as _list_wiki_dir_impl,
+)
+from ultrakb.skill.tools import (
+    read_wiki_file_for_skill as _read_wiki_file_impl,
+)
+from ultrakb.skill.tools import (
+    write_skill_file as _write_skill_file_impl,
+)
+
+MAX_TURNS = 80  # higher than query (50) because compile can write multiple files
+
+
+def build_skill_create_agent(
+    *,
+    wiki_root: str,
+    skill_root: str,
+    skill_name: str,
+    intent: str,
+    model: str,
+    bundle: LlmCredentialBundle | None = None,
+    scope: KnowledgeScope | None = None,
+) -> Agent:
+    """Build the openai-agents Agent for compiling one skill.
+
+    Args:
+        wiki_root: ``<kb>/wiki`` absolute path.
+        skill_root: ``<kb>/output/skills/<name>`` absolute path. Will be
+            created if it does not exist.
+        skill_name: kebab-case slug, also the ``name:`` frontmatter value.
+        intent: the user's natural-language description of what this skill
+            should do.
+        model: LiteLLM-formatted model name from KB config.
+        bundle: Optional per-request LLM credential/config bundle. When
+            provided (REST path), its headers/timeout/parallel-tool-calls
+            drive the agent's model settings so concurrent requests never
+            share process-global config. ``None`` (CLI default) preserves
+            the existing ``resolve_model_settings`` behavior.
+    """
+    scope = scope or legacy_scope(Path(wiki_root).parent)
+    Path(skill_root).mkdir(parents=True, exist_ok=True)
+
+    wiki_schema = get_agents_md(Path(wiki_root))
+    instructions = load_prompt("skill_create").format(
+        intent=intent,
+        skill_name=skill_name,
+        wiki_schema=wiki_schema,
+    )
+
+    @function_tool
+    def list_wiki_dir(directory: str) -> str:
+        """List .md files in a wiki subdirectory (e.g. 'concepts')."""
+        return _list_wiki_dir_impl(directory, wiki_root)
+
+    @function_tool
+    def read_wiki_file(path: str) -> str:
+        """Read a wiki markdown file by path relative to wiki/ (e.g. 'concepts/attention.md')."""
+        return _read_wiki_file_impl(path, wiki_root)
+
+    @function_tool
+    def get_page_content(doc_name: str, pages: str) -> str:
+        """Get text content of specific pages from a PageIndex (long) document.
+
+        Use this to read the *source* of a long document at page-range
+        granularity. The summary page for the doc has a ``full_text``
+        frontmatter pointer plus a tree of section page ranges — use those
+        to target tight ranges, not the whole document.
+
+        Args:
+            doc_name: Document name without extension
+                (e.g. ``"attention-is-all-you-need"``).
+            pages: Page spec such as ``"3-5,7,10-12"``.
+        """
+        return _get_page_content_impl(doc_name, pages, wiki_root)
+
+    @function_tool
+    async def query_wiki(question: str) -> str:
+        """Semantic search over the wiki — narrow follow-ups only.
+
+        This is a nested LLM call: each invocation spawns a separate
+        query agent with its own turn budget. Use ONLY when you have a
+        specific sub-question that direct file reads can't easily answer
+        (e.g. "what does the book say about X across multiple
+        chapters?"). For primary traversal, use list/read/get_page_content
+        instead — they are cheaper and give you the raw text, not
+        another LLM's summary.
+        """
+        # Lazy import to avoid a circular dependency at module load time.
+        from ultrakb.agent.query import build_run_config_from_bundle, run_query
+
+        return await run_query(
+            question,
+            scope.kb_dir,
+            model,
+            stream=False,
+            scope=scope,
+            bundle=bundle,
+            run_config=build_run_config_from_bundle(model, bundle),
+        )
+
+    @function_tool
+    def write_skill_file(path: str, content: str) -> str:
+        """Write a file under the skill directory."""
+        return _write_skill_file_impl(path, content, skill_root)
+
+    @function_tool
+    def done(summary: str) -> str:
+        """Signal that the skill is complete. Call exactly once when finished."""
+        return f"Compilation marked done: {summary}"
+
+    # Default to allowing parallel read tool calls — the compile's early
+    # phase is a fan-out (list dir -> read N summaries -> read N source
+    # page-ranges), and serialising each read into its own turn costs
+    # roughly 5-10 extra round-trips per compile. Writes serialise
+    # naturally because each `write_skill_file` depends on accumulated
+    # reads; the model has no reason to issue parallel writes to the
+    # same path. An explicit config value (e.g. `null` for Bedrock) wins.
+    if bundle is not None:
+        model_settings = {
+            "parallel_tool_calls": (
+                bundle.parallel_tool_calls if bundle.parallel_tool_calls_explicit else True
+            ),
+            "extra_headers": bundle.extra_headers or None,
+            "extra_args": {"timeout": bundle.timeout} if bundle.timeout is not None else None,
+        }
+    else:
+        model_settings = resolve_model_settings(default_parallel_tool_calls=True)
+
+    return Agent(
+        name="skill-creator",
+        instructions=instructions,
+        tools=[
+            list_wiki_dir,
+            read_wiki_file,
+            get_page_content,
+            query_wiki,
+            write_skill_file,
+            done,
+        ],
+        model=f"litellm/{model}",
+        model_settings=ModelSettings(**model_settings),
+    )
+
+
+async def run_skill_create(
+    *,
+    kb_dir: Path,
+    skill_name: str,
+    intent: str,
+    model: str,
+    bundle: LlmCredentialBundle | None = None,
+    scope: KnowledgeScope | None = None,
+    max_turns: int = MAX_TURNS,
+) -> Path:
+    """Compile a single skill from the KB's wiki.
+
+    Returns the path to the produced skill directory. Raises
+    ``RuntimeError`` if the agent finishes without writing ``SKILL.md``,
+    or if the SDK hits its turn cap before the agent declares done.
+
+    ``bundle`` is an optional per-request LLM credential/config bundle
+    forwarded to :func:`build_skill_create_agent`; ``None`` (CLI default)
+    preserves the existing behavior.
+    """
+    from ultrakb.agent.query_evidence import restrict_query_agent
+    from ultrakb.application.query_views import resolve_query_views
+
+    selection = resolve_query_views(kb_dir, intent, scope=scope)
+    scope = resolve_scope(kb_dir, scope)
+    wiki_root = str(scope.wiki_dir)
+    skill_root = skill_dir(kb_dir, skill_name)
+
+    agent = build_skill_create_agent(
+        wiki_root=wiki_root,
+        skill_root=str(skill_root),
+        skill_name=skill_name,
+        intent=intent,
+        model=model,
+        bundle=bundle,
+        scope=scope,
+    )
+    agent = restrict_query_agent(agent, selection)
+
+    # Single user message kicks off the compile. The system prompt already
+    # contains the intent — this just nudges the agent to start.
+    seed = (
+        f"Compile the skill '{skill_name}'. Follow the system prompt's "
+        f"working method. Read the wiki, then write the skill files."
+    )
+
+    # Lazy import: keeps the top of this module independent of the SDK's
+    # internal exception layout in case its export path moves.
+    from agents.exceptions import MaxTurnsExceeded
+
+    # Per-KB credential isolation: when a bundle is supplied (REST path) the
+    # RunConfig carries a dedicated LitellmModel with this KB's api_key/base_url,
+    # overriding the process-global provider for this run only. When bundle is
+    # None (CLI path) build_run_config_from_bundle returns None and the call is
+    # byte-identical to the pre-bundle behavior (no run_config kwarg passed).
+    # Lazy import mirrors this module's convention of keeping query imports local.
+    from ultrakb.agent.query import build_run_config_from_bundle
+
+    run_config = build_run_config_from_bundle(model, bundle)
+    try:
+        if run_config:
+            await Runner.run(agent, seed, max_turns=max_turns, run_config=run_config)
+        else:
+            await Runner.run(agent, seed, max_turns=max_turns)
+    except MaxTurnsExceeded as exc:
+        raise RuntimeError(
+            f"Skill compilation hit the {max_turns}-step cap before finishing. "
+            f"The wiki may be too large for a single skill, or the intent may "
+            f"be too broad. Try splitting into multiple skills with narrower "
+            f"intents, or pass a smaller wiki subset."
+        ) from exc
+
+    return finish_skill_create(skill_root)
+
+
+def finish_skill_create(skill_root: Path) -> Path:
+    """Require the delivered skill entry point before exposing its directory."""
+    if not (skill_root / "SKILL.md").exists():
+        raise RuntimeError(
+            f"Skill compilation finished but agent did not write SKILL.md "
+            f"at {skill_root}. The skill is incomplete; check the wiki has "
+            f"content related to your intent."
+        )
+
+    return skill_root

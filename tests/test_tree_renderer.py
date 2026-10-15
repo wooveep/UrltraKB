@@ -1,8 +1,8 @@
-"""Tests for openkb.tree_renderer."""
+"""Tests for ultrakb.tree_renderer."""
 
 from __future__ import annotations
 
-from openkb.tree_renderer import render_summary_md
+from ultrakb.tree_renderer import render_summary_md
 
 # ---------------------------------------------------------------------------
 # render_summary_md

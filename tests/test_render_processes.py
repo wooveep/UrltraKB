@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-ASSETS = Path(__file__).resolve().parents[1] / "openkb/rendering/assets"
+ASSETS = Path(__file__).resolve().parents[1] / "ultrakb/rendering/assets"
 
 
 @pytest.mark.parametrize("timezone", ["UTC", "Asia/Shanghai"])
@@ -46,7 +46,7 @@ def test_gantt_dates_align_with_task_start_in_every_host_timezone(timezone, case
 
 
 def test_real_formula_keeps_protocol_error_detail(tmp_path):
-    from openkb.rendering.renderer import Renderer
+    from ultrakb.rendering.renderer import Renderer
 
     extension = ".exe" if os.name == "nt" else ""
     if not (ASSETS / f"renderer{extension}").is_file():
@@ -81,11 +81,11 @@ def test_helper_stops_without_cooperation_from_render_thread(kind, reason):
         ]
     with subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"]) as owner:
         environment = dict(os.environ)
-        environment["OPENKB_RENDER_PARENT_PID"] = str(owner.pid)
-        environment["OPENKB_RENDER_TIMEOUT_MS"] = "500" if reason == "deadline" else "10000"
+        environment["ULTRAKB_RENDER_PARENT_PID"] = str(owner.pid)
+        environment["ULTRAKB_RENDER_TIMEOUT_MS"] = "500" if reason == "deadline" else "10000"
         if sys.platform == "linux":
             stat = Path(f"/proc/{owner.pid}/stat").read_text()
-            environment["OPENKB_RENDER_PARENT_START"] = stat[stat.rfind(")") + 2 :].split()[19]
+            environment["ULTRAKB_RENDER_PARENT_START"] = stat[stat.rfind(")") + 2 :].split()[19]
         started = time.monotonic()
         helper = subprocess.Popen(
             command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=environment

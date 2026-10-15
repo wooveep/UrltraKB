@@ -46,41 +46,41 @@ def write(path: Path, content: str, mode: int = 0o644) -> None:
 
 def stage_debian(program: Path, root: Path, source: Path, identity: dict, arch: str) -> None:
     """Install under /opt with stable launchers, icons and desktop menu integration."""
-    installed = root / "opt/urltrakb"
+    installed = root / "opt/ultrakb"
     installed.parent.mkdir(parents=True)
     shutil.move(program, installed)
     for command, executable in {
-        "urltrakb": "UrltraKB",
-        "urltrakb-cli": "UrltraKBCLI",
-        "urltrakb-api": "UrltraKBAPI",
+        "ultrakb": "UltraKBCLI",
+        "ultrakb-desktop": "UltraKB",
+        "ultrakb-api": "UltraKBAPI",
     }.items():
         write(
-            root / "usr/bin" / command, f'#!/bin/sh\nexec /opt/urltrakb/{executable} "$@"\n', 0o755
+            root / "usr/bin" / command, f'#!/bin/sh\nexec /opt/ultrakb/{executable} "$@"\n', 0o755
         )
     write(
-        root / "usr/share/applications/urltrakb.desktop",
-        "[Desktop Entry]\nType=Application\nName=UrltraKB\n"
-        "Comment=Local document knowledge base\nExec=urltrakb\nIcon=urltrakb\n"
-        "Terminal=false\nCategories=Office;Education;\nStartupWMClass=OpenKB\n",
+        root / "usr/share/applications/ultrakb.desktop",
+        "[Desktop Entry]\nType=Application\nName=UltraKB\n"
+        "Comment=Local document knowledge base\nExec=ultrakb-desktop\nIcon=ultrakb\n"
+        "Terminal=false\nCategories=Office;Education;\nStartupWMClass=UltraKB\n",
     )
-    icon = root / "usr/share/icons/hicolor/scalable/apps/urltrakb.svg"
+    icon = root / "usr/share/icons/hicolor/scalable/apps/ultrakb.svg"
     icon.parent.mkdir(parents=True)
-    shutil.copy2(source / "openkb/desktop/assets/brand/openkb-app-icon.svg", icon)
-    write(root / "usr/share/doc/urltrakb/copyright", (source / "LICENSE").read_text("utf-8"))
+    shutil.copy2(source / "ultrakb/desktop/assets/brand/ultrakb-app-icon.svg", icon)
+    write(root / "usr/share/doc/ultrakb/copyright", (source / "LICENSE").read_text("utf-8"))
     # PEP 440's .dev must sort before the corresponding Debian release.
     version = identity["version"].replace(".dev", "~dev")
     size = sum(p.stat().st_size for p in root.rglob("*") if p.is_file()) // 1024 + 1
     dependencies = DEBIAN_DEPENDS
-    if (installed / "_internal/office/openkb-office.json").is_file():
+    if (installed / "_internal/office/ultrakb-office.json").is_file():
         dependencies += OFFICE_DEPENDS
     write(
         root / "DEBIAN/control",
-        f"Package: urltrakb\nVersion: {version}\nArchitecture: {arch}\n"
-        "Maintainer: UrltraKB maintainers <noreply@github.com>\n"
+        f"Package: ultrakb\nVersion: {version}\nArchitecture: {arch}\n"
+        "Maintainer: UltraKB maintainers <noreply@github.com>\n"
         "Section: utils\nPriority: optional\n"
         f"Installed-Size: {size}\nDepends: {dependencies}\n"
         "Homepage: https://github.com/wooveep/UrltraKB\n"
-        "Description: UrltraKB native knowledge-base workbench\n"
+        "Description: UltraKB native knowledge-base workbench\n"
         " Includes desktop, CLI and REST entry points and their Python runtime.\n",
     )
 
@@ -99,20 +99,20 @@ def package(source: Path, program: Path, inventory: dict, output: Path) -> Path:
     if target != desktop_target():
         raise ValueError("Installer packaging must run on the inventoried native host")
     output.mkdir(parents=True, exist_ok=True)
-    stem = f"UrltraKB-{identity['version']}-{target.name}"
+    stem = f"UltraKB-{identity['version']}-{target.name}"
     extension = ".deb" if target.deb_arch else ".zip"
     names = [stem + extension, stem + "-source.zip", stem + "-build.json"]
     if any((output / name).exists() for name in names):
         raise FileExistsError("Build artifacts already exist; select a fresh output directory")
     with tempfile.TemporaryDirectory(prefix="installer-", dir=output) as temporary:
         work = Path(temporary)
-        staged = work / "UrltraKB"
+        staged = work / "UltraKB"
         _program_copy(program, inventory, staged, identity)
         source_archive(source, work / names[1])
         source_record = record(work / names[1], "source")
         write(
             staged / "BUILD-NOTICE.txt",
-            f"UrltraKB {channel} {identity['version']}\nCommit: {identity['commit']}\n"
+            f"UltraKB {channel} {identity['version']}\nCommit: {identity['commit']}\n"
             f"Target: {target.name}\nSource: {source_record.name}\n"
             f"Source SHA256: {source_record.sha256}\n"
             "Built automatically from locked inputs; exact application source accompanies it.\n"
@@ -131,9 +131,9 @@ def package(source: Path, program: Path, inventory: dict, output: Path) -> Path:
             # Exercise actual extraction and validate the packaged payload, not just staging.
             unpacked = work / "unpacked"
             subprocess.run(["dpkg-deb", "--extract", str(artifact), str(unpacked)], check=True)
-            installed = unpacked / "opt/urltrakb"
+            installed = unpacked / "opt/ultrakb"
         elif target.system == "Darwin":
-            app = work / "UrltraKB.app"
+            app = work / "UltraKB.app"
             stage_macos(staged, app, identity, inventory)
             subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], check=True)
             subprocess.run(
@@ -142,33 +142,33 @@ def package(source: Path, program: Path, inventory: dict, output: Path) -> Path:
             )
             unpacked = work / "unpacked"
             subprocess.run(["ditto", "-x", "-k", str(artifact), str(unpacked)], check=True)
-            installed = unpacked / "UrltraKB.app/Contents/MacOS"
+            installed = unpacked / "UltraKB.app/Contents/MacOS"
         else:
             with zipfile.ZipFile(artifact, "w", compression=zipfile.ZIP_DEFLATED) as archive:
                 for path in sorted(staged.rglob("*")):
                     if path.is_file():
-                        archive.write(path, "UrltraKB/" + path.relative_to(staged).as_posix())
+                        archive.write(path, "UltraKB/" + path.relative_to(staged).as_posix())
             unpacked = work / "unpacked"
             with zipfile.ZipFile(artifact) as archive:
                 archive.extractall(unpacked)
-            installed = unpacked / "UrltraKB"
+            installed = unpacked / "UltraKB"
         # Signing changes Mach-O signatures; compare extraction against the signed staging tree.
         original = (
-            work / "UrltraKB.app"
+            work / "UltraKB.app"
             if target.system == "Darwin"
-            else work / "debian/opt/urltrakb"
+            else work / "debian/opt/ultrakb"
             if target.deb_arch
             else staged
         )
-        extracted = unpacked / "UrltraKB.app" if target.system == "Darwin" else installed
+        extracted = unpacked / "UltraKB.app" if target.system == "Darwin" else installed
         for path in original.rglob("*"):
             if path.is_file() and digest(path) != digest(extracted / path.relative_to(original)):
                 raise ValueError(f"Installer content differs from staging: {path.name}")
         suffix = ".exe" if target.system == "Windows" else ""
-        subprocess.run([str(installed / ("UrltraKBCLI" + suffix)), "--help"], check=True)
+        subprocess.run([str(installed / ("UltraKBCLI" + suffix)), "--help"], check=True)
         subprocess.run(
             [
-                str(installed / ("UrltraKBVerify" + suffix)),
+                str(installed / ("UltraKBVerify" + suffix)),
                 "--output",
                 str(output / (stem + "-check")),
             ],

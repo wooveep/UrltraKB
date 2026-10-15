@@ -7,14 +7,14 @@ from contextlib import contextmanager
 
 import pytest
 
-from openkb import compile_recovery
-from openkb.agent.page_response import PageResponseError
-from openkb.compile_checkpoints import CompileCheckpoints
-from openkb.lifecycle import current_generation
-from openkb.llm_usage import _SCOPE, UsageRequest, UsageScope
-from openkb.llm_usage_models import UsageExecution
-from openkb.locks import LockCancelled, atomic_write_json
-from openkb.model_task import ModelTask
+from ultrakb import compile_recovery
+from ultrakb.agent.page_response import PageResponseError
+from ultrakb.compile_checkpoints import CompileCheckpoints
+from ultrakb.lifecycle import current_generation
+from ultrakb.llm_usage import _SCOPE, UsageRequest, UsageScope
+from ultrakb.llm_usage_models import UsageExecution
+from ultrakb.locks import LockCancelled, atomic_write_json
+from ultrakb.model_task import ModelTask
 
 TASK = "1" * 32
 SOURCE = "2" * 32
@@ -50,7 +50,9 @@ def setup(tmp_path):
         stages={"compile": 2},
         inputs={SOURCE: REVISION},
     )
-    atomic_write_json(root / ".openkb/model-tasks" / (TASK + ".json"), task.model_dump(mode="json"))
+    atomic_write_json(
+        root / ".ultrakb/model-tasks" / (TASK + ".json"), task.model_dump(mode="json")
+    )
     for identity, operation in ((OLD, "import_document"), (CURRENT, "retry_source")):
         ex = UsageExecution(
             execution_id=identity,
@@ -60,7 +62,7 @@ def setup(tmp_path):
             source_ids=[SOURCE],
         )
         atomic_write_json(
-            root / ".openkb/usage/executions" / (identity + ".json"), ex.model_dump(mode="json")
+            root / ".ultrakb/usage/executions" / (identity + ".json"), ex.model_dump(mode="json")
         )
     usage = UsageRequest(
         request_attempt_id=REQUEST,
@@ -80,7 +82,7 @@ def setup(tmp_path):
         observation="call",
     )
     atomic_write_json(
-        root / ".openkb/usage/requests" / (REQUEST + ".json"), usage.model_dump(mode="json")
+        root / ".ultrakb/usage/requests" / (REQUEST + ".json"), usage.model_dump(mode="json")
     )
     checkpoint = CompileCheckpoints(root, task, {"document": "fixture"}, {"protocol": "unchanged"})
     checkpoint.claim_repair("summary:5", DIGEST)
@@ -91,7 +93,7 @@ def setup(tmp_path):
 def ledger(root):
     return {
         str(p.relative_to(root)): p.read_bytes()
-        for area in (".openkb/usage", ".openkb/model-tasks")
+        for area in (".ultrakb/usage", ".ultrakb/model-tasks")
         for p in (root / area).rglob("*.json")
     }
 
@@ -120,7 +122,7 @@ def test_matching_recovery_preserves_old_ledger_bytes(tmp_path):
 @pytest.mark.parametrize("sources", [[], ["b" * 32]])
 def test_historical_execution_must_own_request_source(tmp_path, sources):
     root, checkpoint, scope = setup(tmp_path)
-    path = root / ".openkb/usage/executions" / (OLD + ".json")
+    path = root / ".ultrakb/usage/executions" / (OLD + ".json")
     record = UsageExecution.model_validate_json(path.read_text())
     atomic_write_json(
         path, record.model_copy(update={"source_ids": sources}).model_dump(mode="json")
@@ -201,7 +203,7 @@ def test_cancellation_does_not_consume_recovery_before_a_send(tmp_path, monkeypa
         cancelled = True
         return records
 
-    monkeypatch.setattr("openkb.llm_execution.check_model_stop", check)
+    monkeypatch.setattr("ultrakb.llm_execution.check_model_stop", check)
     if moment == "during_ledger_scan":
         monkeypatch.setattr(compile_recovery, "read_requests", read_then_cancel)
     with scoped(scope), compile_recovery.explicit_compile_retry(root, SOURCE):
@@ -212,7 +214,7 @@ def test_cancellation_does_not_consume_recovery_before_a_send(tmp_path, monkeypa
 
 def test_completed_execution_cannot_authorize_unknown_recovery(tmp_path):
     root, checkpoint, scope = setup(tmp_path)
-    path = root / ".openkb/usage/executions" / (OLD + ".json")
+    path = root / ".ultrakb/usage/executions" / (OLD + ".json")
     record = UsageExecution.model_validate_json(path.read_text())
     atomic_write_json(
         path, record.model_copy(update={"state": "completed"}).model_dump(mode="json")

@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from click.testing import CliRunner
 
-from openkb.cli import SUPPORTED_EXTENSIONS, _find_kb_dir, cli
+from ultrakb.cli import SUPPORTED_EXTENSIONS, _find_kb_dir, cli
 
 pytest_plugins = ("test_pdf_readback",)
 
@@ -30,9 +30,9 @@ class TestSupportedExtensions:
 
 
 class TestFindKbDir:
-    def test_finds_openkb_dir(self, tmp_path, monkeypatch):
-        (tmp_path / ".openkb").mkdir()
-        (tmp_path / ".openkb/config.yaml").write_text("{}")
+    def test_finds_ultrakb_dir(self, tmp_path, monkeypatch):
+        (tmp_path / ".ultrakb").mkdir()
+        (tmp_path / ".ultrakb/config.yaml").write_text("{}")
         from kb_fixtures import mark_current_kb
 
         mark_current_kb(tmp_path)
@@ -40,35 +40,35 @@ class TestFindKbDir:
         result = _find_kb_dir()
         assert result is not None
 
-    def test_returns_none_if_no_openkb(self, tmp_path, monkeypatch):
+    def test_returns_none_if_no_ultrakb(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        with patch("openkb.cli.load_global_config", return_value={}):
+        with patch("ultrakb.cli.load_global_config", return_value={}):
             result = _find_kb_dir()
             assert result is None
 
     def test_lifecycle_metadata_is_not_an_initialized_knowledge_base(self, tmp_path, monkeypatch):
-        (tmp_path / ".openkb/kb-lifecycle").mkdir(parents=True)
+        (tmp_path / ".ultrakb/kb-lifecycle").mkdir(parents=True)
         nested = tmp_path / "project"
         nested.mkdir()
         monkeypatch.chdir(nested)
-        with patch("openkb.cli.load_global_config", return_value={}):
+        with patch("ultrakb.cli.load_global_config", return_value={}):
             result = CliRunner().invoke(cli, ["status"])
         assert "No knowledge base found" in result.output
 
     def test_damaged_current_kb_does_not_fall_back_to_another_default(self, tmp_path, monkeypatch):
-        from openkb.mutation import RecoveryRequired
+        from ultrakb.mutation import RecoveryRequired
 
         damaged, other = tmp_path / "damaged", tmp_path / "other"
         for root in (damaged, other):
-            (root / ".openkb").mkdir(parents=True)
+            (root / ".ultrakb").mkdir(parents=True)
             (root / "wiki").mkdir()
-        (damaged / ".openkb/needs-repair.json").write_text("{}")
-        (other / ".openkb/config.yaml").write_text("{}")
+        (damaged / ".ultrakb/needs-repair.json").write_text("{}")
+        (other / ".ultrakb/config.yaml").write_text("{}")
         from kb_fixtures import mark_current_kb
 
         mark_current_kb(other)
         monkeypatch.chdir(damaged)
-        with patch("openkb.cli.load_global_config", return_value={"default_kb": str(other)}):
+        with patch("ultrakb.cli.load_global_config", return_value={"default_kb": str(other)}):
             result = CliRunner().invoke(cli, ["status"])
         assert isinstance(result.exception, RecoveryRequired)
         assert str(damaged) in str(result.exception)
@@ -82,20 +82,20 @@ class TestAddCommand:
         (tmp_path / "wiki" / "summaries").mkdir(parents=True)
         (tmp_path / "wiki" / "concepts").mkdir(parents=True)
         (tmp_path / "wiki" / "reports").mkdir(parents=True)
-        openkb_dir = tmp_path / ".openkb"
-        openkb_dir.mkdir()
-        (openkb_dir / "config.yaml").write_text("model: gpt-4o-mini\n")
+        ultrakb_dir = tmp_path / ".ultrakb"
+        ultrakb_dir.mkdir()
+        (ultrakb_dir / "config.yaml").write_text("model: gpt-4o-mini\n")
         from kb_fixtures import mark_current_kb
 
-        mark_current_kb(openkb_dir.parent)
-        (openkb_dir / "hashes.json").write_text(json.dumps({}))
+        mark_current_kb(ultrakb_dir.parent)
+        (ultrakb_dir / "hashes.json").write_text(json.dumps({}))
         return tmp_path
 
     def test_add_missing_init(self, tmp_path):
         runner = CliRunner()
         with (
             runner.isolated_filesystem(temp_dir=tmp_path),
-            patch("openkb.cli._find_kb_dir", return_value=None),
+            patch("ultrakb.cli._find_kb_dir", return_value=None),
         ):
             result = runner.invoke(cli, ["add", "somefile.pdf"])
             assert "No knowledge base found" in result.output
@@ -107,8 +107,8 @@ class TestAddCommand:
 
         runner = CliRunner()
         with (
-            patch("openkb.cli.add_single_file") as mock_add,
-            patch("openkb.cli._find_kb_dir", return_value=kb_dir),
+            patch("ultrakb.cli.add_single_file") as mock_add,
+            patch("ultrakb.cli._find_kb_dir", return_value=kb_dir),
         ):
             runner.invoke(cli, ["add", str(doc)])
             assert mock_add.call_count == 1
@@ -117,32 +117,32 @@ class TestAddCommand:
             assert mock_add.call_args.kwargs.get("metadata") is None
 
     def test_add_single_file_compile_failure_rolls_back_converted_artifacts(self, tmp_path):
-        from openkb.cli import add_single_file
-        from openkb.state import HashRegistry
+        from ultrakb.cli import add_single_file
+        from ultrakb.state import HashRegistry
 
         kb_dir = self._setup_kb(tmp_path)
         doc = tmp_path / "notes.md"
         doc.write_text("# Notes\n\nBody", encoding="utf-8")
 
         with (
-            patch("openkb.agent.compiler.compile_short_doc", side_effect=RuntimeError("boom")),
-            patch("openkb.application.documents.time.sleep"),
-            patch("openkb.cli._setup_llm_key"),
+            patch("ultrakb.agent.compiler.compile_short_doc", side_effect=RuntimeError("boom")),
+            patch("ultrakb.application.documents.time.sleep"),
+            patch("ultrakb.cli._setup_llm_key"),
         ):
             outcome = add_single_file(doc, kb_dir)
 
         assert outcome == "failed"
         assert not (kb_dir / "raw" / "notes.md").exists()
         assert not (kb_dir / "wiki" / "sources" / "notes.md").exists()
-        assert HashRegistry(kb_dir / ".openkb" / "hashes.json").all_entries() == {}
+        assert HashRegistry(kb_dir / ".ultrakb" / "hashes.json").all_entries() == {}
 
     def test_add_forwards_concurrency_from_config(self, tmp_path):
         from unittest.mock import AsyncMock
 
-        from openkb.cli import add_single_file
+        from ultrakb.cli import add_single_file
 
         kb_dir = self._setup_kb(tmp_path)
-        (kb_dir / ".openkb" / "config.yaml").write_text(
+        (kb_dir / ".ultrakb" / "config.yaml").write_text(
             "model: gpt-4o-mini\nconcurrency: 3\n", encoding="utf-8"
         )
         from kb_fixtures import mark_current_kb
@@ -153,9 +153,9 @@ class TestAddCommand:
 
         with (
             patch(
-                "openkb.agent.compiler.compile_short_doc", new_callable=AsyncMock
+                "ultrakb.agent.compiler.compile_short_doc", new_callable=AsyncMock
             ) as mock_compile,
-            patch("openkb.cli._setup_llm_key"),
+            patch("ultrakb.cli._setup_llm_key"),
         ):
             outcome = add_single_file(doc, kb_dir)
 
@@ -163,9 +163,9 @@ class TestAddCommand:
         assert mock_compile.call_args.kwargs["max_concurrency"] == 3
 
     def test_add_single_file_publishes_an_immutable_source(self, tmp_path, pdf_model):
-        from openkb.application.knowledge_bases import get_kb_list
-        from openkb.cli import add_single_file
-        from openkb.documents import read_document_source
+        from ultrakb.application.knowledge_bases import get_kb_list
+        from ultrakb.cli import add_single_file
+        from ultrakb.documents import read_document_source
 
         kb = self._setup_kb(tmp_path)
         doc = tmp_path / "coordinated.md"
@@ -176,7 +176,7 @@ class TestAddCommand:
         assert saved["knowledge_revision_id"] is not None
 
     def _long_doc_conv(self, kb_dir, name, file_hash):
-        from openkb.converter import ConvertResult
+        from ultrakb.converter import ConvertResult
 
         return ConvertResult(
             raw_path=kb_dir / "raw" / f"{name}.pdf",
@@ -188,13 +188,13 @@ class TestAddCommand:
 
     def test_long_doc_rollback_removes_only_the_new_blob(self, tmp_path, physical_pdf):
         """A failed long-doc add must roll back the blob IT created under
-        .openkb/files, while a pre-existing blob (another document) survives —
+        .ultrakb/files, while a pre-existing blob (another document) survives —
         the targeted track_new must not touch blobs this add didn't create."""
-        from openkb.cli import add_single_file
-        from openkb.indexer import IndexResult
+        from ultrakb.cli import add_single_file
+        from ultrakb.indexer import IndexResult
 
         kb_dir = self._setup_kb(tmp_path)
-        files = kb_dir / ".openkb" / "files" / "default"
+        files = kb_dir / ".ultrakb" / "files" / "default"
         files.mkdir(parents=True)
         other = files / "other-doc.pdf"
         other.write_bytes(b"another-doc-keep-me")
@@ -212,11 +212,11 @@ class TestAddCommand:
         conv = self._long_doc_conv(kb_dir, "paper", "cafebabe00" * 8)
 
         with (
-            patch("openkb.application.documents.convert_document", return_value=conv),
-            patch("openkb.indexer.index_long_document", side_effect=fake_index),
-            patch("openkb.agent.compiler.compile_long_doc", side_effect=RuntimeError("boom")),
-            patch("openkb.application.documents.time.sleep"),
-            patch("openkb.cli._setup_llm_key"),
+            patch("ultrakb.application.documents.convert_document", return_value=conv),
+            patch("ultrakb.indexer.index_long_document", side_effect=fake_index),
+            patch("ultrakb.agent.compiler.compile_long_doc", side_effect=RuntimeError("boom")),
+            patch("ultrakb.application.documents.time.sleep"),
+            patch("ultrakb.cli._setup_llm_key"),
         ):
             outcome = add_single_file(doc, kb_dir)
 
@@ -230,11 +230,11 @@ class TestAddCommand:
         blob (diverged hashes.json/pageindex.db). A failed add must NOT delete
         that pre-existing blob on rollback (regression: track_new globbing the
         doc_id would otherwise register and delete it)."""
-        from openkb.cli import add_single_file
-        from openkb.indexer import IndexResult
+        from ultrakb.cli import add_single_file
+        from ultrakb.indexer import IndexResult
 
         kb_dir = self._setup_kb(tmp_path)
-        files = kb_dir / ".openkb" / "files" / "default"
+        files = kb_dir / ".ultrakb" / "files" / "default"
         files.mkdir(parents=True)
         existing_id = "22222222-2222-2222-2222-222222222222"
         existing_blob = files / f"{existing_id}.pdf"
@@ -249,11 +249,11 @@ class TestAddCommand:
         conv = self._long_doc_conv(kb_dir, "dup", "feedface00" * 8)
 
         with (
-            patch("openkb.application.documents.convert_document", return_value=conv),
-            patch("openkb.indexer.index_long_document", side_effect=fake_index_dedup),
-            patch("openkb.agent.compiler.compile_long_doc", side_effect=RuntimeError("boom")),
-            patch("openkb.application.documents.time.sleep"),
-            patch("openkb.cli._setup_llm_key"),
+            patch("ultrakb.application.documents.convert_document", return_value=conv),
+            patch("ultrakb.indexer.index_long_document", side_effect=fake_index_dedup),
+            patch("ultrakb.agent.compiler.compile_long_doc", side_effect=RuntimeError("boom")),
+            patch("ultrakb.application.documents.time.sleep"),
+            patch("ultrakb.cli._setup_llm_key"),
         ):
             outcome = add_single_file(doc, kb_dir)
 
@@ -270,8 +270,8 @@ class TestAddCommand:
 
         runner = CliRunner()
         with (
-            patch("openkb.cli.add_single_file") as mock_add,
-            patch("openkb.cli._find_kb_dir", return_value=kb_dir),
+            patch("ultrakb.cli.add_single_file") as mock_add,
+            patch("ultrakb.cli._find_kb_dir", return_value=kb_dir),
         ):
             runner.invoke(cli, ["add", str(docs_dir)])
             # Should be called for .md and .txt but not .xyz
@@ -284,7 +284,7 @@ class TestAddCommand:
     def test_add_directory_stops_after_dirty_rollback(self, tmp_path):
         import pytest
 
-        from openkb.add_coordinator import DirtyRollbackError
+        from ultrakb.add_coordinator import DirtyRollbackError
 
         kb_dir = self._setup_kb(tmp_path)
         docs_dir = tmp_path / "docs"
@@ -293,13 +293,13 @@ class TestAddCommand:
         (docs_dir / "b.md").write_text("# B")
         dirty_error = DirtyRollbackError(
             "add",
-            kb_dir / ".openkb" / "journal" / "retained.json",
+            kb_dir / ".ultrakb" / "journal" / "retained.json",
         )
 
         runner = CliRunner()
         with (
-            patch("openkb.cli.add_single_file", side_effect=dirty_error) as mock_add,
-            patch("openkb.cli._find_kb_dir", return_value=kb_dir),
+            patch("ultrakb.cli.add_single_file", side_effect=dirty_error) as mock_add,
+            patch("ultrakb.cli._find_kb_dir", return_value=kb_dir),
         ):
             with pytest.raises(DirtyRollbackError) as exc_info:
                 runner.invoke(cli, ["add", str(docs_dir)], catch_exceptions=False)
@@ -314,7 +314,7 @@ class TestAddCommand:
         doc.write_text("content")
 
         runner = CliRunner()
-        with patch("openkb.cli._find_kb_dir", return_value=kb_dir):
+        with patch("ultrakb.cli._find_kb_dir", return_value=kb_dir):
             result = runner.invoke(cli, ["add", str(doc)])
             assert "Unsupported file type" in result.output
 
@@ -322,7 +322,7 @@ class TestAddCommand:
         kb_dir = self._setup_kb(tmp_path)
 
         runner = CliRunner()
-        with patch("openkb.cli._find_kb_dir", return_value=kb_dir):
+        with patch("ultrakb.cli._find_kb_dir", return_value=kb_dir):
             result = runner.invoke(cli, ["add", str(tmp_path / "nonexistent.pdf")])
             assert "does not exist" in result.output
 
@@ -337,27 +337,45 @@ class TestAddCommand:
         second = runner.invoke(cli, arguments)
         assert second.exit_code == 0 and "; skipped" in second.output
 
-    def test_add_short_doc_runs_compiler(self, tmp_path, pdf_model):
-        from openkb.application.knowledge_bases import get_kb_list
-        from openkb.application.pages import read_page
-        from openkb.application.views import view_scope
+    def test_add_short_doc_runs_compiler(self, tmp_path, pdf_model, monkeypatch):
+        from ultrakb.agent.compiler import compile_short_doc
+        from ultrakb.application.knowledge_bases import get_kb_list
+        from ultrakb.application.pages import read_page
+        from ultrakb.application.views import view_scope
 
         kb = self._setup_kb(tmp_path)
         doc = tmp_path / "test.md"
         doc.write_text("# Hello")
+        compiled = []
+
+        async def observe_compile(doc_name, source_path, kb_dir, model, *args, **kwargs):
+            compiled.append(
+                (doc_name, source_path, kb_dir, source_path.read_text(encoding="utf-8"))
+            )
+            return await compile_short_doc(doc_name, source_path, kb_dir, model, *args, **kwargs)
+
+        monkeypatch.setattr("ultrakb.agent.compiler.compile_short_doc", observe_compile)
         result = CliRunner().invoke(cli, ["--kb-dir", str(kb), "add", str(doc)])
         assert result.exit_code == 0 and "; added" in result.output
         saved = get_kb_list(kb)["documents"][0]
         scope = view_scope(kb, saved["view_id"])
-        assert "First and last sections." in read_page(kb, "summaries/test", scope=scope).body
+        summary = read_page(kb, "summaries/test", scope=scope)
+        assert summary.body.strip()
+        assert "hello" in summary.body.casefold()
+        assert len(compiled) == 1
+        assert compiled[0][0] == "test"
+        assert compiled[0][2] == kb
+        assert compiled[0][3].strip() == "# Hello"
         assert saved["length_class"] == "short"
 
     def test_new_markdown_preserves_an_unmapped_legacy_entry(self, tmp_path, pdf_model):
-        from openkb.application.knowledge_bases import get_kb_list
-        from openkb.state import HashRegistry
+        from ultrakb.application.knowledge_bases import get_kb_list
+        from ultrakb.state import HashRegistry
 
         kb = self._setup_kb(tmp_path)
-        HashRegistry(kb / ".openkb/hashes.json").add("old-hash", {"name": "notes.md", "type": "md"})
+        HashRegistry(kb / ".ultrakb/hashes.json").add(
+            "old-hash", {"name": "notes.md", "type": "md"}
+        )
         doc = tmp_path / "notes.md"
         doc.write_text("# Notes, edited")
         result = CliRunner().invoke(cli, ["--kb-dir", str(kb), "add", str(doc)])
@@ -369,7 +387,7 @@ class TestAddCommand:
     def test_add_requires_path(self, tmp_path):
         kb_dir = self._setup_kb(tmp_path)
         runner = CliRunner()
-        with patch("openkb.cli._find_kb_dir", return_value=kb_dir):
+        with patch("ultrakb.cli._find_kb_dir", return_value=kb_dir):
             result = runner.invoke(cli, ["add"])
             assert "Provide a PATH" in result.output
 
@@ -381,18 +399,18 @@ class TestAddMutationCoordinator:
         (tmp_path / "wiki" / "summaries").mkdir(parents=True)
         (tmp_path / "wiki" / "concepts").mkdir(parents=True)
         (tmp_path / "wiki" / "entities").mkdir(parents=True)
-        openkb_dir = tmp_path / ".openkb"
-        openkb_dir.mkdir()
-        (openkb_dir / "config.yaml").write_text("model: gpt-4o-mini\n", encoding="utf-8")
+        ultrakb_dir = tmp_path / ".ultrakb"
+        ultrakb_dir.mkdir()
+        (ultrakb_dir / "config.yaml").write_text("model: gpt-4o-mini\n", encoding="utf-8")
         from kb_fixtures import mark_current_kb
 
-        mark_current_kb(openkb_dir.parent)
-        (openkb_dir / "hashes.json").write_text("{}", encoding="utf-8")
+        mark_current_kb(ultrakb_dir.parent)
+        (ultrakb_dir / "hashes.json").write_text("{}", encoding="utf-8")
         return tmp_path
 
     def test_coordinator_rolls_back_before_commit_and_skips_post_commit(self, tmp_path):
-        from openkb.add_coordinator import AddMutationPlan, run_add_mutation
-        from openkb.locks import kb_ingest_lock
+        from ultrakb.add_coordinator import AddMutationPlan, run_add_mutation
+        from ultrakb.locks import kb_ingest_lock
 
         kb_dir = self._setup_kb(tmp_path)
         official = kb_dir / "wiki" / "sources" / "doc.md"
@@ -411,14 +429,14 @@ class TestAddMutationCoordinator:
             post_commit_hooks=[lambda: post_commit_calls.append("ran")],
         )
 
-        with kb_ingest_lock(kb_dir / ".openkb"):
+        with kb_ingest_lock(kb_dir / ".ultrakb"):
             assert run_add_mutation(kb_dir, plan) is False
         assert not official.exists()
         assert post_commit_calls == []
 
     def test_coordinator_reports_failed_mutation(self, tmp_path, capsys):
-        from openkb.add_coordinator import AddMutationPlan, run_add_mutation
-        from openkb.locks import kb_ingest_lock
+        from ultrakb.add_coordinator import AddMutationPlan, run_add_mutation
+        from ultrakb.locks import kb_ingest_lock
 
         kb_dir = self._setup_kb(tmp_path)
         official = kb_dir / "wiki" / "sources" / "doc.md"
@@ -435,15 +453,15 @@ class TestAddMutationCoordinator:
             body=body,
         )
 
-        with kb_ingest_lock(kb_dir / ".openkb"):
+        with kb_ingest_lock(kb_dir / ".ultrakb"):
             assert run_add_mutation(kb_dir, plan) is False
 
         output = capsys.readouterr().out
         assert "[ERROR] add failed for doc.md: boom" in output
 
     def test_coordinator_post_commit_failure_does_not_roll_back(self, tmp_path):
-        from openkb.add_coordinator import AddMutationPlan, run_add_mutation
-        from openkb.locks import kb_ingest_lock
+        from ultrakb.add_coordinator import AddMutationPlan, run_add_mutation
+        from ultrakb.locks import kb_ingest_lock
 
         kb_dir = self._setup_kb(tmp_path)
         official = kb_dir / "wiki" / "sources" / "doc.md"
@@ -463,16 +481,16 @@ class TestAddMutationCoordinator:
             post_commit_hooks=[bad_hook],
         )
 
-        with kb_ingest_lock(kb_dir / ".openkb"):
+        with kb_ingest_lock(kb_dir / ".ultrakb"):
             assert run_add_mutation(kb_dir, plan) is True
         assert official.read_text(encoding="utf-8") == "# committed\n"
-        assert list((kb_dir / ".openkb" / "journal").glob("*.json")) == []
+        assert list((kb_dir / ".ultrakb" / "journal").glob("*.json")) == []
 
     def test_coordinator_keyboard_interrupt_rolls_back_and_reraises(self, tmp_path):
         import pytest
 
-        from openkb.add_coordinator import AddMutationPlan, run_add_mutation
-        from openkb.locks import kb_ingest_lock
+        from ultrakb.add_coordinator import AddMutationPlan, run_add_mutation
+        from ultrakb.locks import kb_ingest_lock
 
         kb_dir = self._setup_kb(tmp_path)
         official = kb_dir / "wiki" / "sources" / "doc.md"
@@ -491,18 +509,18 @@ class TestAddMutationCoordinator:
             post_commit_hooks=[lambda: post_commit_calls.append("ran")],
         )
 
-        with kb_ingest_lock(kb_dir / ".openkb"):
+        with kb_ingest_lock(kb_dir / ".ultrakb"):
             with pytest.raises(KeyboardInterrupt):
                 run_add_mutation(kb_dir, plan)
 
         assert not official.exists()
         assert post_commit_calls == []
-        assert list((kb_dir / ".openkb" / "journal").glob("*.json")) == []
+        assert list((kb_dir / ".ultrakb" / "journal").glob("*.json")) == []
 
     def test_run_add_mutation_requires_lock_held(self, tmp_path):
         import pytest
 
-        from openkb.add_coordinator import AddMutationPlan, run_add_mutation
+        from ultrakb.add_coordinator import AddMutationPlan, run_add_mutation
 
         kb_dir = self._setup_kb(tmp_path)
 
@@ -519,9 +537,9 @@ class TestAddMutationCoordinator:
     def test_run_add_mutation_raises_dirty_rollback_when_rollback_fails(self, tmp_path):
         import pytest
 
-        from openkb.add_coordinator import AddMutationPlan, DirtyRollbackError, run_add_mutation
-        from openkb.locks import kb_ingest_lock
-        from openkb.mutation import MutationSnapshot
+        from ultrakb.add_coordinator import AddMutationPlan, DirtyRollbackError, run_add_mutation
+        from ultrakb.locks import kb_ingest_lock
+        from ultrakb.mutation import MutationSnapshot
 
         kb_dir = self._setup_kb(tmp_path)
         official = kb_dir / "wiki" / "sources" / "doc.md"
@@ -541,7 +559,7 @@ class TestAddMutationCoordinator:
 
         # Force rollback to fail: rollback_best_effort returns the error instead
         # of None, so the active journal is retained for next-run recovery.
-        with kb_ingest_lock(kb_dir / ".openkb"):
+        with kb_ingest_lock(kb_dir / ".ultrakb"):
             with patch.object(
                 MutationSnapshot, "rollback_best_effort", return_value=OSError("disk full")
             ):

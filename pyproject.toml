@@ -3,9 +3,9 @@ requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
-name = "openkb"
+name = "ultrakb"
 dynamic = ["version"]
-description = "UrltraKB: Open LLM Knowledge Base, powered by PageIndex"
+description = "UltraKB: Open LLM Knowledge Base, powered by PageIndex"
 readme = "README.md"
 requires-python = ">=3.10,<3.14"
 license = {text = "Apache-2.0"}
@@ -67,17 +67,24 @@ dependencies = [
 ]
 
 [project.urls]
-Repository = "https://github.com/VectifyAI/OpenKB"
-Homepage = "https://github.com/VectifyAI/OpenKB"
-Issues = "https://github.com/VectifyAI/OpenKB/issues"
+Repository = "https://github.com/wooveep/UrltraKB"
+Homepage = "https://github.com/wooveep/UrltraKB"
+Issues = "https://github.com/wooveep/UrltraKB/issues"
 
 [project.scripts]
-openkb = "openkb.cli:cli"
-openkb-desktop = "openkb.desktop.bootstrap:main"
-openkb-api = "openkb.api:main"
+ultrakb = "ultrakb.cli:cli"
+ultrakb-desktop = "ultrakb.desktop.bootstrap:main"
+ultrakb-api = "ultrakb.api:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "--strict-markers"
+markers = [
+    "unit: pure rules and request/response contracts; no external model traffic",
+    "integration: local filesystem, HTTP, persistence or process integration",
+    "live: real DeepSeek Flash responses through the accounted gateway",
+    "native: native desktop/document/process facilities (orthogonal tag)",
+]
 
 [project.optional-dependencies]
 desktop = ["PySide6-Essentials==6.11.2", "shiboken6==6.11.2", "markdown-it-py==4.2.0", "pygments==2.20.0"]
@@ -102,8 +109,8 @@ pageindex-condb = { path = "vendor/ConDB", editable = true }
 litellm = { path = "vendor/LiteLLM", editable = true }
 
 [tool.hatch.build.targets.wheel]
-packages = ["openkb"]
-exclude = ["/openkb/web"]
+packages = ["ultrakb"]
+exclude = ["/ultrakb/web"]
 
 # Ship reproducible application/build sources, not maintainer-local workspace
 # state or retired bundles that may remain in an upgraded source checkout.
@@ -111,50 +118,51 @@ exclude = ["/openkb/web"]
 # Ignored scratch symlinks must not claim vendor directory identities during traversal.
 skip-excluded-dirs = true
 include = [
-    "/openkb", "/skills", "/tests", "/scripts", "/packaging", "/examples", "/assets/fonts",
+    "/ultrakb", "/skills", "/tests", "/scripts", "/packaging", "/examples", "/assets/fonts",
     "/vendor/PageIndex", "/vendor/ChatIndex", "/vendor/ConDB", "/vendor/LiteLLM",
     "/docs/vendor-sdk.md",
     "/docs/office-ingest.md",
     "/docs/desktop.md", "/docs/dev-1.2.0.md", "/docs/golden-principles.md",
     "/docs/desktop-evidence/dev-1.2.0",
     "/docs/desktop-workbench.md", "/docs/desktop-evidence/workbench",
+    "/docs/*.md", "/AGENTS.md", "/CONTEXT.md",
     "/README.md", "/LICENSE", "/pyproject.toml", "/uv.lock", "/source-export.json", "/.gitignore",
     "/Makefile", "/.github/workflows/desktop-build.yml",
 ]
-exclude = ["/openkb/web", "/frontend"]
+exclude = ["/ultrakb/web", "/frontend"]
 
 # Preserve this already-vendored upstream file despite the workspace .claude ignore.
 [tool.hatch.build.targets.sdist.force-include]
 "vendor/PageIndex/.claude/commands/dedupe.md" = "vendor/PageIndex/.claude/commands/dedupe.md"
 
 # Bundle the built-in deck themes + html critic into the wheel so
-# `openkb deck new` / `--critique` / chat `/deck` work right after
-# `pip install` (scan_local_skills also looks under openkb/_skills/).
+# `ultrakb deck new` / `--critique` / chat `/deck` work right after
+# `pip install` (scan_local_skills also looks under ultrakb/_skills/).
 [tool.hatch.build.targets.wheel.force-include]
-"assets/fonts/README.md" = "openkb/desktop/assets/fonts/README.md"
-"assets/fonts/SourceCodePro-Bold.ttf" = "openkb/desktop/assets/fonts/SourceCodePro-Bold.ttf"
-"assets/fonts/SourceCodePro-BoldIt.ttf" = "openkb/desktop/assets/fonts/SourceCodePro-BoldIt.ttf"
-"assets/fonts/SourceCodePro-It-OFL.txt" = "openkb/desktop/assets/fonts/SourceCodePro-It-OFL.txt"
-"assets/fonts/SourceCodePro-It.ttf" = "openkb/desktop/assets/fonts/SourceCodePro-It.ttf"
-"assets/fonts/SourceCodePro-Medium.ttf" = "openkb/desktop/assets/fonts/SourceCodePro-Medium.ttf"
-"assets/fonts/SourceCodePro-Regular-OFL.txt" = "openkb/desktop/assets/fonts/SourceCodePro-Regular-OFL.txt"
-"assets/fonts/SourceCodePro-Regular.ttf" = "openkb/desktop/assets/fonts/SourceCodePro-Regular.ttf"
-"assets/fonts/SourceHanSansCN-Bold.otf" = "openkb/desktop/assets/fonts/SourceHanSansCN-Bold.otf"
-"assets/fonts/SourceHanSansCN-Medium.otf" = "openkb/desktop/assets/fonts/SourceHanSansCN-Medium.otf"
-"assets/fonts/SourceHanSansCN-OFL.txt" = "openkb/desktop/assets/fonts/SourceHanSansCN-OFL.txt"
-"assets/fonts/SourceHanSansCN-Regular.otf" = "openkb/desktop/assets/fonts/SourceHanSansCN-Regular.otf"
-"assets/fonts/FrankRuhlHofshi-Bold.otf" = "openkb/desktop/assets/fonts/FrankRuhlHofshi-Bold.otf"
-"assets/fonts/OfficeSymbol-OFL.txt" = "openkb/desktop/assets/fonts/OfficeSymbol-OFL.txt"
-"assets/fonts/manifest.json" = "openkb/desktop/assets/fonts/manifest.json"
-"skills/openkb-deck-neon" = "openkb/_skills/openkb-deck-neon"
-"skills/openkb-deck-editorial" = "openkb/_skills/openkb-deck-editorial"
-"skills/openkb-html-critic" = "openkb/_skills/openkb-html-critic"
+"assets/fonts/README.md" = "ultrakb/desktop/assets/fonts/README.md"
+"assets/fonts/SourceCodePro-Bold.ttf" = "ultrakb/desktop/assets/fonts/SourceCodePro-Bold.ttf"
+"assets/fonts/SourceCodePro-BoldIt.ttf" = "ultrakb/desktop/assets/fonts/SourceCodePro-BoldIt.ttf"
+"assets/fonts/SourceCodePro-It-OFL.txt" = "ultrakb/desktop/assets/fonts/SourceCodePro-It-OFL.txt"
+"assets/fonts/SourceCodePro-It.ttf" = "ultrakb/desktop/assets/fonts/SourceCodePro-It.ttf"
+"assets/fonts/SourceCodePro-Medium.ttf" = "ultrakb/desktop/assets/fonts/SourceCodePro-Medium.ttf"
+"assets/fonts/SourceCodePro-Regular-OFL.txt" = "ultrakb/desktop/assets/fonts/SourceCodePro-Regular-OFL.txt"
+"assets/fonts/SourceCodePro-Regular.ttf" = "ultrakb/desktop/assets/fonts/SourceCodePro-Regular.ttf"
+"assets/fonts/SourceHanSansCN-Bold.otf" = "ultrakb/desktop/assets/fonts/SourceHanSansCN-Bold.otf"
+"assets/fonts/SourceHanSansCN-Medium.otf" = "ultrakb/desktop/assets/fonts/SourceHanSansCN-Medium.otf"
+"assets/fonts/SourceHanSansCN-OFL.txt" = "ultrakb/desktop/assets/fonts/SourceHanSansCN-OFL.txt"
+"assets/fonts/SourceHanSansCN-Regular.otf" = "ultrakb/desktop/assets/fonts/SourceHanSansCN-Regular.otf"
+"assets/fonts/FrankRuhlHofshi-Bold.otf" = "ultrakb/desktop/assets/fonts/FrankRuhlHofshi-Bold.otf"
+"assets/fonts/OfficeSymbol-OFL.txt" = "ultrakb/desktop/assets/fonts/OfficeSymbol-OFL.txt"
+"assets/fonts/manifest.json" = "ultrakb/desktop/assets/fonts/manifest.json"
+"skills/ultrakb-deck-neon" = "ultrakb/_skills/ultrakb-deck-neon"
+"skills/ultrakb-deck-editorial" = "ultrakb/_skills/ultrakb-deck-editorial"
+"skills/ultrakb-html-critic" = "ultrakb/_skills/ultrakb-html-critic"
 
 [tool.ruff]
 target-version = "py310"
 line-length = 100
-# Audited upstream snapshots keep their original style; OpenKB additions stay checked.
-extend-exclude = ["vendor/PageIndex", "vendor/ChatIndex", "vendor/ConDB", "vendor/LiteLLM", "openkb/office/assets/runtime"]
+# Audited upstream snapshots keep their original style; UltraKB additions stay checked.
+extend-exclude = ["vendor/PageIndex", "vendor/ChatIndex", "vendor/ConDB", "vendor/LiteLLM", "ultrakb/office/assets/runtime"]
 
 [tool.ruff.lint]
 # Start conservative (pyflakes + pycodestyle errors + isort); ratchet up later.
@@ -173,11 +181,11 @@ select = ["E", "F", "I"]
 # reflowing would either fail to shorten or would alter user-facing text.
 # Everywhere else the 100-column limit is enforced. Shrink this list by
 # rewrapping the literals (or adding targeted `# noqa: E501`) over time.
-"openkb/cli.py" = ["E402", "I001", "E501"]
-"openkb/agent/chat.py" = ["E501"]
-"openkb/agent/compiler.py" = ["E501"]
-"openkb/lint.py" = ["E501"]
-"openkb/schema.py" = ["E501"]
+"ultrakb/cli.py" = ["E402", "I001", "E501"]
+"ultrakb/agent/chat.py" = ["E501"]
+"ultrakb/agent/compiler.py" = ["E501"]
+"ultrakb/lint.py" = ["E501"]
+"ultrakb/schema.py" = ["E501"]
 # Test fixtures asserting exact file contents (frontmatter/index literals);
 # rewrapping the strings would change the data under test.
 "tests/test_cli.py" = ["E501"]
@@ -186,13 +194,13 @@ select = ["E", "F", "I"]
 
 [tool.mypy]
 python_version = "3.10"
-files = ["openkb"]
+files = ["ultrakb"]
 # Private pinned Office distributions contain their own Python standard library.
-exclude = ["openkb/office/assets/runtime"]
+exclude = ["ultrakb/office/assets/runtime"]
 # Lenient to start (codebase not previously type-checked); ratchet up over time.
 ignore_missing_imports = true
 # numpy's bundled stubs (reached transitively via litellm/openai-agents ->
-# pydantic, not imported by openkb directly) use `type X = ...` alias
+# pydantic, not imported by ultrakb directly) use `type X = ...` alias
 # statements requiring Python 3.12+ parser support — fatal to the whole run
 # (a [syntax] error, not a suppressible diagnostic) when they get parsed. A
 # per-module `follow_imports = "skip"` override was experimentally confirmed
@@ -209,7 +217,7 @@ follow_imports = "skip"
 # Loosely-shaped dict/list data parsed from LLM JSON output flows through
 # `Any`-typed helpers: union-attr on Any|None, unannotated accumulator lists,
 # argument/return mismatches against str-typed signatures.
-module = "openkb.agent.compiler"
+module = "ultrakb.agent.compiler"
 disable_error_code = [
     "arg-type",
     "dict-item",
@@ -220,13 +228,13 @@ disable_error_code = [
 ]
 
 [[tool.mypy.overrides]]
-module = "openkb.cli"
+module = "ultrakb.cli"
 disable_error_code = ["return-value"]
 
 [[tool.mypy.overrides]]
-module = ["openkb.lint", "openkb.indexer"]
+module = ["ultrakb.lint", "ultrakb.indexer"]
 disable_error_code = ["arg-type"]
 
 [[tool.mypy.overrides]]
-module = "openkb.skill.workspace"
+module = "ultrakb.skill.workspace"
 disable_error_code = ["type-var"]

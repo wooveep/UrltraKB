@@ -1,11 +1,26 @@
 """The actual compiler transport retains native sparse and partial cell observations."""
 
-import asyncio
 import json
 
 import pytest
-from compile_responses import summary_reply
-from test_compile_windows import compile_boundary
+from test_compile_windows import _page_request
+
+pytest_plugins = ("processing_fixtures",)
+
+
+def retained_reader(kb_dir, retained):
+    from ultrakb.agent.source_windows import CompileSourceWindows
+    from ultrakb.ingest_records import UnitRevision
+    from ultrakb.normalization import normalization_id, read_normalization
+    from ultrakb.source_catalog import read_record
+    from ultrakb.unit_publication import list_source_units
+
+    [unit] = list_source_units(kb_dir, retained.source_id)
+    revision = read_record(kb_dir, "unit-revisions", unit.target_revision_id, UnitRevision)
+    directory, _ = read_normalization(
+        kb_dir, normalization_id(revision.source_revision_id, revision.processing_fingerprint)
+    )
+    return CompileSourceWindows(directory / "wiki", unit.doc_name)
 
 
 def original_payload(messages, prefix):
@@ -13,22 +28,22 @@ def original_payload(messages, prefix):
         content = message["content"]
         blocks = content if isinstance(content, list) else [{"text": content}]
         for block in blocks:
-            if block.get("text", "").startswith(prefix):
-                return json.loads(block["text"].split("\n", 1)[1])
+            text = block.get("text", "")
+            if prefix in text:
+                payload = (
+                    text.split("\n", 1)[1]
+                    if text.startswith(prefix)
+                    else text.split(prefix + "\n", 1)[1]
+                )
+                return json.JSONDecoder().raw_decode(payload)[0]
     raise AssertionError("Original payload was not sent")
 
 
-def test_csv_page_input_retains_ragged_records_and_physical_lines(kb_dir, monkeypatch):
-    from openkb.application.documents import import_document
-
+def test_csv_page_input_retains_ragged_records_and_physical_lines(kb_dir, processing_only):
     source = kb_dir / "equipment.csv"
     source.write_text('"Rotor\nAlpha",7,,41\nRotorBeta,9\n')
-    requests = []
-    compile_boundary(
-        monkeypatch, {"entities": {"create": [{"name": "rotor", "type": "product"}]}}, requests
-    )
-    assert import_document(kb_dir, source).status == "added"
-    page = next(r for r in requests if "Write the entity page" in str(r))
+    reader = retained_reader(kb_dir, processing_only(source))
+    page = _page_request(reader, {"name": "rotor", "type": "product"}, kind="entities")
     original = original_payload(page, "Current original:")
     rows = original["csv_rows"]
     assert [(row["row"], len(row["cells"])) for row in rows] == [(1, 4), (2, 2)]
@@ -39,80 +54,47 @@ def test_csv_page_input_retains_ragged_records_and_physical_lines(kb_dir, monkey
     assert "RotorBeta" not in str(rows[0])
 
 
-def test_partial_csv_page_input_does_not_refill_an_unread_value(kb_dir, monkeypatch):
-    from openkb.agent.compiler import compile_long_doc
-    from openkb.application.documents import import_document
-
+def test_partial_csv_page_input_does_not_refill_an_unread_value(kb_dir, processing_only):
     source = kb_dir / "equipment.csv"
     source.write_text("RotorAlpha,17\nRotorBeta,23\n")
-    requests = []
-    compile_boundary(monkeypatch, {}, requests)
-    assert import_document(kb_dir, source).status == "added"
-    retained = next((kb_dir / "wiki/sources").glob("*.content.json"))
-    raw = json.loads(retained.read_text())
+    reader = retained_reader(kb_dir, processing_only(source))
+    raw = json.loads((reader.wiki / reader.original_path).read_text())
     first = next(origin for origin in raw["origins"] if origin.get("csv", {}).get("column") == 1)
     start = first["normalized_span"][0]
-    requests.clear()
-    compile_boundary(
-        monkeypatch,
+    page = _page_request(
+        reader,
         {
-            "entities": {
-                "create": [
-                    {
-                        "name": "rotor",
-                        "type": "product",
-                        "reading_locations": {"chars": f"{start}:{start + 4}"},
-                    }
-                ]
-            }
+            "name": "rotor",
+            "type": "product",
+            "reading_locations": {"chars": f"{start}:{start + 4}"},
         },
-        requests,
+        kind="entities",
+        long=True,
     )
-    doc_name = retained.name.removesuffix(".content.json")
-    asyncio.run(
-        compile_long_doc(
-            doc_name,
-            kb_dir / f"wiki/summaries/{doc_name}.md",
-            "retained-index",
-            kb_dir,
-            "test-model",
-            navigation=[],
-        )
-    )
-    page = next(r for r in requests if "Write the entity page" in str(r))
-    window_message = next(
-        block["text"]
-        for message in page
-        if isinstance(message["content"], list)
-        for block in message["content"]
-        if "Original source windows (bounded, frozen):\n" in block.get("text", "")
-    )
-    windows = json.loads(
-        window_message.split("Original source windows (bounded, frozen):\n", 1)[1].split(
-            "\nPrior page basis", 1
-        )[0]
-    )
+    windows = original_payload(page, "Original source windows (bounded, frozen):")
     observation = windows[0]["csv_rows"][0]["cells"][0]["observations"][0]
     assert observation["value_complete"] is False
     assert "value" not in observation
-    assert "RotorAlpha" not in window_message
-    assert "RotorBeta" not in window_message
+    assert "RotorAlpha" not in str(page)
+    assert "RotorBeta" not in str(page)
 
 
 @pytest.mark.parametrize("native", ["pages", "text"])
-def test_short_page_reads_each_current_original_only_once(kb_dir, monkeypatch, native):
+def test_short_page_reads_each_current_original_only_once(kb_dir, native):
     import hashlib
 
-    from openkb.agent.compiler import compile_short_doc
-    from openkb.text_measurement import measure_markdown
-    from openkb.text_source import FrozenText, TextOrigin
+    from ultrakb.agent.source_windows import CompileSourceWindows
+    from ultrakb.locks import atomic_write_text
+    from ultrakb.text_measurement import measure_markdown
+    from ultrakb.text_source import FrozenText, TextOrigin
 
     wiki = kb_dir / "wiki"
     text = "Model Alder needs supervision during winter."
     source = wiki / "sources/current.md"
-    source.write_text(text)
+    atomic_write_text(source, text)
     rich = wiki / ("sources/current.json" if native == "pages" else "sources/current.content.json")
-    rich.write_text(
+    atomic_write_text(
+        rich,
         json.dumps([{"page": 1, "unit_kind": "page", "content": text}])
         if native == "pages"
         else FrozenText(
@@ -122,87 +104,44 @@ def test_short_page_reads_each_current_original_only_once(kb_dir, monkeypatch, n
             origins=(TextOrigin(normalized_span=(0, len(text)), original_span=(0, len(text))),),
             assets={},
             tokens=measure_markdown(text),
-        ).model_dump_json()
+        ).model_dump_json(),
     )
-    (wiki / "sources/prior.md").write_text("Model Birch requires a summer inspection.")
-    (wiki / "concepts/inspection.md").write_text(
-        "---\ntype: Concept\ndescription: Inspection\nsources: "
-        "[sources/current.md, " + str(rich.relative_to(wiki)) + ", sources/prior.md]\n---\n"
-        "# Inspection\n\nExisting inspection conditions."
+    atomic_write_text(wiki / "sources/prior.md", "Model Birch requires a summer inspection.")
+    atomic_write_text(
+        wiki / "concepts/inspection.md",
+        "---\ntype: Concept\ndescription: Inspection\nsources: [sources/current.md, "
+        + str(rich.relative_to(wiki))
+        + ", sources/prior.md]\n---\n# Inspection\n\nExisting inspection conditions.",
     )
-    requests = []
-    compile_boundary(monkeypatch, {"concepts": {"update": [{"name": "inspection"}]}}, requests)
-    asyncio.run(compile_short_doc("current", source, kb_dir, "test-model"))
-    page = next(r for r in requests if "Update the concept page" in str(r))
+    page = _page_request(
+        CompileSourceWindows(wiki, "current"), {"name": "inspection"}, action="update"
+    )
     original = original_payload(page, "Current original:")
     assert original["path"] == str(rich.relative_to(wiki))
-    contexts = next(
-        block["text"]
-        for message in page
-        if isinstance(message["content"], list)
-        for block in message["content"]
-        if "Original source windows (bounded, frozen):\n" in block.get("text", "")
-    )
-    windows = json.loads(
-        contexts.split("Original source windows (bounded, frozen):\n", 1)[1].split(
-            "\nPrior page basis", 1
-        )[0]
-    )
+    windows = original_payload(page, "Original source windows (bounded, frozen):")
     assert [w["path"] for w in windows] == ["sources/prior.md"]
     assert windows[0]["source_role"] == "prior_linked_source"
     assert "Model Birch" in windows[0]["content"]
 
 
 @pytest.mark.parametrize("stage", ["summary", "concept", "entity"])
-def test_unchanged_cannot_replace_new_knowledge_pages(kb_dir, monkeypatch, stage):
-    from types import SimpleNamespace
+def test_unchanged_cannot_replace_new_knowledge_pages(kb_dir, stage):
+    from ultrakb.agent.page_delivery import validate_page_delivery
+    from ultrakb.agent.page_response import PageResponseError
+    from ultrakb.locks import kb_ingest_lock
+    from ultrakb.mutation import mutation_scope
 
-    from openkb.application.documents import import_document
-
-    source = kb_dir / "instructions.md"
-    source.write_text("The reactor requires a documented safety inspection before start.")
-    sends = []
-
-    def response(**kwargs):
-        messages = kwargs["messages"]
-        sends.append(messages)
-        if "Based on the summary above" in str(messages):
-            result = {
-                "concepts": {"create": [{"name": "reactor"}]},
-                "entities": {"create": [{"name": "reactor", "type": "product"}]},
-            }
-        elif (stage == "summary" and "Write a summary page" in str(messages)) or (
-            f"Write the {stage} page" in str(messages)
-        ):
-            result = {"status": "unchanged", "content": "Navigation only", "description": "Reactor"}
-        else:
-            result = {
-                "content": "# Reactor\n\nSafety inspection before start.",
-                "description": "Reactor",
-            }
-        return SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    message=SimpleNamespace(
-                        content=json.dumps(summary_reply(kwargs["messages"], result))
-                    ),
-                    finish_reason="stop",
-                )
-            ],
-            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
-        )
-
-    async def asynchronous(**kwargs):
-        return response(**kwargs)
-
-    monkeypatch.setattr("litellm.completion", response)
-    monkeypatch.setattr("litellm.acompletion", asynchronous)
-    result = import_document(kb_dir, source)
-    assert result.status == "failed"
-    assert (
-        "summary_invalid_shape" if stage == "summary" else "page_unchanged_not_allowed"
-    ) in result.quality
+    protocol = "summary-page-json" if stage == "summary" else "page-json"
+    error = "summary_invalid_shape" if stage == "summary" else "page_unchanged_not_allowed"
+    with kb_ingest_lock(kb_dir / ".ultrakb"), pytest.raises(PageResponseError, match=error):
+        with mutation_scope(kb_dir, [kb_dir / "wiki"], operation="validate-new-page-delivery"):
+            validate_page_delivery(
+                json.dumps(
+                    {"status": "unchanged", "content": "Navigation only", "description": "Reactor"}
+                ),
+                response_protocol=protocol,
+            )
     assert not (kb_dir / "wiki/summaries/instructions.md").exists()
     assert not (kb_dir / "wiki/concepts/reactor.md").exists()
     assert not (kb_dir / "wiki/entities/reactor.md").exists()
-    assert not list((kb_dir / ".openkb/journal").glob("*.json"))
+    assert not list((kb_dir / ".ultrakb/journal").glob("*.json"))

@@ -1,28 +1,15 @@
 """Literal PDF title locations cannot certify a heading or clip its parent."""
 
-import json
-
 import pytest
-from pageindex.index.page_index import check_title_appearance
-from pageindex.index.physical_sections import SectionBoundary, prepare_entries
+from pageindex.index.physical_sections import (
+    SectionBoundary,
+    finish_title_verification,
+    prepare_entries,
+    unique_heading,
+)
 from pageindex.index.utils import post_processing
-from pageindex.llm import IndexResponse, llm_client_scope
 
 
-class RoleModel:
-    def __init__(self, answer):
-        self.answer = answer
-        self.calls = []
-
-    async def acomplete(self, messages, *, stage):
-        self.calls.append((stage, messages))
-        return IndexResponse(json.dumps({"answer": self.answer}))
-
-    def complete(self, messages, *, stage):
-        raise AssertionError("The role check uses the async indexing runtime")
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("text", "title"),
     [
@@ -31,31 +18,22 @@ class RoleModel:
         ("2026.10.13 Published\n", "Published"),
     ],
 )
-async def test_literal_match_does_not_bypass_rejected_heading_role(text, title):
-    runtime = RoleModel("no")
-    with llm_client_scope(runtime, required=True):
-        result = await check_title_appearance(
-            {"title": title, "physical_index": 147, "list_index": 0},
-            [(text, 10)],
-            start_index=147,
-            model="openai/fixture",
-        )
+def test_literal_match_does_not_bypass_rejected_heading_role(text, title):
+    item = {"title": title, "physical_index": 147, "list_index": 0}
+    result = finish_title_verification(item, {"answer": "no"}, [(text, 10)], 147)
     assert result["answer"] == "no"
-    assert [stage for stage, _ in runtime.calls] == ["verification"]
+    assert result["page_number"] == 147
+    assert item == {"title": title, "physical_index": 147, "list_index": 0}
 
 
-@pytest.mark.asyncio
-async def test_real_heading_keeps_its_location_after_role_verification():
-    runtime = RoleModel("yes")
-    with llm_client_scope(runtime, required=True):
-        result = await check_title_appearance(
-            {"title": "系统镜像", "structure": "7.3.8", "physical_index": 147, "list_index": 0},
-            [("7.3.8 系统镜像\n查看镜像信息，示例：\n# cobbler distro list\n", 30)],
-            start_index=147,
-            model="openai/fixture",
-        )
+def test_real_heading_keeps_its_location_after_role_verification():
+    item = {"title": "系统镜像", "structure": "7.3.8", "physical_index": 147, "list_index": 0}
+    pages = [("7.3.8 系统镜像\n查看镜像信息，示例：\n# cobbler distro list\n", 30)]
+    anchor = unique_heading(item, pages, 147)
+    result = finish_title_verification(item, {"answer": "yes"}, pages, 147)
     assert result["answer"] == "yes" and result["page_number"] == 147
-    assert [stage for stage, _ in runtime.calls] == ["verification"]
+    assert anchor["unit"] == 147 and anchor["range"] == [0, 10]
+    assert anchor["evidence"] == "text_match"
 
 
 def test_unproved_command_location_cannot_truncate_system_image_parent():

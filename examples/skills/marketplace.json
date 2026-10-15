@@ -5,13 +5,13 @@
     "email": "you@example.com"
   },
   "metadata": {
-    "description": "Skills compiled from the demo-kb knowledge base via OpenKB.",
+    "description": "Skills compiled from the demo-kb knowledge base via UltraKB.",
     "version": "0.1.0"
   },
   "plugins": [
     {
-      "name": "openkb",
-      "description": "Knowledge skills compiled from this OpenKB-managed knowledge base.",
+      "name": "ultrakb",
+      "description": "Knowledge skills compiled from this UltraKB-managed knowledge base.",
       "source": "./",
       "version": "0.1.0",
       "author": {

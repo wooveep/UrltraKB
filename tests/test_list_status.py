@@ -1,4 +1,4 @@
-"""Tests for openkb list and openkb status CLI commands."""
+"""Tests for ultrakb list and ultrakb status CLI commands."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from click.testing import CliRunner
 
-from openkb.cli import cli
+from ultrakb.cli import cli
 
 
 def _setup_kb(tmp_path: Path) -> Path:
@@ -20,13 +20,13 @@ def _setup_kb(tmp_path: Path) -> Path:
     (kb_dir / "wiki" / "concepts").mkdir(parents=True)
     (kb_dir / "wiki" / "entities").mkdir(parents=True)
     (kb_dir / "wiki" / "reports").mkdir(parents=True)
-    openkb_dir = kb_dir / ".openkb"
-    openkb_dir.mkdir()
-    (openkb_dir / "config.yaml").write_text("model: gpt-4o-mini\n")
+    ultrakb_dir = kb_dir / ".ultrakb"
+    ultrakb_dir.mkdir()
+    (ultrakb_dir / "config.yaml").write_text("model: gpt-4o-mini\n")
     from kb_fixtures import mark_current_kb
 
-    mark_current_kb(openkb_dir.parent)
-    (openkb_dir / "hashes.json").write_text(json.dumps({}))
+    mark_current_kb(ultrakb_dir.parent)
+    (ultrakb_dir / "hashes.json").write_text(json.dumps({}))
     (kb_dir / "wiki" / "index.md").write_text(
         "# Knowledge Base Index\n\n## Documents\n\n## Concepts\n"
     )
@@ -38,7 +38,7 @@ class TestListCommand:
         runner = CliRunner()
         with (
             runner.isolated_filesystem(temp_dir=tmp_path),
-            patch("openkb.cli._find_kb_dir", return_value=None),
+            patch("ultrakb.cli._find_kb_dir", return_value=None),
         ):
             result = runner.invoke(cli, ["list"])
             assert "No knowledge base found" in result.output
@@ -46,7 +46,7 @@ class TestListCommand:
     def test_list_empty_kb(self, tmp_path):
         kb_dir = _setup_kb(tmp_path)
         runner = CliRunner()
-        with patch("openkb.cli._find_kb_dir", return_value=kb_dir):
+        with patch("ultrakb.cli._find_kb_dir", return_value=kb_dir):
             result = runner.invoke(cli, ["list"])
             assert "No documents indexed yet" in result.output
 
@@ -56,10 +56,10 @@ class TestListCommand:
             "abc123": {"name": "paper.pdf", "type": "pdf"},
             "def456": {"name": "notes.md", "type": "md"},
         }
-        (kb_dir / ".openkb" / "hashes.json").write_text(json.dumps(hashes))
+        (kb_dir / ".ultrakb" / "hashes.json").write_text(json.dumps(hashes))
 
         runner = CliRunner()
-        with patch("openkb.cli._find_kb_dir", return_value=kb_dir):
+        with patch("ultrakb.cli._find_kb_dir", return_value=kb_dir):
             result = runner.invoke(cli, ["list"])
 
         assert "paper.pdf" in result.output
@@ -70,12 +70,12 @@ class TestListCommand:
     def test_list_shows_concepts(self, tmp_path):
         kb_dir = _setup_kb(tmp_path)
         hashes = {"abc": {"name": "paper.pdf", "type": "pdf"}}
-        (kb_dir / ".openkb" / "hashes.json").write_text(json.dumps(hashes))
+        (kb_dir / ".ultrakb" / "hashes.json").write_text(json.dumps(hashes))
         (kb_dir / "wiki" / "concepts" / "attention.md").write_text("# Attention")
         (kb_dir / "wiki" / "concepts" / "transformer.md").write_text("# Transformer")
 
         runner = CliRunner()
-        with patch("openkb.cli._find_kb_dir", return_value=kb_dir):
+        with patch("ultrakb.cli._find_kb_dir", return_value=kb_dir):
             result = runner.invoke(cli, ["list"])
 
         assert "attention" in result.output
@@ -84,10 +84,10 @@ class TestListCommand:
     def test_list_no_concepts_section_when_empty(self, tmp_path):
         kb_dir = _setup_kb(tmp_path)
         hashes = {"abc": {"name": "paper.pdf", "type": "pdf"}}
-        (kb_dir / ".openkb" / "hashes.json").write_text(json.dumps(hashes))
+        (kb_dir / ".ultrakb" / "hashes.json").write_text(json.dumps(hashes))
 
         runner = CliRunner()
-        with patch("openkb.cli._find_kb_dir", return_value=kb_dir):
+        with patch("ultrakb.cli._find_kb_dir", return_value=kb_dir):
             result = runner.invoke(cli, ["list"])
 
         assert result.exit_code == 0
@@ -97,12 +97,12 @@ class TestListCommand:
     def test_list_shows_entities(self, tmp_path):
         kb_dir = _setup_kb(tmp_path)
         hashes = {"abc": {"name": "paper.pdf", "type": "pdf"}}
-        (kb_dir / ".openkb" / "hashes.json").write_text(json.dumps(hashes))
+        (kb_dir / ".ultrakb" / "hashes.json").write_text(json.dumps(hashes))
         (kb_dir / "wiki" / "entities" / "ada-lovelace.md").write_text("# Ada")
         (kb_dir / "wiki" / "entities" / "openai.md").write_text("# OpenAI")
 
         runner = CliRunner()
-        with patch("openkb.cli._find_kb_dir", return_value=kb_dir):
+        with patch("ultrakb.cli._find_kb_dir", return_value=kb_dir):
             result = runner.invoke(cli, ["list"])
 
         assert "Entities (2):" in result.output
@@ -112,10 +112,10 @@ class TestListCommand:
     def test_list_no_entities_section_when_empty(self, tmp_path):
         kb_dir = _setup_kb(tmp_path)
         hashes = {"abc": {"name": "paper.pdf", "type": "pdf"}}
-        (kb_dir / ".openkb" / "hashes.json").write_text(json.dumps(hashes))
+        (kb_dir / ".ultrakb" / "hashes.json").write_text(json.dumps(hashes))
 
         runner = CliRunner()
-        with patch("openkb.cli._find_kb_dir", return_value=kb_dir):
+        with patch("ultrakb.cli._find_kb_dir", return_value=kb_dir):
             result = runner.invoke(cli, ["list"])
 
         assert result.exit_code == 0
@@ -128,7 +128,7 @@ class TestStatusCommand:
         runner = CliRunner()
         with (
             runner.isolated_filesystem(temp_dir=tmp_path),
-            patch("openkb.cli._find_kb_dir", return_value=None),
+            patch("ultrakb.cli._find_kb_dir", return_value=None),
         ):
             result = runner.invoke(cli, ["status"])
             assert "No knowledge base found" in result.output
@@ -142,7 +142,7 @@ class TestStatusCommand:
         (kb_dir / "wiki" / "concepts" / "concept1.md").write_text("# Concept")
 
         runner = CliRunner()
-        with patch("openkb.cli._find_kb_dir", return_value=kb_dir):
+        with patch("ultrakb.cli._find_kb_dir", return_value=kb_dir):
             result = runner.invoke(cli, ["status"])
 
         assert "sources" in result.output
@@ -158,10 +158,10 @@ class TestStatusCommand:
             "def": {"name": "b.pdf", "type": "pdf"},
             "ghi": {"name": "c.md", "type": "md"},
         }
-        (kb_dir / ".openkb" / "hashes.json").write_text(json.dumps(hashes))
+        (kb_dir / ".ultrakb" / "hashes.json").write_text(json.dumps(hashes))
 
         runner = CliRunner()
-        with patch("openkb.cli._find_kb_dir", return_value=kb_dir):
+        with patch("ultrakb.cli._find_kb_dir", return_value=kb_dir):
             result = runner.invoke(cli, ["status"])
 
         assert "3" in result.output  # total indexed count
@@ -172,7 +172,7 @@ class TestStatusCommand:
         (kb_dir / "raw" / "file2.pdf").write_bytes(b"PDF")
 
         runner = CliRunner()
-        with patch("openkb.cli._find_kb_dir", return_value=kb_dir):
+        with patch("ultrakb.cli._find_kb_dir", return_value=kb_dir):
             result = runner.invoke(cli, ["status"])
 
         assert "raw" in result.output
@@ -181,7 +181,7 @@ class TestStatusCommand:
         kb_dir = _setup_kb(tmp_path)
 
         runner = CliRunner()
-        with patch("openkb.cli._find_kb_dir", return_value=kb_dir):
+        with patch("ultrakb.cli._find_kb_dir", return_value=kb_dir):
             result = runner.invoke(cli, ["status"])
 
         assert result.exit_code == 0
@@ -195,7 +195,7 @@ class TestStatusKbPath:
         kb_dir = _setup_kb(tmp_path)
 
         runner = CliRunner()
-        with patch("openkb.cli._find_kb_dir", return_value=kb_dir):
+        with patch("ultrakb.cli._find_kb_dir", return_value=kb_dir):
             result = runner.invoke(cli, ["status"])
 
         assert result.exit_code == 0

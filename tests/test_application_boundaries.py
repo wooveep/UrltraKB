@@ -3,11 +3,11 @@
 import ast
 from pathlib import Path
 
-import openkb
+import ultrakb
 
 
 def test_application_does_not_import_entrypoint_adapters():
-    package = Path(openkb.__file__).parent / "application"
+    package = Path(ultrakb.__file__).parent / "application"
     violations = []
     for path in package.rglob("*.py"):
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
@@ -16,11 +16,11 @@ def test_application_does_not_import_entrypoint_adapters():
                 modules = [alias.name for alias in node.names]
             elif isinstance(node, ast.ImportFrom):
                 modules = [node.module or ""]
-                if node.module == "openkb":
-                    modules.extend(f"openkb.{alias.name}" for alias in node.names)
+                if node.module == "ultrakb":
+                    modules.extend(f"ultrakb.{alias.name}" for alias in node.names)
             for module in modules:
-                leaf = module.removeprefix("openkb.").split(".")[0]
-                if module.startswith("openkb.") and (
+                leaf = module.removeprefix("ultrakb.").split(".")[0]
+                if module.startswith("ultrakb.") and (
                     leaf in {"cli", "api", "desktop", "terminal_answers", "terminal_maintenance"}
                     or leaf.startswith(("cli_", "api_"))
                 ):

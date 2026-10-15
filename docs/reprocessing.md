@@ -38,8 +38,8 @@ reprocessing explanation.
 ## Review a new processing request
 
 ```bash
-openkb --kb-dir /path/to/kb reprocess SOURCE_ID
-openkb --kb-dir /path/to/kb reprocess SOURCE_ID --execute PREVIEW_VERSION
+ultrakb --kb-dir /path/to/kb reprocess SOURCE_ID
+ultrakb --kb-dir /path/to/kb reprocess SOURCE_ID --execute PREVIEW_VERSION
 ```
 
 The first command only reads the retained original and assets, runtime file

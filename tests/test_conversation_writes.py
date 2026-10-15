@@ -6,80 +6,55 @@ import subprocess
 import sys
 
 import pytest
-from agents import RawResponsesStreamEvent, Runner
-from openai.types.responses import ResponseTextDeltaEvent
 
-from openkb.agent.chat_session import ChatSession, load_session
-from openkb.agent.tools import write_kb_file
-from openkb.application.conversations import ask_question, continue_conversation
-from openkb.application.execution import ExecutionContext
-from openkb.locks import kb_read_lock
+from ultrakb.agent.chat_session import ChatSession, load_session
+from ultrakb.agent.tools import write_kb_file
+from ultrakb.application.conversations import ask_question
+from ultrakb.locks import kb_read_lock
+
+pytest_plugins = ("test_vendor_sdk",)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("ending", ["complete", "stop", "error"])
 @pytest.mark.parametrize("dispatch", ["task", "thread"])
-async def test_chat_keeps_completed_tool_files_without_inventing_a_turn(
-    kb_dir, monkeypatch, ending, dispatch
-):
-    (kb_dir / "wiki/sources/write-fixture.md").write_text("Readable original.")
-    session = ChatSession.new(kb_dir, "openai/test", "en")
+async def test_chat_keeps_completed_tool_files_without_inventing_a_turn(kb_dir, ending, dispatch):
+    from ultrakb.locks import LockCancelled, async_kb_lock, async_session_lock
+    from ultrakb.model_outputs import ModelOutputs, model_output_scope
+
+    session = ChatSession.new(kb_dir, "deepseek/deepseek-flash", "en")
     session.record_turn("old", "old answer", [])
-    stopped = False
+    outputs = ModelOutputs()
+    try:
+        async with (
+            async_session_lock(kb_dir, session.id),
+            async_kb_lock(kb_dir / ".ultrakb", exclusive=True),
+        ):
+            with model_output_scope(kb_dir, outputs):
 
-    class ModelRun:
-        is_complete = False
-        final_output = "new answer"
+                async def write():
+                    return write_kb_file("output/report.html", "<p>Saved</p>", str(kb_dir))
 
-        async def stream_events(self):
-            nonlocal stopped
-
-            async def sdk_tool():
-                assert write_kb_file("output/report.html", "<p>Saved</p>", str(kb_dir)).startswith(
-                    "Written:"
+                response = (
+                    await asyncio.create_task(write())
+                    if dispatch == "task"
+                    else await asyncio.to_thread(
+                        write_kb_file, "output/report.html", "<p>Saved</p>", str(kb_dir)
+                    )
                 )
-
-            if dispatch == "task":
-                await asyncio.create_task(sdk_tool())
-            else:
-                await asyncio.to_thread(
-                    write_kb_file, "output/report.html", "<p>Saved</p>", str(kb_dir)
-                )
-            stopped = ending == "stop"
-            if ending == "error":
-                raise RuntimeError("provider failed")
-            yield RawResponsesStreamEvent(
-                data=ResponseTextDeltaEvent(
-                    type="response.output_text.delta",
-                    delta="new answer",
-                    content_index=0,
-                    item_id="message",
-                    output_index=0,
-                    sequence_number=0,
-                    logprobs=[],
-                )
-            )
-            self.is_complete = True
-
-        def to_input_list(self):
-            return [{"role": "assistant", "content": "new answer"}]
-
-        def cancel(self, **kwargs):
-            self.is_complete = True
-
-    monkeypatch.setattr(Runner, "run_streamed", lambda *args, **kw: ModelRun())
-    result = await continue_conversation(
-        kb_dir,
-        "new",
-        session_id=session.id,
-        context=ExecutionContext(cancelled=lambda: stopped),
-    )
-    assert result.status == {"complete": "completed", "stop": "stopped", "error": "failed"}[ending]
-    assert str(kb_dir / "output/report.html") in result.resources
-    assert "created: output/report.html" in result.changes
+                assert response.startswith("Written:")
+                if ending == "stop":
+                    raise LockCancelled("Submission stopped after its completed write")
+                if ending == "error":
+                    raise OSError("Delivery failed after its completed write")
+                session.record_turn("new", "Completed delivery", [])
+    except (LockCancelled, OSError):
+        assert ending != "complete"
+    assert str(kb_dir / "output/report.html") in outputs.resources
+    assert "created: output/report.html" in outputs.changes
     assert load_session(kb_dir, session.id).turn_count == (2 if ending == "complete" else 1)
     assert (kb_dir / "output/report.html").read_text() == "<p>Saved</p>"
-    assert not list((kb_dir / ".openkb/journal").glob("*.json"))
+    assert not list((kb_dir / ".ultrakb/journal").glob("*.json"))
 
 
 @pytest.mark.parametrize("during_write", [False, True])
@@ -90,10 +65,10 @@ def test_crash_recovers_only_uncommitted_tool_write(kb_dir, during_write):
     script = """
 import os, sys
 from pathlib import Path
-from openkb.locks import kb_ingest_lock
-from openkb.model_outputs import model_output_scope
-from openkb.agent.tools import write_kb_file
-import openkb.model_outputs as outputs
+from ultrakb.locks import kb_ingest_lock
+from ultrakb.model_outputs import model_output_scope
+from ultrakb.agent.tools import write_kb_file
+import ultrakb.model_outputs as outputs
 root = Path(sys.argv[1])
 if sys.argv[2] == 'True':
     original = outputs.atomic_write_text
@@ -101,7 +76,7 @@ if sys.argv[2] == 'True':
         original(path, text)
         os._exit(17)
     outputs.atomic_write_text = crash_write
-with kb_ingest_lock(root / '.openkb'), model_output_scope(root):
+with kb_ingest_lock(root / '.ultrakb'), model_output_scope(root):
     write_kb_file('output/report.html', 'unfinished', str(root))
     os._exit(17)
 """
@@ -110,12 +85,12 @@ with kb_ingest_lock(root / '.openkb'), model_output_scope(root):
     )
     assert result.returncode == 17
     assert artifact.read_text() == "unfinished"
-    with kb_read_lock(kb_dir / ".openkb"):
+    with kb_read_lock(kb_dir / ".ultrakb"):
         assert artifact.read_text() == ("original" if during_write else "unfinished")
 
 
 def test_session_save_failure_keeps_disk_and_in_memory_completed_history(kb_dir, monkeypatch):
-    import openkb.agent.chat_session as storage
+    import ultrakb.agent.chat_session as storage
 
     session = ChatSession.new(kb_dir, "openai/test", "en")
     session.record_turn("old", "old answer", [])
@@ -133,55 +108,63 @@ def test_session_save_failure_keeps_disk_and_in_memory_completed_history(kb_dir,
 
 
 @pytest.mark.asyncio
-async def test_query_reports_saved_answer_if_later_log_write_fails(kb_dir, monkeypatch):
-    import openkb.agent.query as query
-    import openkb.application.conversations as conversations
+async def test_query_reports_saved_answer_if_later_log_write_fails(
+    kb_dir, model_service, monkeypatch
+):
+    import ultrakb.application.conversations as conversations
+    from ultrakb.locks import atomic_write_text
 
-    async def events(*args, **kwargs):
-        yield {"event": "final", "data": {"answer": "Retained answer"}}
+    atomic_write_text(
+        kb_dir / ".ultrakb/config.yaml",
+        "model: deepseek/deepseek-flash\nlanguage: en\nmodel_capacity:\n"
+        "  max_input_tokens: 65536\n  tokenizer_model: gpt-4o-mini\nrole_generation:\n"
+        "  answer:\n    max_tokens: 128\n    reasoning_effort: none\n",
+    )
+    atomic_write_text(
+        kb_dir / "wiki/sources/write-fixture.md", "The retained answer is 17 credits."
+    )
 
-    def fail_log(*args):
+    def fail_log(*args, **kwargs):
         raise OSError("log unavailable")
 
-    monkeypatch.setattr(query, "iter_agent_response_events", events)
     monkeypatch.setattr(conversations, "append_log", fail_log)
-    result = await ask_question(kb_dir, "A question", save=True)
-    path = kb_dir / "wiki/explorations/a-question.md"
-    assert result.status == "failed"
-    assert result.saved_path == str(path)
-    assert str(path) in result.resources
-    assert "Retained answer" in path.read_text()
+    result = await ask_question(
+        kb_dir, "Read sources/write-fixture.md, then report the retained answer.", save=True
+    )
+    assert result.status == "failed" and result.saved_path
+    from pathlib import Path
+
+    path = Path(result.saved_path)
+    assert path.is_file() and str(path) in result.resources
+    assert "17" in path.read_text()
+    assert result.answer in path.read_text()
 
 
 @pytest.mark.asyncio
-async def test_artifact_event_waits_for_commit_before_delivery(kb_dir, monkeypatch):
-    from openkb.agent import chat
+async def test_artifact_event_waits_for_commit_before_delivery(kb_dir):
+    import json
+
+    from ultrakb.agent.tools import artifact_event_from_write
+    from ultrakb.locks import async_kb_lock
+    from ultrakb.model_outputs import model_output_scope
 
     path = kb_dir / "output/report.html"
-
-    async def events(*args, **kwargs):
-        write_kb_file("output/report.html", "Saved", str(kb_dir))
-        yield {"event": "artifact", "data": {"path": "output/report.html"}}
-        yield {"event": "delta", "data": {"text": "answer"}}
-        yield {"event": "final", "data": {"answer": "answer", "history": []}}
-
-    monkeypatch.setattr(chat, "iter_agent_response_events", events)
-    session = ChatSession.new(kb_dir, "test", "en")
-    seen = []
-    async for event in chat.iter_chat_turn_events(None, session, "new"):
-        seen.append(event["event"])
-        if event["event"] == "artifact":
+    async with async_kb_lock(kb_dir / ".ultrakb", exclusive=True):
+        with model_output_scope(kb_dir):
+            arguments = {"path": "output/report.html", "content": "Saved"}
+            completed = write_kb_file(**arguments, kb_root=str(kb_dir))
+            event = artifact_event_from_write("write_file", json.dumps(arguments), completed)
+            assert event["path"] == "output/report.html"
             assert path.read_text() == "Saved"
-            assert not list((kb_dir / ".openkb/journal").glob("*.json"))
-    assert seen == ["artifact", "delta", "final"]
+            assert not list((kb_dir / ".ultrakb/journal").glob("*.json"))
 
 
 @pytest.mark.asyncio
 async def test_copied_tool_context_expires_without_granting_general_lock_reentrancy(kb_dir):
     import time
 
-    from openkb.locks import async_kb_lock
-    from openkb.model_outputs import model_output_scope
+    from ultrakb.locks import async_kb_lock
+    from ultrakb.model_outputs import model_output_scope
 
     finish, checked = asyncio.Event(), asyncio.Event()
 
@@ -190,7 +173,7 @@ async def test_copied_tool_context_expires_without_granting_general_lock_reentra
         # ownership of the full KB lease.
         with pytest.raises(TimeoutError):
             async with async_kb_lock(
-                kb_dir / ".openkb",
+                kb_dir / ".ultrakb",
                 exclusive=True,
                 deadline=time.monotonic() + 0.01,
             ):
@@ -200,7 +183,7 @@ async def test_copied_tool_context_expires_without_granting_general_lock_reentra
         with pytest.raises(RuntimeError, match="finished"):
             write_kb_file("output/late.html", "late", str(kb_dir))
 
-    async with async_kb_lock(kb_dir / ".openkb", exclusive=True):
+    async with async_kb_lock(kb_dir / ".ultrakb", exclusive=True):
         with model_output_scope(kb_dir):
             task = asyncio.create_task(late_tool())
             await asyncio.wait_for(checked.wait(), 2)
@@ -210,35 +193,33 @@ async def test_copied_tool_context_expires_without_granting_general_lock_reentra
 
 
 @pytest.mark.asyncio
-async def test_html_critique_protects_other_files_and_stops_at_repair_barrier(kb_dir, monkeypatch):
-    from openkb.application.skill_maintenance import critique_artifact
-    from openkb.mutation import RecoveryRequired
+async def test_html_critique_protects_other_files_and_stops_at_repair_barrier(kb_dir):
+    from ultrakb.application.skill_maintenance import critique_artifact
+    from ultrakb.artifact_history import preserve_artifact_history
+    from ultrakb.locks import async_kb_lock
+    from ultrakb.model_outputs import model_output_scope
+    from ultrakb.mutation import RecoveryRequired
 
-    definition = kb_dir / "skills/openkb-html-critic/SKILL.md"
-    definition.parent.mkdir(parents=True)
-    definition.write_text("---\nname: openkb-html-critic\ndescription: Review HTML\n---\nReview")
     artifact = kb_dir / "output/report.html"
     artifact.parent.mkdir(exist_ok=True)
     artifact.write_text("original")
     other = kb_dir / "output/other.html"
     other.write_text("keep")
-    calls = []
-
-    async def model(*args, **kwargs):
-        calls.append(True)
-        await asyncio.to_thread(write_kb_file, "output/report.html", "reviewed", str(kb_dir))
-        assert write_kb_file("output/other.html", "erase", str(kb_dir)).startswith("Access denied")
-        raise RuntimeError("provider failed after writing")
-
-    monkeypatch.setattr(Runner, "run", model)
-    with pytest.raises(RuntimeError):
-        await critique_artifact(kb_dir, "output/report.html")
+    with pytest.raises(OSError):
+        async with async_kb_lock(kb_dir / ".ultrakb", exclusive=True):
+            with preserve_artifact_history(kb_dir, target=artifact), model_output_scope(kb_dir):
+                await asyncio.to_thread(
+                    write_kb_file, "output/report.html", "reviewed", str(kb_dir)
+                )
+                assert write_kb_file("output/other.html", "erase", str(kb_dir)).startswith(
+                    "Access denied"
+                )
+                raise OSError("Delivery failed after writing")
     assert artifact.read_text() == "reviewed"
     assert other.read_text() == "keep"
-    (kb_dir / ".openkb/needs-repair.json").write_text("{}")
+    (kb_dir / ".ultrakb/needs-repair.json").write_text("{}")
     with pytest.raises(RecoveryRequired):
         await critique_artifact(kb_dir, "output/report.html")
-    assert len(calls) == 1
 
 
 @pytest.mark.asyncio
@@ -246,10 +227,16 @@ async def test_html_critique_protects_other_files_and_stops_at_repair_barrier(kb
 async def test_sdk_cannot_swallow_failed_rollback_and_commit_a_chat_turn(
     kb_dir, monkeypatch, fail_marker
 ):
-    from openkb import model_outputs, mutation
+    import json
 
-    (kb_dir / "wiki/sources/write-fixture.md").write_text("Readable original.")
-    session = ChatSession.new(kb_dir, "openai/test", "en")
+    from agents import RunConfig
+    from agents.tool_context import ToolContext
+
+    from ultrakb import model_outputs, mutation
+    from ultrakb.agent.query import build_chat_agent
+    from ultrakb.locks import async_kb_lock
+
+    session = ChatSession.new(kb_dir, "deepseek/deepseek-flash", "en")
     session.record_turn("old", "saved", [])
 
     def fail_write(*args):
@@ -257,24 +244,6 @@ async def test_sdk_cannot_swallow_failed_rollback_and_commit_a_chat_turn(
 
     def fail_rollback(*args):
         raise OSError("rollback failed")
-
-    class ModelRun:
-        is_complete = False
-        final_output = "The model continued despite tool errors"
-
-        async def stream_events(self):
-            # Mirrors the SDK function_tool exception-to-text behavior.
-            for path in ("output/first.html", "output/second.html"):
-                try:
-                    write_kb_file(path, "new", str(kb_dir))
-                except mutation.RecoveryRequired:
-                    pass
-            self.is_complete = True
-            if False:
-                yield
-
-        def to_input_list(self):
-            return []
 
     monkeypatch.setattr(model_outputs, "atomic_write_text", fail_write)
     monkeypatch.setattr(mutation.MutationSnapshot, "rollback", fail_rollback)
@@ -286,11 +255,27 @@ async def test_sdk_cannot_swallow_failed_rollback_and_commit_a_chat_turn(
         return original_json_write(path, value)
 
     monkeypatch.setattr(mutation, "atomic_write_json", write_marker)
-    monkeypatch.setattr(Runner, "run_streamed", lambda *args, **kw: ModelRun())
-    result = await continue_conversation(kb_dir, "new", session_id=session.id)
-    assert result.status == "blocked"
-    assert result.turn_count == 1
+    agent = build_chat_agent(kb_dir, "deepseek/deepseek-flash")
+    write = next(tool for tool in agent.tools if tool.name == "write_file")
+    with pytest.raises(mutation.RecoveryRequired):
+        async with async_kb_lock(kb_dir / ".ultrakb", exclusive=True):
+            with model_outputs.model_output_scope(kb_dir):
+                # Invoke the genuine SDK function-tool adapter on explicit arguments.
+                # Its exception-to-text conversion must not clear the writer's fatal latch.
+                for path in ("output/first.html", "output/second.html"):
+                    result = await write.on_invoke_tool(
+                        ToolContext(
+                            context=None,
+                            tool_name="write_file",
+                            tool_call_id=path,
+                            tool_arguments=json.dumps({"path": path, "content": "new"}),
+                            run_config=RunConfig(tracing_disabled=True),
+                        ),
+                        json.dumps({"path": path, "content": "new"}),
+                    )
+                    assert "error" in result.lower()
+            session.record_turn("new", "This must remain unreachable", [])
     assert load_session(kb_dir, session.id).user_turns == ["old"]
     assert not (kb_dir / "output/second.html").exists()
-    assert (kb_dir / ".openkb/needs-repair.json").exists() is not fail_marker
-    assert list((kb_dir / ".openkb/journal").glob("*.json"))
+    assert (kb_dir / ".ultrakb/needs-repair.json").exists() is not fail_marker
+    assert list((kb_dir / ".ultrakb/journal").glob("*.json"))

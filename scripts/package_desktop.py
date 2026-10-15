@@ -1,4 +1,4 @@
-"""Create UrltraKB runtime archives separately from matching source/build materials."""
+"""Create UltraKB runtime archives separately from matching source/build materials."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ import zipfile
 from dataclasses import asdict
 from pathlib import Path, PurePosixPath
 
-from openkb.distribution import ReleaseFile, read_distribution
+from ultrakb.distribution import ReleaseFile, read_distribution
 
 try:
     from .export_desktop_source import verify_source
@@ -71,23 +71,23 @@ def _material_members(materials, identity):
     release = read_distribution(materials, identity)
     if release.source_archive:
         raise ValueError("A complete material directory is required")
-    members = {"UrltraKB/distribution/" + f.name: f for f in release.files}
-    members["UrltraKB/distribution/release.json"] = record(materials / "release.json", "build")
+    members = {"UltraKB/distribution/" + f.name: f for f in release.files}
+    members["UltraKB/distribution/release.json"] = record(materials / "release.json", "build")
     return release, members
 
 
 def package_materials(source: Path, materials: Path, output: Path) -> ReleaseFile:
     identity = verify_source(source)
     release, expected = _material_members(materials, identity)
-    target = _target(output, f"UrltraKB-{identity['version']}-materials.zip")
-    with tempfile.TemporaryDirectory(prefix="urltrakb-materials-", dir=output) as directory:
+    target = _target(output, f"UltraKB-{identity['version']}-materials.zip")
+    with tempfile.TemporaryDirectory(prefix="ultrakb-materials-", dir=output) as directory:
         archive_path = Path(directory) / target.name
         with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_STORED) as archive:
             with (materials / "release.json").open("rb") as reader:
-                _zip_write(archive, "UrltraKB/distribution/release.json", reader)
+                _zip_write(archive, "UltraKB/distribution/release.json", reader)
             for file in release.files:
                 with release.open_file(file.name) as reader:
-                    _zip_write(archive, "UrltraKB/distribution/" + file.name, reader)
+                    _zip_write(archive, "UltraKB/distribution/" + file.name, reader)
         _zip_members(archive_path, expected)
         archive_path.rename(target)
     return record(target, "source")
@@ -99,12 +99,10 @@ def _program_copy(program, inventory, destination, identity):
     rows = inventory["files"]
     names = [row["path"] for row in rows]
     suffix = ".exe" if inventory["platform"]["system"] == "Windows" else ""
-    required = {
-        name + suffix for name in ("UrltraKB", "UrltraKBCLI", "UrltraKBAPI", "UrltraKBVerify")
-    }
+    required = {name + suffix for name in ("UltraKB", "UltraKBCLI", "UltraKBAPI", "UltraKBVerify")}
     shared_executables = {}
     if len(set(names)) != len(names) or not required <= set(names):
-        raise ValueError("Missing or duplicate UrltraKB entry points")
+        raise ValueError("Missing or duplicate UltraKB entry points")
     for row in rows:
         name = row["path"]
         relative = PurePosixPath(name)
@@ -178,7 +176,7 @@ def _program_copy(program, inventory, destination, identity):
         ):
             raise ValueError(f"Copied program input changed: {row['path']}")
     if (
-        json.loads((destination / "_internal/openkb/_build_info.json").read_text("utf-8"))
+        json.loads((destination / "_internal/ultrakb/_build_info.json").read_text("utf-8"))
         != identity
     ):
         raise ValueError("Program identity does not match its inventory")
@@ -187,8 +185,8 @@ def _program_copy(program, inventory, destination, identity):
 def package_runtime(source, program, inventory, materials, source_archive, output):
     identity = verify_source(source)
     release, material_members = _material_members(materials, identity)
-    if source_archive.name != f"UrltraKB-{identity['version']}-materials.zip":
-        raise ValueError("Separate material archive must identify this UrltraKB version")
+    if source_archive.name != f"UltraKB-{identity['version']}-materials.zip":
+        raise ValueError("Separate material archive must identify this UltraKB version")
     companion = record(source_archive, "source")
     _zip_members(source_archive, material_members)
     if digest(source_archive) != companion.sha256:
@@ -200,24 +198,24 @@ def package_runtime(source, program, inventory, materials, source_archive, outpu
     }:
         raise ValueError("Only Windows and Debian x86_64 builds are supported")
     platform = "windows-x64.zip" if system == "Windows" else "debian13.6-x64.tar.gz"
-    target = _target(output, f"UrltraKB-{identity['version']}-{platform}")
-    with tempfile.TemporaryDirectory(prefix="urltrakb-runtime-", dir=output) as directory:
-        stage = Path(directory) / "UrltraKB"
+    target = _target(output, f"UltraKB-{identity['version']}-{platform}")
+    with tempfile.TemporaryDirectory(prefix="ultrakb-runtime-", dir=output) as directory:
+        stage = Path(directory) / "UltraKB"
         _program_copy(program, inventory, stage, identity)
         distribution = stage / "distribution"
         distribution.mkdir()
         bundled = []
         notices = [
-            "UrltraKB runtime package\n",
+            "UltraKB runtime package\n",
             f"Version: {identity['version']}\nCommit: {identity['commit']}\n",
             f"Separate source/build materials: {companion.name}\nSHA256: {companion.sha256}\n",
             "完整许可随程序提供。源码与构建资料在上述独立资料包中，可从同一交付目录取得。\n"
             "需要本地源码或通过 REST 提供完整资料时，将资料包解压到与程序包相同的位置，\n"
-            "合并 UrltraKB/distribution/。也可用 OPENKB_DISTRIBUTION_DIR 指向解压后的资料目录。\n"
+            "合并 UltraKB/distribution/。也可用 ULTRAKB_DISTRIBUTION_DIR 指向解压后的资料目录。\n"
             "以下完整资料说明中的源码路径属于独立资料包，不表示源码已随运行包安装。\n"
             "Download the companion archive from the same delivery location. Extract it beside\n"
-            "the program archive to merge UrltraKB/distribution/, or configure the extracted\n"
-            "material directory through OPENKB_DISTRIBUTION_DIR. Source paths in the original\n"
+            "the program archive to merge UltraKB/distribution/, or configure the extracted\n"
+            "material directory through ULTRAKB_DISTRIBUTION_DIR. Source paths in the original\n"
             "material notice below refer to that companion archive.\n",
         ]
         for file in release.files:
@@ -230,7 +228,7 @@ def package_runtime(source, program, inventory, materials, source_archive, outpu
                     with (distribution / file.name).open("xb") as writer:
                         shutil.copyfileobj(stream, writer)
                     bundled.append(file)
-        notice = distribution / "UrltraKB-NOTICE.txt"
+        notice = distribution / "UltraKB-NOTICE.txt"
         with notice.open("x", encoding="utf-8") as stream:
             stream.write("\n".join(notices))
         bundled.append(record(notice, "notice"))
@@ -245,15 +243,15 @@ def package_runtime(source, program, inventory, materials, source_archive, outpu
         )
         read_distribution(distribution, identity)
         (stage / "README.txt").write_text(
-            f"UrltraKB {identity['version']}\n\n"
-            "Windows：运行 UrltraKB.exe。Debian：运行 ./UrltraKB。\n"
-            "UrltraKBCLI 提供命令行，UrltraKBAPI 提供 REST，UrltraKBVerify 用于验收。\n"
+            f"UltraKB {identity['version']}\n\n"
+            "Windows：运行 UltraKB.exe。Debian：运行 ./UltraKB。\n"
+            "UltraKBCLI 提供命令行，UltraKBAPI 提供 REST，UltraKBVerify 用于验收。\n"
             "保留整个程序目录。许可与独立源码资料包信息见 distribution/，"
             "也可从右上角 ⋯ 菜单查看。\n",
             encoding="utf-8",
         )
         expected = {
-            "UrltraKB/" + p.relative_to(stage).as_posix(): record(p, "build")
+            "UltraKB/" + p.relative_to(stage).as_posix(): record(p, "build")
             for p in stage.rglob("*")
             if p.is_file()
         }
@@ -280,7 +278,7 @@ def package_runtime(source, program, inventory, materials, source_archive, outpu
                 ) as compressed,
                 tarfile.open(fileobj=compressed, mode="w") as archive,
             ):
-                archive.add(stage, arcname="UrltraKB", filter=_tar_metadata)
+                archive.add(stage, arcname="UltraKB", filter=_tar_metadata)
             with tarfile.open(archive_path, "r:gz") as archive:
                 entries = [m for m in archive.getmembers() if not m.isdir()]
                 if len(entries) != len(expected) or {m.name for m in entries} != set(expected):

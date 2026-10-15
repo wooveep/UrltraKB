@@ -11,11 +11,13 @@ import subprocess
 import tempfile
 from pathlib import Path, PurePosixPath
 
-_TREES = {"openkb", "skills", "tests", "scripts", "packaging", "examples", "assets", "vendor"}
+_TREES = {"ultrakb", "skills", "tests", "scripts", "packaging", "examples", "assets", "vendor"}
 _FILES = {
     ".gitattributes",
     ".github/workflows/desktop-build.yml",
     ".gitignore",
+    "AGENTS.md",
+    "CONTEXT.md",
     "README.md",
     "Makefile",
     "LICENSE",
@@ -39,12 +41,12 @@ _FILES = {
     "docs/office-ingest.md",
 }
 _GENERATED = {
-    "openkb/rendering/assets",
-    "openkb/rendering/rust-helper/target",
-    "openkb/office/assets/runtime",
-    "openkb/office/launcher/target",
-    "openkb/cfb_helper/assets/runtime",
-    "openkb/cfb_helper/rust-helper/target",
+    "ultrakb/rendering/assets",
+    "ultrakb/rendering/rust-helper/target",
+    "ultrakb/office/assets/runtime",
+    "ultrakb/office/launcher/target",
+    "ultrakb/cfb_helper/assets/runtime",
+    "ultrakb/cfb_helper/rust-helper/target",
     "packaging/desktop/build",
     "packaging/desktop/dist",
 }
@@ -83,6 +85,8 @@ def _source(name: str) -> bool:
         return False
     if name.startswith("assets/"):
         return name.startswith("assets/fonts/") and len(path.parts) == 3
+    if name.startswith("docs/"):
+        return name in _FILES or (len(path.parts) == 2 and path.suffix == ".md")
     if name.startswith("vendor/"):
         return (
             name.startswith(
@@ -94,7 +98,7 @@ def _source(name: str) -> bool:
                 for part in path.parts
             )
         )
-    return not name.startswith("openkb/web/") and (name in _FILES or path.parts[0] in _TREES)
+    return not name.startswith("ultrakb/web/") and (name in _FILES or path.parts[0] in _TREES)
 
 
 def _digest(path: Path) -> str:
@@ -163,7 +167,7 @@ def export_source(repo: Path, output: Path, commit: str = "HEAD") -> dict[str, s
     if not blobs:
         raise ValueError("No application source at the selected commit")
     output.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="openkb-source-", dir=output.parent) as temporary:
+    with tempfile.TemporaryDirectory(prefix="ultrakb-source-", dir=output.parent) as temporary:
         staging = Path(temporary) / "source"
         staging.mkdir()
         # Raw objects bypass export-ignore/subst and checkout filters, including
@@ -178,8 +182,8 @@ def export_source(repo: Path, output: Path, commit: str = "HEAD") -> dict[str, s
                     check=True,
                 )
             path.chmod(mode)
-        (staging / "openkb").mkdir(exist_ok=True)
-        (staging / "openkb/_build_info.json").write_text(
+        (staging / "ultrakb").mkdir(exist_ok=True)
+        (staging / "ultrakb/_build_info.json").write_text(
             json.dumps(identity, indent=2) + "\n", encoding="utf-8", newline="\n"
         )
         record = {
@@ -234,7 +238,7 @@ def verify_source(root: Path) -> dict[str, str]:
     if set(_source_files(root)) != set(record["files"]):
         raise ValueError("Unexpected application files in committed source export")
     identity = {"version": record["version"], "commit": record["commit"]}
-    if json.loads((root / "openkb/_build_info.json").read_text("utf-8")) != identity:
+    if json.loads((root / "ultrakb/_build_info.json").read_text("utf-8")) != identity:
         raise ValueError("Installed identity does not match committed source")
     return identity
 

@@ -1,137 +1,109 @@
-"""Explicit retry can finish one unobserved repair without repeating paid results."""
+"""Unobserved recovery keeps its historical ledger and never reopens semantic repair."""
 
 import json
-import os
-import signal
-import subprocess
-import sys
-import threading
-from pathlib import Path
+from dataclasses import replace
 
 import pytest
-from test_vendor_sdk import response
-
-pytest_plugins = ("test_vendor_sdk",)
-
-
-def reply(value):
-    return 200, response({"role": "assistant", "content": json.dumps(value)})
 
 
 @pytest.mark.parametrize("valid_recovery", [True, False])
-def test_public_retry_recovers_unobserved_summary_repair_once(
-    kb_dir, model_service, valid_recovery
-):
-    from openkb.application.documents import import_document
-    from openkb.application.execution import ExecutionContext
-    from openkb.application.repair import repair_knowledge_base
-    from openkb.application.source_retry import retry_source
-    from openkb.llm_usage import read_requests
-    from openkb.model_task import read_task
+def test_public_retry_recovers_unobserved_summary_repair_once(kb_dir, valid_recovery):
+    from publication_recovery_inputs import failed_summary_inputs, ledger_bytes, retrying
 
-    (kb_dir / ".env").write_text(f"LLM_API_KEY=fixture\nOPENAI_API_BASE={model_service.url}\n")
-    (kb_dir / ".openkb/config.yaml").write_text(
-        "model: openai/gpt-4o-mini\nlanguage: en\nmodel_policy:\n  retries: 0\n  max_calls: 8\n"
-    )
-    normal = kb_dir / "normal.txt"
-    normal.write_text("Normal operation requires supervision.")
-    accepted = {
-        "description": "Operating condition",
-        "content": "# Operation\nSupervision required.",
-    }
-    model_service.replies.extend([reply(accepted), reply({})])
-    context = ExecutionContext()
-    result = import_document(kb_dir, normal, context=context)
-    assert result.status == "added"
-    retained = (kb_dir / "wiki/summaries/normal.md").read_bytes()
-    task_id = context.model_task.record.task_id
-    source = kb_dir / "interrupted.txt"
-    source.write_text("Interrupted operation requires supervision.")
-    requested, release = threading.Event(), threading.Event()
+    from ultrakb.agent.page_delivery import validate_page_delivery
+    from ultrakb.agent.page_response import PageResponseError
+    from ultrakb.compile_checkpoints import CompileCheckpoints
+    from ultrakb.llm_usage import UsageRequest
+    from ultrakb.llm_usage_models import UsageExecution
+    from ultrakb.locks import atomic_write_json, atomic_write_text
+    from ultrakb.model_task import read_task
 
-    def unobserved(_request):
-        requested.set()
-        assert release.wait(30), "The test did not release its interrupted response"
-        return response({"role": "assistant", "content": json.dumps(accepted)})
-
-    model_service.replies.extend(
-        [reply({"description": "Invalid", "content": ""}), (200, unobserved)]
-    )
-    script = """
-import sys
-from pathlib import Path
-from openkb.application.documents import import_document
-from openkb.application.execution import ExecutionContext
-import_document(Path(sys.argv[1]), Path(sys.argv[2]),
-                context=ExecutionContext(resume_model_task_id=sys.argv[3]))
-"""
-    repo = Path(__file__).resolve().parents[1]
-    env = {
-        **os.environ,
-        "PYTHONDONTWRITEBYTECODE": "1",
-        "PYTHONPATH": os.pathsep.join(
-            [
-                str(repo),
-                *[
-                    str(repo / "vendor" / name)
-                    for name in ("PageIndex", "ChatIndex", "ConDB", "LiteLLM")
-                ],
-            ]
-        ),
-    }
-    with (kb_dir.parent / "interrupted-compile.log").open("w") as stream:
-        child = subprocess.Popen(
-            [sys.executable, "-B", "-c", script, str(kb_dir), str(source), task_id],
-            cwd=repo,
-            env=env,
-            stdout=stream,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
+    fixture = failed_summary_inputs(kb_dir, unknown=True)
+    normal = kb_dir / "wiki/summaries/normal.md"
+    atomic_write_text(normal, "Normal operation requires supervision.")
+    retained = normal.read_bytes()
+    historical = ledger_bytes(fixture)
+    with retrying(fixture):
+        fixture.checkpoint.claim_generation(
+            "short-summary", "same-request", stage="compile.summary"
         )
-        try:
-            assert requested.wait(30), "The real repair request was never sent"
-            os.killpg(child.pid, signal.SIGKILL)
-            child.wait(timeout=10)
-        finally:
-            release.set()
-            if child.poll() is None:
-                os.killpg(child.pid, signal.SIGKILL)
-                child.wait(timeout=10)
-    assert child.returncode == -signal.SIGKILL
-    before = read_task(kb_dir, task_id)
-    assert before.used == 4
-    unknown = [item for item in read_requests(kb_dir) if item.state == "started"]
-    assert len(unknown) == 1 and unknown[0].observation == "call"
-    assert unknown[0].send_status == "sent"
-    old_ledger = {p: p.read_bytes() for p in (kb_dir / ".openkb/usage/requests").glob("*.json")}
-    assert repair_knowledge_base(kb_dir).repaired
-    model_service.replies.extend(
-        [reply(accepted), reply({})]
-        if valid_recovery
-        else [reply({"description": "Still invalid", "content": ""})]
+    entry = json.loads(fixture.checkpoint.path.read_text())["entries"]["short-summary"]
+    assert entry["recovery_used"] is True and entry["repair_used"] is True
+    assert entry["recovery"]["request_attempt_id"] == fixture.request.request_attempt_id
+    accepted = json.dumps(
+        {"description": "Operating condition", "content": "Supervision required."}
     )
-    resumed = retry_source(kb_dir, unknown[0].source_id)
-    if not valid_recovery:
-        assert resumed.status == "failed", resumed
-        assert len(model_service.requests) == read_task(kb_dir, task_id).used == 5
-        again = retry_source(kb_dir, unknown[0].source_id)
-        assert again.status == "failed", again
-        assert len(model_service.requests) == read_task(kb_dir, task_id).used == 5
-        assert all(p.read_bytes() == value for p, value in old_ledger.items())
-        assert (kb_dir / "wiki/summaries/normal.md").read_bytes() == retained
-        assert not (kb_dir / "wiki/summaries/interrupted.md").exists()
-        model_service.replies.extend([reply(accepted), reply({})])
-        finished = retry_source(kb_dir, unknown[0].source_id, retry_failed_response=True)
-        assert finished.status == "added", finished
-        assert len(model_service.requests) == read_task(kb_dir, task_id).used == 7
-        assert all(p.read_bytes() == value for p, value in old_ledger.items())
-        assert (kb_dir / "wiki/summaries/normal.md").read_bytes() == retained
-        return
-    assert resumed.status == "added", resumed
-    assert len(model_service.requests) == 6
-    assert read_task(kb_dir, task_id).used == 6
-    assert len(list((kb_dir / ".openkb/model-tasks").glob("*.json"))) == 1
-    assert resumed.model_usage["current"]["actual_sends"] == 2
-    assert all(p.read_bytes() == value for p, value in old_ledger.items())
-    assert (kb_dir / "wiki/summaries/normal.md").read_bytes() == retained
-    assert "Supervision required." in (kb_dir / "wiki/summaries/interrupted.md").read_text()
+    if valid_recovery:
+        received = validate_page_delivery(accepted, response_protocol="summary-page-json")
+        fixture.checkpoint.save("short-summary", "same-request", received)
+    else:
+        with pytest.raises(PageResponseError):
+            validate_page_delivery(
+                '{"description":"Still invalid","content":""}',
+                response_protocol="summary-page-json",
+            )
+        fixture.checkpoint.record_failure("short-summary", "same-request", "summary_invalid_shape")
+        with retrying(fixture), pytest.raises(PageResponseError, match="compile_repair_exhausted"):
+            fixture.checkpoint.claim_generation(
+                "short-summary", "same-request", stage="compile.summary"
+            )
+        # A subsequent observed invalid delivery is a new ledger input. The
+        # original unobserved receipt remains immutable and cannot authorize it.
+        execution_path = (
+            kb_dir / ".ultrakb/usage/executions" / (fixture.scope.execution_id + ".json")
+        )
+        execution = UsageExecution.model_validate_json(execution_path.read_text())
+        atomic_write_json(
+            execution_path,
+            execution.model_copy(update={"state": "completed"}).model_dump(mode="json"),
+        )
+        observed = UsageRequest.model_validate(
+            fixture.request.model_dump(mode="json")
+            | {
+                "request_attempt_id": "7" * 32,
+                "logical_call_id": "8" * 32,
+                "execution_id": fixture.scope.execution_id,
+                "state": "completed",
+                "business_state": "completed",
+                "started_at": "2026-10-12T00:00:02+00:00",
+                "ended_at": "2026-10-12T00:00:03+00:00",
+            }
+        )
+        atomic_write_json(
+            fixture.request_path.parent / (observed.request_attempt_id + ".json"),
+            observed.model_dump(mode="json"),
+        )
+        current = UsageExecution(
+            execution_id="9" * 32,
+            operation="retry_source",
+            state="started",
+            model_task_id=fixture.task.task_id,
+            source_ids=[fixture.result.source_id],
+        )
+        atomic_write_json(
+            execution_path.parent / (current.execution_id + ".json"),
+            current.model_dump(mode="json"),
+        )
+        fixture.scope = replace(fixture.scope, execution_id=current.execution_id)
+        with retrying(fixture, retry_failed_response=True):
+            fixture.checkpoint.claim_generation(
+                "short-summary", "same-request", stage="compile.summary"
+            )
+            fixture.checkpoint.save(
+                "short-summary",
+                "same-request",
+                validate_page_delivery(accepted, response_protocol="summary-page-json"),
+            )
+        latest = json.loads(fixture.checkpoint.path.read_text())["entries"]["short-summary"]
+        assert latest["manual_retry_used"] is True
+        assert latest["manual_retry"]["request_attempt_id"] == observed.request_attempt_id
+    restored = CompileCheckpoints(
+        kb_dir, fixture.task, {"document": "failed"}, fixture.checkpoint.conditions
+    )
+    assert "Supervision required" in restored.load("short-summary", "same-request")
+    with retrying(fixture), pytest.raises(PageResponseError, match="compile_repair_exhausted"):
+        restored.claim_repair("short-summary", "same-request")
+    assert all(path.read_bytes() == data for path, data in historical.items())
+    assert normal.read_bytes() == retained
+    assert read_task(kb_dir, fixture.task.task_id).used == 4
+    assert len(list((kb_dir / ".ultrakb/model-tasks").glob("*.json"))) == 1

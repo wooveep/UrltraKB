@@ -1,4 +1,4 @@
-"""Tests for OpenKB KB locks and atomic writes."""
+"""Tests for UltraKB KB locks and atomic writes."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import threading
 
 import pytest
 
-from openkb.locks import (
+from ultrakb.locks import (
     atomic_write_json,
     atomic_write_text,
     kb_ingest_lock,
@@ -21,61 +21,61 @@ from openkb.locks import (
 
 @pytest.mark.asyncio
 async def test_independent_async_writer_waits_and_can_cancel(tmp_path):
-    from openkb.locks import LockCancelled, async_kb_lock
+    from ultrakb.locks import LockCancelled, async_kb_lock
 
     waiting = asyncio.Event()
     cancelled = threading.Event()
-    openkb_dir = tmp_path / ".openkb"
+    ultrakb_dir = tmp_path / ".ultrakb"
 
     async def competing_writer():
         with pytest.raises(LockCancelled):
             async with async_kb_lock(
-                openkb_dir,
+                ultrakb_dir,
                 exclusive=True,
                 cancelled=cancelled.is_set,
                 on_wait=waiting.set,
             ):
                 pytest.fail("A cancelled waiter must not execute")
 
-    async with async_kb_lock(openkb_dir, exclusive=True):
+    async with async_kb_lock(ultrakb_dir, exclusive=True):
         competitor = asyncio.create_task(competing_writer())
         await asyncio.wait_for(waiting.wait(), timeout=2)
         cancelled.set()
         await asyncio.wait_for(competitor, timeout=2)
-        with kb_ingest_lock(openkb_dir):
-            assert kb_ingest_lock_held(openkb_dir)
+        with kb_ingest_lock(ultrakb_dir):
+            assert kb_ingest_lock_held(ultrakb_dir)
 
 
 def test_write_lock_is_reentrant(tmp_path):
-    openkb_dir = tmp_path / ".openkb"
+    ultrakb_dir = tmp_path / ".ultrakb"
 
-    with kb_ingest_lock(openkb_dir):
-        with kb_ingest_lock(openkb_dir):
-            assert (openkb_dir / "ingest.lock").exists()
+    with kb_ingest_lock(ultrakb_dir):
+        with kb_ingest_lock(ultrakb_dir):
+            assert (ultrakb_dir / "ingest.lock").exists()
 
 
 def test_read_lock_is_reentrant(tmp_path):
-    openkb_dir = tmp_path / ".openkb"
+    ultrakb_dir = tmp_path / ".ultrakb"
 
-    with kb_read_lock(openkb_dir):
-        with kb_read_lock(openkb_dir):
-            assert (openkb_dir / "ingest.lock").exists()
+    with kb_read_lock(ultrakb_dir):
+        with kb_read_lock(ultrakb_dir):
+            assert (ultrakb_dir / "ingest.lock").exists()
 
 
 def test_read_locks_do_not_block_each_other_in_process(tmp_path):
-    openkb_dir = tmp_path / ".openkb"
+    ultrakb_dir = tmp_path / ".ultrakb"
     first_entered = threading.Event()
     release_first = threading.Event()
     second_entered = threading.Event()
 
     def first_reader():
-        with kb_read_lock(openkb_dir):
+        with kb_read_lock(ultrakb_dir):
             first_entered.set()
             assert release_first.wait(timeout=2)
 
     def second_reader():
         assert first_entered.wait(timeout=2)
-        with kb_read_lock(openkb_dir):
+        with kb_read_lock(ultrakb_dir):
             second_entered.set()
 
     first = threading.Thread(target=first_reader)
@@ -91,43 +91,43 @@ def test_read_locks_do_not_block_each_other_in_process(tmp_path):
 
 
 def test_read_to_write_upgrade_fails(tmp_path):
-    openkb_dir = tmp_path / ".openkb"
+    ultrakb_dir = tmp_path / ".ultrakb"
 
-    with kb_read_lock(openkb_dir):
+    with kb_read_lock(ultrakb_dir):
         with pytest.raises(RuntimeError, match="Cannot upgrade"):
-            with kb_ingest_lock(openkb_dir):
+            with kb_ingest_lock(ultrakb_dir):
                 pass
 
 
 def test_write_lock_can_take_nested_read(tmp_path):
-    openkb_dir = tmp_path / ".openkb"
+    ultrakb_dir = tmp_path / ".ultrakb"
 
-    with kb_ingest_lock(openkb_dir):
-        with kb_read_lock(openkb_dir):
-            assert (openkb_dir / "ingest.lock").exists()
+    with kb_ingest_lock(ultrakb_dir):
+        with kb_read_lock(ultrakb_dir):
+            assert (ultrakb_dir / "ingest.lock").exists()
 
 
 def test_kb_ingest_lock_held_is_exclusive_and_thread_local(tmp_path):
-    openkb_dir = tmp_path / ".openkb"
+    ultrakb_dir = tmp_path / ".ultrakb"
     worker_seen = []
 
-    assert not kb_ingest_lock_held(openkb_dir)
+    assert not kb_ingest_lock_held(ultrakb_dir)
 
-    with kb_read_lock(openkb_dir):
-        assert not kb_ingest_lock_held(openkb_dir)
+    with kb_read_lock(ultrakb_dir):
+        assert not kb_ingest_lock_held(ultrakb_dir)
 
-    with kb_ingest_lock(openkb_dir):
-        assert kb_ingest_lock_held(openkb_dir)
+    with kb_ingest_lock(ultrakb_dir):
+        assert kb_ingest_lock_held(ultrakb_dir)
 
         worker = threading.Thread(
-            target=lambda: worker_seen.append(kb_ingest_lock_held(openkb_dir))
+            target=lambda: worker_seen.append(kb_ingest_lock_held(ultrakb_dir))
         )
         worker.start()
         worker.join(timeout=2)
 
     assert not worker.is_alive()
     assert worker_seen == [False]
-    assert not kb_ingest_lock_held(openkb_dir)
+    assert not kb_ingest_lock_held(ultrakb_dir)
 
 
 def test_atomic_write_text_replaces_file(tmp_path):

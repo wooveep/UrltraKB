@@ -17,11 +17,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from openkb.locks import LockCancelled, atomic_write_text, kb_ingest_lock  # noqa: E402
+from ultrakb.locks import LockCancelled, atomic_write_text, kb_ingest_lock  # noqa: E402
 
 
 def hold(kb, ready, release):
-    with kb_ingest_lock(Path(kb) / ".openkb"):
+    with kb_ingest_lock(Path(kb) / ".ultrakb"):
         ready.set()
         if not release.wait(60):
             raise TimeoutError("Probe controller did not release holder")
@@ -29,7 +29,7 @@ def hold(kb, ready, release):
 
 def write(kb, waiting, cancelled, result):
     try:
-        with kb_ingest_lock(Path(kb) / ".openkb", on_wait=waiting.set, cancelled=cancelled.is_set):
+        with kb_ingest_lock(Path(kb) / ".ultrakb", on_wait=waiting.set, cancelled=cancelled.is_set):
             atomic_write_text(Path(kb) / "written.md", "committed")
         result.send("committed")
     except LockCancelled:
@@ -45,7 +45,7 @@ def main() -> None:
     ctx = mp.get_context("spawn")
     processes = []
     release = ctx.Event()
-    with tempfile.TemporaryDirectory(prefix="openkb-lock-acceptance-") as directory:
+    with tempfile.TemporaryDirectory(prefix="ultrakb-lock-acceptance-") as directory:
         root = Path(directory)
         kb, other = root / "kb", root / "other"
         kb.mkdir()

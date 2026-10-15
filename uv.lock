@@ -1689,7 +1689,7 @@ wheels = [
 ]
 
 [[package]]
-name = "openkb"
+name = "ultrakb"
 source = { editable = "." }
 dependencies = [
     { name = "beautifulsoup4" },

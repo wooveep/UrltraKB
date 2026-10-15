@@ -1,15 +1,15 @@
 # Chat TUI
 
-`openkb chat` is an interactive REPL over your wiki. Unlike `query` (one-shot), a
+`ultrakb chat` is an interactive REPL over your wiki. Unlike `query` (one-shot), a
 chat session keeps context across turns, can edit the KB through slash commands,
 and is saved so you can resume it later.
 
 ```bash
-openkb chat
+ultrakb chat
 ```
 
 ```text
-OpenKB Chat
+UltraKB Chat
 ~/research-kb · anthropic/claude-sonnet-4-6 · session 20260625-143022-a1x
 Type /help for commands, Ctrl-D to exit, Ctrl-C to abort the current response.
 
@@ -30,19 +30,19 @@ as rich Markdown (headings, tables, code) in a terminal.
 
 ## Persistent sessions
 
-Every conversation is stored as JSON in `<kb>/.openkb/chats/`. Manage them with:
+Every conversation is stored as JSON in `<kb>/.ultrakb/chats/`. Manage them with:
 
 ```bash
-openkb chat --list              # table of sessions: id · turns · updated · title
-openkb chat --resume            # resume the most recent session
-openkb chat --resume 20260625   # resume by id or unique prefix
-openkb chat --delete 20260625   # delete a session
+ultrakb chat --list              # table of sessions: id · turns · updated · title
+ultrakb chat --resume            # resume the most recent session
+ultrakb chat --resume 20260625   # resume by id or unique prefix
+ultrakb chat --delete 20260625   # delete a session
 ```
 
 Resuming replays the last few turns so you have context:
 
 ```text
-$ openkb chat --resume
+$ ultrakb chat --resume
 Resumed session · 4 turn(s)
 [3] >>> How do the two papers differ on their use of attention?
 [3]     Both rely on scaled dot-product attention, but…
@@ -85,8 +85,8 @@ or "turn this into a skill" produces real files you keep.
 ## Plain output for piping or logs
 
 ```bash
-openkb chat --no-color     # disable colored output entirely
-openkb chat --raw          # show raw Markdown source, keep prompt/tool colors
+ultrakb chat --no-color     # disable colored output entirely
+ultrakb chat --raw          # show raw Markdown source, keep prompt/tool colors
 ```
 
 `--no-color` also respects the `NO_COLOR` environment variable.

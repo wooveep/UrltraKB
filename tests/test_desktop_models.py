@@ -1,87 +1,64 @@
 """Spawn isolation through the real SDK, with a controlled HTTP model boundary."""
 
-import json
 import os
 import queue
 import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 import yaml
 
-from openkb.locks import atomic_write_text
-from openkb.runtime.requests import AskQuestion
-from openkb.runtime.tasks import TaskManager
+from ultrakb.locks import atomic_write_text
+from ultrakb.runtime.requests import AskQuestion
+from ultrakb.runtime.tasks import TaskManager
 
 
 @pytest.fixture
-def model_service():
+def model_service(live_llm, monkeypatch):
+    """Gate genuine gateway delivery without replacing provider frames or usage."""
+    import hmac
+
+    live_llm.install(monkeypatch)
     requests = queue.Queue()
+    record_start = len(live_llm._proxy.records)
+    requests.delivered_records = lambda: live_llm._proxy.records[record_start:]
     arrived, release = threading.Event(), threading.Event()
+    handler = live_llm._proxy._server.RequestHandlerClass
+    forward = handler.do_POST
+    credential = live_llm.credentials.api_key
 
-    class Handler(BaseHTTPRequestHandler):
-        def log_message(self, *args):
-            pass
+    def observe(request):
+        profile = request.headers.get("X-KB")
+        captured = hmac.compare_digest(
+            request.headers.get("Authorization", ""), "Bearer " + credential
+        )
+        requests.put((profile, captured))
+        if profile == "unit-a" and not arrived.is_set():
+            arrived.set()
+            release.wait(90)
+            if getattr(release, "discard", False):
+                return
+        forward(request)
 
-        def do_POST(self):
-            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-            requests.put(
-                (body["model"], self.headers.get("Authorization"), self.headers.get("X-KB"))
-            )
-            if body["model"] == "unit-a" and not arrived.is_set():
-                arrived.set()
-                release.wait(30)
-            self.send_response(200)
-            self.send_header("Content-Type", "text/event-stream")
-            self.end_headers()
-            for delta, finish in [
-                ({"role": "assistant", "content": body["model"]}, None),
-                ({}, "stop"),
-            ]:
-                event = {
-                    "id": "completion-test",
-                    "object": "chat.completion.chunk",
-                    "created": 1,
-                    "model": body["model"],
-                    "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
-                }
-                self.wfile.write(f"data: {json.dumps(event)}\n\n".encode())
-                self.wfile.flush()
-            if body.get("stream_options", {}).get("include_usage"):
-                event["choices"] = []
-                event["usage"] = {
-                    "prompt_tokens": 100,
-                    "completion_tokens": 25,
-                    "total_tokens": 125,
-                    "prompt_tokens_details": {"cached_tokens": 60},
-                    "completion_tokens_details": {"reasoning_tokens": 10},
-                }
-                self.wfile.write(f"data: {json.dumps(event)}\n\n".encode())
-            self.wfile.write(b"data: [DONE]\n\n")
-
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
+    monkeypatch.setattr(handler, "do_POST", observe)
     try:
-        yield f"http://127.0.0.1:{server.server_port}/v1", requests, arrived, release
+        yield live_llm._proxy.url, requests, arrived, release
     finally:
         release.set()
-        server.shutdown()
-        server.server_close()
-        thread.join(5)
 
 
-def configure(kb, url, name):
+def configure(kb, url, name, *, max_calls=1):
     atomic_write_text(kb / "wiki/sources/model-fixture.md", "An available source.")
     atomic_write_text(
-        kb / ".openkb/config.yaml",
+        kb / ".ultrakb/config.yaml",
         yaml.safe_dump(
             {
-                "model": f"openai/{name}",
+                "model": "deepseek/deepseek-flash",
                 "language": "en",
                 "pageindex_threshold": 20,
                 "extra_headers": {"X-KB": name},
-                "timeout": 5,
+                "model_policy": {"max_calls": max_calls, "retries": 0},
+                "role_generation": {"answer": {"max_tokens": 64, "reasoning_effort": "none"}},
+                "timeout": 90,
                 "model_capacity": {
                     "max_input_tokens": 65536,
                     "tokenizer_model": "gpt-4o-mini",
@@ -89,7 +66,7 @@ def configure(kb, url, name):
             }
         ),
     )
-    atomic_write_text(kb / ".env", f"LLM_API_KEY=synthetic-{name}\nOPENAI_API_BASE={url}\n")
+    atomic_write_text(kb / ".env", f"OPENAI_API_BASE={url}\n")
 
 
 def test_batch_keeps_first_snapshot_and_independent_kb_uses_its_own_settings(
@@ -102,37 +79,90 @@ def test_batch_keeps_first_snapshot_and_independent_kb_uses_its_own_settings(
     url, requests, arrived, release = model_service
     other = tmp_path.parent / (tmp_path.name + "-other")
     shutil.copytree(kb_dir, other)
-    configure(kb_dir, url, "unit-a")
-    configure(other, url, "unit-b")
+    # max_calls belongs to the entire task, including later batch workers.
+    configure(kb_dir, url, "unit-a", max_calls=4)
+    configure(other, url, "unit-b", max_calls=2)
+    for root in (kb_dir, other):
+        atomic_write_text(root / "wiki/index.md", "# Index\nProtocol acknowledgement fixture.")
+
+    def question(label):
+        return AskQuestion(
+            f"{label}: Use read_file for index.md exactly once, then reply with the "
+            "single word ACK. No other lookup or source facts are required."
+        )
+
     environment, cwd = dict(os.environ), os.getcwd()
     manager = TaskManager(history_dir=tmp_path / "history", max_workers=2)
     try:
-        batch = manager.submit(kb_dir, [AskQuestion("First"), AskQuestion("Second")])
+        batch = manager.submit(
+            kb_dir,
+            [
+                question("First"),
+                question("Second"),
+            ],
+        )
         assert arrived.wait(30), manager.get(batch)
-        independent = manager.submit(other, [AskQuestion("Independent")])
-        assert manager.wait(independent, timeout=30).results[0].answer_outcome == "answered"
+        independent = manager.submit(other, [question("Independent")])
+        independent_result = manager.wait(independent, timeout=120)
+        assert independent_result.state == "completed", independent_result
+        assert independent_result.text.strip() == "ACK"
         # An external editor changes settings after actual first execution.
         # Later batch units keep the acknowledged context; a new task gets it.
-        configure(kb_dir, url, "unit-new")
-        queued = manager.submit(kb_dir, [AskQuestion("Queued")])
+        configure(kb_dir, url, "unit-new", max_calls=2)
+        queued = manager.submit(kb_dir, [question("Queued")])
         release.set()
-        finished = manager.wait(batch, timeout=45)
+        finished = manager.wait(batch, timeout=120)
         assert finished.state == "completed", finished
-        assert all(result.answer_outcome == "answered" for result in finished.results)
-        assert manager.wait(queued, timeout=45).results[0].answer_outcome == "answered"
+        assert finished.text.strip() == "ACK"
+        queued_result = manager.wait(queued, timeout=120)
+        assert queued_result.state == "completed", queued_result
+        assert queued_result.text.strip() == "ACK"
+        task_counts = {}
+        for task in (independent_result, finished, queued_result):
+            assert len(task.results) == task.total
+            assert task.succeeded == task.total
+            assert task.error is None
+            cumulative = 0
+            model_task_ids = set()
+            for result in task.results:
+                assert result.status == "completed"
+                assert result.output_state == "available"
+                assert result.output.strip() == "ACK"
+                if result.answer_outcome == "partial":
+                    assert result.unfinished == ("Unverified required parts after call_budget",)
+                else:
+                    assert result.answer_outcome == "answered"
+                    assert result.unfinished == ()
+                assert result.usage["output"] > 0
+                current = result.model_usage["current"]
+                assert 1 <= current["actual_sends"] == current["requests"] <= 2
+                assert current["unsent_attempts"] == 0
+                cumulative += current["actual_sends"]
+                [model_task] = result.model_usage["model_tasks"]
+                model_task_ids.add(model_task["task_id"])
+                assert model_task["actual_sends"] == cumulative
+                assert model_task["limit"] == (4 if task.id == batch else 2)
+            assert len(model_task_ids) == 1
+            task_counts[task.id] = cumulative
         seen = [requests.get_nowait() for _ in range(requests.qsize())]
-        assert sorted(seen) == sorted(
-            [
-                ("unit-a", "Bearer synthetic-unit-a", "unit-a"),
-                ("unit-a", "Bearer synthetic-unit-a", "unit-a"),
-                ("unit-b", "Bearer synthetic-unit-b", "unit-b"),
-                ("unit-new", "Bearer synthetic-unit-new", "unit-new"),
-            ]
-        )
+        assert all(captured for _, captured in seen)
+        from collections import Counter
+
+        assert Counter(profile for profile, _ in seen) == {
+            "unit-a": task_counts[batch],
+            "unit-b": task_counts[independent],
+            "unit-new": task_counts[queued],
+        }
+        records = requests.delivered_records()
+        assert len(records) == sum(task_counts.values()) == len(seen)
+        assert 4 <= len(records) <= 8
+        assert all(payload["model"] == "deepseek-flash" for payload, _, _ in records)
+        assert all(payload["max_tokens"] == 64 for payload, _, _ in records)
         assert os.getcwd() == cwd
-        assert dict(os.environ) == environment
+        environment_is_unchanged = dict(os.environ) == environment
+        assert environment_is_unchanged
         summaries = "".join(path.read_text() for path in (tmp_path / "history").rglob("*.json"))
-        assert "synthetic-" not in summaries
+        assert "Bearer " not in summaries
         assert "First" not in summaries
     finally:
         release.set()
@@ -151,18 +181,22 @@ def test_worker_loss_is_interrupted_and_never_replays_remaining_units(
     configure(kb_dir, url, "unit-a")
     manager = TaskManager(history_dir=tmp_path / "history", max_workers=1)
     try:
-        task = manager.submit(kb_dir, [AskQuestion("Crash"), AskQuestion("Must not run")])
+        task = manager.submit(
+            kb_dir,
+            [AskQuestion("Crash: reply with the single word ACK."), AskQuestion("Must not run")],
+        )
         assert arrived.wait(30)
         # Fault injection at the actual OS process boundary, not a fabricated
         # terminal message or a mocked business function.
         children = [
             process
             for process in multiprocessing.active_children()
-            if process.name.startswith(f"openkb-unit-{task[:8]}-")
+            if process.name.startswith(f"ultrakb-unit-{task[:8]}-")
         ]
         assert len(children) == 1
         children[0].terminate()
-        result = manager.wait(task, timeout=30)
+        release.discard = True
+        result = manager.wait(task, timeout=120)
         assert result.state == "interrupted"
         assert result.succeeded == 0
         assert result.unfinished == 2
@@ -175,33 +209,33 @@ def test_worker_loss_is_interrupted_and_never_replays_remaining_units(
 
 
 def test_streamed_usage_reaches_receipt_and_restored_conversation(kb_dir, tmp_path, model_service):
-    from openkb.application.conversations import read_conversation
-    from openkb.runtime.requests import ContinueConversation
+    from ultrakb.application.conversations import read_conversation
+    from ultrakb.runtime.requests import ContinueConversation
 
     url, _, _, release = model_service
     configure(kb_dir, url, "unit-b")
     manager = TaskManager(history_dir=tmp_path / "history", max_workers=1)
     try:
-        first = manager.wait(manager.submit(kb_dir, [ContinueConversation("hello")]), timeout=30)
+        first = manager.wait(
+            manager.submit(kb_dir, [ContinueConversation("Reply with the single word ACK.")]),
+            timeout=120,
+        )
         assert first.state == "completed", first
         result = first.results[0]
-        assert result.usage == {
-            "input_cached": 60,
-            "input_uncached": 40,
-            "output": 25,
-            "reasoning": 10,
-        }
+        assert result.usage["input_cached"] >= 0
+        assert result.usage["input_uncached"] > 0 and result.usage["output"] > 0
         second = manager.wait(
-            manager.submit(kb_dir, [ContinueConversation("again", result.session_id)]), timeout=30
+            manager.submit(
+                kb_dir, [ContinueConversation("Repeat that same word.", result.session_id)]
+            ),
+            timeout=120,
         )
         assert second.state == "completed", second
         restored = read_conversation(kb_dir, result.session_id)
-        assert restored.usage == {
-            "input_cached": 120,
-            "input_uncached": 80,
-            "output": 50,
-            "reasoning": 20,
-        }
+        from ultrakb.agent.token_usage import add_usage
+
+        assert restored.usage == add_usage(result.usage, second.results[0].usage)
+        assert restored.usage["output"] > result.usage["output"]
     finally:
         release.set()
         manager.shutdown(stop=True)

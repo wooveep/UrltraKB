@@ -23,7 +23,7 @@ until installation completed.
 | `pytest -q` | 1249 passed, 2 warnings, 14.17 seconds |
 | `ruff check .` | Passed |
 | `ruff format --check .` | Passed |
-| `mypy openkb` | Passed, 56 source files |
+| `mypy ultrakb` | Passed, 56 source files |
 
 The declared CLI/API minimum remains Python 3.10. The lock contains separate
 Python/platform resolutions; the baseline execution above only tests 3.12.
@@ -69,12 +69,12 @@ judgment call, and the full feature remains incomplete.
 | --- | --- |
 | Full `pytest -q` | 1261 passed, 2 existing mocked-coroutine warnings, 12.28 seconds |
 | `ruff check .` / `ruff format --check .` | Passed / 135 files formatted |
-| `mypy openkb` | Passed, 67 source files |
+| `mypy ultrakb` | Passed, 67 source files |
 | Real Debian spawn/OS lock probe, Python 3.12.13 | 16.03 s same-KB contention; cancellable waiter, independent KB, process reaping passed |
 | Real Windows 11 x86_64 spawn/OS lock probe, Python 3.12.13 | 16.02 s same-KB contention; cancellable waiter, independent KB, process reaping passed |
 
 The Windows host reports Windows 11 build 26100.9168. Its probe uses an isolated
-Python installation and venv in `OpenKB-native-20260907`; existing installations
+Python installation and venv in `UltraKB-native-20260907`; existing installations
 were not replaced. The portable desktop package, graphical interaction and real
 model/generator distribution acceptance have **not** been run there yet.
 
@@ -110,7 +110,7 @@ while rejecting incorrectly shaped data. Controlled repair reuses that boundary.
 | --- | --- |
 | `pytest -q` at this checkpoint | 1271 passed, 2 existing warnings, 35.87 seconds |
 | Ruff check / format check | Passed / 157 files formatted |
-| `mypy openkb` | Passed, 84 source files |
+| `mypy ultrakb` | Passed, 84 source files |
 | Real SDK against a controlled local HTTP model | Dual-KB model/key/header isolation; fixed batch snapshot; latest queued task; parent environment/cwd unchanged |
 | Real child termination during a model request | Interrupted outcome; remaining unit not replayed; child reaped |
 | Busy KB with one worker slot | Independent KB completed; waiting task stopped without writes |
@@ -119,8 +119,8 @@ while rejecting incorrectly shaped data. Controlled repair reuses that boundary.
 The window smoke check found a quit race (save-completion callbacks scheduling
 reads after shutdown) and a close-event veto of explicit application quit;
 both were fixed and the smoke check then completed successfully. A screenshot
-and logs are local evidence under `/tmp/openkb-native-first.png` and
-`/tmp/openkb-desktop-smoke-2.log`; they are not portable-package acceptance.
+and logs are local evidence under `/tmp/ultrakb-native-first.png` and
+`/tmp/ultrakb-desktop-smoke-2.log`; they are not portable-package acceptance.
 
 The renderer uses the accepted MathJax/Merman/resvg code and font adaptations.
 `prepare_desktop_assets.py` verifies Node/font hashes, installs the exact npm
@@ -169,9 +169,9 @@ families in light/dark presentation; larger-scale output and Windows images
 still need their complete visual verdict recorded. Parse/output checks alone
 are not semantic approval.
 
-Local logs include `/tmp/openkb-frozen-import-1.log`,
-`/tmp/openkb-frozen-corpus-1.log` and `/tmp/openkb-p2-full.log`.
-Windows evidence is isolated under `OpenKB-native-20260907/interactive-model-1`
+Local logs include `/tmp/ultrakb-frozen-import-1.log`,
+`/tmp/ultrakb-frozen-corpus-1.log` and `/tmp/ultrakb-p2-full.log`.
+Windows evidence is isolated under `UltraKB-native-20260907/interactive-model-1`
 and `interactive-corpus-1`; both commands exited 0 on 2026-09-08 in the logged-in
 desktop session. The temporary acceptance scheduled task was removed after
 completion. The last local read-contention/image-publication fixes postdate
@@ -427,7 +427,7 @@ Windows scheduled tasks were removed.
 
 The final inventory maps 10,832 files / 7,228 Python modules on Debian and 11,331
 files / 7,302 modules on Windows. Comparing source inputs against `6b7139e` shows
-only `openkb.desktop.artifacts` and `openkb.desktop.verification_artifacts`
+only `ultrakb.desktop.artifacts` and `ultrakb.desktop.verification_artifacts`
 changed; collected native libraries, executables under `_internal`, and font
 files remain byte-identical. Generated renderer assets were reused only after
 comparing their build inputs and verifying every manifest hash. The detailed
@@ -438,8 +438,8 @@ Local internal archives are available under
 
 | Archive | Size (bytes) | SHA256 |
 | --- | ---: | --- |
-| `OpenKB-0.1.dev42+g87bdcc7b6e33-debian13.6-x64-INTERNAL.tar.gz` | 442890460 | `ae43d2e2c41972d2286a6f5b27278e978fce79ee5519c9eb60361f57aca50e7d` |
-| `OpenKB-0.1.dev42+g87bdcc7b6e33-windows-x64-INTERNAL.zip` | 392799930 | `52696aaa437d033c537379139defe3af1b5feb6747500b54972db367417257d5` |
+| `UltraKB-0.1.dev42+g87bdcc7b6e33-debian13.6-x64-INTERNAL.tar.gz` | 442890460 | `ae43d2e2c41972d2286a6f5b27278e978fce79ee5519c9eb60361f57aca50e7d` |
+| `UltraKB-0.1.dev42+g87bdcc7b6e33-windows-x64-INTERNAL.zip` | 392799930 | `52696aaa437d033c537379139defe3af1b5feb6747500b54972db367417257d5` |
 
 Every archived program file was decompressed and checked against its frozen
 inventory hash. The Windows ZIP was also copied back to this workspace and its

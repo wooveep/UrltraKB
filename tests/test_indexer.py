@@ -1,4 +1,4 @@
-"""Tests for openkb.indexer."""
+"""Tests for ultrakb.indexer."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from openkb.indexer import (
+from ultrakb.indexer import (
     IndexResult,
     _build_index_config,
     _normalize_page_content,
@@ -55,42 +55,42 @@ class TestBuildIndexConfig:
         assert cfg.if_add_doc_description is True
 
     def test_forwards_concurrency_when_supported(self, monkeypatch):
-        monkeypatch.setattr("openkb.indexer.IndexConfig", _FakeIndexConfigWithConcurrency)
+        monkeypatch.setattr("ultrakb.indexer.IndexConfig", _FakeIndexConfigWithConcurrency)
         cfg = _build_index_config({"concurrency": 8})
         assert cfg.max_concurrency == 8
 
     def test_does_not_forward_when_unsupported(self, monkeypatch):
-        monkeypatch.setattr("openkb.indexer.IndexConfig", _FakeIndexConfigWithoutConcurrency)
+        monkeypatch.setattr("ultrakb.indexer.IndexConfig", _FakeIndexConfigWithoutConcurrency)
         cfg = _build_index_config({"concurrency": 8})
         assert not hasattr(cfg, "max_concurrency")
 
     def test_none_value_is_left_to_pageindex_default(self, monkeypatch):
-        monkeypatch.setattr("openkb.indexer.IndexConfig", _FakeIndexConfigWithConcurrency)
+        monkeypatch.setattr("ultrakb.indexer.IndexConfig", _FakeIndexConfigWithConcurrency)
         cfg = _build_index_config({"concurrency": None})
         assert getattr(cfg, "max_concurrency", None) is None
 
     def test_invalid_value_is_left_to_pageindex_default(self, monkeypatch):
         # resolve_concurrency() rejects bools/non-positive values — same as an
         # unset key, just via the shared config-level validation.
-        monkeypatch.setattr("openkb.indexer.IndexConfig", _FakeIndexConfigWithConcurrency)
+        monkeypatch.setattr("ultrakb.indexer.IndexConfig", _FakeIndexConfigWithConcurrency)
         cfg = _build_index_config({"concurrency": 0})
         assert getattr(cfg, "max_concurrency", None) is None
 
     def test_warns_when_configured_but_unsupported(self, monkeypatch, caplog):
-        monkeypatch.setattr("openkb.indexer.IndexConfig", _FakeIndexConfigWithoutConcurrency)
-        with caplog.at_level(logging.WARNING, logger="openkb.indexer"):
+        monkeypatch.setattr("ultrakb.indexer.IndexConfig", _FakeIndexConfigWithoutConcurrency)
+        with caplog.at_level(logging.WARNING, logger="ultrakb.indexer"):
             _build_index_config({"concurrency": 8})
         assert "concurrency" in caplog.text
 
     def test_no_warning_when_unset(self, monkeypatch, caplog):
-        monkeypatch.setattr("openkb.indexer.IndexConfig", _FakeIndexConfigWithoutConcurrency)
-        with caplog.at_level(logging.WARNING, logger="openkb.indexer"):
+        monkeypatch.setattr("ultrakb.indexer.IndexConfig", _FakeIndexConfigWithoutConcurrency)
+        with caplog.at_level(logging.WARNING, logger="ultrakb.indexer"):
             _build_index_config({})
         assert caplog.text == ""
 
     def test_no_warning_when_supported(self, monkeypatch, caplog):
-        monkeypatch.setattr("openkb.indexer.IndexConfig", _FakeIndexConfigWithConcurrency)
-        with caplog.at_level(logging.WARNING, logger="openkb.indexer"):
+        monkeypatch.setattr("ultrakb.indexer.IndexConfig", _FakeIndexConfigWithConcurrency)
+        with caplog.at_level(logging.WARNING, logger="ultrakb.indexer"):
             _build_index_config({"concurrency": 8})
         assert caplog.text == ""
 
@@ -141,7 +141,7 @@ class TestIndexLongDocument:
         collection.add.side_effect = wrapped
         client = MagicMock()
         client.collection.return_value = collection
-        monkeypatch.setattr("openkb.indexer.LocalClient", lambda **kwargs: client)
+        monkeypatch.setattr("ultrakb.indexer.LocalClient", lambda **kwargs: client)
         with pytest.raises(PagePartsContractError, match="No content"):
             index_long_document(kb_dir / "retained.okpi", kb_dir)
         assert collection.add.call_count == 1
@@ -181,8 +181,8 @@ class TestIndexLongDocument:
         pdf_path.write_bytes(b"%PDF-1.4 fake")
 
         with (
-            patch("openkb.indexer.LocalClient", return_value=fake_client),
-            patch("openkb.images.convert_pdf_to_pages", return_value=self._fake_pages()),
+            patch("ultrakb.indexer.LocalClient", return_value=fake_client),
+            patch("ultrakb.images.convert_pdf_to_pages", return_value=self._fake_pages()),
         ):
             result = index_long_document(pdf_path, kb_dir)
 
@@ -192,7 +192,7 @@ class TestIndexLongDocument:
         assert result.tree is not None
 
     def test_deletes_pageindex_doc_when_a_post_add_step_fails(self, kb_dir, sample_tree, tmp_path):
-        """The PageIndex blob is durably written by col.add(), but .openkb/files is
+        """The PageIndex blob is durably written by col.add(), but .ultrakb/files is
         no longer in the add mutation's eager snapshot — track_new only registers
         the blob on a successful return. So if any step after col.add() raises
         (here: get_document), index_long_document must delete the doc it just
@@ -208,7 +208,7 @@ class TestIndexLongDocument:
         pdf_path = tmp_path / "sample.pdf"
         pdf_path.write_bytes(b"%PDF-1.4 fake")
 
-        with patch("openkb.indexer.LocalClient", return_value=fake_client):
+        with patch("ultrakb.indexer.LocalClient", return_value=fake_client):
             with pytest.raises(RuntimeError, match="get_document blew up"):
                 index_long_document(pdf_path, kb_dir)
 
@@ -233,8 +233,8 @@ class TestIndexLongDocument:
         pdf_path.write_bytes(b"%PDF-1.4 fake")
 
         with (
-            patch("openkb.indexer.LocalClient", return_value=fake_client),
-            patch("openkb.images.convert_pdf_to_pages", return_value=self._fake_pages()),
+            patch("ultrakb.indexer.LocalClient", return_value=fake_client),
+            patch("ultrakb.images.convert_pdf_to_pages", return_value=self._fake_pages()),
         ):
             index_long_document(pdf_path, kb_dir)
 
@@ -257,8 +257,8 @@ class TestIndexLongDocument:
         pdf_path.write_bytes(b"%PDF-1.4 fake")
 
         with (
-            patch("openkb.indexer.LocalClient", return_value=fake_client),
-            patch("openkb.images.convert_pdf_to_pages", return_value=self._fake_pages()),
+            patch("ultrakb.indexer.LocalClient", return_value=fake_client),
+            patch("ultrakb.images.convert_pdf_to_pages", return_value=self._fake_pages()),
         ):
             index_long_document(pdf_path, kb_dir)
 
@@ -280,8 +280,8 @@ class TestIndexLongDocument:
         pdf_path.write_bytes(b"%PDF-1.4 fake")
 
         with (
-            patch("openkb.indexer.LocalClient", return_value=fake_client) as mock_cls,
-            patch("openkb.images.convert_pdf_to_pages", return_value=self._fake_pages()),
+            patch("ultrakb.indexer.LocalClient", return_value=fake_client) as mock_cls,
+            patch("ultrakb.images.convert_pdf_to_pages", return_value=self._fake_pages()),
         ):
             index_long_document(pdf_path, kb_dir)
 
@@ -298,7 +298,7 @@ class TestIndexLongDocument:
         """The KB's real config.yaml, loaded by index_long_document itself, must
         reach the IndexConfig passed to PageIndexClient — not just the isolated
         _build_index_config unit tested directly with a hand-built dict."""
-        (kb_dir / ".openkb" / "config.yaml").write_text(
+        (kb_dir / ".ultrakb" / "config.yaml").write_text(
             "model: gpt-4o-mini\nconcurrency: 7\n", encoding="utf-8"
         )
 
@@ -311,9 +311,9 @@ class TestIndexLongDocument:
         pdf_path.write_bytes(b"%PDF-1.4 fake")
 
         with (
-            patch("openkb.indexer.IndexConfig", _FakeIndexConfigWithConcurrency),
-            patch("openkb.indexer.LocalClient", return_value=fake_client) as mock_cls,
-            patch("openkb.images.convert_pdf_to_pages", return_value=self._fake_pages()),
+            patch("ultrakb.indexer.IndexConfig", _FakeIndexConfigWithConcurrency),
+            patch("ultrakb.indexer.LocalClient", return_value=fake_client) as mock_cls,
+            patch("ultrakb.images.convert_pdf_to_pages", return_value=self._fake_pages()),
         ):
             index_long_document(pdf_path, kb_dir)
 
@@ -335,9 +335,9 @@ class TestIndexLongDocument:
         monkeypatch.setenv("PAGEINDEX_API_KEY", "test-key")
 
         with (
-            patch("openkb.indexer.LocalClient", return_value=fake_client),
+            patch("ultrakb.indexer.LocalClient", return_value=fake_client),
             patch(
-                "openkb.indexer._convert_pdf_to_pages", return_value=self._fake_pages()
+                "ultrakb.indexer._convert_pdf_to_pages", return_value=self._fake_pages()
             ) as local_pages,
         ):
             index_long_document(pdf_path, kb_dir)
@@ -359,8 +359,8 @@ class TestIndexLongDocument:
         monkeypatch.setenv("PAGEINDEX_API_KEY", "test-key")
 
         with (
-            patch("openkb.indexer.LocalClient", return_value=fake_client),
-            patch("openkb.indexer._convert_pdf_to_pages", return_value=[]),
+            patch("ultrakb.indexer.LocalClient", return_value=fake_client),
+            patch("ultrakb.indexer._convert_pdf_to_pages", return_value=[]),
         ):
             try:
                 index_long_document(pdf_path, kb_dir)
@@ -387,9 +387,9 @@ def test_index_long_document_uses_explicit_doc_name(kb_dir, monkeypatch):
     pdf.write_bytes(b"%PDF-1.4 fake")
 
     with (
-        patch("openkb.indexer.LocalClient", return_value=fake_client),
+        patch("ultrakb.indexer.LocalClient", return_value=fake_client),
         patch(
-            "openkb.indexer._convert_pdf_to_pages", return_value=[{"page": 1, "text": "p1"}]
+            "ultrakb.indexer._convert_pdf_to_pages", return_value=[{"page": 1, "text": "p1"}]
         ) as mock_convert,
     ):
         result = index_long_document(pdf, kb_dir, doc_name="original-abc12345")
@@ -411,7 +411,7 @@ def test_index_long_document_uses_explicit_doc_name(kb_dir, monkeypatch):
 
 
 def test_write_long_doc_artifacts_writes_json_and_summary(kb_dir, sample_tree):
-    from openkb.indexer import _write_long_doc_artifacts
+    from ultrakb.indexer import _write_long_doc_artifacts
 
     pages = [{"page": 1, "content": "Hello.", "images": []}]
     summary_path = _write_long_doc_artifacts(sample_tree, pages, "my-doc", "doc-1", kb_dir)

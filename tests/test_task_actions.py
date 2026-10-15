@@ -2,17 +2,17 @@
 
 import pytest
 
-from openkb.application.pages import read_page
-from openkb.runtime.requests import SavePage
-from openkb.runtime.task_actions import preview_retry, retry_task
-from openkb.runtime.tasks import TaskManager
+from ultrakb.application.pages import read_page
+from ultrakb.runtime.requests import SavePage
+from ultrakb.runtime.task_actions import preview_retry, retry_task
+from ultrakb.runtime.tasks import TaskManager
 
 
 def test_interrupted_history_can_be_reviewed_and_cleared_without_claiming_reaped(kb_dir, tmp_path):
     import json
     import uuid
 
-    from openkb.runtime.records import TaskView, UnitIdentity
+    from ultrakb.runtime.records import TaskView, UnitIdentity
 
     history = tmp_path / "history"
     history.mkdir()
@@ -129,15 +129,15 @@ def test_manual_retry_only_repeats_failed_units_as_a_new_task(kb_dir, tmp_path):
 
 
 def test_retry_and_cleanup_refuse_active_task_and_respect_repair_gate(kb_dir, tmp_path):
-    from openkb.locks import kb_ingest_lock
-    from openkb.mutation import RecoveryRequired, repair_marker
+    from ultrakb.locks import kb_ingest_lock
+    from ultrakb.mutation import RecoveryRequired, repair_marker
 
     page = kb_dir / "wiki/concepts/note.md"
     page.write_text("old")
     version = read_page(kb_dir, "concepts/note").version
     manager = TaskManager(history_dir=tmp_path / "history")
     try:
-        with kb_ingest_lock(kb_dir / ".openkb"):
+        with kb_ingest_lock(kb_dir / ".ultrakb"):
             task = manager.submit(kb_dir, [SavePage("concepts/note", "new", version)])
             with pytest.raises(ValueError):
                 preview_retry(manager, task)

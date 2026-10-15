@@ -3,18 +3,18 @@
 import pytest
 from click.testing import CliRunner
 
-from openkb.cli import cli
-from openkb.locks import kb_ingest_lock
-from openkb.mutation import RecoveryRequired, repair_marker
-from openkb.skill.evaluator import EvalPrompt, save_eval_set
-from openkb.skill.workspace import save_iteration
+from ultrakb.cli import cli
+from ultrakb.locks import kb_ingest_lock
+from ultrakb.mutation import RecoveryRequired, repair_marker
+from ultrakb.skill.evaluator import EvalPrompt, save_eval_set
+from ultrakb.skill.workspace import save_iteration
 
 
 def skill_history(kb_dir):
     skill = kb_dir / "output/skills/demo"
     skill.mkdir(parents=True)
     (skill / "SKILL.md").write_text("---\nname: demo\ndescription: earlier\n---\nEarlier")
-    with kb_ingest_lock(kb_dir / ".openkb"):
+    with kb_ingest_lock(kb_dir / ".ultrakb"):
         save_iteration(kb_dir, "demo")
     (skill / "SKILL.md").write_text("---\nname: demo\ndescription: current\n---\nCurrent")
     return skill
@@ -30,7 +30,7 @@ def test_cli_rollback_respects_repair_barrier(kb_dir):
 
 
 def test_rollback_restores_current_and_archive_when_manifest_write_fails(kb_dir, monkeypatch):
-    from openkb.skill import marketplace
+    from ultrakb.skill import marketplace
 
     skill = skill_history(kb_dir)
     before = {
@@ -60,11 +60,11 @@ def test_eval_set_save_refuses_repair_and_escaping_name(kb_dir):
     repair_marker(kb_dir).write_text("{}")
     with pytest.raises(RecoveryRequired):
         save_eval_set(kb_dir, "demo", prompts)
-    assert not (kb_dir / ".openkb/eval-sets/demo.json").exists()
+    assert not (kb_dir / ".ultrakb/eval-sets/demo.json").exists()
 
 
 def test_eval_set_failure_restores_previous_prompts(kb_dir, monkeypatch):
-    from openkb import locks
+    from ultrakb import locks
 
     target = save_eval_set(kb_dir, "demo", [EvalPrompt(question="Before", expected="trigger")])
     before = target.read_bytes()

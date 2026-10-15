@@ -3,8 +3,8 @@
 import os
 from pathlib import Path
 
-from openkb.office.inventory import digest
-from openkb.office.runtime import validate_runtime
+from ultrakb.office.inventory import digest
+from ultrakb.office.runtime import validate_runtime
 
 
 def office_inventory(program: Path, inputs) -> dict[str, dict]:
@@ -28,9 +28,9 @@ def office_inventory(program: Path, inputs) -> dict[str, dict]:
     launcher = inputs.add(
         "build/office-launcher",
         "0.1.0",
-        source="openkb/office/launcher",
+        source="ultrakb/office/launcher",
         rust="1.95.0",
-        lock_sha256=digest(inputs.source / "openkb/office/launcher/Cargo.lock"),
+        lock_sha256=digest(inputs.source / "ultrakb/office/launcher/Cargo.lock"),
     )
     generated = inputs.add(
         "build/office-runtime",
@@ -41,14 +41,14 @@ def office_inventory(program: Path, inputs) -> dict[str, dict]:
     result = {}
     for name, checksum in {
         **manifest.files,
-        "openkb-office.json": digest(root / "openkb-office.json"),
+        "ultrakb-office.json": digest(root / "ultrakb-office.json"),
     }.items():
         component = office
         if name.startswith("program/python-core-") or "LibreOfficePython.framework/" in name:
             component = python
         elif name == manifest.launcher:
             component = launcher
-        elif name.startswith("openkb-provenance/") or name == "openkb-office.json":
+        elif name.startswith("ultrakb-provenance/") or name == "ultrakb-office.json":
             component = generated
         font = inputs.application_fonts.get(Path(name).name)
         if font and name in manifest.fonts:

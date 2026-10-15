@@ -1,4 +1,4 @@
-"""Tests for `openkb feedback` — the prefilled-GitHub-issue feedback flow."""
+"""Tests for `ultrakb feedback` — the prefilled-GitHub-issue feedback flow."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from urllib.parse import parse_qs, urlparse
 
 from click.testing import CliRunner
 
-from openkb.cli import (
+from ultrakb.cli import (
     _FEEDBACK_REPO,
     _build_feedback_url,
     _collect_feedback_diagnostics,
@@ -86,11 +86,11 @@ def test_build_url_diagnostics_attached_when_provided():
     url = _build_feedback_url(
         "x",
         "bug",
-        {"openkb": "1.2.3", "python": "3.12.0", "platform": "Linux 6.0"},
+        {"ultrakb": "1.2.3", "python": "3.12.0", "platform": "Linux 6.0"},
     )
     params = _parse(url)
     assert "Diagnostics" in params["body"]
-    assert "**openkb**: 1.2.3" in params["body"]
+    assert "**ultrakb**: 1.2.3" in params["body"]
     assert "**python**: 3.12.0" in params["body"]
     assert "**platform**: Linux 6.0" in params["body"]
 
@@ -117,10 +117,10 @@ def test_collect_diagnostics_returns_minimal_non_sensitive_set(tmp_path):
     class _Ctx:
         obj = None
 
-    with patch("openkb.cli._find_kb_dir", return_value=None):
+    with patch("ultrakb.cli._find_kb_dir", return_value=None):
         info = _collect_feedback_diagnostics(_Ctx())
 
-    assert set(info.keys()) == {"openkb", "python", "platform", "kb_initialised"}
+    assert set(info.keys()) == {"ultrakb", "python", "platform", "kb_initialised"}
     assert info["kb_initialised"] == "no"
     # Defensive: no path-like values that would leak the user's home dir.
     for v in info.values():
@@ -132,14 +132,14 @@ def test_collect_diagnostics_flags_kb_present(tmp_path):
     class _Ctx:
         obj = None
 
-    with patch("openkb.cli._find_kb_dir", return_value=tmp_path):
+    with patch("ultrakb.cli._find_kb_dir", return_value=tmp_path):
         info = _collect_feedback_diagnostics(_Ctx())
 
     assert info["kb_initialised"] == "yes"
 
 
 # ---------------------------------------------------------------------------
-# CLI: openkb feedback
+# CLI: ultrakb feedback
 # ---------------------------------------------------------------------------
 
 
@@ -152,7 +152,7 @@ def test_feedback_one_liner_opens_browser_with_url():
     assert result.exit_code == 0, result.output
     mock_open.assert_called_once()
     called_url = mock_open.call_args[0][0]
-    assert called_url.startswith("https://github.com/VectifyAI/OpenKB/issues/new?")
+    assert called_url.startswith("https://github.com/wooveep/UrltraKB/issues/new?")
     # The URL is also printed so the user has a copy if auto-open fails.
     assert called_url in result.output
 
@@ -169,7 +169,7 @@ def test_feedback_empty_message_aborts_with_exit_1():
 def test_feedback_prompts_for_type_when_not_given_via_flag():
     """If --type isn't on the command line and stdin is a TTY, prompt the user."""
     runner = CliRunner()
-    with patch("webbrowser.open"), patch("openkb.cli._stdin_is_tty", return_value=True):
+    with patch("webbrowser.open"), patch("ultrakb.cli._stdin_is_tty", return_value=True):
         result = runner.invoke(
             cli,
             ["feedback", "missing-type prompt test"],
@@ -191,7 +191,7 @@ def test_feedback_skips_type_prompt_when_stdin_is_not_a_tty():
     """In CI / piped contexts the second prompt would hang or abort
     confusingly — the command must fall through to a default."""
     runner = CliRunner()
-    with patch("webbrowser.open"), patch("openkb.cli._stdin_is_tty", return_value=False):
+    with patch("webbrowser.open"), patch("ultrakb.cli._stdin_is_tty", return_value=False):
         result = runner.invoke(cli, ["feedback", "non-tty feedback"])
 
     assert result.exit_code == 0, result.output
@@ -233,11 +233,11 @@ def test_feedback_confirms_when_webbrowser_open_succeeds():
     assert "Opened GitHub in your browser" in result.output
 
 
-def test_openkb_version_helper_matches_package_version():
-    """`_openkb_version` in cli.py must delegate to `openkb.__version__`
+def test_ultrakb_version_helper_matches_package_version():
+    """`_ultrakb_version` in cli.py must delegate to `ultrakb.__version__`
     so the chat REPL and the feedback issue body never disagree on the
     fallback string."""
-    from openkb import __version__
-    from openkb.cli import _openkb_version
+    from ultrakb import __version__
+    from ultrakb.cli import _ultrakb_version
 
-    assert _openkb_version() == __version__
+    assert _ultrakb_version() == __version__

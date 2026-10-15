@@ -6,19 +6,19 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from openkb.application.knowledge_bases import initialize_kb
+from ultrakb.application.knowledge_bases import initialize_kb
 
 
 @pytest.fixture(autouse=True)
 def isolated_settings(tmp_path, monkeypatch):
-    from openkb import config
+    from ultrakb import config
 
     monkeypatch.setattr(config, "GLOBAL_CONFIG_DIR", tmp_path / "settings")
     monkeypatch.setattr(config, "GLOBAL_CONFIG_PATH", tmp_path / "settings/global.yaml")
 
 
 def test_failed_creation_restores_existing_files_and_can_be_retried(tmp_path, monkeypatch):
-    from openkb.application import knowledge_bases
+    from ultrakb.application import knowledge_bases
 
     root = tmp_path / "new"
     (root / "wiki").mkdir(parents=True)
@@ -36,7 +36,7 @@ def test_failed_creation_restores_existing_files_and_can_be_retried(tmp_path, mo
         initialize_kb(root)
     assert (root / "wiki/index.md").read_text() == "existing notes"
     assert (root / "raw/keep.md").read_text() == "owned input"
-    assert not (root / ".openkb/config.yaml").exists()
+    assert not (root / ".ultrakb/config.yaml").exists()
     monkeypatch.setattr(knowledge_bases, "save_config", original)
     assert initialize_kb(root)["created"]
 
@@ -48,7 +48,7 @@ def test_creation_crash_recovers_before_explicit_retry(tmp_path, entry, point):
     code = """
 import os, sys
 from pathlib import Path
-from openkb.application import knowledge_bases as kb
+from ultrakb.application import knowledge_bases as kb
 if sys.argv[2] == 'config':
     original = kb.save_config
     def crash(*args, **kwargs):
@@ -66,24 +66,24 @@ kb.initialize_kb(Path(sys.argv[1]), seed_environment=False)
 """
     result = subprocess.run([sys.executable, "-c", code, str(root), point], timeout=20)
     assert result.returncode == 23
-    assert list((root / ".openkb/journal").glob("*.json"))
+    assert list((root / ".ultrakb/journal").glob("*.json"))
     if entry == "open":
-        from openkb.application.knowledge_bases import open_kb
+        from ultrakb.application.knowledge_bases import open_kb
 
         with pytest.raises(ValueError, match="not initialized"):
             open_kb(root)
     elif entry == "repair":
-        from openkb.application.repair import repair_knowledge_base
+        from ultrakb.application.repair import repair_knowledge_base
 
         repaired = repair_knowledge_base(root)
         assert repaired.repaired and not repaired.initialized
-    from openkb.application.knowledge_bases import initialization_pending
+    from ultrakb.application.knowledge_bases import initialization_pending
 
     if entry != "initialize":
         assert initialization_pending(root)
     assert initialize_kb(root, seed_environment=False, require_empty=True)["created"]
     assert not initialization_pending(root)
-    assert not list((root / ".openkb/journal").glob("*.json"))
+    assert not list((root / ".ultrakb/journal").glob("*.json"))
 
 
 def test_concurrent_creation_has_one_owner(tmp_path):
@@ -107,4 +107,4 @@ def test_native_creation_checks_empty_directory_after_recovery(tmp_path):
     with pytest.raises(ValueError, match="空目录"):
         initialize_kb(root, require_empty=True)
     assert note.read_text() == "Keep this"
-    assert not (root / ".openkb/config.yaml").exists()
+    assert not (root / ".ultrakb/config.yaml").exists()

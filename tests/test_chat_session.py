@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import json
-from typing import Any, AsyncIterator
 
 import pytest
 
-from openkb.agent import chat as chat_mod
-from openkb.agent.chat import iter_chat_turn_events
-from openkb.agent.chat_session import ChatSession, load_session
+from ultrakb.agent.chat import iter_chat_turn_events
+from ultrakb.agent.chat_session import ChatSession, load_session
+
+pytest_plugins = ("test_vendor_sdk",)
 
 
 def _image_history() -> list[dict[str, object]]:
@@ -111,74 +111,44 @@ def test_load_session_missing_traces_then_new_turn_stays_aligned(tmp_path):
     assert len(loaded.assistant_traces) == len(loaded.assistant_texts) == 3
 
 
-def _fake_event_stream(events: list[dict[str, Any]]):
-    """Build a stand-in for ``iter_agent_response_events`` that replays *events*."""
+def test_whitespace_only_delta_then_final_answer_lands_in_trace(kb_dir):
+    from ultrakb.agent.chat_trace import append_event, complete_trace
 
-    async def _stream(agent, input_data, **kwargs) -> AsyncIterator[dict[str, Any]]:
-        for event in events:
-            yield event
-
-    return _stream
-
-
-@pytest.mark.asyncio
-async def test_whitespace_only_delta_then_final_answer_lands_in_trace(kb_dir, monkeypatch):
-    """A whitespace-only streamed delta must not swallow the final answer.
-
-    Regression: a `" "` / `"\\n"` delta creates a text step, so a
-    presence-only guard treats that empty step as "the answer is already in the
-    trace" and never records the real answer -> a restored turn renders empty.
-    The guard now requires a text step with non-whitespace content.
-    """
-    session = ChatSession.new(kb_dir, "gpt-4o-mini", "en")
-
-    events = [
-        {"event": "delta", "data": {"text": " "}},
-        {"event": "delta", "data": {"text": "\n"}},
-        {"event": "final", "data": {"answer": "The real answer.", "history": []}},
-    ]
-    monkeypatch.setattr(chat_mod, "iter_agent_response_events", _fake_event_stream(events))
-
-    collected = [event async for event in iter_chat_turn_events(object(), session, "q")]
-
-    # The final frame still carries the answer...
-    final = collected[-1]
-    assert final["event"] == "final"
-    assert final["data"]["answer"] == "The real answer."
-
-    # ...and the persisted trace contains the real answer as a text step, so a
-    # restored turn is not blank.
-    persisted_trace = session.assistant_traces[-1]
+    session = ChatSession.new(kb_dir, "deepseek/deepseek-flash", "en")
+    trace = []
+    append_event(trace, {"event": "delta", "data": {"text": " "}})
+    append_event(trace, {"event": "delta", "data": {"text": "\n"}})
+    complete_trace(trace, "The retained answer.")
+    session.record_turn("q", "The retained answer.", [], trace=trace)
+    restored = load_session(kb_dir, session.id)
+    assert restored.assistant_texts == ["The retained answer."]
     assert any(
-        step.get("kind") == "text" and step.get("text") == "The real answer."
-        for step in persisted_trace
+        step.get("kind") == "text" and step.get("text") == "The retained answer."
+        for step in restored.assistant_traces[-1]
     )
 
 
-@pytest.mark.asyncio
-async def test_substantive_streamed_text_is_not_duplicated_by_final(kb_dir, monkeypatch):
-    """When real text was streamed, the final answer must not be appended again."""
-    session = ChatSession.new(kb_dir, "gpt-4o-mini", "en")
+def test_substantive_streamed_text_is_not_duplicated_by_final(kb_dir):
+    from ultrakb.agent.chat_trace import append_event, complete_trace
 
-    events = [
-        {"event": "delta", "data": {"text": "The real "}},
-        {"event": "delta", "data": {"text": "answer."}},
-        {"event": "final", "data": {"answer": "The real answer.", "history": []}},
+    session = ChatSession.new(kb_dir, "deepseek/deepseek-flash", "en")
+    trace = []
+    append_event(trace, {"event": "delta", "data": {"text": "The retained "}})
+    append_event(trace, {"event": "delta", "data": {"text": "answer."}})
+    complete_trace(trace, "The retained answer.")
+    session.record_turn("q", "The retained answer.", [], trace=trace)
+    text_steps = [
+        step
+        for step in load_session(kb_dir, session.id).assistant_traces[-1]
+        if step.get("kind") == "text"
     ]
-    monkeypatch.setattr(chat_mod, "iter_agent_response_events", _fake_event_stream(events))
-
-    _ = [event async for event in iter_chat_turn_events(object(), session, "q")]
-
-    persisted_trace = session.assistant_traces[-1]
-    text_steps = [s for s in persisted_trace if s.get("kind") == "text"]
-    assert len(text_steps) == 1
-    assert text_steps[0]["text"] == "The real answer."
+    assert text_steps == [{"kind": "text", "text": "The retained answer."}]
 
 
 def test_stale_session_cannot_overwrite_or_resurrect_completed_history(kb_dir):
     import pytest
 
-    from openkb.agent.chat_session import ChatSession, delete_session, load_session
+    from ultrakb.agent.chat_session import ChatSession, delete_session, load_session
 
     session = ChatSession.new(kb_dir, "test", "zh")
     session.record_turn("One", "First answer", [])
@@ -193,111 +163,130 @@ def test_stale_session_cannot_overwrite_or_resurrect_completed_history(kb_dir):
 
 
 @pytest.mark.asyncio
-async def test_closing_chat_waits_for_model_work_before_releasing_write_lease(kb_dir, monkeypatch):
-    (kb_dir / "wiki/sources/fixture.md").write_text("Available original.")
-    import asyncio
+async def test_closing_chat_waits_for_model_work_before_releasing_write_lease(
+    kb_dir, model_service, monkeypatch
+):
+    from agents import RunConfig, Runner
+    from test_llm_execution import executor_for
+    from test_managed_agent import agent_for
 
-    from agents import RawResponsesStreamEvent, Runner
-    from openai.types.responses import ResponseTextDeltaEvent
+    from ultrakb.locks import atomic_write_text
 
-    settled = asyncio.Event()
-    stop_requested = asyncio.Event()
+    atomic_write_text(kb_dir / "wiki/sources/fixture.md", "Available original.")
+    executor = executor_for(model_service, max_calls=2)
+    agent = agent_for(executor)
+    agent.instructions = "Answer without tools. Count from one to twenty in words."
+    agent.model_settings.max_tokens = 128
+    runs = []
+    original = Runner.run_streamed
 
-    class ModelRun:
-        is_complete = False
+    def observe(*args, **kwargs):
+        actual = original(*args, **kwargs)
+        runs.append(actual)
+        return actual
 
-        def cancel(self, mode="immediate"):
-            assert mode == "after_turn"
-            stop_requested.set()
-
-        async def stream_events(self):
-            try:
-                yield RawResponsesStreamEvent(
-                    data=ResponseTextDeltaEvent(
-                        type="response.output_text.delta",
-                        delta="Partial",
-                        content_index=0,
-                        item_id="message",
-                        output_index=0,
-                        sequence_number=0,
-                        logprobs=[],
-                    )
-                )
-                await stop_requested.wait()
-            finally:
-                await stop_requested.wait()
-                settled.set()
-
-    monkeypatch.setattr(Runner, "run_streamed", lambda *a, **kw: ModelRun())
-    session = ChatSession.new(kb_dir, "test", "en")
-    from agents import Agent
-
-    stream = iter_chat_turn_events(Agent(name="test"), session, "Question")
+    monkeypatch.setattr(Runner, "run_streamed", observe)
+    session = ChatSession.new(kb_dir, "deepseek/deepseek-flash", "en")
+    stream = iter_chat_turn_events(
+        agent, session, "Count the numbers.", run_config=RunConfig(tracing_disabled=True)
+    )
     first = await anext(stream)
-    assert first["event"] == "delta" and "Partial" in str(first)
+    while first["event"] != "delta":
+        first = await anext(stream)
+    assert first["data"]["text"]
     await stream.aclose()
-    assert settled.is_set()
+    assert runs[0].run_loop_task.done()
     assert not session.path.exists()
 
 
 @pytest.mark.asyncio
-async def test_cancelling_consumer_keeps_lease_until_real_sdk_work_settles(kb_dir, monkeypatch):
-    (kb_dir / "wiki/sources/fixture.md").write_text("Available original.")
+async def test_cancelling_consumer_keeps_lease_until_real_sdk_work_settles(
+    kb_dir, model_service, monkeypatch
+):
     import asyncio
 
-    from agents import Agent, RunContextWrapper, Runner
-    from agents.result import QueueCompleteSentinel, RunResultStreaming
+    from agents import RunConfig, Runner
+    from litellm import CustomStreamWrapper
+    from test_llm_execution import executor_for
+    from test_managed_agent import agent_for
 
-    from openkb.locks import async_kb_lock
+    from ultrakb.locks import async_kb_lock, atomic_write_text
 
-    started, finish, settled, competing = (asyncio.Event() for _ in range(4))
+    atomic_write_text(kb_dir / "wiki/sources/fixture.md", "Available original.")
+    executor = executor_for(model_service, max_calls=2)
+    agent = agent_for(executor)
+    agent.instructions = "Answer without tools. List the twelve month names in order."
+    agent.model_settings.max_tokens = 128
+    first_delta = asyncio.Event()
+    sdk_waiting = asyncio.Event()
+    release_sdk = asyncio.Event()
+    writer_waiting = asyncio.Event()
+    delivered_content = False
+    original_next = CustomStreamWrapper.__anext__
 
-    async def model_work():
-        started.set()
-        await finish.wait()
-        settled.set()
-        result.is_complete = True
-        result._event_queue.put_nowait(QueueCompleteSentinel())
+    async def gated_chunk(stream):
+        nonlocal delivered_content
+        if delivered_content:
+            sdk_waiting.set()
+            await release_sdk.wait()
+        chunk = await original_next(stream)
+        if any(choice.delta.content for choice in chunk.choices):
+            delivered_content = True
+        return chunk
 
-    result = RunResultStreaming(
-        input="x",
-        new_items=[],
-        raw_responses=[],
-        final_output=None,
-        input_guardrail_results=[],
-        output_guardrail_results=[],
-        tool_input_guardrail_results=[],
-        tool_output_guardrail_results=[],
-        context_wrapper=RunContextWrapper(None),
-        current_agent=Agent(name="test"),
-        current_turn=1,
-        max_turns=2,
-        _current_agent_output_schema=None,
-        trace=None,
-        run_loop_task=asyncio.create_task(model_work()),
-    )
-    monkeypatch.setattr(Runner, "run_streamed", lambda *a, **kw: result)
-    session = ChatSession.new(kb_dir, "test", "en")
+    monkeypatch.setattr(CustomStreamWrapper, "__anext__", gated_chunk)
+    runs = []
+    original = Runner.run_streamed
+
+    def observe(*args, **kwargs):
+        actual = original(*args, **kwargs)
+        runs.append(actual)
+        return actual
+
+    monkeypatch.setattr(Runner, "run_streamed", observe)
+    session = ChatSession.new(kb_dir, "deepseek/deepseek-flash", "en")
 
     async def consume():
-        return [event async for event in iter_chat_turn_events(Agent(name="test"), session, "x")]
+        from contextlib import aclosing
+
+        stream = iter_chat_turn_events(
+            agent, session, "Name the months.", run_config=RunConfig(tracing_disabled=True)
+        )
+        async with aclosing(stream):
+            async for event in stream:
+                if event["event"] == "delta":
+                    first_delta.set()
+                    # Consumer-side scheduling does not fabricate or alter model events.
+                    await asyncio.Event().wait()
 
     async def next_writer():
-        async with async_kb_lock(kb_dir / ".openkb", exclusive=True, on_wait=competing.set):
-            assert settled.is_set()
+        async with async_kb_lock(kb_dir / ".ultrakb", exclusive=True, on_wait=writer_waiting.set):
+            assert runs[0].run_loop_task.done()
 
     consumer = asyncio.create_task(consume())
-    await asyncio.wait_for(started.wait(), 5)
-    while not result._waiting_on_event_queue:
+    contender = None
+    try:
+        await asyncio.wait_for(first_delta.wait(), 30)
+        await asyncio.wait_for(sdk_waiting.wait(), 30)
+        assert not runs[0].run_loop_task.done()
+        consumer.cancel()
+        contender = asyncio.create_task(next_writer())
+        await asyncio.wait_for(writer_waiting.wait(), 30)
+        consumer.cancel()
         await asyncio.sleep(0)
-    consumer.cancel()
-    contender = asyncio.create_task(next_writer())
-    await asyncio.wait_for(competing.wait(), 5)
-    assert not consumer.done()
-    consumer.cancel()  # A second cancellation must not cut short cleanup.
-    finish.set()
-    with pytest.raises(asyncio.CancelledError):
-        await asyncio.wait_for(consumer, 5)
-    await asyncio.wait_for(contender, 5)
-    assert result.run_loop_task.done()
+        assert not consumer.done() and not contender.done()
+        assert not runs[0].run_loop_task.done()
+        release_sdk.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(consumer, 30)
+        await asyncio.wait_for(contender, 30)
+    finally:
+        release_sdk.set()
+        consumer.cancel()
+        if contender is not None:
+            contender.cancel()
+        await asyncio.gather(
+            consumer, *([contender] if contender is not None else []), return_exceptions=True
+        )
+    assert runs[0].run_loop_task.done()
     assert not session.path.exists()

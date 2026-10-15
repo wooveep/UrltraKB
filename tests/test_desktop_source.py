@@ -11,9 +11,9 @@ def _repository(tmp_path):
     root.mkdir()
     subprocess.run(["git", "init", "-q", str(root)], check=True)
     for name, text in {
-        "openkb/example.py": "COMMITTED = True\n",
-        "openkb/示例资源.txt": "已提交的中文资源\n",
-        "openkb/version.txt": "$Format:%H$\n",
+        "ultrakb/example.py": "COMMITTED = True\n",
+        "ultrakb/示例资源.txt": "已提交的中文资源\n",
+        "ultrakb/version.txt": "$Format:%H$\n",
         "assets/fonts/SourceCodePro-Regular.ttf": "committed font fixture",
         "assets/private.txt": "private asset",
         "vendor/PageIndex/pageindex/__init__.py": "VENDORED = True\n",
@@ -27,8 +27,8 @@ def _repository(tmp_path):
         "vendor/LiteLLM/enterprise/private.py": "excluded enterprise package",
         "vendor/ConDB/dist/old.whl": "generated build artifact",
         "vendor/private/notes.txt": "not a vendored dependency",
-        "openkb/web/index.html": "retired browser bundle",
-        "pyproject.toml": "[project]\nname = 'openkb'\n",
+        "ultrakb/web/index.html": "retired browser bundle",
+        "pyproject.toml": "[project]\nname = 'ultrakb'\n",
         "LICENSE": "original license",
         "Makefile": "help:\n\t@echo build\n",
         ".github/workflows/desktop-build.yml": "name: Desktop packages\n",
@@ -62,12 +62,12 @@ def test_source_export_uses_commit_and_excludes_private_or_retired_files(tmp_pat
     from scripts.export_desktop_source import export_source, verify_source
 
     repo = _repository(tmp_path)
-    (repo / "openkb/example.py").write_text("UNCOMMITTED = True\n", encoding="utf-8")
-    (repo / "openkb/untracked.py").write_text("private workspace data", encoding="utf-8")
+    (repo / "ultrakb/example.py").write_text("UNCOMMITTED = True\n", encoding="utf-8")
+    (repo / "ultrakb/untracked.py").write_text("private workspace data", encoding="utf-8")
     output = tmp_path / "export"
     identity = export_source(repo, output)
-    assert (output / "openkb/example.py").read_text("utf-8") == "COMMITTED = True\n"
-    assert (output / "openkb/示例资源.txt").read_text("utf-8") == "已提交的中文资源\n"
+    assert (output / "ultrakb/example.py").read_text("utf-8") == "COMMITTED = True\n"
+    assert (output / "ultrakb/示例资源.txt").read_text("utf-8") == "已提交的中文资源\n"
     assert (output / "vendor/PageIndex/pageindex/__init__.py").read_text() == "VENDORED = True\n"
     assert (output / "vendor/PageIndex/LICENSE").read_text() == "upstream MIT license"
     assert (output / "vendor/ChatIndex/ctree/__init__.py").read_text() == "CHAT_TREE = True\n"
@@ -83,8 +83,8 @@ def test_source_export_uses_commit_and_excludes_private_or_retired_files(tmp_pat
         "CLAUDE.md",
         ".env",
         "docs/internal",
-        "openkb/web",
-        "openkb/untracked.py",
+        "ultrakb/web",
+        "ultrakb/untracked.py",
         "assets/private.txt",
         "vendor/private/notes.txt",
         "vendor/LiteLLM/enterprise",
@@ -93,7 +93,7 @@ def test_source_export_uses_commit_and_excludes_private_or_retired_files(tmp_pat
         assert not (output / name).exists()
     assert (output / "Makefile").is_file()
     assert (output / ".github/workflows/desktop-build.yml").is_file()
-    assert json.loads((output / "openkb/_build_info.json").read_text("utf-8")) == identity
+    assert json.loads((output / "ultrakb/_build_info.json").read_text("utf-8")) == identity
     assert verify_source(output) == identity
     assert (
         identity["commit"]
@@ -106,7 +106,7 @@ def test_build_refuses_modified_export_or_additional_application_source(tmp_path
 
     output = tmp_path / "export"
     export_source(_repository(tmp_path), output)
-    source = output / "openkb/example.py"
+    source = output / "ultrakb/example.py"
     original = source.read_bytes()
     source.write_text("MODIFIED = True\n", encoding="utf-8")
     with pytest.raises(ValueError, match="changed"):
@@ -118,7 +118,7 @@ def test_build_refuses_modified_export_or_additional_application_source(tmp_path
     with pytest.raises(ValueError, match="changed"):
         verify_source(output)
     vendored.write_bytes(original_vendored)
-    (output / "openkb/injected.py").write_text("EXTRA = True\n", encoding="utf-8")
+    (output / "ultrakb/injected.py").write_text("EXTRA = True\n", encoding="utf-8")
     with pytest.raises(ValueError, match="Unexpected"):
         verify_source(output)
 
@@ -144,7 +144,7 @@ def test_exact_release_tag_sets_export_and_embedded_version(tmp_path, annotated)
     identity = export_source(repo, output)
     assert identity["version"] == "1.0.0"
     assert verify_source(output) == identity
-    assert json.loads((output / "openkb/_build_info.json").read_text())["version"] == "1.0.0"
+    assert json.loads((output / "ultrakb/_build_info.json").read_text())["version"] == "1.0.0"
     subprocess.run([*command, "commit", "--allow-empty", "-qm", "After release"], check=True)
     development = export_source(repo, tmp_path / "next")
     assert development["version"].startswith("0.1.dev")
@@ -178,12 +178,12 @@ def test_local_archive_attributes_cannot_remove_or_rewrite_source(tmp_path):
 
     repo = _repository(tmp_path)
     (repo / ".git/info/attributes").write_text(
-        "openkb/example.py export-ignore\nopenkb/version.txt export-subst\n", encoding="utf-8"
+        "ultrakb/example.py export-ignore\nultrakb/version.txt export-subst\n", encoding="utf-8"
     )
     output = tmp_path / "export"
     export_source(repo, output)
-    assert (output / "openkb/example.py").read_text("utf-8") == "COMMITTED = True\n"
-    assert (output / "openkb/version.txt").read_text("utf-8") == "$Format:%H$\n"
+    assert (output / "ultrakb/example.py").read_text("utf-8") == "COMMITTED = True\n"
+    assert (output / "ultrakb/version.txt").read_text("utf-8") == "$Format:%H$\n"
     verify_source(output)
 
 
@@ -192,7 +192,7 @@ def test_local_replacement_refs_cannot_change_committed_blob_bytes(tmp_path):
 
     repo = _repository(tmp_path)
     original = subprocess.check_output(
-        ["git", "-C", str(repo), "rev-parse", "HEAD:openkb/example.py"], text=True
+        ["git", "-C", str(repo), "rev-parse", "HEAD:ultrakb/example.py"], text=True
     ).strip()
     replacement = (
         subprocess.check_output(
@@ -205,7 +205,7 @@ def test_local_replacement_refs_cannot_change_committed_blob_bytes(tmp_path):
     subprocess.run(["git", "-C", str(repo), "replace", original, replacement], check=True)
     output = tmp_path / "export"
     export_source(repo, output)
-    assert (output / "openkb/example.py").read_text("utf-8") == "COMMITTED = True\n"
+    assert (output / "ultrakb/example.py").read_text("utf-8") == "COMMITTED = True\n"
 
 
 @pytest.mark.parametrize("system", ["Windows", "Linux"])
@@ -215,9 +215,9 @@ def test_delivery_separates_source_from_branded_runtime(tmp_path, system):
     import zipfile
     from dataclasses import asdict
 
-    from openkb.distribution import read_distribution
     from scripts.export_desktop_source import export_source
     from scripts.package_desktop import package_materials, package_runtime, record
+    from ultrakb.distribution import read_distribution
 
     source = tmp_path / "export"
     identity = export_source(_repository(tmp_path), source)
@@ -225,19 +225,19 @@ def test_delivery_separates_source_from_branded_runtime(tmp_path, system):
     materials.mkdir()
     material_files = []
     for kind in ("source", "licenses", "notice", "components", "build"):
-        path = materials / f"UrltraKB-{kind}.txt"
+        path = materials / f"UltraKB-{kind}.txt"
         path.write_text(f"Complete {kind} material", encoding="utf-8")
         material_files.append(asdict(record(path, kind)))
     (materials / "release.json").write_text(
         json.dumps({"schema": 1, **identity, "files": material_files}), encoding="utf-8"
     )
     program = tmp_path / "program"
-    (program / "_internal/openkb").mkdir(parents=True)
+    (program / "_internal/ultrakb").mkdir(parents=True)
     suffix = ".exe" if system == "Windows" else ""
-    for name in ("UrltraKB", "UrltraKBCLI", "UrltraKBAPI", "UrltraKBVerify"):
+    for name in ("UltraKB", "UltraKBCLI", "UltraKBAPI", "UltraKBVerify"):
         (program / (name + suffix)).write_bytes(b"inventoried executable fixture")
         (program / (name + suffix)).chmod(0o755)
-    (program / "_internal/openkb/_build_info.json").write_text(json.dumps(identity))
+    (program / "_internal/ultrakb/_build_info.json").write_text(json.dumps(identity))
     if system == "Linux":
         (program / "_internal/library.so.1").write_bytes(b"shared runtime")
         (program / "_internal/library.so").symlink_to("library.so.1")
@@ -256,9 +256,9 @@ def test_delivery_separates_source_from_branded_runtime(tmp_path, system):
     runtime = package_runtime(
         source, program, inventory, materials, output / companion.name, output
     )
-    assert runtime.name.startswith(f"UrltraKB-{identity['version']}-")
+    assert runtime.name.startswith(f"UltraKB-{identity['version']}-")
     with zipfile.ZipFile(output / companion.name) as archive:
-        assert "UrltraKB/distribution/UrltraKB-source.txt" in archive.namelist()
+        assert "UltraKB/distribution/UltraKB-source.txt" in archive.namelist()
     extracted = tmp_path / "extracted"
     if system == "Windows":
         with zipfile.ZipFile(output / runtime.name) as archive:
@@ -266,16 +266,16 @@ def test_delivery_separates_source_from_branded_runtime(tmp_path, system):
     else:
         with tarfile.open(output / runtime.name) as archive:
             archive.extractall(extracted, filter="data")
-        assert (extracted / "UrltraKB/UrltraKB").stat().st_mode & 0o111
-        assert (extracted / "UrltraKB/UrltraKB").samefile(extracted / "UrltraKB/UrltraKBCLI")
-        assert (extracted / "UrltraKB/_internal/library.so").read_bytes() == b"shared runtime"
-    release = read_distribution(extracted / "UrltraKB/distribution", identity)
+        assert (extracted / "UltraKB/UltraKB").stat().st_mode & 0o111
+        assert (extracted / "UltraKB/UltraKB").samefile(extracted / "UltraKB/UltraKBCLI")
+        assert (extracted / "UltraKB/_internal/library.so").read_bytes() == b"shared runtime"
+    release = read_distribution(extracted / "UltraKB/distribution", identity)
     assert {f.kind for f in release.files} == {"licenses", "notice"}
     assert release.source_archive == companion
     assert not list(extracted.rglob("*source*"))
     assert not list(extracted.rglob("private.env"))
-    assert not list(extracted.rglob("OpenKB*"))
-    with release.open_file("UrltraKB-licenses.txt") as stream:
+    assert {path.name for path in extracted.iterdir()} == {"UltraKB"}
+    with release.open_file("UltraKB-licenses.txt") as stream:
         assert stream.read() == b"Complete licenses material"
     import os
 
@@ -290,13 +290,13 @@ def test_delivery_separates_source_from_branded_runtime(tmp_path, system):
     )
     assert repeated_runtime.sha256 == runtime.sha256
     if system == "Linux":
-        (program / "UrltraKB").chmod(0o644)
+        (program / "UltraKB").chmod(0o644)
         with pytest.raises(ValueError, match="not executable"):
             package_runtime(
                 source, program, inventory, materials, output / companion.name, tmp_path / "nonexec"
             )
-        (program / "UrltraKB").chmod(0o755)
-    (program / ("UrltraKB" + suffix)).write_bytes(b"changed executable")
+        (program / "UltraKB").chmod(0o755)
+    (program / ("UltraKB" + suffix)).write_bytes(b"changed executable")
     before = hashlib.sha256((output / runtime.name).read_bytes()).hexdigest()
     with pytest.raises(FileExistsError):
         package_runtime(source, program, inventory, materials, output / companion.name, output)

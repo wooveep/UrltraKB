@@ -16,7 +16,8 @@ from .block_policy import BlockContractError
 from .page_parts_policy import PagePartsContractError, PagePartsPolicy
 from .physical_sections import (
     SectionBoundary, SubtreeQualityError, merge_continuation, prepare_entries, unique_heading,
-    title_line_positions,
+    title_line_positions, requires_local_correction, require_corrected_navigation,
+    finish_title_verification, physical_child_entries, document_range_entry,
     validate_order as validate_physical_order,
 )
 
@@ -78,25 +79,7 @@ async def check_title_appearance(item, page_list, start_index=1, model=None, pol
                    'inside that parent section, not a neighboring operation or chapter.')
     response = await llm_acompletion(model=model, prompt=prompt, usage_stage="verification")
     response = extract_json(response)
-    if 'answer' in response:
-        answer = response['answer']
-    else:
-        answer = 'no'
-    if boundary:
-        # A model establishes heading role, not physical coordinates. Native
-        # positions plus confirmed parent bounds can prove membership even
-        # when printed page labels mislead the model's separate membership claim.
-        positions = title_line_positions(item, page_list, start_index)
-        current = [position for position in positions if position['unit'] == page_number]
-        proved = (boundary.start_confirmed and boundary.end_confirmed and len(current) == 1
-                  and all(boundary.contains(position) for position in positions))
-        if (positions and boundary.start_confirmed and boundary.end_confirmed
-                and not any(boundary.contains(position) for position in current)):
-            answer = 'no'
-        elif not proved and response.get('belongs_to_parent') is not True:
-            answer = 'no'
-    return {'list_index': item['list_index'], 'answer': answer, 'title': title, 'page_number': page_number}
-
+    return finish_title_verification(item, response, page_list, start_index, boundary)
 
 async def check_title_appearance_in_start(title, page_text, model=None, logger=None):    
     prompt = f"""
@@ -814,6 +797,7 @@ def check_toc(page_list, opt=None, policy=None):
 
 
 
+
 ################### fix incorrect toc #########################################################
 async def single_toc_item_index_fixer(section_title, content, model=None):
     toc_extractor_prompt = """
@@ -1104,6 +1088,8 @@ async def _meta_processor_once(page_list, mode=None, toc_content=None, toc_page_
     if not policy:
         toc_with_page_number = prepare_entries(toc_with_page_number, page_list, start_index,
                                               boundary, getattr(opt, 'max_nodes_per_unit', 4))
+        if not toc_with_page_number:
+            return []
     if isinstance(policy, PagePartsPolicy):
         toc_with_page_number = policy.prepare_navigation(toc_with_page_number, start_index,
                                                          start_index + len(page_list) - 1)
@@ -1131,15 +1117,9 @@ async def _meta_processor_once(page_list, mode=None, toc_content=None, toc_page_
             for item in toc_with_page_number:
                 item['unit_kind'] = policy.unit_kind
         return toc_with_page_number
-    if (policy or boundary or accuracy > 0.6) and len(incorrect_results) > 0:
+    if requires_local_correction(accuracy, incorrect_results, policy=policy, boundary=boundary):
         toc_with_page_number, incorrect_results = await fix_incorrect_toc_with_retries(toc_with_page_number, page_list, incorrect_results,start_index=start_index, max_attempts=3, model=opt.model, logger=logger, **({"policy": policy} if policy else {}), **({"boundary": boundary} if boundary else {}))
-        if incorrect_results:
-            if getattr(policy, 'unit_kind', None) == 'block':
-                raise BlockContractError("Block correction attempts exhausted")
-            if isinstance(policy, PagePartsPolicy):
-                raise PagePartsContractError("Unverified slide anchors after correction")
-            from ..errors import IndexQualityError
-            raise IndexQualityError("Unverified physical-page anchors after correction")
+        require_corrected_navigation(incorrect_results, policy)
         if not policy:
             validate_physical_order(toc_with_page_number, start_index, len(page_list))
         if policy:
@@ -1195,10 +1175,12 @@ async def process_large_node_recursively(node, page_list, opt=None, logger=None,
         elif policy and valid_node_toc_items and node['title'].strip() == valid_node_toc_items[0]['title'].strip():
             node['nodes'] = post_processing(valid_node_toc_items[1:], node['end_index'], policy=policy)
         
-        elif not policy and valid_node_toc_items and boundary.is_parent_root(valid_node_toc_items[0], node_page_list, node['start_index']):
-            if len(valid_node_toc_items) == 1:
+        elif not policy:
+            children = physical_child_entries(boundary, valid_node_toc_items,
+                                               node_page_list, node['start_index'])
+            if valid_node_toc_items and not children:
                 return node
-            node['nodes'] = post_processing(valid_node_toc_items[1:], node['end_index'])
+            node['nodes'] = post_processing(children, node['end_index'])
         else:
             node['nodes'] = post_processing(valid_node_toc_items, node['end_index'], **({"policy": policy} if policy else {}))
         
@@ -1231,6 +1213,12 @@ async def tree_parser(page_list, opt, doc=None, logger=None, policy=None):
             start_index=1, 
             opt=opt,
             logger=logger, **({"policy": policy} if policy else {}))
+
+    if not policy and not toc_with_page_number:
+        logger.info({'navigation': 'document_range', 'reason': 'no_heading_candidates'})
+        # This node denotes the known physical source range. Do not run title
+        # verification or section recursion: it claims no original heading.
+        return post_processing([document_range_entry(page_list)], len(page_list))
 
     toc_with_page_number = policy.preface(toc_with_page_number) if policy else add_preface_if_needed(toc_with_page_number)
     toc_with_page_number = await check_title_appearance_in_start_concurrent(toc_with_page_number, page_list, model=opt.model, logger=logger, **({"policy": policy} if policy else {}))

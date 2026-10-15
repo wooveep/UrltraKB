@@ -1,6 +1,6 @@
-# AGENTS.md — OpenKB map for coding agents
+# AGENTS.md — UltraKB map for coding agents
 
-OpenKB compiles raw documents into an interlinked wiki knowledge base using
+UltraKB compiles raw documents into an interlinked wiki knowledge base using
 LLMs (vectorless retrieval via PageIndex). This repo is developed **agent-first**:
 humans steer, agents execute. Optimize changes for agent legibility.
 
@@ -11,11 +11,11 @@ humans steer, agents execute. Optimize changes for agent legibility.
 
 ## Dev commands
 - Install: `pip install -e ".[dev]"`  (or `uv sync --extra dev` — plain `uv sync` skips the dev tools)
-- Run CLI: `openkb <command>`  (entry point: `openkb.cli:cli`)
+- Run CLI: `ultrakb <command>`  (entry point: `ultrakb.cli:cli`)
 - Test: `pytest`
-- Lint/format/types: `ruff check .` · `ruff format .` · `mypy openkb`
+- Lint/format/types: `ruff check .` · `ruff format .` · `mypy ultrakb`
 
-## Module map (openkb/)
+## Module map (ultrakb/)
 - `cli.py` — Click CLI entry point & command wiring *(large; see tech-debt)*.
 - `config.py` — config loading/validation (LiteLLM passthrough, env).
 - `converter.py` — document → markdown conversion (markitdown).

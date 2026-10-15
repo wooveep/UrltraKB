@@ -9,7 +9,7 @@ pageindex_threshold: 20          # PDF pages threshold for PageIndex
 # concurrency: 5
 
 # Optional: whether the LLM agents (query, chat, lint, skill) may call tools
-# in parallel. Leave it UNSET (commented out) to keep OpenKB's per-agent
+# in parallel. Leave it UNSET (commented out) to keep UltraKB's per-agent
 # defaults. Setting it applies the SAME value to every agent:
 #   true    allow parallel tool calls
 #   false   force sequential tool calls

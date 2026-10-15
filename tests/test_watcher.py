@@ -1,11 +1,11 @@
-"""Tests for openkb.watcher (Task 12)."""
+"""Tests for ultrakb.watcher (Task 12)."""
 
 from __future__ import annotations
 
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from openkb.watcher import DebouncedHandler, start_watch
+from ultrakb.watcher import DebouncedHandler, start_watch
 
 
 def _make_file_event(src_path: str, is_directory: bool = False):
@@ -166,7 +166,7 @@ def test_blocking_watch_cancellation_reaps_observer_and_callbacks(tmp_path):
     import threading
     import time
 
-    from openkb.watcher import watch_directory
+    from ultrakb.watcher import watch_directory
 
     delivered = threading.Event()
     cancelled = threading.Event()

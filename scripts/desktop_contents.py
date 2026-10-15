@@ -6,7 +6,7 @@ import hashlib
 import os
 from pathlib import Path, PurePosixPath
 
-ENTRYPOINTS = ("UrltraKB", "UrltraKBCLI", "UrltraKBAPI", "UrltraKBVerify")
+ENTRYPOINTS = ("UltraKB", "UltraKBCLI", "UltraKBAPI", "UltraKBVerify")
 
 
 def runtime_asset(relative: str) -> bool:

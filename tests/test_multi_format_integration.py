@@ -4,16 +4,20 @@ import json
 
 import pytest
 
-pytest_plugins = ("test_workbook_import",)
+pytest_plugins = ("test_workbook_import", "processing_fixtures")
 
 
-def test_retry_source_uses_retained_input_after_original_was_removed(kb_dir, tmp_path, pdf_model):
-    from openkb.application.documents import import_document
-    from openkb.application.source_retry import retry_source
+def test_retry_source_uses_retained_input_after_original_was_removed(kb_dir, tmp_path):
+    from publication_fixtures import publish_document
+
+    from ultrakb.application.source_retry import retry_source
+    from ultrakb.config import LlmCredentialBundle
 
     path = tmp_path / "note.md"
     path.write_text("Retained evidence", encoding="utf-8")
-    first = import_document(kb_dir, path)
+    first = publish_document(
+        kb_dir, path, "Retained evidence", bundle=LlmCredentialBundle(api_key="local-domain")
+    )
     path.unlink()
     result = retry_source(kb_dir, first.source_id)
     assert result.status == "skipped"
@@ -27,17 +31,28 @@ def test_cli_http_and_spawn_retry_share_source_revision_and_measurements(
     from click.testing import CliRunner
     from fastapi.testclient import TestClient
 
-    from openkb.api import create_app
-    from openkb.application.documents import import_document
-    from openkb.cli import cli
-    from openkb.config import register_kb_alias
-    from openkb.documents import read_document_source
-    from openkb.runtime.requests import RetrySource
-    from openkb.runtime.tasks import TaskManager
+    from ultrakb.api import create_app
+    from ultrakb.application.documents import import_document
+    from ultrakb.cli import cli
+    from ultrakb.config import load_config, register_kb_alias, save_config
+    from ultrakb.documents import read_document_source
+    from ultrakb.runtime.assets import configure_sdk_resources
+    from ultrakb.runtime.requests import RetrySource
+    from ultrakb.runtime.tasks import TaskManager
+
+    # Parent, CLI/HTTP, and the fresh child capture the same explicit model and
+    # SDK table. A source retry cannot inherit a different user's role binding.
+    configure_sdk_resources()
+    config_path = kb_dir / ".ultrakb/config.yaml"
+    config = load_config(config_path)
+    config.update(model="deepseek/deepseek-flash", language="en")
+    config["role_generation"] = {"compile": {"max_tokens": 1024, "reasoning_effort": "none"}}
+    save_config(config_path, config)
 
     path = tmp_path / "cross.md"
     path.write_text("Inspect the same saved body.", encoding="utf-8")
     first = import_document(kb_dir, path)
+    assert first.status == "added", first.message
     path.unlink()
     register_kb_alias("cross", kb_dir)
     expected = read_document_source(kb_dir, first.source_id)
@@ -84,13 +99,13 @@ def test_legacy_read_is_unknown_and_does_not_change_catalog(kb_dir, monkeypatch)
     from click.testing import CliRunner
     from fastapi.testclient import TestClient
 
-    from openkb.api import create_app
-    from openkb.cli import cli
-    from openkb.config import register_kb_alias
-    from openkb.state import HashRegistry
+    from ultrakb.api import create_app
+    from ultrakb.cli import cli
+    from ultrakb.config import register_kb_alias
+    from ultrakb.state import HashRegistry
 
     (kb_dir / "wiki/sources/old.md").write_text("Preserved legacy body", encoding="utf-8")
-    HashRegistry(kb_dir / ".openkb/hashes.json").add(
+    HashRegistry(kb_dir / ".ultrakb/hashes.json").add(
         "f" * 64, {"name": "old.docx", "doc_name": "old", "type": "docx"}
     )
     register_kb_alias("old", kb_dir)
@@ -100,7 +115,7 @@ def test_legacy_read_is_unknown_and_does_not_change_catalog(kb_dir, monkeypatch)
 
     monkeypatch.setattr("litellm.completion", forbidden)
     monkeypatch.setattr("litellm.acompletion", forbidden)
-    before = {p: p.read_bytes() for p in (kb_dir / ".openkb/catalog").rglob("*.json")}
+    before = {p: p.read_bytes() for p in (kb_dir / ".ultrakb/catalog").rglob("*.json")}
     result = CliRunner().invoke(cli, ["--kb-dir", str(kb_dir), "source", "f" * 64])
     assert result.exit_code == 0, result.output
     with TestClient(create_app()) as client:
@@ -108,13 +123,13 @@ def test_legacy_read_is_unknown_and_does_not_change_catalog(kb_dir, monkeypatch)
     assert result.status_code == 200, result.text
     assert result.json()["content"] == "Preserved legacy body"
     assert result.json()["length_class"] is None and result.json()["tokens"] is None
-    assert before == {p: p.read_bytes() for p in (kb_dir / ".openkb/catalog").rglob("*.json")}
+    assert before == {p: p.read_bytes() for p in (kb_dir / ".ultrakb/catalog").rglob("*.json")}
 
 
 def test_raw_watcher_excludes_managed_and_hidden_outputs(kb_dir):
     import threading
 
-    from openkb.watcher import start_watch
+    from ultrakb.watcher import start_watch
 
     received = []
     completed = threading.Event()
@@ -126,7 +141,7 @@ def test_raw_watcher_excludes_managed_and_hidden_outputs(kb_dir):
 
     watch = start_watch(kb_dir / "raw", observe, debounce=0.05)
     try:
-        managed = kb_dir / "raw/.openkb/normalized"
+        managed = kb_dir / "raw/.ultrakb/normalized"
         managed.mkdir(parents=True)
         (managed / "derived.md").write_text("Never import", encoding="utf-8")
         (kb_dir / "wiki/sources/derived.md").write_text("Never import", encoding="utf-8")
@@ -147,35 +162,34 @@ def test_raw_watcher_excludes_managed_and_hidden_outputs(kb_dir):
     ],
 )
 def test_unsupported_catalog_blocks_settings_and_cancel_signals_but_allows_read(
-    kb_dir, tmp_path, pdf_model, change
+    kb_dir, tmp_path, processing_only, change
 ):
-    from openkb.application.documents import import_document
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
-    from openkb.documents import read_document_source
-    from openkb.lifecycle import current_generation
-    from openkb.pending.control import request_stop
+    from ultrakb.application.settings import apply_kb_config_patch
+    from ultrakb.application.settings_data import KbConfigPatchRequest
+    from ultrakb.documents import read_document_source
+    from ultrakb.lifecycle import current_generation
+    from ultrakb.pending.control import request_stop
 
     path = tmp_path / "note.md"
     path.write_text("Read remains available", encoding="utf-8")
-    source = import_document(kb_dir, path)
-    schema = kb_dir / ".openkb/catalog/schema.json"
+    source = processing_only(path)
+    schema = kb_dir / ".ultrakb/catalog/schema.json"
     value = json.loads(schema.read_text())
     schema.write_text(json.dumps({**value, **change}))
-    before = (kb_dir / ".openkb/config.yaml").read_bytes()
+    before = (kb_dir / ".ultrakb/config.yaml").read_bytes()
     with pytest.raises(ValueError):
         apply_kb_config_patch(
             kb_dir, KbConfigPatchRequest(kb=str(kb_dir), config={"language": "en"})
         )
     with pytest.raises(ValueError):
         request_stop(kb_dir, "a" * 32, "b" * 32, current_generation(kb_dir))
-    assert not (kb_dir / ".openkb/pending-control").exists()
-    assert (kb_dir / ".openkb/config.yaml").read_bytes() == before
+    assert not (kb_dir / ".ultrakb/pending-control").exists()
+    assert (kb_dir / ".ultrakb/config.yaml").read_bytes() == before
     assert "Read remains available" in read_document_source(kb_dir, source.source_id)["content"]
 
 
 def unsupported_catalog(kb_dir):
-    from openkb.catalog_schema import CatalogSchema, catalog_schema_path
+    from ultrakb.catalog_schema import CatalogSchema, catalog_schema_path
 
     path = catalog_schema_path(kb_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -185,9 +199,9 @@ def unsupported_catalog(kb_dir):
 
 
 def test_cancel_does_not_write_to_an_unsupported_catalog(kb_dir, tmp_path):
-    from openkb.application.pending import cancel_execution_group
-    from openkb.inputs import prepared_input
-    from openkb.source_catalog import admit_source_revision
+    from ultrakb.application.pending import cancel_execution_group
+    from ultrakb.inputs import prepared_input
+    from ultrakb.source_catalog import admit_source_revision
 
     source = tmp_path / "source.md"
     source.write_text("Simple retained original", encoding="utf-8")
@@ -197,16 +211,16 @@ def test_cancel_does_not_write_to_an_unsupported_catalog(kb_dir, tmp_path):
     unsupported_catalog(kb_dir)
     with pytest.raises(ValueError):
         cancel_execution_group(kb_dir, identity)
-    assert not (kb_dir / ".openkb/pending-control" / f"group-{identity}.json").exists()
+    assert not (kb_dir / ".ultrakb/pending-control" / f"group-{identity}.json").exists()
 
 
 def test_runtime_can_still_stop_when_catalog_becomes_unsupported(kb_dir, tmp_path):
-    from openkb.application.pending import claim_pending_job
-    from openkb.inputs import prepared_input
-    from openkb.locks import kb_ingest_lock
-    from openkb.runtime.requests import RunPendingJob
-    from openkb.runtime.tasks import TaskManager
-    from openkb.source_catalog import admit_source_revision
+    from ultrakb.application.pending import claim_pending_job
+    from ultrakb.inputs import prepared_input
+    from ultrakb.locks import kb_ingest_lock
+    from ultrakb.runtime.requests import RunPendingJob
+    from ultrakb.runtime.tasks import TaskManager
+    from ultrakb.source_catalog import admit_source_revision
 
     path = tmp_path / "unconverted.docx"
     path.write_bytes(b"Retain admission before body processing")
@@ -215,20 +229,20 @@ def test_runtime_can_still_stop_when_catalog_becomes_unsupported(kb_dir, tmp_pat
     job = claim_pending_job(kb_dir)
     manager = TaskManager(history_dir=tmp_path / "tasks")
     try:
-        with kb_ingest_lock(kb_dir / ".openkb"):
+        with kb_ingest_lock(kb_dir / ".ultrakb"):
             task = manager.submit(kb_dir, [RunPendingJob(job["id"], job["dispatch_id"])])
             unsupported_catalog(kb_dir)
             manager.stop(task)
         assert manager.wait(task, timeout=20).state in {"stopped", "blocked"}
-        assert not (kb_dir / ".openkb/pending-control").exists()
+        assert not (kb_dir / ".ultrakb/pending-control").exists()
     finally:
         manager.shutdown(stop=True)
         assert manager.join(10)
 
 
 def test_repair_does_not_roll_back_an_unsupported_catalog(kb_dir):
-    from openkb.application.repair import repair_knowledge_base
-    from openkb.mutation import snapshot_paths
+    from ultrakb.application.repair import repair_knowledge_base
+    from ultrakb.mutation import snapshot_paths
 
     page = kb_dir / "wiki/concepts/future.md"
     page.write_text("Before mutation\n", encoding="utf-8")
@@ -244,7 +258,7 @@ def test_repair_does_not_roll_back_an_unsupported_catalog(kb_dir):
 
 
 def test_resuming_deletion_does_not_bypass_catalog_guard(kb_dir, monkeypatch):
-    from openkb import kb_admin
+    from ultrakb import kb_admin
 
     def fail_removal(path):
         raise OSError("Fixture interrupted deletion before directory removal")
@@ -264,9 +278,9 @@ def test_resuming_deletion_does_not_bypass_catalog_guard(kb_dir, monkeypatch):
 def test_failed_workbook_inventory_still_reports_its_discovery(kb_dir, pdf_model):
     from fastapi.testclient import TestClient
 
-    from openkb.api import create_app
-    from openkb.application.pending import pending_status
-    from openkb.config import register_kb_alias
+    from ultrakb.api import create_app
+    from ultrakb.application.pending import pending_status
+    from ultrakb.config import register_kb_alias
 
     register_kb_alias("counts", kb_dir)
     with TestClient(create_app()) as client:
@@ -282,41 +296,29 @@ def test_failed_workbook_inventory_still_reports_its_discovery(kb_dir, pdf_model
     assert result["discovery_pending_count"] == current["discovery_pending"] == 1
 
 
-def test_add_api_keeps_compiler_quality(kb_dir, tmp_path, pdf_model, monkeypatch):
-    from types import SimpleNamespace
-
+def test_add_api_keeps_compiler_quality(kb_dir, tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
-    from openkb.api import create_app
-    from openkb.application.documents import import_document
-    from openkb.config import register_kb_alias
+    from ultrakb.agent.compile_plan import normalize_plan
+    from ultrakb.api import create_app
+    from ultrakb.application.documents import import_document
+    from ultrakb.compilation_report import CompilationIncomplete, report_compile_issue
+    from ultrakb.config import register_kb_alias
 
-    def completion(**kwargs):
-        return SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    message=SimpleNamespace(
-                        content=json.dumps(
-                            {
-                                "description": "Fixture",
-                                "content": "Body",
-                                "create": "invalid-plan-shape",
-                                "update": [],
-                                "related": [],
-                            }
-                        )
-                    ),
-                    finish_reason="stop",
-                )
-            ],
-            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
-        )
+    async def rejected_delivery(*args, **kwargs):
+        # Inject a local validation failure at delivery; no provider response is
+        # invented and no model is asked to manufacture invalid JSON.
+        with pytest.raises(ValueError, match="create must be an array"):
+            normalize_plan(
+                {"create": "invalid-plan-shape", "update": [], "related": []},
+                existing={"concepts": set(), "entities": set()},
+                entity_types=frozenset({"other"}),
+                sanitize=lambda name: name,
+            )
+        report_compile_issue("malformed_plan_items", "concepts", "entities")
+        raise CompilationIncomplete(("malformed_plan_items",), ("concepts", "entities"))
 
-    async def acompletion(**kwargs):
-        return completion(**kwargs)
-
-    monkeypatch.setattr("litellm.completion", completion)
-    monkeypatch.setattr("litellm.acompletion", acompletion)
+    monkeypatch.setattr("ultrakb.agent.compiler.compile_short_doc", rejected_delivery)
     source = tmp_path / "quality.md"
     source.write_text("Content with quality signals", encoding="utf-8")
     ordinary = import_document(kb_dir, source)
@@ -339,7 +341,7 @@ def test_add_api_keeps_compiler_quality(kb_dir, tmp_path, pdf_model, monkeypatch
 def test_visible_markdown_reacts_to_hidden_asset_change(tmp_path):
     import threading
 
-    from openkb.watcher import start_watch
+    from ultrakb.watcher import start_watch
 
     raw = tmp_path / "raw"
     images = raw / ".assets"
@@ -367,10 +369,10 @@ def test_visible_markdown_reacts_to_hidden_asset_change(tmp_path):
 
 
 def test_schema_restored_by_recovery_is_revalidated_before_writer_upgrade(kb_dir):
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
-    from openkb.catalog_schema import CatalogSchema, UnsupportedCatalogWriter, catalog_schema_path
-    from openkb.mutation import snapshot_paths
+    from ultrakb.application.settings import apply_kb_config_patch
+    from ultrakb.application.settings_data import KbConfigPatchRequest
+    from ultrakb.catalog_schema import CatalogSchema, UnsupportedCatalogWriter, catalog_schema_path
+    from ultrakb.mutation import snapshot_paths
 
     schema = catalog_schema_path(kb_dir)
     schema.parent.mkdir(parents=True, exist_ok=True)
@@ -379,12 +381,12 @@ def test_schema_restored_by_recovery_is_revalidated_before_writer_upgrade(kb_dir
     schema.write_text(json.dumps(old), encoding="utf-8")
     snapshot_paths(kb_dir, [schema], operation="interrupted-schema-update")
     schema.write_text(CatalogSchema().model_dump_json(), encoding="utf-8")
-    before = (kb_dir / ".openkb/config.yaml").read_bytes()
+    before = (kb_dir / ".ultrakb/config.yaml").read_bytes()
     try:
         apply_kb_config_patch(
             kb_dir, KbConfigPatchRequest(kb=str(kb_dir), config={"language": "fr"})
         )
     except UnsupportedCatalogWriter:
         pass
-    assert (kb_dir / ".openkb/config.yaml").read_bytes() == before
+    assert (kb_dir / ".ultrakb/config.yaml").read_bytes() == before
     assert "future-writer-v999" in json.loads(schema.read_text())["required_capabilities"]

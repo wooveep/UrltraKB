@@ -14,7 +14,7 @@ def test_native_baseline_documents_and_conversation(tmp_path):
         [
             sys.executable,
             "-m",
-            "openkb.desktop.verification",
+            "ultrakb.desktop.verification",
             "--baseline",
             "--output",
             str(tmp_path / "baseline"),
@@ -32,7 +32,7 @@ def test_native_workbench_navigation_and_appearance(tmp_path):
         [
             sys.executable,
             "-m",
-            "openkb.desktop.verification",
+            "ultrakb.desktop.verification",
             "--workbench",
             "--output",
             str(tmp_path / "workbench"),
@@ -48,7 +48,7 @@ def test_native_workbench_navigation_and_appearance(tmp_path):
         [
             sys.executable,
             "-m",
-            "openkb.desktop.verification",
+            "ultrakb.desktop.verification",
             "--output",
             str(tmp_path / "restart"),
             "--workbench-restart",

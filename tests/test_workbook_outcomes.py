@@ -2,21 +2,21 @@
 
 import pytest
 
-pytest_plugins = ("test_workbook_import",)
+pytest_plugins = ("test_office_import", "block_fixtures", "workbook_fixtures")
 
 
 @pytest.mark.parametrize("empty_inventory", [False, True])
 def test_inventory_failure_survives_import_and_keeps_old_body(
-    kb_dir, three_sheets, pdf_model, empty_inventory
+    kb_dir, three_sheets, empty_inventory
 ):
-    from openkb.application.documents import import_document
-    from openkb.application.sources import source_inventory
-    from openkb.documents import read_document_source
+    from office_publication_fixtures import publish_workbook
 
-    first = import_document(
-        kb_dir,
-        three_sheets,
-    )
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.sources import source_inventory
+    from ultrakb.documents import read_document_source
+
+    first = publish_workbook(kb_dir, three_sheets)
+    assert first.status == "added", first.message
     if empty_inventory:
         import re
         from zipfile import ZipFile
@@ -58,10 +58,10 @@ def test_inventory_failure_survives_import_and_keeps_old_body(
     assert old["status"] == "completed" and old["message"] is None
 
 
-def test_invalid_xlsx_cell_coordinate_never_publishes(kb_dir, tmp_path, pdf_model):
+def test_invalid_xlsx_cell_coordinate_never_publishes(kb_dir, tmp_path):
     from openpyxl import Workbook
 
-    from openkb.application.documents import import_document
+    from ultrakb.application.documents import import_document
 
     workbook = Workbook()
     workbook.active["XFE1"] = "Outside the XLSX column limit"
@@ -78,17 +78,26 @@ def test_partial_recompile_has_per_sheet_outcomes_and_is_not_counted_skipped(
 
     import litellm
     from click.testing import CliRunner
+    from office_publication_fixtures import publish_workbook
+    from openpyxl import load_workbook
+    from test_workbook_import import worksheet_prompt_markers
 
-    from openkb.api_recompile import iter_recompile
-    from openkb.application.documents import import_document
-    from openkb.cli import cli
+    from ultrakb.api_recompile import iter_recompile
+    from ultrakb.cli import cli
 
-    imported = import_document(kb_dir, three_sheets)
+    # One completed sheet beside the failed one proves per-unit aggregation and
+    # both adapters' PARTIAL display. Three-sheet identity/retry has its own test.
+    book = load_workbook(three_sheets)
+    book.remove(book["Gamma"])
+    book.save(three_sheets)
+    book.close()
+    imported = publish_workbook(kb_dir, three_sheets)
+    assert imported.status == "added", imported.message
     original = litellm.completion
 
     def complete(**kwargs):
-        if "BETA_SHEET" in str(kwargs["messages"]):
-            raise ValueError("Fixture rejects Beta recompile")
+        if "BETA_SHEET" in worksheet_prompt_markers(kwargs["messages"]):
+            raise ValueError("Local transport rejects Beta recompile")
         return original(**kwargs)
 
     monkeypatch.setattr(litellm, "completion", complete)
@@ -99,6 +108,10 @@ def test_partial_recompile_has_per_sheet_outcomes_and_is_not_counted_skipped(
     final = asyncio.run(run())[-1]
     assert final.get("partial") == 1 and final["skipped"] == 0
     assert {item["status"] for item in final["docs"][0]["units"]} == {"completed", "failed"}
+    assert {item["name"]: item["status"] for item in final["docs"][0]["units"]} == {
+        "Alpha": "completed",
+        "Beta": "failed",
+    }
     cli_result = CliRunner().invoke(cli, ["--kb-dir", str(kb_dir), "recompile", imported.source_id])
     assert cli_result.exit_code == 0, cli_result.output
     assert "[PARTIAL]" in cli_result.output and "Beta" in cli_result.output

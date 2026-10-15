@@ -14,8 +14,8 @@ def png_bytes(color="red"):
 
 def record_markdown(wiki, path, text):
     """Declare the syntax of a fixture, as a retained modern Markdown source does."""
-    from openkb.locks import atomic_write_json, atomic_write_text
-    from openkb.text_source import FrozenText, TextOrigin
+    from ultrakb.locks import atomic_write_json, atomic_write_text
+    from ultrakb.text_source import FrozenText, TextOrigin
 
     atomic_write_text(wiki / path, text)
     raw = FrozenText(

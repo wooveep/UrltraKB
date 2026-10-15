@@ -4,9 +4,9 @@ import json
 
 
 def mark_current_kb(root):
-    from openkb.kb_format import KB_FORMAT
+    from ultrakb.kb_format import KB_FORMAT
 
-    state = root / ".openkb"
+    state = root / ".ultrakb"
     state.mkdir(parents=True, exist_ok=True)
     (state / "format.json").write_text(json.dumps(KB_FORMAT))
 
@@ -14,10 +14,10 @@ def mark_current_kb(root):
 def seed_document_index(root, identity, name):
     from test_condb_pageindex import indexed_document
 
-    from openkb.condb_storage import ConDBPageIndexStorage
-    from openkb.index_location import IndexLocation
+    from ultrakb.condb_storage import ConDBPageIndexStorage
+    from ultrakb.index_location import IndexLocation
 
-    with ConDBPageIndexStorage(IndexLocation.package(root / ".openkb")) as storage:
+    with ConDBPageIndexStorage(IndexLocation.package(root / ".ultrakb")) as storage:
         storage.get_or_create_collection("default")
         storage.save_document(
             "default",

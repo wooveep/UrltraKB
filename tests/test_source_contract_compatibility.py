@@ -1,48 +1,124 @@
 """Read old frozen records and paid index caches without migrating their inputs."""
 
+import base64
+import hashlib
 import json
+from pathlib import Path
 
 import pytest
+from native_source_fixtures import LITERAL_TABLE
 from pageindex import IndexConfig
 from test_answer_evidence_regression import agent_for, invoke
-from test_index_pdf_layout import TableIndexModel
-from test_native_slide_contract import SlideModel, slide_fixture
-from test_native_source_contract import LITERAL_TABLE
+from test_index_llm import RecordingIndexLLM
 
-from openkb.agent.evidence_payload import project_evidence, slice_evidence
-from openkb.condb_storage import ConDBPageIndexStorage
-from openkb.index_client import create_index_client
-from openkb.index_pdf import NativePdfParser
-from openkb.locks import atomic_write_bytes, atomic_write_json, atomic_write_text
-from openkb.office.slide_package import FrozenSlideParser
-from openkb.source_pages import read_page_selection, select_page_part
+from ultrakb.agent.evidence_payload import project_evidence, slice_evidence
+from ultrakb.condb_storage import ConDBPageIndexStorage
+from ultrakb.index_client import create_index_client
+from ultrakb.index_pdf import NativePdfParser
+from ultrakb.locks import atomic_write_bytes, atomic_write_json, atomic_write_text
+from ultrakb.office.slide_package import FrozenSlideParser
+from ultrakb.source_pages import read_page_selection, select_page_part
+
+
+def _legacy_cache_documents(tmp_path):
+    import pymupdf
+    from test_slide_index_contract import slide_package
+
+    from ultrakb.office.slide_package import SlidePackage
+
+    notes = "Native speaker note.\n" + LITERAL_TABLE
+    path = slide_package(
+        tmp_path,
+        ["1. Calibration\nApply the cold-only valve setting."],
+        [notes],
+        cover_image=True,
+    )
+    package = SlidePackage.model_validate_json(path.read_text())
+    with pymupdf.open(stream=base64.b64decode(package.pdf), filetype="pdf") as document:
+        page = document[0]
+        page.draw_rect(pymupdf.Rect(72, 200, 300, 252))
+        page.draw_line((186, 200), (186, 252))
+        page.draw_line((72, 226), (300, 226))
+        for x, y, text in (
+            (78, 217, "Rule"),
+            (192, 217, "Mode"),
+            (78, 243, "Valve"),
+            (192, 243, "cold-only"),
+        ):
+            page.insert_text((x, y), text, fontsize=9)
+        body = page.get_text()
+        data = document.tobytes()
+    pdf = tmp_path / "manual.pdf"
+    atomic_write_bytes(pdf, data)
+    package = package.model_copy(
+        update={
+            "pdf": base64.b64encode(data).decode("ascii"),
+            "pdf_digest": hashlib.sha256(data).hexdigest(),
+            "slides": [package.slides[0].model_copy(update={"body": body})],
+        }
+    )
+    atomic_write_text(path, package.model_dump_json())
+    return pdf, path, notes
+
+
+def test_legacy_cache_input_keeps_distinct_parser_roles_notes_and_images(tmp_path):
+    from ultrakb.office.slide_content import LEGACY_NOTES_POLICY
+
+    _, package, notes = _legacy_cache_documents(tmp_path)
+    original = package.read_bytes()
+    legacy = FrozenSlideParser(legacy=True).parse(
+        str(package), images_dir=str(tmp_path / "legacy-images")
+    )
+    native = FrozenSlideParser().parse(str(package), images_dir=str(tmp_path / "native-images"))
+    assert len(legacy.nodes) == len(native.nodes) == 1
+    assert "<table>" not in legacy.nodes[0].metadata["parts"]["body"]
+    assert "<table>" in native.nodes[0].metadata["parts"]["body"]
+    assert legacy.metadata["notes_policy"] == LEGACY_NOTES_POLICY
+    for parsed in (legacy, native):
+        assert parsed.nodes[0].metadata["parts"]["notes"] == notes
+        assert parsed.nodes[0].images
+        assert all(Path(image["path"]).is_file() for image in parsed.nodes[0].images)
+    assert package.read_bytes() == original
 
 
 @pytest.mark.parametrize("kind", ["pdf", "slides"])
 def test_missing_legacy_cache_uses_its_recorded_parser_without_model_calls(
-    tmp_path, monkeypatch, kind
+    tmp_path, monkeypatch, live_llm, kind
 ):
-    pdf, package, _ = slide_fixture(tmp_path)
+    pdf, package, notes = _legacy_cache_documents(tmp_path)
     path = package if kind == "slides" else pdf
     original = path.read_bytes()
     parser = FrozenSlideParser(legacy=True) if kind == "slides" else NativePdfParser(legacy=True)
-    runtime = SlideModel() if kind == "slides" else TableIndexModel()
+    live_llm.install(monkeypatch)
+    runtime = RecordingIndexLLM(live_llm=live_llm)
     options = IndexConfig(
-        llm_client=runtime, if_add_node_summary=False, if_add_doc_description=False
+        model="deepseek/deepseek-flash",
+        llm_client=runtime,
+        require_llm_client=True,
+        if_add_node_summary=False,
+        if_add_doc_description=False,
     )
     with create_index_client(storage_path=tmp_path / "index", index_config=options) as client:
         client.register_parser(parser)
         collection = client.collection()
         identity = collection.add(str(path))
         before = collection.get_page_content(identity, "1")
-    requests = len(runtime.inputs if kind == "slides" else runtime.structure_inputs)
+    requests = len(runtime.calls)
+    stages = {stage for stage, _ in runtime.calls}
+    assert "structure" in stages and stages <= {"structure", "verification"}
+    assert before[0]["images"]
+    assert all(Path(image["path"]).is_file() for image in before[0]["images"])
     if kind == "slides":
         assert "<table>" not in before[0]["parts"]["body"]
+        assert before[0]["parts"]["notes"] == notes
     monkeypatch.setattr(ConDBPageIndexStorage, "get_pages", lambda *args: None)
-    with create_index_client(storage_path=tmp_path / "index", index_config=options) as client:
+    no_generation = RecordingIndexLLM()
+    recovery = options.model_copy(update={"llm_client": no_generation})
+    with create_index_client(storage_path=tmp_path / "index", index_config=recovery) as client:
         after = client.collection().get_page_content(identity, "1")
     assert after == before
-    assert len(runtime.inputs if kind == "slides" else runtime.structure_inputs) == requests
+    assert len(runtime.calls) == requests
+    assert no_generation.calls == []
     assert path.read_bytes() == original
 
 
@@ -100,7 +176,7 @@ def test_previous_generated_image_spans_remain_readable_in_original_domain():
 def test_reading_requalifies_caption_without_rewriting_old_figure_cache(kb_dir):
     from figure_fixtures import png_bytes
 
-    from openkb.agent.source_windows import CompileSourceWindows
+    from ultrakb.agent.source_windows import CompileSourceWindows
 
     wiki = kb_dir / "wiki"
     path = "sources/images/legacy.png"
@@ -128,9 +204,9 @@ def test_reading_requalifies_caption_without_rewriting_old_figure_cache(kb_dir):
 def test_previous_html_policy_keeps_its_native_heading_proof(kb_dir, tmp_path):
     from test_source_qualification import freeze_source
 
-    from openkb.html_source import LEGACY_HTML_POLICY
-    from openkb.source_records import ENCODING_POLICY
-    from openkb.text_source import read_text_selection
+    from ultrakb.html_source import LEGACY_HTML_POLICY
+    from ultrakb.source_records import ENCODING_POLICY
+    from ultrakb.text_source import read_text_selection
 
     _, current = freeze_source(kb_dir, tmp_path, "html", "<h1>Original heading</h1><p>Body.</p>")
     previous = current.model_copy(
@@ -151,8 +227,8 @@ def test_previous_html_policy_keeps_its_native_heading_proof(kb_dir, tmp_path):
 async def test_bare_legacy_text_cannot_mint_figure_roles_or_demand_reprocessing(kb_dir, literal):
     from figure_fixtures import png_bytes
 
-    from openkb.agent.source_windows import CompileSourceWindows
-    from openkb.figure_assets import freeze_figures
+    from ultrakb.agent.source_windows import CompileSourceWindows
+    from ultrakb.figure_assets import freeze_figures
 
     wiki = kb_dir / "wiki"
     asset = wiki / "sources/images/legacy.png"
@@ -179,9 +255,9 @@ def test_bare_legacy_compilation_keeps_accepted_checkpoint_and_page_base(kb_dir)
 
     from figure_fixtures import png_bytes
 
-    from openkb.compile_checkpoints import CompileCheckpoints
-    from openkb.locks import kb_ingest_lock
-    from openkb.unit_publication import prepare_compile_view
+    from ultrakb.compile_checkpoints import CompileCheckpoints
+    from ultrakb.locks import kb_ingest_lock
+    from ultrakb.unit_publication import prepare_compile_view
 
     wiki = kb_dir / "wiki"
     atomic_write_bytes(wiki / "sources/images/legacy.png", png_bytes())
@@ -199,7 +275,7 @@ def test_bare_legacy_compilation_keeps_accepted_checkpoint_and_page_base(kb_dir)
     checkpoint.bind_page(page, hashlib.sha256(before).hexdigest())
     checkpoint.save("summary:1", "retained-request", {"content": "Retained draft"})
     cached = checkpoint.path.read_bytes()
-    with kb_ingest_lock(kb_dir / ".openkb"), prepare_compile_view(kb_dir) as view:
+    with kb_ingest_lock(kb_dir / ".ultrakb"), prepare_compile_view(kb_dir) as view:
         assert (view.scope.wiki_dir / page).read_bytes() == before
         assert checkpoint.load("summary:1", "retained-request") == {"content": "Retained draft"}
         assert checkpoint.path.read_bytes() == cached

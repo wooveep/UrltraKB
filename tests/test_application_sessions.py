@@ -1,12 +1,12 @@
 """Conversation maintenance through the shared application interface."""
 
-from openkb.agent.chat_session import ChatSession, load_session
+from ultrakb.agent.chat_session import ChatSession, load_session
 
 
 def test_confirmed_deletion_rejects_a_new_completed_turn(kb_dir):
-    from openkb.application.conversations import read_conversation
-    from openkb.application.execution import ExecutionContext
-    from openkb.application.sessions import delete_conversation
+    from ultrakb.application.conversations import read_conversation
+    from ultrakb.application.execution import ExecutionContext
+    from ultrakb.application.sessions import delete_conversation
 
     session = ChatSession.new(kb_dir, "openai/test", "zh")
     session.record_turn("First", "First answer", [])
@@ -23,7 +23,7 @@ def test_confirmed_deletion_rejects_a_new_completed_turn(kb_dir):
     assert removed.status == "deleted"
     assert context.snapshot is not None
     assert not session.path.exists()
-    assert removed.changes == (f"deleted: .openkb/chats/{session.id}.json",)
+    assert removed.changes == (f"deleted: .ultrakb/chats/{session.id}.json",)
     assert delete_conversation(kb_dir, session.id).status == "missing"
 
 
@@ -32,8 +32,8 @@ def test_malformed_conversation_cannot_redirect_its_identity(kb_dir):
 
     import pytest
 
-    from openkb.agent.chat_session import list_sessions
-    from openkb.application.conversations import read_conversation
+    from ultrakb.agent.chat_session import list_sessions
+    from ultrakb.application.conversations import read_conversation
 
     session = ChatSession.new(kb_dir, "openai/test", "zh")
     session.record_turn("Question", "Answer", [])
@@ -48,7 +48,7 @@ def test_malformed_conversation_cannot_redirect_its_identity(kb_dir):
 def test_transcript_exports_latest_completed_history_to_unique_copies(kb_dir):
     from pathlib import Path
 
-    from openkb.application.sessions import export_conversation
+    from ultrakb.application.sessions import export_conversation
 
     session = ChatSession.new(kb_dir, 'openai/model"quoted', "zh")
     session.record_turn("First question", "Answer with [[concepts/missing]].", [])
@@ -67,8 +67,8 @@ def test_transcript_exports_latest_completed_history_to_unique_copies(kb_dir):
 
 
 def test_unchanged_windows_conversation_can_be_deleted_after_confirmation(kb_dir):
-    from openkb.application.conversations import read_conversation
-    from openkb.application.sessions import delete_conversation
+    from ultrakb.application.conversations import read_conversation
+    from ultrakb.application.sessions import delete_conversation
 
     session = ChatSession.new(kb_dir, "openai/test", "en")
     session.record_turn("Question", "Answer", [])
@@ -80,8 +80,8 @@ def test_unchanged_windows_conversation_can_be_deleted_after_confirmation(kb_dir
 def test_malformed_image_arguments_do_not_hide_completed_history(kb_dir):
     import json
 
-    from openkb.agent.chat_session import list_sessions
-    from openkb.application.conversations import read_conversation
+    from ultrakb.agent.chat_session import list_sessions
+    from ultrakb.application.conversations import read_conversation
 
     session = ChatSession.new(kb_dir, "openai/test", "zh")
     session.record_turn("Question", "Answer", [])

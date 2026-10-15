@@ -1,10 +1,10 @@
-"""Tests for the `openkb remove` feature.
+"""Tests for the `ultrakb remove` feature.
 
 Covers:
 - compiler helpers (`_remove_source_from_frontmatter`,
   `remove_doc_from_concept_pages`, `remove_doc_from_index`)
 - `HashRegistry.remove_by_doc_name`
-- The `openkb remove` CLI: identifier resolution, dry-run, --yes,
+- The `ultrakb remove` CLI: identifier resolution, dry-run, --yes,
   --keep-raw, --keep-empty-concepts, error paths, and the auto
   `lint --fix` post-pass.
 """
@@ -17,14 +17,14 @@ from unittest.mock import MagicMock, patch
 
 from click.testing import CliRunner
 
-from openkb.agent.compiler import (
+from ultrakb.agent.compiler import (
     _remove_section_entry,
     _remove_source_from_frontmatter,
     remove_doc_from_concept_pages,
     remove_doc_from_index,
 )
-from openkb.cli import _resolve_doc_identifier, cli
-from openkb.state import HashRegistry
+from ultrakb.cli import _resolve_doc_identifier, cli
+from ultrakb.state import HashRegistry
 
 pytest_plugins = ("test_pdf_readback",)
 
@@ -314,7 +314,7 @@ def test_resolve_identifier_empty(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# CLI: openkb remove
+# CLI: ultrakb remove
 # ---------------------------------------------------------------------------
 
 
@@ -329,7 +329,7 @@ def _seed_two_doc_kb(kb_dir: Path) -> None:
       wiki/concepts/llm.md         (sources: llm only — single-source)
       wiki/index.md with both Documents and all three Concepts entries
     """
-    (kb_dir / ".openkb" / "hashes.json").write_text(
+    (kb_dir / ".ultrakb" / "hashes.json").write_text(
         json.dumps(
             {
                 "h_a": {
@@ -413,7 +413,7 @@ def test_cli_remove_dry_run_does_nothing(kb_dir):
     assert (kb_dir / "wiki" / "summaries" / "attention-h_a.md").exists()
     assert (kb_dir / "wiki" / "concepts" / "transformer.md").exists()
     assert (kb_dir / "raw" / "attention.pdf").exists()
-    hashes = json.loads((kb_dir / ".openkb" / "hashes.json").read_text())
+    hashes = json.loads((kb_dir / ".ultrakb" / "hashes.json").read_text())
     assert "h_a" in hashes
 
 
@@ -492,7 +492,7 @@ def test_cli_remove_yes_executes_full_plan(kb_dir):
     assert not (kb_dir / "raw" / "attention.pdf").exists()
 
     # Hash registry pruned
-    hashes = json.loads((kb_dir / ".openkb" / "hashes.json").read_text())
+    hashes = json.loads((kb_dir / ".ultrakb" / "hashes.json").read_text())
     assert "h_a" not in hashes and "h_l" in hashes
 
     # Index updated
@@ -600,7 +600,7 @@ def _seed_legacy_kb(kb_dir: Path) -> None:
     the bare stem of the original filename — which is also what
     ``cli.py``'s ``Path(name).stem`` fallback produces on the read path.
     """
-    (kb_dir / ".openkb" / "hashes.json").write_text(
+    (kb_dir / ".ultrakb" / "hashes.json").write_text(
         json.dumps(
             {
                 "h_legacy": {"name": "ollama.md", "type": "md"},
@@ -635,14 +635,14 @@ def test_cli_remove_prunes_legacy_registry_entry_without_doc_name(kb_dir):
     ``remove_by_doc_name(meta.get('doc_name') or Path(name).stem)``,
     which silently no-op'd because ``meta.get('doc_name')`` is None for
     every legacy row — leaving an orphan hash entry that then re-bound
-    the next ``openkb add`` of the same file via SHA dedup.
+    the next ``ultrakb add`` of the same file via SHA dedup.
 
     Fix: the CLI now prunes the registry by the already-resolved
     ``file_hash`` (returned by ``_resolve_doc_identifier``), so the
     metadata shape doesn't matter.
     """
     _seed_legacy_kb(kb_dir)
-    hashes_path = kb_dir / ".openkb" / "hashes.json"
+    hashes_path = kb_dir / ".ultrakb" / "hashes.json"
 
     result = _invoke(kb_dir, ["remove", "ollama.md", "--yes"])
 
@@ -661,7 +661,7 @@ def test_cli_remove_prunes_legacy_registry_entry_without_doc_name(kb_dir):
 
 
 def test_cli_remove_lint_cleans_dangling_links_in_modified_page(kb_dir):
-    """`openkb remove` must auto-run a scoped lint --fix so wikilinks
+    """`ultrakb remove` must auto-run a scoped lint --fix so wikilinks
     pointing at the just-deleted summary get stripped from concept
     pages that this removal modified.
 
@@ -689,7 +689,7 @@ def test_cli_remove_lint_cleans_dangling_links_in_modified_page(kb_dir):
 
 
 def test_cli_remove_preserves_ghosts_in_unrelated_pages(kb_dir):
-    """Issue #58 / Bug 2 regression: `openkb remove` must NOT strip
+    """Issue #58 / Bug 2 regression: `ultrakb remove` must NOT strip
     pre-existing dangling wikilinks from concept pages that don't have
     the removed doc in their frontmatter sources.
 
@@ -716,13 +716,13 @@ def test_cli_remove_preserves_ghosts_in_unrelated_pages(kb_dir):
     assert "[[concepts/agent-loops]]" in surviving
     # And a hand-added link to the just-deleted summary also survives
     # because llm.md is OUT OF SCOPE for this removal's cleanup. Users
-    # who want a wiki-wide sweep can run `openkb lint --fix` explicitly.
+    # who want a wiki-wide sweep can run `ultrakb lint --fix` explicitly.
     assert "[[summaries/attention-h_a]]" in surviving
 
 
 # ---------------------------------------------------------------------------
 # Regression: code-review issue #1
-# `openkb add` must persist `doc_name` so `remove_by_doc_name` can prune
+# `ultrakb add` must persist `doc_name` so `remove_by_doc_name` can prune
 # the registry entry. Earlier add_single_file only stored `name` + `type`,
 # so the new remove flow silently no-op'd on the registry write.
 # ---------------------------------------------------------------------------
@@ -730,8 +730,8 @@ def test_cli_remove_preserves_ghosts_in_unrelated_pages(kb_dir):
 
 def test_add_persists_doc_name_for_later_remove(kb_dir, pdf_model):
     """New-source names remain removable while their durable identity records survive."""
-    from openkb.application.sources import source_inventory
-    from openkb.source_catalog import list_sources, read_source
+    from ultrakb.application.sources import source_inventory
+    from ultrakb.source_catalog import list_sources, read_source
 
     doc = kb_dir / "raw/paper.md"
     doc.write_text("# Hello", encoding="utf-8")
@@ -882,7 +882,7 @@ def test_remove_doc_strips_trailing_see_also_cleanly(kb_dir):
 
 # ---------------------------------------------------------------------------
 # Functional-completeness fix: per-doc images directory cleanup
-# `openkb add` writes images into wiki/sources/images/<doc_name>/. Remove
+# `ultrakb add` writes images into wiki/sources/images/<doc_name>/. Remove
 # must take that whole tree with it — otherwise image-heavy docs leak
 # tens to hundreds of MB per add → remove cycle.
 # ---------------------------------------------------------------------------
@@ -928,7 +928,7 @@ def test_cli_remove_dry_run_does_not_touch_images(kb_dir):
 
 # ---------------------------------------------------------------------------
 # Functional-completeness fix: `doc_id` is persisted for long PDFs so a
-# later `openkb remove` can call PageIndex's delete_document API.
+# later `ultrakb remove` can call PageIndex's delete_document API.
 # ---------------------------------------------------------------------------
 
 
@@ -938,10 +938,10 @@ def test_legacy_long_pdf_preview_retains_the_cleanup_reference(kb_dir):
     New imports publish their index reference in immutable knowledge revisions;
     the old registry remains the compatibility boundary for legacy removal.
     """
-    from openkb.application.removal import run_remove_for_api
+    from ultrakb.application.removal import run_remove_for_api
 
     _seed_long_pdf_kb(kb_dir, doc_id="pi-doc-abc123")
-    registry = kb_dir / ".openkb/hashes.json"
+    registry = kb_dir / ".ultrakb/hashes.json"
     before = registry.read_bytes()
     result = run_remove_for_api(kb_dir, "paper.pdf", dry_run=True)
     assert result["status"] == "dry_run"
@@ -964,7 +964,7 @@ def _seed_long_pdf_kb(kb_dir: Path, doc_id: str | None = "pi-doc-xyz") -> None:
     }
     if doc_id is not None:
         meta["doc_id"] = doc_id
-    (kb_dir / ".openkb" / "hashes.json").write_text(json.dumps({"h_paper": meta}))
+    (kb_dir / ".ultrakb" / "hashes.json").write_text(json.dumps({"h_paper": meta}))
     (kb_dir / "raw" / "paper.pdf").write_bytes(b"%PDF-fake")
     (kb_dir / "wiki" / "summaries" / "paper.md").write_text(
         "---\nsources: [raw/paper.pdf]\nbrief: x\n---\n# Paper\n",
@@ -983,10 +983,10 @@ def _seed_long_pdf_kb(kb_dir: Path, doc_id: str | None = "pi-doc-xyz") -> None:
 def _set_index_rows(kb_dir, rows):
     from kb_fixtures import seed_document_index
 
-    from openkb.condb_storage import ConDBPageIndexStorage
-    from openkb.index_location import IndexLocation
+    from ultrakb.condb_storage import ConDBPageIndexStorage
+    from ultrakb.index_location import IndexLocation
 
-    with ConDBPageIndexStorage(IndexLocation.package(kb_dir / ".openkb")) as store:
+    with ConDBPageIndexStorage(IndexLocation.package(kb_dir / ".ultrakb")) as store:
         for doc in store.list_documents("default"):
             store.delete_document("default", doc["doc_id"])
     for identity, name in rows:
@@ -994,10 +994,10 @@ def _set_index_rows(kb_dir, rows):
 
 
 def _index_ids(kb_dir):
-    from openkb.condb_storage import ConDBPageIndexStorage
-    from openkb.index_location import IndexLocation
+    from ultrakb.condb_storage import ConDBPageIndexStorage
+    from ultrakb.index_location import IndexLocation
 
-    with ConDBPageIndexStorage(IndexLocation.package(kb_dir / ".openkb")) as store:
+    with ConDBPageIndexStorage(IndexLocation.package(kb_dir / ".ultrakb")) as store:
         return {row["doc_id"] for row in store.list_documents("default")}
 
 
@@ -1030,16 +1030,16 @@ def test_cli_remove_pageindex_fallback_skips_on_ambiguous_match(kb_dir):
     assert _index_ids(kb_dir) == {"pi-a", "pi-b"}
     assert "Multiple index documents" in result.output
     assert not (kb_dir / "wiki/summaries/paper.md").exists()
-    assert "h_paper" in json.loads((kb_dir / ".openkb/hashes.json").read_text())
+    assert "h_paper" in json.loads((kb_dir / ".ultrakb/hashes.json").read_text())
 
 
 def test_cli_remove_skips_pageindex_when_no_state_file(kb_dir):
-    """Short-doc-only KBs never created `.openkb/pageindex.db`. The
+    """Short-doc-only KBs never created `.ultrakb/pageindex.db`. The
     remove flow must not import or instantiate PageIndexClient in that
     case — opening it would unnecessarily require an LLM key.
     """
     _seed_two_doc_kb(kb_dir)
-    assert not (kb_dir / ".openkb" / "pageindex.db").exists()
+    assert not (kb_dir / ".ultrakb" / "pageindex.db").exists()
 
     with patch("pageindex.PageIndexClient") as mock_cls:
         result = _invoke(kb_dir, ["remove", "attention.pdf", "--yes"])
@@ -1053,13 +1053,13 @@ def test_cli_remove_skips_pageindex_when_no_state_file(kb_dir):
 # Consistency-fix regression: PageIndex failure must NOT clear the registry,
 # so the user can retry. The previous order removed the registry entry first
 # and then attempted PageIndex cleanup — leaving an orphan SQLite row that
-# silently re-bound on the next `openkb add` via PageIndex's SHA-256 dedup.
+# silently re-bound on the next `ultrakb add` via PageIndex's SHA-256 dedup.
 # ---------------------------------------------------------------------------
 
 
 def test_cli_remove_pageindex_failure_preserves_registry_for_retry(kb_dir):
     """When `_cleanup_pageindex` raises, the registry entry (and its
-    `doc_id`) must survive so a subsequent `openkb remove` invocation
+    `doc_id`) must survive so a subsequent `ultrakb remove` invocation
     has the handle needed to retry. Wiki-side cleanup still happens
     because every step is idempotent across retries.
     """
@@ -1070,7 +1070,7 @@ def test_cli_remove_pageindex_failure_preserves_registry_for_retry(kb_dir):
 
     with (
         patch(
-            "openkb.application.local_index.remove_index_document",
+            "ultrakb.application.local_index.remove_index_document",
             side_effect=RuntimeError("storage failed"),
         ),
     ):
@@ -1083,7 +1083,7 @@ def test_cli_remove_pageindex_failure_preserves_registry_for_retry(kb_dir):
     assert "re-run" in result.output
 
     # Registry entry is intact for retry.
-    hashes = json.loads((kb_dir / ".openkb" / "hashes.json").read_text())
+    hashes = json.loads((kb_dir / ".ultrakb" / "hashes.json").read_text())
     assert "h_paper" in hashes
     assert hashes["h_paper"]["doc_id"] == "pi-doc-xyz"
 
@@ -1096,16 +1096,16 @@ def test_cli_remove_retry_after_pageindex_failure_completes(kb_dir):
     """A later explicit command can finish the same persisted cleanup identity."""
     _seed_long_pdf_kb(kb_dir, doc_id="pi-doc-xyz")
     with patch(
-        "openkb.application.local_index.remove_index_document", side_effect=OSError("transient")
+        "ultrakb.application.local_index.remove_index_document", side_effect=OSError("transient")
     ):
         first = _invoke(kb_dir, ["remove", "paper.pdf", "--keep-raw", "--yes"])
     assert first.exit_code == 0 and "[WARN]" in first.output
-    assert "h_paper" in json.loads((kb_dir / ".openkb/hashes.json").read_text())
+    assert "h_paper" in json.loads((kb_dir / ".ultrakb/hashes.json").read_text())
     assert _index_ids(kb_dir) == {"pi-doc-xyz"}
     second = _invoke(kb_dir, ["remove", "paper.pdf", "--keep-raw", "--yes"])
     assert second.exit_code == 0, second.output
     assert _index_ids(kb_dir) == set()
-    assert json.loads((kb_dir / ".openkb/hashes.json").read_text()) == {}
+    assert json.loads((kb_dir / ".ultrakb/hashes.json").read_text()) == {}
     assert not (kb_dir / "wiki/summaries/paper.md").exists()
 
 
@@ -1122,7 +1122,7 @@ def test_cli_remove_deletes_renamed_raw_copy(kb_dir):
     raw_file = kb_dir / "raw" / "report-aabbccdd.md"
     raw_file.write_text("# R", encoding="utf-8")
     (kb_dir / "wiki" / "sources" / "report-aabbccdd.md").write_text("# R", encoding="utf-8")
-    HashRegistry(kb_dir / ".openkb" / "hashes.json").add(
+    HashRegistry(kb_dir / ".ultrakb" / "hashes.json").add(
         "h-collide",
         {
             "name": "report.md",
@@ -1154,16 +1154,16 @@ def test_remove_cloud_doc_never_touches_pageindex(tmp_path):
 
     from click.testing import CliRunner
 
-    from openkb.cli import cli
-    from openkb.state import HashRegistry
+    from ultrakb.cli import cli
+    from ultrakb.state import HashRegistry
 
     # Minimal KB
     (tmp_path / "raw").mkdir()
     for sub in ("sources/images", "summaries", "concepts", "entities", "reports"):
         (tmp_path / "wiki" / sub).mkdir(parents=True)
-    openkb_dir = tmp_path / ".openkb"
-    openkb_dir.mkdir()
-    (openkb_dir / "config.yaml").write_text("model: gpt-4o-mini\n")
+    ultrakb_dir = tmp_path / ".ultrakb"
+    ultrakb_dir.mkdir()
+    (ultrakb_dir / "config.yaml").write_text("model: gpt-4o-mini\n")
     from kb_fixtures import mark_current_kb, seed_document_index
 
     mark_current_kb(tmp_path)
@@ -1173,7 +1173,7 @@ def test_remove_cloud_doc_never_touches_pageindex(tmp_path):
     # Cloud artifacts + registry entry
     (tmp_path / "wiki" / "summaries" / "cloud-doc.md").write_text("---\n---\n# s\n")
     (tmp_path / "wiki" / "sources" / "cloud-doc.json").write_text("[]")
-    registry = HashRegistry(openkb_dir / "hashes.json")
+    registry = HashRegistry(ultrakb_dir / "hashes.json")
     registry.add(
         "synthhash",
         {
@@ -1189,7 +1189,7 @@ def test_remove_cloud_doc_never_touches_pageindex(tmp_path):
 
     runner = CliRunner()
     with (
-        patch("openkb.cli._find_kb_dir", return_value=tmp_path),
+        patch("ultrakb.cli._find_kb_dir", return_value=tmp_path),
         patch("pageindex.PageIndexClient") as mock_client,
     ):
         result = runner.invoke(cli, ["remove", "cloud-doc", "--yes"])
@@ -1200,7 +1200,7 @@ def test_remove_cloud_doc_never_touches_pageindex(tmp_path):
     # Local artifacts are gone and the registry entry is removed.
     assert not (tmp_path / "wiki" / "summaries" / "cloud-doc.md").exists()
     assert not (tmp_path / "wiki" / "sources" / "cloud-doc.json").exists()
-    assert HashRegistry(openkb_dir / "hashes.json").get("synthhash") is None
+    assert HashRegistry(ultrakb_dir / "hashes.json").get("synthhash") is None
 
 
 # ---------------------------------------------------------------------------
@@ -1209,7 +1209,7 @@ def test_remove_cloud_doc_never_touches_pageindex(tmp_path):
 
 
 def _seed_one_doc_kb(kb_dir: Path) -> None:
-    (kb_dir / ".openkb" / "hashes.json").write_text(
+    (kb_dir / ".ultrakb" / "hashes.json").write_text(
         json.dumps(
             {
                 "h_a": {
@@ -1236,7 +1236,7 @@ def _seed_one_doc_kb(kb_dir: Path) -> None:
 
 def test_run_remove_for_api_dry_run_has_no_side_effects(kb_dir):
     _seed_one_doc_kb(kb_dir)
-    from openkb.cli import run_remove_for_api
+    from ultrakb.cli import run_remove_for_api
 
     result = run_remove_for_api(kb_dir, "paper.pdf", dry_run=True)
 
@@ -1245,35 +1245,35 @@ def test_run_remove_for_api_dry_run_has_no_side_effects(kb_dir):
     assert any(a["tag"] == "DELETE" for a in result["actions"])
     # Nothing modified.
     assert (kb_dir / "wiki" / "summaries" / "paper.md").exists()
-    assert "h_a" in json.loads((kb_dir / ".openkb" / "hashes.json").read_text())
+    assert "h_a" in json.loads((kb_dir / ".ultrakb" / "hashes.json").read_text())
 
 
 def test_run_remove_for_api_removes_doc(kb_dir):
     _seed_one_doc_kb(kb_dir)
-    from openkb.cli import run_remove_for_api
+    from ultrakb.cli import run_remove_for_api
 
     result = run_remove_for_api(kb_dir, "paper.pdf", dry_run=False)
 
     assert result["status"] == "removed"
     assert not (kb_dir / "wiki" / "summaries" / "paper.md").exists()
     assert not (kb_dir / "raw" / "paper.pdf").exists()
-    assert json.loads((kb_dir / ".openkb" / "hashes.json").read_text()) == {}
+    assert json.loads((kb_dir / ".ultrakb" / "hashes.json").read_text()) == {}
 
 
 def test_run_remove_for_api_not_found(kb_dir):
     _seed_one_doc_kb(kb_dir)
-    from openkb.cli import run_remove_for_api
+    from ultrakb.cli import run_remove_for_api
 
     assert run_remove_for_api(kb_dir, "missing")["status"] == "not_found"
 
 
 def test_run_remove_for_api_keep_raw_preserves_file(kb_dir):
     _seed_one_doc_kb(kb_dir)
-    from openkb.cli import run_remove_for_api
+    from ultrakb.cli import run_remove_for_api
 
     run_remove_for_api(kb_dir, "paper.pdf", keep_raw=True)
     assert (kb_dir / "raw" / "paper.pdf").exists()
-    assert json.loads((kb_dir / ".openkb" / "hashes.json").read_text()) == {}
+    assert json.loads((kb_dir / ".ultrakb" / "hashes.json").read_text()) == {}
 
 
 def test_run_remove_for_api_pageindex_failure_is_partial(kb_dir):
@@ -1286,16 +1286,16 @@ def test_run_remove_for_api_pageindex_failure_is_partial(kb_dir):
 
     with (
         patch(
-            "openkb.application.local_index.remove_index_document",
+            "ultrakb.application.local_index.remove_index_document",
             side_effect=RuntimeError("storage failed"),
         ),
     ):
-        from openkb.cli import run_remove_for_api
+        from ultrakb.cli import run_remove_for_api
 
         result = run_remove_for_api(kb_dir, "paper.pdf", keep_raw=True)
 
     assert result["status"] == "partial"
     # Registry entry (with doc_id) survives for retry.
-    hashes = json.loads((kb_dir / ".openkb" / "hashes.json").read_text())
+    hashes = json.loads((kb_dir / ".ultrakb" / "hashes.json").read_text())
     assert "h_paper" in hashes
     assert hashes["h_paper"]["doc_id"] == "pi-doc-xyz"

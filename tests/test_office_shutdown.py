@@ -10,7 +10,7 @@ import pytest
 
 @pytest.fixture
 def shutdown(monkeypatch):
-    from openkb.office import processes
+    from ultrakb.office import processes
 
     class DisposedException(Exception):
         pass

@@ -22,7 +22,7 @@ except ModuleNotFoundError:
     from desktop_platform import desktop_target
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = ROOT / "openkb/rendering"
+SOURCE = ROOT / "ultrakb/rendering"
 NODE_VERSION = "24.20.0"
 NODE_HASHES = {
     "linux-x64.tar.xz": "2f2c0da162318f0de47665410c7c8c2ed3d36c8f3105de4bbc61176c70a7cbf2",
@@ -111,7 +111,7 @@ def main() -> None:
     )
     extension = ".exe" if os.name == "nt" else ""
     shutil.copy2(
-        SOURCE / "rust-helper/target/release" / f"openkb-render-prototype{extension}",
+        SOURCE / "rust-helper/target/release" / f"ultrakb-render-prototype{extension}",
         assets / f"renderer{extension}",
     )
     manifest = {

@@ -3,27 +3,27 @@
 import asyncio
 import importlib
 import io
-import json
 import zipfile
-from types import SimpleNamespace
 
 import pytest
 from click.testing import CliRunner
 from fastapi.testclient import TestClient
 
+pytest_plugins = ("test_vendor_sdk",)
+
 
 @pytest.fixture(autouse=True)
 def isolated_profile(tmp_path, monkeypatch):
     profile = tmp_path / "profile"
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", profile)
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", profile / "global.yaml")
-    monkeypatch.delenv("OPENKB_API_TOKEN", raising=False)
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", profile)
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", profile / "global.yaml")
+    monkeypatch.delenv("ULTRAKB_API_TOKEN", raising=False)
 
 
 def api_client(kb_dir, monkeypatch):
-    from openkb.api import create_app
+    from ultrakb.api import create_app
 
-    monkeypatch.setattr("openkb.api_helpers.resolve_kb_alias", lambda _: kb_dir)
+    monkeypatch.setattr("ultrakb.api_helpers.resolve_kb_alias", lambda _: kb_dir)
     return TestClient(create_app())
 
 
@@ -31,11 +31,11 @@ def api_client(kb_dir, monkeypatch):
 def test_question_wording_never_requires_product_alias_confirmation(
     kb_dir, monkeypatch, narrated_model, entry
 ):
-    from openkb.application.conversations import ask_question
+    from ultrakb.application.conversations import ask_question
 
     question = "What does Atlas V99 say about the answer?"
     if entry == "cli":
-        cli = importlib.import_module("openkb.cli")
+        cli = importlib.import_module("ultrakb.cli")
         monkeypatch.setattr(cli, "_setup_llm_key", lambda _: None)
         result = CliRunner().invoke(cli.cli, ["--kb-dir", str(kb_dir), "query", question])
         assert result.exit_code == 0, result.output
@@ -55,40 +55,40 @@ def test_question_wording_never_requires_product_alias_confirmation(
         result = asyncio.run(ask_question(kb_dir, question))
         assert result.answer_outcome == "answered"
         body = result.answer
-    assert "The answer is 42." in body
+    assert "42" in body
+    assert any("42" in str(run.final_output) for run in narrated_model)
 
 
 @pytest.mark.parametrize("entry", ["cli", "api", "desktop"])
-def test_import_batch_keeps_initial_model(kb_dir, monkeypatch, entry):
-    from openkb.application.documents import import_document
-    from openkb.application.execution import ExecutionContext
+def test_import_batch_keeps_initial_model(kb_dir, monkeypatch, narrated_model, live_llm, entry):
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.execution import ExecutionContext
+    from ultrakb.locks import atomic_write_text
 
-    settings = kb_dir / ".openkb/config.yaml"
-    settings.write_text("model: openai/initial\nlanguage: en\n")
+    settings = kb_dir / ".ultrakb/config.yaml"
     incoming = kb_dir / "incoming"
     incoming.mkdir()
     paths = [incoming / "alpha.md", incoming / "beta.md"]
     for path in paths:
-        path.write_text(f"# {path.stem}\nDistinct source {path.stem}.")
+        path.write_text(f"# {path.stem}\nThe {path.stem} approval is recorded before release.")
     models = []
 
-    def completion(**kwargs):
-        models.append(kwargs["model"])
+    def observe(values, delivered):
+        models.append(values["model"])
         if len(models) == 2:
-            settings.write_text("model: openai/changed\nlanguage: zh\n")
-        payload = (
-            {"description": "Fixture", "content": "# Fixture\nCompiled."}
-            if len(models) % 2
-            else {"create": [], "update": [], "related": []}
-        )
-        return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload)))],
-            usage=SimpleNamespace(prompt_tokens=10, completion_tokens=10),
-        )
+            atomic_write_text(settings, "model: deepseek/changed-after-capture\nlanguage: zh\n")
+        return delivered
+
+    def completion(**kwargs):
+        return observe(kwargs, live_llm.completion(**kwargs))
+
+    async def acompletion(**kwargs):
+        return observe(kwargs, await live_llm.acompletion(**kwargs))
 
     monkeypatch.setattr("litellm.completion", completion)
+    monkeypatch.setattr("litellm.acompletion", acompletion)
     if entry == "cli":
-        cli = importlib.import_module("openkb.cli")
+        cli = importlib.import_module("ultrakb.cli")
         monkeypatch.setattr(cli, "_setup_llm_key", lambda _: None)
         result = CliRunner().invoke(cli.cli, ["--kb-dir", str(kb_dir), "add", str(incoming)])
         assert result.exit_code == 0, result.output
@@ -107,71 +107,57 @@ def test_import_batch_keeps_initial_model(kb_dir, monkeypatch, entry):
             "added",
             "added",
         ]
-    assert models == ["openai/initial"] * 4
+    assert len(models) >= 4
+    assert set(models) == {"deepseek/deepseek-flash"}
 
 
 @pytest.fixture
-def narrated_model(kb_dir, monkeypatch, request):
-    from agents import RawResponsesStreamEvent, Runner
-    from openai.types.responses import ResponseTextDeltaEvent
+def narrated_model(kb_dir, monkeypatch, live_llm):
+    """Observe actual final outputs through the project's genuine SDK adapters."""
+    from agents import Runner
 
-    deltas, answer = getattr(
-        request, "param", (("Let me search. ", "The answer is 42."), "The answer is 42.")
+    from ultrakb.locks import atomic_write_text
+
+    live_llm.install(monkeypatch)
+    atomic_write_text(
+        kb_dir / ".ultrakb/config.yaml",
+        "model: deepseek/deepseek-flash\nlanguage: en\nmodel_capacity:\n"
+        "  max_input_tokens: 65536\n  tokenizer_model: gpt-4o-mini\nrole_generation:\n"
+        "  answer:\n    max_tokens: 256\n    reasoning_effort: none\n"
+        "  compile:\n    max_tokens: 512\n    reasoning_effort: none\n",
     )
-    from evidence_model import read_fixture, review_response
+    atomic_write_text(
+        kb_dir / "wiki/index.md", "# Atlas V99\nRead sources/fixture.md for the recorded answer."
+    )
+    atomic_write_text(kb_dir / "wiki/sources/fixture.md", "# Atlas V99\nThe answer is 42.")
+    actual = []
+    run_streamed, run = Runner.run_streamed, Runner.run
 
-    (kb_dir / "wiki/sources/fixture.md").write_text("The answer is 42. Final answer only.")
+    def observe_stream(*args, **kwargs):
+        delivered = run_streamed(*args, **kwargs)
+        actual.append(delivered)
+        return delivered
 
-    class Run:
-        final_output = answer
-        is_complete = False
+    async def observe(*args, **kwargs):
+        delivered = await run(*args, **kwargs)
+        actual.append(delivered)
+        return delivered
 
-        def __init__(self, agent):
-            self.agent = agent
-
-        async def stream_events(self):
-            await read_fixture(self.agent)
-            for index, delta in enumerate(deltas):
-                yield RawResponsesStreamEvent(
-                    data=ResponseTextDeltaEvent(
-                        type="response.output_text.delta",
-                        delta=delta,
-                        item_id="answer",
-                        output_index=0,
-                        content_index=0,
-                        sequence_number=index,
-                        logprobs=[],
-                    )
-                )
-            self.is_complete = True
-
-        def cancel(self, **kwargs):
-            pass
-
-        def to_input_list(self):
-            return [{"role": "assistant", "content": self.final_output}]
-
-    monkeypatch.setattr(Runner, "run_streamed", lambda agent, *a, **kw: Run(agent))
-
-    async def run(agent, input, **kwargs):
-        if agent.name == "evidence-review":
-            return review_response(input)
-        await read_fixture(agent)
-        return Run(agent)
-
-    monkeypatch.setattr(Runner, "run", run)
+    monkeypatch.setattr(Runner, "run_streamed", observe_stream)
+    monkeypatch.setattr(Runner, "run", observe)
+    return actual
 
 
 @pytest.mark.parametrize("entry", ["cli", "api", "api_stream", "desktop"])
 def test_query_saves_only_final_answer_and_keeps_previous_copy(
     kb_dir, monkeypatch, narrated_model, entry
 ):
-    from openkb.application.conversations import ask_question
+    from ultrakb.application.conversations import ask_question
 
     question = "What is the answer?"
     for _ in range(2):
         if entry == "cli":
-            cli = importlib.import_module("openkb.cli")
+            cli = importlib.import_module("ultrakb.cli")
             monkeypatch.setattr(cli, "_stream_to_tty", lambda: True)
             monkeypatch.setattr(cli, "_setup_llm_key", lambda _: None)
             result = CliRunner().invoke(
@@ -194,14 +180,17 @@ def test_query_saves_only_final_answer_and_keeps_previous_copy(
             assert asyncio.run(ask_question(kb_dir, question, save=True)).status == "completed"
     files = list((kb_dir / "wiki/explorations").glob("*.md"))
     assert len(files) == 2
-    assert all("The answer is 42." in p.read_text() for p in files)
+    answers = [str(run.final_output) for run in narrated_model if run.final_output]
+    assert len(answers) >= 2
+    assert all("42" in p.read_text() for p in files)
+    assert all(any(answer in p.read_text() for answer in answers) for p in files)
     assert all("Let me search." not in p.read_text() for p in files)
 
 
 def test_cli_resume_selects_latest_shared_session(kb_dir, monkeypatch):
-    from openkb.agent.chat_session import ChatSession
+    from ultrakb.agent.chat_session import ChatSession
 
-    cli = importlib.import_module("openkb.cli")
+    cli = importlib.import_module("ultrakb.cli")
     previous = ChatSession.new(kb_dir, "model", "en", identity="a-previous")
     current = ChatSession.new(kb_dir, "model", "en", identity="z-current")
     previous.save()
@@ -211,7 +200,7 @@ def test_cli_resume_selects_latest_shared_session(kb_dir, monkeypatch):
     async def run_chat(root, session, **kwargs):
         selected.append(session.id)
 
-    monkeypatch.setattr("openkb.agent.chat.run_chat", run_chat)
+    monkeypatch.setattr("ultrakb.agent.chat.run_chat", run_chat)
     monkeypatch.setattr(cli, "_setup_llm_key", lambda _: None)
     result = CliRunner().invoke(cli.cli, ["--kb-dir", str(kb_dir), "chat", "--resume"])
     assert result.exit_code == 0, result.output
@@ -220,7 +209,7 @@ def test_cli_resume_selects_latest_shared_session(kb_dir, monkeypatch):
 
 @pytest.mark.parametrize("entry", ["api", "desktop"])
 def test_artifact_export_rejects_external_symlink(kb_dir, tmp_path, monkeypatch, entry):
-    from openkb.application.artifacts import export_artifact
+    from ultrakb.application.artifacts import export_artifact
 
     target = kb_dir / "output/skills/example"
     target.mkdir(parents=True)
@@ -242,7 +231,7 @@ def test_artifact_export_rejects_external_symlink(kb_dir, tmp_path, monkeypatch,
 
 
 def test_api_archive_has_same_layout_as_desktop(kb_dir, tmp_path, monkeypatch):
-    from openkb.application.artifacts import export_artifact
+    from ultrakb.application.artifacts import export_artifact
 
     target = kb_dir / "output/skills/example"
     target.mkdir(parents=True)
@@ -262,33 +251,34 @@ def test_api_archive_has_same_layout_as_desktop(kb_dir, tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("entry", ["cli", "api", "api_stream", "desktop"])
 def test_chat_persists_the_same_final_answer(kb_dir, monkeypatch, narrated_model, entry):
-    from openkb.agent.chat import _build_style, _run_turn
-    from openkb.agent.chat_session import ChatSession, list_sessions, load_session
-    from openkb.application.conversations import continue_conversation
+    from ultrakb.agent.chat import _build_style, _run_turn
+    from ultrakb.agent.chat_session import ChatSession, list_sessions, load_session
+    from ultrakb.application.conversations import continue_conversation
 
+    prompt = "Read sources/fixture.md and state the recorded answer."
     if entry == "cli":
         session = ChatSession.new(kb_dir, "", "")
-        asyncio.run(_run_turn(session, "Hi", _build_style(False), use_color=False))
+        asyncio.run(_run_turn(session, prompt, _build_style(False), use_color=False))
     elif entry.startswith("api"):
         with api_client(kb_dir, monkeypatch) as client:
             result = client.post(
                 "/api/v1/chat",
-                json={"kb": "audit", "message": "Hi", "stream": entry == "api_stream"},
+                json={"kb": "audit", "message": prompt, "stream": entry == "api_stream"},
             )
         assert result.status_code == 200, result.text
     else:
-        assert asyncio.run(continue_conversation(kb_dir, "Hi")).status == "completed"
+        assert asyncio.run(continue_conversation(kb_dir, prompt)).status == "completed"
     saved = load_session(kb_dir, list_sessions(kb_dir)[0]["id"])
-    assert saved.user_turns == ["Hi"]
-    assert saved.assistant_texts[0].startswith("The answer is 42.")
+    assert saved.user_turns == [prompt]
+    assert "42" in saved.assistant_texts[0]
     assert "Let me search." not in saved.assistant_texts[0]
-    assert saved.assistant_texts[0] == "The answer is 42."
+    assert saved.assistant_texts[0] == str(narrated_model[-1].final_output)
     assert saved.turn_count == 1
     assert saved.answer_outcomes == ["answered"]
 
 
 def test_api_session_operations_use_shared_sessions(kb_dir, monkeypatch):
-    from openkb.agent.chat_session import ChatSession
+    from ultrakb.agent.chat_session import ChatSession
 
     own = ChatSession.new(kb_dir, "model", "en")
     own.save()
@@ -314,27 +304,35 @@ def test_api_session_operations_use_shared_sessions(kb_dir, monkeypatch):
 
 
 @pytest.mark.parametrize("entry", ["cli", "api", "api_stream", "desktop"])
-def test_generation_requires_explicit_replacement_and_preserves_archive(kb_dir, monkeypatch, entry):
-    from openkb.application.generators import GenerationOptions, generate_artifact
-    from openkb.locks import atomic_write_text
-    from openkb.skill.generator import Generator
+def test_generation_requires_explicit_replacement_and_preserves_archive(
+    kb_dir, monkeypatch, narrated_model, model_service, entry
+):
+    from short_generation import assert_formatter_delivery, retained_formatter
 
-    (kb_dir / "wiki/concepts/topic.md").write_text("# Topic\nKnowledge")
+    from ultrakb.application.generators import GenerationOptions, generate_artifact
+
+    intent = (
+        "Required deliverable: SKILL.md must include a 'Recorded answer:' line containing "
+        "the numeric value read from the original source. Read that value from the source; "
+        "do not guess it from this user prompt. "
+    ) + retained_formatter(kb_dir, model_service.credentials, recorded_answer=42)
     target = kb_dir / "output/skills/example"
     target.mkdir(parents=True)
     (target / "SKILL.md").write_text("original")
 
-    async def generate(self):
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-        atomic_write_text(self.output_dir / "SKILL.md", "replacement")
-
-    monkeypatch.setattr(Generator, "run", generate)
     for replace in (False, True):
         if entry == "cli":
-            cli = importlib.import_module("openkb.cli")
+            cli = importlib.import_module("ultrakb.cli")
             result = CliRunner().invoke(
                 cli.cli,
-                ["--kb-dir", str(kb_dir), "skill", "new", "example", "A skill"]
+                [
+                    "--kb-dir",
+                    str(kb_dir),
+                    "skill",
+                    "new",
+                    "example",
+                    intent,
+                ]
                 + (["--yes"] if replace else []),
             )
             assert (result.exit_code == 0) is replace, result.output
@@ -345,7 +343,7 @@ def test_generation_requires_explicit_replacement_and_preserves_archive(kb_dir, 
                     json={
                         "kb": "audit",
                         "name": "example",
-                        "intent": "A skill",
+                        "intent": intent,
                         "replace": replace,
                         "stream": entry == "api_stream",
                     },
@@ -361,53 +359,60 @@ def test_generation_requires_explicit_replacement_and_preserves_archive(kb_dir, 
                 generate_artifact(
                     kb_dir,
                     GenerationOptions(
-                        "skill", "example", "A skill", overwrite="archive" if replace else "refuse"
+                        "skill",
+                        "example",
+                        intent,
+                        overwrite="archive" if replace else "refuse",
                     ),
                 )
             )
             assert result.status == ("completed" if replace else "conflict"), result
-        assert (target / "SKILL.md").read_text() == ("replacement" if replace else "original")
+        content = (target / "SKILL.md").read_text()
+        if replace:
+            assert content != "original" and "42" in content
+            assert_formatter_delivery(kb_dir, "example", model_service)
+            assert narrated_model
+        else:
+            assert content == "original"
+            assert model_service.requests == [] and narrated_model == []
     copies = [p for p in (target.parent / "example-workspace").rglob("SKILL.md")]
     assert len(copies) == 1
+    assert copies[0].read_text() == "original"
     assert copies[0].read_text() == "original"
 
 
 @pytest.mark.parametrize("entry", ["query", "chat", "low_level_query"])
-@pytest.mark.parametrize(
-    "narrated_model",
-    [(("<thi", "nk>hidden rationale</think>", "Searching documents..."), "Final answer only.")],
-    indirect=True,
-)
 def test_terminal_shows_final_result_and_filters_reasoning(
     kb_dir, monkeypatch, narrated_model, capsys, entry
 ):
+    prompt = "Read sources/fixture.md and state the recorded answer."
     if entry == "query":
-        cli = importlib.import_module("openkb.cli")
+        cli = importlib.import_module("ultrakb.cli")
         monkeypatch.setattr(cli, "_stream_to_tty", lambda: True)
-        result = CliRunner().invoke(cli.cli, ["--kb-dir", str(kb_dir), "query", "Hi", "--raw"])
+        result = CliRunner().invoke(cli.cli, ["--kb-dir", str(kb_dir), "query", prompt, "--raw"])
         assert result.exit_code == 0, result.output
         output = result.output
     elif entry == "chat":
-        from openkb.agent.chat import _build_style, _run_turn
-        from openkb.agent.chat_session import ChatSession
+        from ultrakb.agent.chat import _build_style, _run_turn
+        from ultrakb.agent.chat_session import ChatSession
 
         asyncio.run(
-            _run_turn(ChatSession.new(kb_dir, "", ""), "Hi", _build_style(False), use_color=False)
+            _run_turn(ChatSession.new(kb_dir, "", ""), prompt, _build_style(False), use_color=False)
         )
         output = capsys.readouterr().out
     else:
-        from openkb.agent.query import run_query
+        from ultrakb.agent.query import run_query
 
-        asyncio.run(run_query("Hi", kb_dir, "model", stream=True, raw=True))
+        asyncio.run(run_query(prompt, kb_dir, "model", stream=True, raw=True))
         output = capsys.readouterr().out
-    assert "Final answer only." in output
+    assert "42" in output
     assert "hidden rationale" not in output
     assert "<think>" not in output
 
 
 @pytest.mark.parametrize("answer", ["x < t", "x < a", "A literal <"])
 def test_terminal_final_result_releases_a_held_tag_prefix(answer, capsys):
-    from openkb.terminal_answers import AnswerRenderer
+    from ultrakb.terminal_answers import AnswerRenderer
 
     with AnswerRenderer() as renderer:
         for character in answer:

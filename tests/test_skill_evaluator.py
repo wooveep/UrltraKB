@@ -1,4 +1,4 @@
-"""Tests for openkb.skill.evaluator.
+"""Tests for ultrakb.skill.evaluator.
 
 The Runner.run call is mocked everywhere — no real LLM tokens spent.
 What we DO verify:
@@ -13,20 +13,24 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from openkb.skill.evaluator import (
+from ultrakb.skill.evaluator import (
     EvalPrompt,
     EvalResult,
     _read_description,
+    assemble_eval_result,
+    build_coverage_grader,
+    build_eval_set_agent,
+    build_trigger_grader,
     generate_eval_set,
     grade_coverage,
     grade_one,
     load_eval_set,
-    run_eval,
+    parse_coverage_verdict,
+    parse_eval_set,
+    parse_trigger_verdict,
     save_eval_set,
 )
 
@@ -68,94 +72,78 @@ def test_read_description_raises_on_missing_description_field(tmp_path):
 # -------- generate_eval_set ---------------------------------------------------
 
 
-def _fake_generator_payload(count: int = 10) -> str:
+def _eval_protocol_payload(count: int = 10) -> str:
     trig = [f"trigger question {i}" for i in range(count)]
     no = [f"unrelated question {i}" for i in range(count)]
     return json.dumps({"should_trigger": trig, "should_not": no})
 
 
 @pytest.mark.asyncio
-async def test_generate_eval_set_parses_plain_json(tmp_path):
-    skill_dir = _make_skill(tmp_path)
-
-    async def fake_runner(*args, **kwargs):
-        return SimpleNamespace(final_output=_fake_generator_payload(10))
-
-    with patch("openkb.skill.evaluator.Runner.run", new=AsyncMock(side_effect=fake_runner)):
-        prompts = await generate_eval_set(skill_dir, model="gpt-4o-mini", count=10)
-
-    assert len(prompts) == 20
-    assert sum(1 for p in prompts if p.expected == "trigger") == 10
-    assert sum(1 for p in prompts if p.expected == "no-trigger") == 10
-    assert prompts[0].question == "trigger question 0"
-    assert prompts[10].question == "unrelated question 0"
+async def test_generate_eval_set_parses_plain_json(tmp_path, live_llm, monkeypatch):
+    live_llm.install(monkeypatch)
+    skill_dir = _make_skill(tmp_path, description="Use for choosing a quiet reading room.")
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: demo\ndescription: Use for choosing a quiet reading room.\n---\n"
+        "# Rooms\nThe indoor room and garden room both permit quiet reading.\n"
+    )
+    prompts = await generate_eval_set(skill_dir, model="deepseek/deepseek-flash", count=2)
+    assert len(prompts) == 4
+    assert sum(p.expected == "trigger" for p in prompts) == 2
+    assert sum(p.expected == "no-trigger" for p in prompts) == 2
+    assert all(p.question.strip() for p in prompts)
+    assert any("room" in p.question.lower() for p in prompts if p.expected == "trigger")
 
 
 @pytest.mark.asyncio
 async def test_generate_eval_set_strips_code_fences(tmp_path):
-    skill_dir = _make_skill(tmp_path)
-    fenced = "```json\n" + _fake_generator_payload(3) + "\n```"
-
-    async def fake_runner(*args, **kwargs):
-        return SimpleNamespace(final_output=fenced)
-
-    with patch("openkb.skill.evaluator.Runner.run", new=AsyncMock(side_effect=fake_runner)):
-        prompts = await generate_eval_set(skill_dir, model="gpt-4o-mini", count=3)
-
+    fenced = "```json\n" + _eval_protocol_payload(3) + "\n```"
+    prompts = parse_eval_set(fenced)
     assert len(prompts) == 6
+    assert [p.question for p in prompts[:3]] == [
+        "trigger question 0",
+        "trigger question 1",
+        "trigger question 2",
+    ]
 
 
 # -------- grade_one -----------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_grade_one_returns_trigger_for_trigger_response():
-    async def fake_runner(*args, **kwargs):
-        return SimpleNamespace(final_output="TRIGGER")
-
-    with patch("openkb.skill.evaluator.Runner.run", new=AsyncMock(side_effect=fake_runner)):
-        out = await grade_one("desc", "question?", model="gpt-4o-mini")
+async def test_grade_one_returns_trigger_for_trigger_response(live_llm, monkeypatch):
+    live_llm.install(monkeypatch)
+    out = await grade_one(
+        "Use for choosing a quiet reading room.",
+        "Which room should I choose for quiet reading?",
+        model="deepseek/deepseek-flash",
+    )
     assert out == "trigger"
 
 
 @pytest.mark.asyncio
-async def test_grade_one_returns_no_trigger_for_negative_response():
-    async def fake_runner(*args, **kwargs):
-        return SimpleNamespace(final_output="NO-TRIGGER")
-
-    with patch("openkb.skill.evaluator.Runner.run", new=AsyncMock(side_effect=fake_runner)):
-        out = await grade_one("desc", "question?", model="gpt-4o-mini")
+async def test_grade_one_returns_no_trigger_for_negative_response(live_llm, monkeypatch):
+    live_llm.install(monkeypatch)
+    out = await grade_one(
+        "Use for choosing a quiet reading room.",
+        "What is the weather in London?",
+        model="deepseek/deepseek-flash",
+    )
     assert out == "no-trigger"
 
 
 @pytest.mark.asyncio
 async def test_grade_one_handles_mixed_case():
-    async def fake_runner(*args, **kwargs):
-        return SimpleNamespace(final_output="trigger")
-
-    with patch("openkb.skill.evaluator.Runner.run", new=AsyncMock(side_effect=fake_runner)):
-        out = await grade_one("desc", "question?", model="gpt-4o-mini")
-    assert out == "trigger"
+    assert parse_trigger_verdict("trigger") == "trigger"
 
 
 @pytest.mark.asyncio
 async def test_grade_one_handles_space_variant():
-    async def fake_runner(*args, **kwargs):
-        return SimpleNamespace(final_output="No Trigger")
-
-    with patch("openkb.skill.evaluator.Runner.run", new=AsyncMock(side_effect=fake_runner)):
-        out = await grade_one("desc", "question?", model="gpt-4o-mini")
-    assert out == "no-trigger"
+    assert parse_trigger_verdict("No Trigger") == "no-trigger"
 
 
 @pytest.mark.asyncio
 async def test_grade_one_defaults_to_no_trigger_on_ambiguous_output():
-    async def fake_runner(*args, **kwargs):
-        return SimpleNamespace(final_output="hmm not sure")
-
-    with patch("openkb.skill.evaluator.Runner.run", new=AsyncMock(side_effect=fake_runner)):
-        out = await grade_one("desc", "question?", model="gpt-4o-mini")
-    assert out == "no-trigger"
+    assert parse_trigger_verdict("hmm not sure") == "no-trigger"
 
 
 # -------- run_eval ------------------------------------------------------------
@@ -170,32 +158,15 @@ def _build_eval_set(n_trig: int = 3, n_no: int = 3) -> list[EvalPrompt]:
     return prompts
 
 
-async def _supported_coverage(content, question, *, model):
-    return "supported", ""
-
-
 @pytest.mark.asyncio
 async def test_run_eval_happy_path_all_correct(tmp_path):
-    skill_dir = _make_skill(tmp_path)
     eval_set = _build_eval_set(3, 3)
-
-    async def fake_grade(description, question, *, model):
-        # Return the ground truth label — perfect grader.
-        match = next(p for p in eval_set if p.question == question)
-        return match.expected
-
-    with (
-        patch("openkb.skill.evaluator.grade_one", side_effect=fake_grade),
-        patch("openkb.skill.evaluator.grade_coverage", side_effect=_supported_coverage),
-    ):
-        result = await run_eval(skill_dir, model="gpt-4o-mini", eval_set=eval_set)
-
+    result = assemble_eval_result(eval_set, [p.expected for p in eval_set], [("supported", "")] * 3)
     assert isinstance(result, EvalResult)
     assert result.total == 6
     assert result.passed == 6
     assert result.pass_rate == 1.0
     assert result.misses == []
-    # Body coverage was graded only on the 3 trigger prompts, all supported.
     assert result.trigger_questions == 3
     assert result.coverage_passed == 3
     assert result.coverage_rate == 1.0
@@ -204,147 +175,83 @@ async def test_run_eval_happy_path_all_correct(tmp_path):
 
 @pytest.mark.asyncio
 async def test_run_eval_reports_misses(tmp_path):
-    skill_dir = _make_skill(tmp_path)
     eval_set = _build_eval_set(3, 3)
-
-    # Grader always says "trigger" — so the 3 no-trigger prompts will miss.
-    async def fake_grade(description, question, *, model):
-        return "trigger"
-
-    with (
-        patch("openkb.skill.evaluator.grade_one", side_effect=fake_grade),
-        patch("openkb.skill.evaluator.grade_coverage", side_effect=_supported_coverage),
-    ):
-        result = await run_eval(skill_dir, model="gpt-4o-mini", eval_set=eval_set)
-
+    result = assemble_eval_result(eval_set, ["trigger"] * 6, [("supported", "")] * 3)
     assert result.total == 6
     assert result.passed == 3
     assert len(result.misses) == 3
-    assert all(m.prompt.expected == "no-trigger" for m in result.misses)
-    assert all(m.graded == "trigger" for m in result.misses)
+    assert all((m.prompt.expected == "no-trigger" for m in result.misses))
+    assert all((m.graded == "trigger" for m in result.misses))
     assert result.pass_rate == pytest.approx(0.5)
-    # EvalMiss.label sanity check
     assert "no-trigger" in result.misses[0].label
     assert "trigger" in result.misses[0].label
 
 
 @pytest.mark.asyncio
 async def test_run_eval_reports_coverage_gaps(tmp_path):
-    """Body alignment must catch the hollow-body case: description fires
-    correctly but the body cannot support the questions it claims."""
-    skill_dir = _make_skill(tmp_path)
+    """A correct activation decision cannot hide unsupported body content."""
     eval_set = _build_eval_set(3, 3)
-
-    async def perfect_trigger(description, question, *, model):
-        match = next(p for p in eval_set if p.question == question)
-        return match.expected
-
-    async def hollow_coverage(content, question, *, model):
-        # Body claims to support but actually doesn't for the first two
-        # trigger prompts.
-        if question in {"trig 0", "trig 1"}:
-            return "unsupported", "body has no material"
-        return "supported", ""
-
-    with (
-        patch("openkb.skill.evaluator.grade_one", side_effect=perfect_trigger),
-        patch("openkb.skill.evaluator.grade_coverage", side_effect=hollow_coverage),
-    ):
-        result = await run_eval(skill_dir, model="gpt-4o-mini", eval_set=eval_set)
-
-    # Trigger accuracy is still perfect.
+    result = assemble_eval_result(
+        eval_set,
+        [p.expected for p in eval_set],
+        [("unsupported", "body has no material")] * 2 + [("supported", "")],
+    )
     assert result.passed == 6
-    # But coverage catches the hollow shell.
     assert result.trigger_questions == 3
     assert len(result.coverage_misses) == 2
     assert {g.prompt.question for g in result.coverage_misses} == {"trig 0", "trig 1"}
-    assert all(g.reason == "body has no material" for g in result.coverage_misses)
+    assert all((g.reason == "body has no material" for g in result.coverage_misses))
     assert result.coverage_rate == pytest.approx(1 / 3)
 
 
 @pytest.mark.asyncio
-async def test_grade_coverage_parses_supported_verdict():
-    async def fake_runner(*args, **kwargs):
-        return SimpleNamespace(final_output="VERDICT: SUPPORTED\nREASON: body covers this directly")
-
-    with patch("openkb.skill.evaluator.Runner.run", new=AsyncMock(side_effect=fake_runner)):
-        verdict, reason = await grade_coverage("body content", "question?", model="gpt-4o-mini")
+async def test_grade_coverage_parses_supported_verdict(live_llm, monkeypatch):
+    live_llm.install(monkeypatch)
+    verdict, reason = await grade_coverage(
+        "The indoor room and garden room both permit quiet reading.",
+        "Which rooms permit quiet reading?",
+        model="deepseek/deepseek-flash",
+    )
     assert verdict == "supported"
-    assert reason == "body covers this directly"
+    assert reason.strip()
 
 
 @pytest.mark.asyncio
 async def test_grade_coverage_reports_ambiguous_on_unparseable_output():
-    async def fake_runner(*args, **kwargs):
-        return SimpleNamespace(final_output="hmm not sure")
-
-    with patch("openkb.skill.evaluator.Runner.run", new=AsyncMock(side_effect=fake_runner)):
-        verdict, reason = await grade_coverage("body", "q?", model="gpt-4o-mini")
-    # Ambiguous is a third state — not collapsed into unsupported, so
-    # grader-malfunction doesn't silently inflate coverage_misses.
+    verdict, reason = parse_coverage_verdict("hmm not sure")
     assert verdict == "ambiguous"
     assert "unparseable grader output" in reason
 
 
 @pytest.mark.asyncio
 async def test_run_eval_segregates_ambiguous_from_coverage_misses(tmp_path):
-    """An ambiguous coverage verdict goes into ``coverage_ambiguous``, not
-    ``coverage_misses``, and is excluded from the coverage_rate denominator."""
-    skill_dir = _make_skill(tmp_path)
-    eval_set = _build_eval_set(3, 0)  # 3 trigger, 0 no-trigger
-
-    async def perfect_trigger(description, question, *, model):
-        return "trigger"
-
-    async def mixed_coverage(content, question, *, model):
-        # trig 0 -> supported, trig 1 -> unsupported, trig 2 -> ambiguous
-        if question == "trig 0":
-            return "supported", ""
-        if question == "trig 1":
-            return "unsupported", "body gap"
-        return "ambiguous", "unparseable grader output: 'xxx'"
-
-    with (
-        patch("openkb.skill.evaluator.grade_one", side_effect=perfect_trigger),
-        patch("openkb.skill.evaluator.grade_coverage", side_effect=mixed_coverage),
-    ):
-        result = await run_eval(skill_dir, model="gpt-4o-mini", eval_set=eval_set)
-
+    """Ambiguous coverage is kept separate and excluded from the scored denominator."""
+    eval_set = _build_eval_set(3, 0)
+    result = assemble_eval_result(
+        eval_set,
+        ["trigger"] * 3,
+        [
+            ("supported", ""),
+            ("unsupported", "body gap"),
+            ("ambiguous", "unparseable grader output: xxx"),
+        ],
+    )
     assert result.trigger_questions == 3
-    assert len(result.coverage_misses) == 1  # only the "unsupported" one
+    assert len(result.coverage_misses) == 1
     assert len(result.coverage_ambiguous) == 1
-    # Score 1 supported out of (3 - 1 ambiguous) = 1/2
     assert result.coverage_passed == 1
     assert result.coverage_rate == pytest.approx(0.5)
 
 
 @pytest.mark.asyncio
 async def test_run_eval_captures_grader_failures_without_aborting(tmp_path):
-    """A single grader failure must NOT abort the whole eval. The failed
-    prompt goes into trigger_errors/coverage_errors and is excluded from
-    rate denominators; the other prompts grade normally."""
-    skill_dir = _make_skill(tmp_path)
-    eval_set = _build_eval_set(2, 2)  # 2 trigger + 2 no-trigger
-
-    async def flaky_trigger(description, question, *, model):
-        if question == "trig 0":
-            raise RuntimeError("max-turn cap hit")
-        # Everything else: perfect grader
-        match = next(p for p in eval_set if p.question == question)
-        return match.expected
-
-    async def flaky_coverage(content, question, *, model):
-        if question == "trig 1":
-            raise RuntimeError("malformed grader output")
-        return "supported", ""
-
-    with (
-        patch("openkb.skill.evaluator.grade_one", side_effect=flaky_trigger),
-        patch("openkb.skill.evaluator.grade_coverage", side_effect=flaky_coverage),
-    ):
-        result = await run_eval(skill_dir, model="gpt-4o-mini", eval_set=eval_set)
-
-    # 4 prompts total; one trigger errored, one coverage errored.
+    """One failed classification cannot discard other completed classifications."""
+    eval_set = _build_eval_set(2, 2)
+    result = assemble_eval_result(
+        eval_set,
+        [RuntimeError("max-turn cap hit"), "trigger", "no-trigger", "no-trigger"],
+        [("supported", ""), RuntimeError("malformed grader output")],
+    )
     assert result.total == 4
     assert len(result.trigger_errors) == 1
     assert result.trigger_errors[0].prompt.question == "trig 0"
@@ -352,13 +259,9 @@ async def test_run_eval_captures_grader_failures_without_aborting(tmp_path):
     assert len(result.coverage_errors) == 1
     assert result.coverage_errors[0].prompt.question == "trig 1"
     assert "malformed" in result.coverage_errors[0].reason
-
-    # Trigger: 3 prompts scored (1 errored), all correct -> 3/3 = 100%
     assert result.trigger_scored == 3
     assert result.passed == 3
     assert result.pass_rate == pytest.approx(1.0)
-
-    # Coverage: 2 trigger prompts, 1 errored, 1 supported -> 1/1 = 100%
     assert result.coverage_passed == 1
     assert result.coverage_rate == pytest.approx(1.0)
 
@@ -370,7 +273,7 @@ def test_save_and_load_eval_set_round_trip(tmp_path):
     prompts = _build_eval_set(2, 2)
     path = save_eval_set(tmp_path, "demo", prompts)
 
-    assert path == tmp_path / ".openkb" / "eval-sets" / "demo.json"
+    assert path == tmp_path / ".ultrakb" / "eval-sets" / "demo.json"
     assert path.is_file()
 
     data = json.loads(path.read_text())
@@ -388,30 +291,15 @@ def test_save_and_load_eval_set_round_trip(tmp_path):
 
 @pytest.mark.asyncio
 async def test_generate_eval_set_translates_max_turns_to_runtime_error(tmp_path):
-    """MaxTurnsExceeded from Runner.run should become RuntimeError."""
-    from agents.exceptions import MaxTurnsExceeded
-
     skill_dir = _make_skill(tmp_path)
-
-    async def fake_runner(*args, **kwargs):
-        raise MaxTurnsExceeded("ran out")
-
-    with patch("openkb.skill.evaluator.Runner.run", new=AsyncMock(side_effect=fake_runner)):
-        with pytest.raises(RuntimeError, match="max-turn cap"):
-            await generate_eval_set(skill_dir, model="gpt-4o-mini")
+    with pytest.raises(RuntimeError, match="max-turn cap"):
+        await generate_eval_set(skill_dir, model="deepseek/deepseek-flash", max_turns=0)
 
 
 @pytest.mark.asyncio
 async def test_generate_eval_set_translates_malformed_json_to_runtime_error(tmp_path):
-    """Non-JSON LLM output should produce a friendly RuntimeError."""
-    skill_dir = _make_skill(tmp_path)
-
-    async def fake_runner(*args, **kwargs):
-        return SimpleNamespace(final_output="this is not json at all")
-
-    with patch("openkb.skill.evaluator.Runner.run", new=AsyncMock(side_effect=fake_runner)):
-        with pytest.raises(RuntimeError, match="non-JSON output"):
-            await generate_eval_set(skill_dir, model="gpt-4o-mini")
+    with pytest.raises(RuntimeError, match="non-JSON output"):
+        parse_eval_set("this is not json at all")
 
 
 # -------- parallel_tool_calls on the (tool-less) eval agents ------------------
@@ -422,31 +310,11 @@ async def test_generate_eval_set_translates_malformed_json_to_runtime_error(tmp_
 # migration" that wires them through resolve_model_settings().
 
 
-async def _capture_eval_agent(coro_factory):
-    """Run an eval coroutine with Runner.run mocked, returning the Agent it built."""
-    captured = {}
-
-    async def fake_runner(agent, *args, **kwargs):
-        captured["agent"] = agent
-        # Return output shaped enough for each caller's parser not to raise.
-        return SimpleNamespace(final_output="NO-TRIGGER")
-
-    with patch("openkb.skill.evaluator.Runner.run", new=AsyncMock(side_effect=fake_runner)):
-        try:
-            await coro_factory()
-        except Exception:
-            # We only care about the agent that was built, not the parse result.
-            pass
-    return captured["agent"]
-
-
 async def _all_three_eval_agents(skill_dir):
     return [
-        await _capture_eval_agent(
-            lambda: generate_eval_set(skill_dir, model="gpt-4o-mini", count=2)
-        ),
-        await _capture_eval_agent(lambda: grade_one("desc", "q?", model="gpt-4o-mini")),
-        await _capture_eval_agent(lambda: grade_coverage("body", "q?", model="gpt-4o-mini")),
+        build_eval_set_agent(skill_dir, model="deepseek/deepseek-flash", count=2),
+        build_trigger_grader("desc", model="deepseek/deepseek-flash"),
+        build_coverage_grader("body", model="deepseek/deepseek-flash"),
     ]
 
 
@@ -461,7 +329,7 @@ async def _all_three_eval_agents(skill_dir):
     ],
 )
 async def test_eval_agents_always_omit_parallel_tool_calls(tmp_path, stash):
-    from openkb.config import set_parallel_tool_calls
+    from ultrakb.config import set_parallel_tool_calls
 
     skill_dir = _make_skill(tmp_path)
     set_parallel_tool_calls(*stash)

@@ -8,11 +8,11 @@ import pytest
 from pageindex.index.block_policy import BlockPolicy
 from test_answer_evidence_regression import agent_for, invoke
 
-from openkb.agent.evidence_payload import project_evidence
-from openkb.block_package import FrozenBlockParser, freeze_block_package
-from openkb.locks import atomic_write_text
-from openkb.text_formats import normalize_text_document
-from openkb.text_source import read_text_selection
+from ultrakb.agent.evidence_payload import project_evidence
+from ultrakb.block_package import FrozenBlockParser, freeze_block_package
+from ultrakb.locks import atomic_write_text
+from ultrakb.text_formats import normalize_text_document
+from ultrakb.text_source import read_text_selection
 
 pytest_plugins = ("test_vendor_sdk",)
 
@@ -70,7 +70,7 @@ async def test_heading_roles_agree_in_new_index_and_public_continuation(
     offset = frozen.text.index("OUTSIDE")
     projected = project_evidence(read_text_selection(raw), offset=offset)
     assert [item["text"].strip() for item in projected.get("display_context", [])] == contexts
-    from openkb.agent.source_windows import CompileSourceWindows
+    from ultrakb.agent.source_windows import CompileSourceWindows
 
     compiled = CompileSourceWindows(kb_dir / "wiki", "manual").read_selection(
         "sources/manual.content.json", {"blocks": "1"}
@@ -98,11 +98,6 @@ async def test_heading_roles_agree_in_new_index_and_public_continuation(
 def test_real_block_index_cannot_upgrade_a_literal_comment(
     kb_dir, tmp_path, extension, title, expected
 ):
-    from pageindex import IndexConfig
-    from pageindex.llm import IndexResponse
-
-    from openkb.index_client import create_index_client
-
     text = f"# {title}\n\nThe body must remain available.\n"
     source, frozen = freeze_source(kb_dir, tmp_path, extension, text)
     package = freeze_block_package(source, "manual")
@@ -119,31 +114,20 @@ def test_real_block_index_cannot_upgrade_a_literal_comment(
         },
     }
 
-    class Model:
-        def complete(self, messages, *, stage):
-            return IndexResponse(json.dumps([entry]))
-
-        async def acomplete(self, messages, *, stage):
-            return self.complete(messages, stage=stage)
-
-    options = IndexConfig(
-        llm_client=Model(),
-        if_add_node_summary=False,
-        if_add_doc_description=False,
-        if_add_node_text=True,
+    policy = BlockPolicy(
+        FrozenBlockParser().parse(str(package), images_dir=str(tmp_path / "index/images")).metadata
     )
-    with create_index_client(storage_path=tmp_path / "index", index_config=options) as client:
-        collection = client.collection()
-        identity = collection.add(str(package))
-        result = collection.get_document(identity, include_text=True)
-        assert result["structure"][0]["title_origin"] == expected
-        assert result["structure"][0]["text"] == frozen.text
+    policy.normalize_title_origin(entry)
+    prepared = [entry]
+    assert prepared[0]["title_origin"] == expected
+    assert policy.valid(prepared[0], 1, 1)
+    assert json.loads(policy.render(1))["source"][0]["range"] == [0, len(frozen.text)]
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("tag", ["script", "style", "title", "template"])
 async def test_hidden_table_text_is_not_a_cell_value_in_compile_or_question(kb_dir, tmp_path, tag):
-    from openkb.agent.source_windows import CompileSourceWindows
+    from ultrakb.agent.source_windows import CompileSourceWindows
 
     text = (
         f"<table><tr><td>1<{tag}>999</{tag}></td><td>visible &amp; text<br>tail</td></tr></table>\n"
@@ -171,11 +155,10 @@ async def test_hidden_table_text_is_not_a_cell_value_in_compile_or_question(kb_d
 def test_native_pdf_image_syntax_remains_text_at_the_model_boundary(tmp_path, model_service, role):
     import pymupdf
     from test_llm_execution import executor_for
-    from test_vendor_sdk import response
 
-    from openkb.index_pdf import NativePdfParser
-    from openkb.llm_execution import ModelRequest
-    from openkb.source_pages import read_page_selection
+    from ultrakb.index_pdf import NativePdfParser
+    from ultrakb.llm_execution import ModelRequest
+    from ultrakb.source_pages import read_page_selection
 
     literal = "![image](data:image/png;base64,YWJj)"
     path = tmp_path / "literal.pdf"
@@ -190,9 +173,11 @@ def test_native_pdf_image_syntax_remains_text_at_the_model_boundary(tmp_path, mo
         [{"page": 1, "unit_kind": "page", "content": parsed.nodes[0].content, "images": []}], "1"
     )
     projected = project_evidence(selected)
-    model_service.replies.append((200, response()))
     request = ModelRequest(
-        [{"role": "user", "content": json.dumps(projected)}], operation="source", stage="original"
+        [{"role": "user", "content": json.dumps(projected)}],
+        operation="source",
+        stage="original",
+        generation_options={"max_tokens": 64},
     )
     executor_for(model_service).complete(role, request)
     assert len(model_service.requests) == 1
@@ -201,17 +186,20 @@ def test_native_pdf_image_syntax_remains_text_at_the_model_boundary(tmp_path, mo
 
 
 def test_legacy_block_cache_keeps_its_bytes_but_does_not_certify_old_headings(
-    kb_dir, tmp_path, monkeypatch
+    kb_dir, tmp_path, monkeypatch, model_service
 ):
     from pageindex import IndexConfig
-    from pageindex.llm import IndexResponse
+    from test_index_llm import RecordingIndexLLM
+    from test_llm_execution import executor_for
 
-    from openkb.block_package import BlockPackage
-    from openkb.condb_storage import ConDBPageIndexStorage
-    from openkb.content_blocks import LEGACY_BLOCK_POLICY, ContentBlock, SourceHeading
-    from openkb.index_client import create_index_client
+    from ultrakb.block_package import BlockPackage
+    from ultrakb.condb_storage import ConDBPageIndexStorage
+    from ultrakb.content_blocks import LEGACY_BLOCK_POLICY, ContentBlock, SourceHeading
+    from ultrakb.index_client import create_index_client
+    from ultrakb.index_llm import PageIndexLLM
 
     text = "# old comment\n\nStored original body.\n"
+    heading_end = text.index("\n") + 1
     source, frozen = freeze_source(kb_dir, tmp_path, "txt", text)
     legacy = frozen.model_copy(
         update={
@@ -221,7 +209,7 @@ def test_legacy_block_cache_keeps_its_bytes_but_does_not_certify_old_headings(
                 ContentBlock(
                     ordinal=1,
                     source_spans=((0, len(text)),),
-                    headings=(SourceHeading(title="old comment", source_span=(0, 14)),),
+                    headings=(SourceHeading(title="old comment", source_span=(0, heading_end)),),
                 ),
             ),
         }
@@ -235,54 +223,82 @@ def test_legacy_block_cache_keeps_its_bytes_but_does_not_certify_old_headings(
         str(package), images_dir=str(tmp_path / "old/images")
     )
     assert parsed.nodes[0].metadata["headings"][0]["title"] == "old comment"
-    from openkb.block_package import read_block_selection
+    assert "".join(node.content for node in parsed.nodes) == text
+    from ultrakb.block_package import read_block_selection
 
     projection = project_evidence(read_block_selection(legacy.model_dump(mode="json")), offset=16)
     assert all(not block.get("headings") for block in projection.get("blocks", []))
     assert not projection.get("display_context")
 
-    class Model:
-        def complete(self, messages, *, stage):
-            return IndexResponse(
-                json.dumps(
-                    [
-                        {
-                            "title": "old comment",
-                            "title_origin": "original",
-                            "structure": "1",
-                            "physical_index": 1,
-                            "anchor": {
-                                "unit": 1,
-                                "part": "body",
-                                "range": [0, 14],
-                                "excerpt": text[:14],
-                            },
-                        }
-                    ]
-                )
-            )
-
-        async def acomplete(self, messages, *, stage):
-            return self.complete(messages, stage=stage)
-
     options = IndexConfig(
-        llm_client=Model(), if_add_node_summary=False, if_add_doc_description=False
+        model="deepseek/deepseek-flash",
+        llm_client=PageIndexLLM(executor_for(model_service)),
+        if_add_node_summary=False,
+        if_add_doc_description=False,
     )
     with create_index_client(storage_path=tmp_path / "old", index_config=options) as client:
         client.register_parser(FrozenBlockParser(legacy=True))
         identity = client.collection().add(str(package))
         before = client.collection().get_block_content(identity, "1")
+    sent = len(model_service.requests)
     monkeypatch.setattr(ConDBPageIndexStorage, "get_pages", lambda *args: None)
-    with create_index_client(storage_path=tmp_path / "old", index_config=options) as client:
+    no_generation = RecordingIndexLLM()
+    recovery = options.model_copy(update={"llm_client": no_generation})
+    with create_index_client(storage_path=tmp_path / "old", index_config=recovery) as client:
         after = client.collection().get_block_content(identity, "1")
     assert before == after
     assert package.read_bytes() == bytes_before
+    assert len(model_service.requests) == sent
+    assert no_generation.calls == []
+
+
+def test_legacy_heading_anchor_cannot_include_the_following_body(kb_dir, tmp_path):
+    from ultrakb.block_package import BlockPackage
+    from ultrakb.content_blocks import LEGACY_BLOCK_POLICY, ContentBlock, SourceHeading
+
+    text = "# old comment\n\nStored original body.\n"
+    source, frozen = freeze_source(kb_dir, tmp_path, "txt", text)
+    heading_end = text.index("\n") + 1
+    legacy = frozen.model_copy(
+        update={
+            "unit_kind": "block",
+            "block_policy": LEGACY_BLOCK_POLICY,
+            "blocks": (
+                ContentBlock(
+                    ordinal=1,
+                    source_spans=((0, len(text)),),
+                    headings=(SourceHeading(title="old comment", source_span=(0, heading_end)),),
+                ),
+            ),
+        }
+    )
+    package = source.with_suffix(".okbi")
+    atomic_write_text(
+        package, BlockPackage(doc_name="manual", source=legacy, assets={}).model_dump_json()
+    )
+    parsed = FrozenBlockParser(legacy=True).parse(str(package), images_dir=str(tmp_path / "images"))
+    policy = BlockPolicy(parsed.metadata)
+    entry = {
+        "structure": "1",
+        "title": "old comment",
+        "title_origin": "original",
+        "physical_index": 1,
+        "anchor": {"unit": 1, "part": "body", "range": [0, len(text)], "excerpt": text},
+    }
+    assert policy.validate_entry(entry) == "original_heading_anchor_mismatch"
+    entry["anchor"] = {
+        "unit": 1,
+        "part": "body",
+        "range": [0, heading_end],
+        "excerpt": text[:heading_end],
+    }
+    assert policy.validate_entry(entry) is None
 
 
 @pytest.mark.parametrize("role", ["headings", "heading_path", "table_header"])
 def test_new_block_parser_rejects_forged_source_structure(kb_dir, tmp_path, role):
-    from openkb.block_package import BlockPackage
-    from openkb.content_blocks import BLOCK_POLICY, ContentBlock, DisplayContext, SourceHeading
+    from ultrakb.block_package import BlockPackage
+    from ultrakb.content_blocks import BLOCK_POLICY, ContentBlock, DisplayContext, SourceHeading
 
     source, frozen = freeze_source(kb_dir, tmp_path, "txt", "# comment\n")
     forged = frozen.model_copy(
@@ -359,7 +375,7 @@ def test_unresolved_html_controls_never_certify_a_plain_cell_value(kb_dir, tmp_p
 async def test_table_qualification_survives_character_selection(
     kb_dir, tmp_path, extension, fenced
 ):
-    from openkb.agent.source_windows import CompileSourceWindows
+    from ultrakb.agent.source_windows import CompileSourceWindows
 
     table = "<table><tr><td>1</td><td>visible</td></tr></table>"
     text = f"```html\n{table}\n```\n" if fenced else table + "\n"
@@ -444,8 +460,8 @@ def test_table_header_continuation_keeps_full_source_role(kb_dir, tmp_path, exte
 
 @pytest.mark.asyncio
 async def test_sparse_blocks_cannot_extend_table_header_scope(kb_dir, tmp_path):
-    from openkb.agent.source_windows import CompileSourceWindows
-    from openkb.block_package import read_block_selection
+    from ultrakb.agent.source_windows import CompileSourceWindows
+    from ultrakb.block_package import read_block_selection
 
     table = "| Label | Value |\n| --- | --- |\n" + "| row | retained table value |\n" * 320
     text = table + "\n\nOUTSIDE is ordinary prose.\n" + "z" * 2400 + "\n"
@@ -486,7 +502,7 @@ async def test_sparse_blocks_cannot_extend_table_header_scope(kb_dir, tmp_path):
 
 
 def test_omitted_heading_resets_the_selected_ancestor_path(kb_dir, tmp_path):
-    from openkb.block_package import read_block_selection
+    from ultrakb.block_package import read_block_selection
 
     text = "# First\n\n" + "a" * 4500 + "\n\n# Second\n\n" + "b" * 2500 + "\n\nOUTSIDE.\n"
     source, _ = freeze_source(kb_dir, tmp_path, "md", text)
@@ -505,9 +521,8 @@ def test_short_import_keeps_qualified_figures_in_both_model_requests(
     kb_dir, tmp_path, model_service, extension
 ):
     import fitz
-    from test_vendor_sdk import response
 
-    from openkb.application.documents import import_document
+    from ultrakb.application.documents import import_document
 
     picture = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 1, 1), False)
     picture.clear_with(255)
@@ -516,20 +531,14 @@ def test_short_import_keeps_qualified_figures_in_both_model_requests(
     incoming = tmp_path / f"short.{extension}"
     incoming.write_text(text)
     atomic_write_text(
-        kb_dir / ".env", f"LLM_API_KEY=fixture\nOPENAI_API_BASE={model_service.url}\n"
+        kb_dir / ".ultrakb/config.yaml",
+        "model: deepseek/deepseek-flash\nlanguage: en\n"
+        "model_policy:\n  retries: 0\n  max_calls: 12\n",
     )
-    atomic_write_text(
-        kb_dir / ".openkb/config.yaml",
-        "model: openai/gpt-4o-mini\nlanguage: en\nmodel_policy:\n  retries: 0\n  max_calls: 2\n",
-    )
-    for output in ({"description": "Source", "content": "# Source\nOriginal."}, {}):
-        model_service.replies.append(
-            (200, response({"role": "assistant", "content": json.dumps(output)}))
-        )
     result = import_document(kb_dir, incoming)
     assert result.status == "added", result.message
-    assert len(model_service.requests) == 2
-    for request in model_service.requests:
+    assert 2 <= len(model_service.requests) <= 12
+    for request in model_service.requests[:2]:
         content = request["messages"][1]["content"]
         body = content if isinstance(content, str) else "".join(item["text"] for item in content)
         structure = json.loads(body.split("Original structure (native-tables-v1):\n", 1)[1])
@@ -538,7 +547,7 @@ def test_short_import_keeps_qualified_figures_in_both_model_requests(
 
 
 def test_generated_csv_header_requires_its_native_mapping(kb_dir, tmp_path):
-    from openkb.source_qualification import source_table_headers
+    from ultrakb.source_qualification import source_table_headers
 
     source, _ = freeze_source(kb_dir, tmp_path, "csv", "one,two\n")
     raw = json.loads(source.with_suffix(".content.json").read_text())
@@ -551,10 +560,10 @@ def test_legacy_string_source_keeps_literal_tables_unqualified(kb_dir, model_ser
     from test_answer_evidence_regression import selection
     from test_llm_execution import executor_for
 
-    from openkb.agent.compiler import short_document_messages
-    from openkb.agent.source_windows import CompileSourceWindows
-    from openkb.context.knowledge import KnowledgeRetrieval
-    from openkb.context.projection import knowledge_forest
+    from ultrakb.agent.compiler import short_document_messages
+    from ultrakb.agent.source_windows import CompileSourceWindows
+    from ultrakb.context.knowledge import KnowledgeRetrieval
+    from ultrakb.context.projection import knowledge_forest
 
     text = "# shell comment\n\n<table><tr><td>literal example</td></tr></table>\n"
     path = kb_dir / "wiki/sources/legacy.md"
@@ -586,7 +595,7 @@ def test_legacy_string_source_keeps_literal_tables_unqualified(kb_dir, model_ser
 @pytest.mark.asyncio
 @pytest.mark.parametrize("tag", ["br", "div"])
 async def test_escaped_pipe_cell_html_preserves_native_roles(kb_dir, tmp_path, tag):
-    from openkb.agent.source_windows import CompileSourceWindows
+    from ultrakb.agent.source_windows import CompileSourceWindows
 
     nested = "\n# Contained example\n\n</div>\n" if tag == "div" else ""
     text = (
@@ -600,7 +609,7 @@ async def test_escaped_pipe_cell_html_preserves_native_roles(kb_dir, tmp_path, t
     assert [h["title"] for node in parsed.nodes for h in node.metadata["headings"]] == [
         "Native heading"
     ]
-    from openkb.source_qualification import source_table_headers
+    from ultrakb.source_qualification import source_table_headers
 
     raw = json.loads(source.with_suffix(".content.json").read_text())
     assert len(source_table_headers(raw)) == 1

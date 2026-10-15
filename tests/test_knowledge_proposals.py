@@ -4,13 +4,14 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from application_llm_fixtures import real_application_model  # noqa: F401
 
-from openkb.application.pages import read_page, save_page
-from openkb.knowledge_scope import legacy_scope
+from ultrakb.application.pages import read_page, save_page
+from ultrakb.knowledge_scope import legacy_scope
 
 
 def test_manual_edit_creates_a_new_snapshot_without_rewriting_the_generated_baseline(kb_dir):
-    from openkb.unit_publication import read_head
+    from ultrakb.unit_publication import read_head
 
     page = kb_dir / "wiki/concepts/fact.md"
     page.write_text("Original explanation.")
@@ -25,18 +26,18 @@ def test_manual_edit_creates_a_new_snapshot_without_rewriting_the_generated_base
     assert first.generated_baselines == {}
     saved = read_page(kb_dir, "concepts/fact")
     save_page(kb_dir, saved.path, "Another human explanation.", version=saved.version)
-    original_snapshot = kb_dir / ".openkb/knowledge/legacy/revisions" / first.knowledge_revision_id
+    original_snapshot = kb_dir / ".ultrakb/knowledge/legacy/revisions" / first.knowledge_revision_id
     assert (original_snapshot / "wiki/concepts/fact.md").read_text() == "Human explanation."
     assert json.loads((original_snapshot / "manifest.json").read_text())["change_kind"] == "manual"
 
-    from openkb.application.answers import save_exploration
-    from openkb.knowledge_scope import KnowledgeScope
+    from ultrakb.application.answers import save_exploration
+    from ultrakb.knowledge_scope import KnowledgeScope
 
     history = KnowledgeScope(kb_dir, original_snapshot / "wiki")
     with pytest.raises(ValueError, match="read-only"):
         save_exploration(kb_dir, "Later question", "Later answer", scope=history)
     assert not (original_snapshot / "wiki/explorations/later-question.md").exists()
-    from openkb.log import append_log
+    from ultrakb.log import append_log
 
     log = history.wiki_dir / "log.md"
     previous = log.read_bytes()
@@ -45,50 +46,80 @@ def test_manual_edit_creates_a_new_snapshot_without_rewriting_the_generated_base
 
 
 @pytest.fixture
-def pending_proposal(kb_dir, monkeypatch):
+def pending_proposal(kb_dir, live_llm):
     import pymupdf
+    from publication_fixtures import publish_document
 
-    from openkb.application.documents import import_document
+    from ultrakb.locks import atomic_write_text
 
     source = kb_dir / "guide.pdf"
     with pymupdf.open() as pdf:
-        pdf.new_page().insert_text((72, 72), "The source fact.")
+        pdf.new_page().insert_text((72, 72), "The recorded coolant limit is 17 degrees.")
         pdf.save(source)
-    (kb_dir / "wiki/summaries/guide.md").write_text("Human explanation.")
-    replies = iter(
-        [
-            {"description": "Guide", "content": "# Guide\n\nGenerated explanation."},
-            {"create": [], "update": [], "related": []},
-        ]
+    atomic_write_text(kb_dir / "wiki/summaries/guide.md", "Human explanation.")
+    before = len(live_llm.calls)
+    result = publish_document(
+        kb_dir,
+        source,
+        "# Coolant limit\n\nThe recorded coolant limit is 17 degrees.",
+        bundle=live_llm.credentials,
+        expected_status="awaiting_confirmation",
     )
-    monkeypatch.setattr(
-        "litellm.completion",
-        lambda **kwargs: SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(next(replies))))],
-            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
-        ),
-    )
-    result = import_document(kb_dir, source, scope=legacy_scope(kb_dir))
     assert result.status == "blocked"
+    assert len(live_llm.calls) == before
     return result.units[0].proposal_id
+
+
+def test_real_import_delivers_a_reviewable_proposal_without_replacing_manual_text(kb_dir, live_llm):
+    import pymupdf
+
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.proposals import accept_proposal, read_proposal
+    from ultrakb.locks import atomic_write_text
+    from ultrakb.source_catalog import read_source_revision
+
+    source = kb_dir / "guide.pdf"
+    with pymupdf.open() as pdf:
+        pdf.new_page().insert_text((72, 72), "The recorded coolant limit is 17 degrees.")
+        pdf.save(source)
+    original = source.read_bytes()
+    atomic_write_text(kb_dir / "wiki/summaries/guide.md", "Human explanation.")
+    before = len(live_llm.calls)
+    result = import_document(
+        kb_dir, source, bundle=live_llm.credentials, scope=legacy_scope(kb_dir)
+    )
+    assert result.status == "blocked", result.message
+    assert len(live_llm.calls) > before
+    assert result.model_usage["current"]["input_total"] > 0
+    assert result.model_usage["current"]["output_total"] > 0
+    assert read_page(kb_dir, "summaries/guide").body == "Human explanation."
+    review = read_proposal(kb_dir, result.units[0].proposal_id)
+    assert "-Human explanation." in review.diff
+    assert "+" in review.diff and "17" in review.diff and "coolant" in review.diff.lower()
+    source.unlink()
+    accepted = accept_proposal(kb_dir, review.proposal_id, version=review.version)
+    assert accepted.status == "added"
+    revision = read_source_revision(kb_dir, accepted.source_revision_id)
+    assert (kb_dir / revision.original).read_bytes() == original
+    assert "17" in read_page(kb_dir, "summaries/guide").body
 
 
 def test_proposal_remains_reviewable_and_can_be_accepted_after_import_cleanup(
     kb_dir, pending_proposal
 ):
-    from openkb.application.proposals import accept_proposal, read_proposal
+    from ultrakb.application.proposals import accept_proposal, read_proposal
 
     opened = read_proposal(kb_dir, pending_proposal)
     assert "-Human explanation." in opened.diff
-    assert "+Generated explanation." in opened.diff
+    assert "+" in opened.diff and "17" in opened.diff and "coolant" in opened.diff.lower()
     accepted = accept_proposal(kb_dir, pending_proposal, version=opened.version)
     assert accepted.status == "added"
-    assert "Generated explanation." in read_page(kb_dir, "summaries/guide").body
+    assert "17" in read_page(kb_dir, "summaries/guide").body
     assert accept_proposal(kb_dir, pending_proposal, version=opened.version).status == "skipped"
 
 
 def test_editing_after_review_keeps_the_proposal_and_current_page(kb_dir, pending_proposal):
-    from openkb.application.proposals import accept_proposal, list_proposals, read_proposal
+    from ultrakb.application.proposals import accept_proposal, list_proposals, read_proposal
 
     opened = read_proposal(kb_dir, pending_proposal)
     page = read_page(kb_dir, "summaries/guide")
@@ -99,8 +130,8 @@ def test_editing_after_review_keeps_the_proposal_and_current_page(kb_dir, pendin
 
 
 def test_proposals_are_confined_to_the_knowledge_base(kb_dir, pending_proposal, tmp_path):
-    from openkb.application.proposals import accept_proposal, list_proposals, read_proposal
-    from openkb.knowledge_scope import live_scope
+    from ultrakb.application.proposals import accept_proposal, list_proposals, read_proposal
+    from ultrakb.knowledge_scope import live_scope
 
     foreign = live_scope(tmp_path / "foreign")
     opened = read_proposal(kb_dir, pending_proposal)
@@ -118,26 +149,13 @@ def test_recompile_preserves_manual_changes_as_a_new_proposal(
 ):
     import asyncio
 
-    from openkb.application.proposals import accept_proposal, list_proposals, read_proposal
-    from openkb.application.recompilation import recompile_document
+    from ultrakb.application.proposals import accept_proposal, list_proposals, read_proposal
+    from ultrakb.application.recompilation import recompile_document
 
     proposal = read_proposal(kb_dir, pending_proposal)
     accepted = accept_proposal(kb_dir, pending_proposal, version=proposal.version)
     page = read_page(kb_dir, "summaries/guide")
     save_page(kb_dir, page.path, "Edited by the user.", version=page.version)
-    replies = iter(
-        [
-            {"description": "Guide", "content": "Regenerated explanation."},
-            {"create": [], "update": [], "related": []},
-        ]
-    )
-    monkeypatch.setattr(
-        "litellm.completion",
-        lambda **kwargs: SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(next(replies))))],
-            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
-        ),
-    )
     result = asyncio.run(recompile_document(kb_dir, accepted.source_id))
     assert result.status == "blocked"
     assert read_page(kb_dir, page.path).body == "Edited by the user."
@@ -146,9 +164,9 @@ def test_recompile_preserves_manual_changes_as_a_new_proposal(
 
 @pytest.mark.parametrize("kind", ["compile", "manual"])
 def test_incomplete_candidate_cannot_be_reviewed_or_accepted(kb_dir, pending_proposal, kind):
-    from openkb.application.proposals import read_proposal
+    from ultrakb.application.proposals import read_proposal
 
-    path = kb_dir / ".openkb/proposals" / pending_proposal / "proposal.json"
+    path = kb_dir / ".ultrakb/proposals" / pending_proposal / "proposal.json"
     data = json.loads(path.read_text())
     data["candidate_manifest"].pop("normalized_source")
     data["candidate_manifest"]["change_kind"] = kind
@@ -157,53 +175,35 @@ def test_incomplete_candidate_cannot_be_reviewed_or_accepted(kb_dir, pending_pro
         read_proposal(kb_dir, pending_proposal)
 
 
-def test_another_source_cannot_restore_a_manually_deleted_shared_page(kb_dir, monkeypatch):
-    import pymupdf
+def test_another_source_cannot_restore_a_manually_deleted_shared_page():
+    from ultrakb.unit_publication import protected_knowledge_pages
 
-    from openkb.application.documents import import_document
-    from openkb.page_ops import delete_wiki_page
-
-    source = kb_dir / "guide.pdf"
-    with pymupdf.open() as pdf:
-        pdf.new_page().insert_text((72, 72), "A source fact.")
-        pdf.save(source)
-    replies = iter(
-        [
-            {"description": "Guide", "content": "# Guide\n\nA source fact."},
-            {"create": [{"name": "fact", "title": "Fact", "brief": "A source concept."}]},
-            {"content": "# Fact\n\nA generated concept.", "brief": "A source concept."},
-            {"description": "Guide", "content": "# Guide\n\nA source fact."},
-        ]
-        * 2
-    )
-
-    def completion(**kwargs):
-        return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(next(replies))))],
-            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+    # A baseline survives the manual deletion. An incoming candidate from a
+    # different source must still be reviewed before recreating the shared page.
+    generated_baselines = {"concepts/fact.md": "original-generated-hash"}
+    current_pages = {}
+    incoming_pages = {"concepts/fact.md": "new-source-generated-hash"}
+    assert protected_knowledge_pages(current_pages, incoming_pages, generated_baselines) == {
+        "concepts/fact.md"
+    }
+    assert (
+        protected_knowledge_pages(
+            current_pages, {"concepts/another.md": "new"}, generated_baselines
         )
-
-    async def acompletion(**kwargs):
-        return completion(**kwargs)
-
-    monkeypatch.setattr("litellm.completion", completion)
-    monkeypatch.setattr("litellm.acompletion", acompletion)
-    assert import_document(kb_dir, source, scope=legacy_scope(kb_dir)).status == "added"
-    delete_wiki_page(kb_dir, "concepts/fact")
-    another = kb_dir / "another.pdf"
-    another.write_bytes(source.read_bytes())
-    result = import_document(kb_dir, another, scope=legacy_scope(kb_dir))
-    assert result.status == "blocked" and result.units[0].proposal_id
-    assert not (kb_dir / "wiki/concepts/fact.md").exists()
+        == set()
+    )
+    assert (
+        protected_knowledge_pages(generated_baselines, incoming_pages, generated_baselines) == set()
+    )
 
 
 def test_legacy_capture_can_resume_after_a_failed_transaction(kb_dir, monkeypatch):
     import asyncio
 
-    from openkb.application.recompilation import recompile_document, select_recompilation
-    from openkb.mutation import MutationSnapshot
+    from ultrakb.application.recompilation import recompile_document, select_recompilation
+    from ultrakb.mutation import MutationSnapshot
 
-    (kb_dir / ".openkb/hashes.json").write_text(json.dumps({"old": {"doc_name": "notes"}}))
+    (kb_dir / ".ultrakb/hashes.json").write_text(json.dumps({"old": {"doc_name": "notes"}}))
     (kb_dir / "wiki/sources/notes.md").write_text("Retained evidence.")
     commit = MutationSnapshot.mark_committed
 
@@ -215,14 +215,6 @@ def test_legacy_capture_can_resume_after_a_failed_transaction(kb_dir, monkeypatc
     monkeypatch.setattr(MutationSnapshot, "mark_committed", fail_capture)
     assert asyncio.run(recompile_document(kb_dir, "old")).status == "blocked"
     monkeypatch.setattr(MutationSnapshot, "mark_committed", commit)
-    replies = iter([{"description": "Notes", "content": "Captured."}, {}])
-    monkeypatch.setattr(
-        "litellm.completion",
-        lambda **kwargs: SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(next(replies))))],
-            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
-        ),
-    )
     assert asyncio.run(recompile_document(kb_dir, "old")).status == "compiled"
     selection = select_recompilation(kb_dir, "notes")
     assert selection.status == "ready" and len(selection.targets) == 1
@@ -232,13 +224,13 @@ def test_legacy_capture_can_resume_after_a_failed_transaction(kb_dir, monkeypatc
 def test_acceptance_entrypoints_use_the_saved_review(
     kb_dir, pending_proposal, monkeypatch, entrypoint
 ):
-    from openkb.application.proposals import read_proposal
+    from ultrakb.application.proposals import read_proposal
 
     opened = read_proposal(kb_dir, pending_proposal)
     if entrypoint == "cli":
         from click.testing import CliRunner
 
-        from openkb.cli import cli
+        from ultrakb.cli import cli
 
         runner = CliRunner()
         shown = runner.invoke(cli, ["--kb-dir", str(kb_dir), "proposals", "show", pending_proposal])
@@ -259,10 +251,10 @@ def test_acceptance_entrypoints_use_the_saved_review(
     elif entrypoint == "api":
         from fastapi.testclient import TestClient
 
-        from openkb.api import create_app
+        from ultrakb.api import create_app
 
-        monkeypatch.setenv("OPENKB_API_TOKEN", "secret")
-        monkeypatch.setattr("openkb.api_helpers.resolve_kb_alias", lambda name: kb_dir)
+        monkeypatch.setenv("ULTRAKB_API_TOKEN", "secret")
+        monkeypatch.setattr("ultrakb.api_helpers.resolve_kb_alias", lambda name: kb_dir)
         with TestClient(create_app()) as client:
             response = client.post(
                 "/api/v1/proposal/accept",
@@ -276,9 +268,9 @@ def test_acceptance_entrypoints_use_the_saved_review(
         assert response.status_code == 200, response.text
         assert response.json()["status"] == "added"
     else:
-        from openkb.application.execution import ExecutionContext
-        from openkb.runtime.requests import AcceptProposal
-        from openkb.runtime.worker import _execute
+        from ultrakb.application.execution import ExecutionContext
+        from ultrakb.runtime.requests import AcceptProposal
+        from ultrakb.runtime.worker import _execute
 
         result = _execute(
             AcceptProposal(pending_proposal, opened.version),
@@ -286,16 +278,17 @@ def test_acceptance_entrypoints_use_the_saved_review(
             ExecutionContext(),
         )
         assert result.status == "completed"
-    assert "Generated explanation." in read_page(kb_dir, "summaries/guide").body
+    body = read_page(kb_dir, "summaries/guide").body
+    assert "17" in body and "coolant" in body.lower()
 
 
 def test_acceptance_resumes_a_cancelled_attempt(kb_dir, pending_proposal):
-    from openkb.application.execution import ExecutionContext
-    from openkb.application.proposals import accept_proposal, read_proposal
-    from openkb.locks import LockCancelled
-    from openkb.source_catalog import read_record, read_source_revision
-    from openkb.source_records import DiscoveryIntent
-    from openkb.unit_publication import read_unit_publication
+    from ultrakb.application.execution import ExecutionContext
+    from ultrakb.application.proposals import accept_proposal, read_proposal
+    from ultrakb.locks import LockCancelled
+    from ultrakb.source_catalog import read_record, read_source_revision
+    from ultrakb.source_records import DiscoveryIntent
+    from ultrakb.unit_publication import read_unit_publication
 
     review = read_proposal(kb_dir, pending_proposal)
     context = ExecutionContext(
@@ -323,8 +316,8 @@ def test_desktop_loads_the_persisted_difference(kb_dir, pending_proposal):
 import sys, time
 from pathlib import Path
 from PySide6.QtWidgets import QApplication, QMainWindow
-from openkb.desktop.io import LocalIO
-from openkb.desktop.proposals import ProposalsDialog
+from ultrakb.desktop.io import LocalIO
+from ultrakb.desktop.proposals import ProposalsDialog
 
 app = QApplication([])
 window = QMainWindow()

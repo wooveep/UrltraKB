@@ -8,8 +8,8 @@ pytest_plugins = ("pending_fixtures",)
 def test_dispatched_without_started_can_resume_and_old_delivery_is_ignored(
     kb_dir, embedded_docx, pdf_model
 ):
-    from openkb.application.documents import import_document
-    from openkb.application.pending import claim_pending_job, pending_status, run_pending_job
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.pending import claim_pending_job, pending_status, run_pending_job
 
     import_document(kb_dir, embedded_docx)
     old = claim_pending_job(kb_dir)
@@ -25,15 +25,16 @@ def test_started_unknown_import_requires_explicit_retry(
 ):
     import litellm
 
-    from openkb.application.documents import import_document
-    from openkb.application.pending import pending_status, process_pending, retry_pending_job
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.pending import pending_status, process_pending, retry_pending_job
 
     import_document(kb_dir, embedded_docx)
     process_pending(kb_dir, max_jobs=1)
     completion = litellm.completion
 
     def worker_died(**kwargs):
-        raise SystemExit("Fixture worker disappeared before model result")
+        completion(**kwargs)
+        raise SystemExit("Worker disappeared before delivering the genuine model result")
 
     monkeypatch.setattr(litellm, "completion", worker_died)
     with pytest.raises(SystemExit):
@@ -53,11 +54,11 @@ def test_started_unknown_import_requires_explicit_retry(
 def test_business_commit_wins_when_job_completion_record_is_lost(
     kb_dir, embedded_docx, office_runtime, pdf_model, monkeypatch
 ):
-    from openkb.application.documents import import_document
-    from openkb.application.pending import pending_status, process_pending
-    from openkb.mutation import MutationSnapshot
-    from openkb.pending.records import ImportIntent
-    from openkb.source_catalog import read_record
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.pending import pending_status, process_pending
+    from ultrakb.mutation import MutationSnapshot
+    from ultrakb.pending.records import ImportIntent
+    from ultrakb.source_catalog import read_record
 
     import_document(kb_dir, embedded_docx)
     process_pending(kb_dir, max_jobs=1)
@@ -90,11 +91,11 @@ def test_cli_and_api_expose_waiting_counts_without_restarting_them(
     from click.testing import CliRunner
     from fastapi.testclient import TestClient
 
-    from openkb.api import create_app
-    from openkb.application.documents import import_document
-    from openkb.application.pending import pending_status, update_execution_budget
-    from openkb.cli import cli
-    from openkb.config import register_kb
+    from ultrakb.api import create_app
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.pending import pending_status, update_execution_budget
+    from ultrakb.cli import cli
+    from ultrakb.config import register_kb
 
     import_document(kb_dir, embedded_docx)
     group = pending_status(kb_dir)["groups"][0]
@@ -112,12 +113,12 @@ def test_cli_and_api_expose_waiting_counts_without_restarting_them(
 def test_group_cancel_after_lost_receipt_preserves_committed_import_status(
     kb_dir, embedded_docx, office_runtime, pdf_model, monkeypatch
 ):
-    from openkb.application.documents import import_document
-    from openkb.application.pending import cancel_execution_group, pending_status, process_pending
-    from openkb.documents import read_document_source
-    from openkb.mutation import MutationSnapshot
-    from openkb.pending.records import ImportIntent
-    from openkb.source_catalog import read_record
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.pending import cancel_execution_group, pending_status, process_pending
+    from ultrakb.documents import read_document_source
+    from ultrakb.mutation import MutationSnapshot
+    from ultrakb.pending.records import ImportIntent
+    from ultrakb.source_catalog import read_record
 
     import_document(kb_dir, embedded_docx)
     process_pending(kb_dir, max_jobs=1)
@@ -149,8 +150,8 @@ def test_bad_candidate_does_not_hide_a_later_complete_file(kb_dir, embedded_docx
     import io
     from zipfile import ZipFile
 
-    from openkb.application.documents import import_document
-    from openkb.application.pending import pending_status, process_pending
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.pending import pending_status, process_pending
 
     broken = io.BytesIO()
     with ZipFile(broken, "w") as nested:
@@ -168,8 +169,8 @@ def test_bad_candidate_does_not_hide_a_later_complete_file(kb_dir, embedded_docx
 def test_foreign_source_reference_cannot_complete_unimported_job(kb_dir, embedded_docx, pdf_model):
     import json
 
-    from openkb.application.documents import import_document
-    from openkb.application.pending import pending_status, process_pending
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.pending import pending_status, process_pending
 
     import_document(kb_dir, embedded_docx)
     process_pending(kb_dir, max_jobs=1)
@@ -178,7 +179,7 @@ def test_foreign_source_reference_cannot_complete_unimported_job(kb_dir, embedde
     foreign.write_text("A separate ordinary document.", encoding="utf-8")
     other = import_document(kb_dir, foreign)
     assert other.status == "added"
-    path = kb_dir / ".openkb/catalog/import-intents" / (job["id"] + ".json")
+    path = kb_dir / ".ultrakb/catalog/import-intents" / (job["id"] + ".json")
     value = json.loads(path.read_text())
     value["source_id"] = other.source_id
     value["source_revision_id"] = other.source_revision_id

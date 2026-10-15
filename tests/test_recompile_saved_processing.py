@@ -9,11 +9,10 @@ import pytest
 import test_presentation_import as slide_fixtures
 from openpyxl import Workbook
 
-from openkb.application.documents import import_document
-from openkb.application.recompilation import recompile_document, select_recompilation
-from openkb.application.settings import apply_kb_config_patch
-from openkb.application.settings_data import KbConfigPatchRequest
-from openkb.documents import read_document_source
+from ultrakb.application.recompilation import recompile_document, select_recompilation
+from ultrakb.application.settings import apply_kb_config_patch
+from ultrakb.application.settings_data import KbConfigPatchRequest
+from ultrakb.documents import read_document_source
 
 pytest_plugins = ("block_fixtures", "test_pdf_readback", "cnki_fixtures")
 frozen_slide_conversion = slide_fixtures.frozen_slide_conversion
@@ -23,12 +22,16 @@ single_slide_model = slide_fixtures.single_slide_model
 def test_recompile_uses_saved_worksheet_without_reading_original_again(
     kb_dir, tmp_path, block_model, monkeypatch
 ):
+    from office_publication_fixtures import publish_workbook
+
+    from ultrakb.config import resolve_credential_bundle
+
     path = tmp_path / "manual.xlsx"
     book = Workbook()
     book.active["A1"] = "hello"
     book.active["B1"] = "Retained worksheet"
     book.save(path)
-    imported = import_document(kb_dir, path)
+    imported = publish_workbook(kb_dir, path, bundle=resolve_credential_bundle(kb_dir))
     assert imported.status == "added", imported.message
     before = read_document_source(kb_dir, imported.source_id)
     requests = len(block_model)
@@ -38,7 +41,7 @@ def test_recompile_uses_saved_worksheet_without_reading_original_again(
         calls.append(args)
         raise AssertionError("Original workbook must not be read during recompilation")
 
-    monkeypatch.setattr("openkb.workbooks.xlsx.read_xlsx", unavailable)
+    monkeypatch.setattr("ultrakb.workbooks.xlsx.read_xlsx", unavailable)
     path.unlink()
     selection = select_recompilation(kb_dir, imported.source_id, confirmation=True)
     result = asyncio.run(recompile_document(kb_dir, imported.source_id, version=selection.version))
@@ -54,16 +57,22 @@ def test_recompile_uses_saved_worksheet_without_reading_original_again(
 def test_recompile_reuses_slide_processing_with_no_office_or_new_tree(
     kb_dir, tmp_path, frozen_slide_conversion, single_slide_model, monkeypatch, limit
 ):
+    from saved_processing_publication import publish_saved_processing
+
+    from ultrakb.config import resolve_credential_bundle
+
     apply_kb_config_patch(
         kb_dir, KbConfigPatchRequest(kb=str(kb_dir), config={"pdf_short_max_pages": limit})
     )
     path = frozen_slide_conversion(tmp_path / "manual.pptx", "Original rule.")
-    imported = import_document(kb_dir, path)
+    imported = publish_saved_processing(
+        kb_dir, path, bundle=resolve_credential_bundle(kb_dir), indexed=limit == 0
+    )
     assert imported.status == "added", imported.message
     before = read_document_source(kb_dir, imported.source_id)
     normalized = {
         str(p): hashlib.sha256(p.read_bytes()).hexdigest()
-        for p in (kb_dir / ".openkb/normalized").rglob("*")
+        for p in (kb_dir / ".ultrakb/normalized").rglob("*")
         if p.is_file()
     }
     tree_calls = sum("PHYSICAL SLIDE STRUCTURE" in str(r) for r in single_slide_model)
@@ -73,8 +82,8 @@ def test_recompile_reuses_slide_processing_with_no_office_or_new_tree(
         calls.append(args)
         raise AssertionError("Recompilation must not use today's Office runtime")
 
-    monkeypatch.setattr("openkb.office.convert.convert_office", forbidden)
-    monkeypatch.setattr("openkb.office.runtime.processing_identity", forbidden)
+    monkeypatch.setattr("ultrakb.office.convert.convert_office", forbidden)
+    monkeypatch.setattr("ultrakb.office.runtime.processing_identity", forbidden)
     path.unlink()
     apply_kb_config_patch(
         kb_dir,
@@ -91,7 +100,7 @@ def test_recompile_reuses_slide_processing_with_no_office_or_new_tree(
     assert after["knowledge_revision_id"] != before["knowledge_revision_id"]
     assert normalized == {
         str(p): hashlib.sha256(p.read_bytes()).hexdigest()
-        for p in (kb_dir / ".openkb/normalized").rglob("*")
+        for p in (kb_dir / ".ultrakb/normalized").rglob("*")
         if p.is_file()
     }
 
@@ -99,7 +108,13 @@ def test_recompile_reuses_slide_processing_with_no_office_or_new_tree(
 def test_recompile_uses_retained_cnki_without_preparing_original_again(
     kb_dir, cnki_source, pdf_model, monkeypatch
 ):
-    imported = import_document(kb_dir, cnki_source)
+    from saved_processing_publication import publish_saved_processing
+
+    from ultrakb.config import resolve_credential_bundle
+
+    imported = publish_saved_processing(
+        kb_dir, cnki_source, bundle=resolve_credential_bundle(kb_dir)
+    )
     assert imported.status == "added", imported.message
     before = read_document_source(kb_dir, imported.source_id)
     calls = []
@@ -108,8 +123,8 @@ def test_recompile_uses_retained_cnki_without_preparing_original_again(
         calls.append(args)
         raise AssertionError("Recompilation must not prepare CNKI again")
 
-    monkeypatch.setattr("openkb.cnki.convert.prepare_cnki", forbidden)
-    monkeypatch.setattr("openkb.cnki.runtime.processing_identity", forbidden)
+    monkeypatch.setattr("ultrakb.cnki.convert.prepare_cnki", forbidden)
+    monkeypatch.setattr("ultrakb.cnki.runtime.processing_identity", forbidden)
     cnki_source.unlink()
     selection = select_recompilation(kb_dir, imported.source_id, confirmation=True)
     result = asyncio.run(recompile_document(kb_dir, imported.source_id, version=selection.version))
@@ -123,15 +138,21 @@ def test_recompile_uses_retained_cnki_without_preparing_original_again(
 def test_missing_saved_index_does_not_rebuild_from_the_original(
     kb_dir, tmp_path, frozen_slide_conversion, single_slide_model, monkeypatch
 ):
+    from saved_processing_publication import publish_saved_processing
+
+    from ultrakb.config import resolve_credential_bundle
+
     apply_kb_config_patch(
         kb_dir, KbConfigPatchRequest(kb=str(kb_dir), config={"pdf_short_max_pages": 0})
     )
     path = frozen_slide_conversion(tmp_path / "manual.pptx", "Original rule.")
-    imported = import_document(kb_dir, path)
+    imported = publish_saved_processing(
+        kb_dir, path, bundle=resolve_credential_bundle(kb_dir), indexed=True
+    )
     assert imported.status == "added", imported.message
     unit = imported.units[0]
     snapshot = (
-        kb_dir / ".openkb/knowledge" / unit.view_id / "revisions" / unit.knowledge_revision_id
+        kb_dir / ".ultrakb/knowledge" / unit.view_id / "revisions" / unit.knowledge_revision_id
     )
     summary = (kb_dir / f"wiki/summaries/{unit.doc_name}.md").read_bytes()
     calls = len(single_slide_model)
@@ -140,8 +161,8 @@ def test_missing_saved_index_does_not_rebuild_from_the_original(
     def forbidden(*args, **kwargs):
         pytest.fail("A missing saved index cannot authorize original processing")
 
-    monkeypatch.setattr("openkb.office.convert.convert_office", forbidden)
-    monkeypatch.setattr("openkb.office.runtime.processing_identity", forbidden)
+    monkeypatch.setattr("ultrakb.office.convert.convert_office", forbidden)
+    monkeypatch.setattr("ultrakb.office.runtime.processing_identity", forbidden)
     result = asyncio.run(recompile_document(kb_dir, imported.source_id))
     assert result.status == "failed", result.message
     assert len(single_slide_model) == calls
@@ -151,10 +172,13 @@ def test_missing_saved_index_does_not_rebuild_from_the_original(
 def test_docx_recompile_uses_saved_writer_pdf_with_no_office(
     kb_dir, tmp_path, frozen_slide_conversion, block_model, monkeypatch
 ):
-    from openkb.locks import atomic_write_text
-    from openkb.office.convert import convert_office
-    from openkb.office.records import OfficeConversion
-    from openkb.state import HashRegistry
+    from saved_processing_publication import publish_saved_processing
+
+    from ultrakb.config import resolve_credential_bundle
+    from ultrakb.locks import atomic_write_text
+    from ultrakb.office.convert import convert_office
+    from ultrakb.office.records import OfficeConversion
+    from ultrakb.state import HashRegistry
 
     # A fixed external Office result, with real retained provenance/digest checks.
     template = frozen_slide_conversion(tmp_path / "output-template.pptx", "hello Writer rule.")
@@ -173,7 +197,7 @@ def test_docx_recompile_uses_saved_writer_pdf_with_no_office(
         atomic_write_text(receipt, record.model_dump_json())
         return receipt
 
-    monkeypatch.setattr("openkb.office.convert.convert_office", convert)
+    monkeypatch.setattr("ultrakb.office.convert.convert_office", convert)
     path = tmp_path / "manual.docx"
     with zipfile.ZipFile(path, "w") as package:
         package.writestr(
@@ -181,15 +205,15 @@ def test_docx_recompile_uses_saved_writer_pdf_with_no_office(
             '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
             "<w:body><w:p><w:r><w:t>hello Writer rule.</w:t></w:r></w:p></w:body></w:document>",
         )
-    imported = import_document(kb_dir, path)
+    imported = publish_saved_processing(kb_dir, path, bundle=resolve_credential_bundle(kb_dir))
     assert imported.status == "added", imported.message
     before = read_document_source(kb_dir, imported.source_id)
 
     def forbidden(*args, **kwargs):
         pytest.fail("Saved Writer processing must not invoke Office")
 
-    monkeypatch.setattr("openkb.office.convert.convert_office", forbidden)
-    monkeypatch.setattr("openkb.office.runtime.processing_identity", forbidden)
+    monkeypatch.setattr("ultrakb.office.convert.convert_office", forbidden)
+    monkeypatch.setattr("ultrakb.office.runtime.processing_identity", forbidden)
     path.unlink()
     result = asyncio.run(recompile_document(kb_dir, imported.source_id))
     assert result.status == "compiled", result.message

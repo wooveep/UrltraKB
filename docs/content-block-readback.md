@@ -19,7 +19,7 @@ Markdown 使用冻结正文的固定 `cl100k_base` token 数分类：≤5000 为
 `title_origin=original`。导航条目不能代替原文标题锚点。块不使用印刷页码
 偏移或 PDF 的“末标题须过文档中点”规则；PDF 的既有行为与递归 AND 条件保留。
 
-CLI 使用 `openkb source SOURCE_ID --blocks 1,3-5`，也可用 `--chars START:END`。
+CLI 使用 `ultrakb source SOURCE_ID --blocks 1,3-5`，也可用 `--chars START:END`。
 REST `/api/v1/document/source` 使用 `blocks` 字段；`pages`、`chars`、`blocks`
 只能选一种。块结果显示 `pages=null`、`block_count`、`block_range`、精确
 `source_spans` 与独立显示上下文。桌面支持块范围与字符范围，问答通过受版本

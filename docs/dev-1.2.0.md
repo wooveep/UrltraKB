@@ -57,7 +57,7 @@ macOS 弹窗验收使用正文和实际可见对话框识别。
 ## 独立环境与复验
 
 必须使用本分支自己的依赖环境。`dev-1.1.0` 使用的
-`pageindex==0.3.0.dev3+openkb.1` 修改包与本分支原始接口不兼容；这里使用
+`pageindex==0.3.0.dev3+ultrakb.1` 修改包与本分支原始接口不兼容；这里使用
 项目内 `vendor/PageIndex` 的 `v0.3.0.dev3` 源码，构建版本为
 `pageindex==0.3.0.dev3+urltrakb.3`。`uv sync` 直接以 editable 模式安装本目录，
 本地索引算法与原始 `0.3.0.dev3` 一致，云端后端已移除。来源和升级说明见
@@ -67,17 +67,17 @@ macOS 弹窗验收使用正文和实际可见对话框识别。
 uv sync --frozen --python 3.12.13 --extra desktop --extra api --extra dev
 # 首次运行时准备固定版本的本地公式/图表资源。
 uv run python scripts/prepare_desktop_assets.py
-uv run openkb-desktop
+uv run ultrakb-desktop
 
 .venv/bin/python -m pytest -q
 .venv/bin/ruff check .
 .venv/bin/ruff format --check .
-.venv/bin/mypy openkb
+.venv/bin/mypy ultrakb
 
 # 输出目录必须尚不存在；只调用本地受控 HTTP 模型，无需实际密钥。
 QT_QPA_PLATFORM=offscreen .venv/bin/python scripts/verify_baseline_desktop.py \
   --output .scratch/baseline-acceptance
-QT_QPA_PLATFORM=offscreen .venv/bin/python -m openkb.desktop.verification \
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m ultrakb.desktop.verification \
   --baseline --output .scratch/baseline-pages
 ```
 
@@ -99,7 +99,7 @@ PageIndex 272 项通过、2 项因缺少上游 PDF fixture 跳过；桌面 22 �
 
 ## 移除托管服务调用
 
-后续的 `+urltrakb.2` 修改移除了 PageIndex Cloud 传输代码、云端客户端、
+后续的 `+ultrakb.2` 修改移除了 PageIndex Cloud 传输代码、云端客户端、
 旧版远程 SDK、CLI 云端文档 ID 导入及配套示例、说明。长 PDF 固定调用
 本地 `LocalClient`，不再读取 `PAGEINDEX_API_KEY` 决定索引方式。
 遗留资料类型仍用于识别本地历史数据，读取和删除不请求云端。
@@ -127,7 +127,7 @@ PageIndex 自身的短超时默认值覆盖，也不会泄漏到其他知识库�
 监听随机本机端口，再转发到指定模型服务；不会修改 `.env` 或把本机地址
 保存进知识库配置。默认上游为 `https://api.deepseek.com`。
 
-记录保存在 `.openkb/traces/<run-id>/`，不受文档失败回滚影响：
+记录保存在 `.ultrakb/traces/<run-id>/`，不受文档失败回滚影响：
 
 - `manifest.json`：文档、SHA256、页数、模型、超时、执行状态。
 - `requests/<request-id>/request.json`：完整提示词、请求参数、阶段和时间。

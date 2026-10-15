@@ -13,6 +13,8 @@ venv/
 # Knowledge base test artifacts
 raw/
 wiki/
+.ultrakb/
+# Retained KB state from earlier installations
 .openkb/
 output/
 kbs/
@@ -30,9 +32,9 @@ examples/docs/
 examples/kb/
 
 # Locally assembled native rendering runtimes (included by desktop packaging).
-/openkb/rendering/assets/
-/openkb/rendering/rust-helper/target/
-/openkb/office/assets/runtime
-/openkb/office/launcher/target/
-/openkb/cfb_helper/assets/runtime/
-/openkb/cfb_helper/rust-helper/target/
+/ultrakb/rendering/assets/
+/ultrakb/rendering/rust-helper/target/
+/ultrakb/office/assets/runtime
+/ultrakb/office/launcher/target/
+/ultrakb/cfb_helper/assets/runtime/
+/ultrakb/cfb_helper/rust-helper/target/

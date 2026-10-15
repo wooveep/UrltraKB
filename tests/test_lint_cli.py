@@ -1,4 +1,4 @@
-"""Tests for the openkb lint CLI command."""
+"""Tests for the ultrakb lint CLI command."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from click.testing import CliRunner
 
-from openkb.cli import cli
+from ultrakb.cli import cli
 
 
 def _setup_kb(tmp_path: Path) -> Path:
@@ -19,13 +19,13 @@ def _setup_kb(tmp_path: Path) -> Path:
     (kb_dir / "wiki" / "summaries").mkdir(parents=True)
     (kb_dir / "wiki" / "concepts").mkdir(parents=True)
     (kb_dir / "wiki" / "reports").mkdir(parents=True)
-    openkb_dir = kb_dir / ".openkb"
-    openkb_dir.mkdir()
-    (openkb_dir / "config.yaml").write_text("model: gpt-4o-mini\n")
+    ultrakb_dir = kb_dir / ".ultrakb"
+    ultrakb_dir.mkdir()
+    (ultrakb_dir / "config.yaml").write_text("model: gpt-4o-mini\n")
     from kb_fixtures import mark_current_kb
 
-    mark_current_kb(openkb_dir.parent)
-    (openkb_dir / "hashes.json").write_text(json.dumps({}))
+    mark_current_kb(ultrakb_dir.parent)
+    (ultrakb_dir / "hashes.json").write_text(json.dumps({}))
     (kb_dir / "wiki" / "index.md").write_text(
         "# Knowledge Base Index\n\n## Documents\n\n## Concepts\n"
     )
@@ -37,7 +37,7 @@ class TestLintCommand:
         """Lint on an empty KB (no indexed docs) should exit early."""
         kb_dir = _setup_kb(tmp_path)
         runner = CliRunner()
-        with patch("openkb.cli._find_kb_dir", return_value=kb_dir):
+        with patch("ultrakb.cli._find_kb_dir", return_value=kb_dir):
             result = runner.invoke(cli, ["lint"])
         assert result.exit_code == 0
         assert "Nothing to lint" in result.output
@@ -49,9 +49,9 @@ class TestLintCommand:
     def test_lint_no_hashes_file_skips(self, tmp_path):
         """Lint should also skip when hashes.json doesn't exist."""
         kb_dir = _setup_kb(tmp_path)
-        (kb_dir / ".openkb" / "hashes.json").unlink()
+        (kb_dir / ".ultrakb" / "hashes.json").unlink()
         runner = CliRunner()
-        with patch("openkb.cli._find_kb_dir", return_value=kb_dir):
+        with patch("ultrakb.cli._find_kb_dir", return_value=kb_dir):
             result = runner.invoke(cli, ["lint"])
         assert result.exit_code == 0
         assert "Nothing to lint" in result.output
@@ -60,24 +60,29 @@ class TestLintCommand:
         runner = CliRunner()
         with (
             runner.isolated_filesystem(temp_dir=tmp_path),
-            patch("openkb.cli._find_kb_dir", return_value=None),
+            patch("ultrakb.cli._find_kb_dir", return_value=None),
         ):
             result = runner.invoke(cli, ["lint"])
             assert "No knowledge base found" in result.output
 
-    def test_lint_runs_when_docs_exist(self, tmp_path):
+    def test_lint_runs_when_docs_exist(self, tmp_path, live_llm, monkeypatch):
         """Lint should proceed when there are indexed documents."""
+        from application_llm_fixtures import (
+            assert_semantic_lint_delivery,
+            semantic_lint_fixture,
+        )
+
         kb_dir = _setup_kb(tmp_path)
-        hashes = {"abc": {"name": "paper.pdf", "type": "pdf"}}
-        (kb_dir / ".openkb" / "hashes.json").write_text(json.dumps(hashes))
+        observation = semantic_lint_fixture(kb_dir, live_llm, monkeypatch)
         runner = CliRunner()
-        with (
-            patch("openkb.cli._find_kb_dir", return_value=kb_dir),
-            patch("openkb.cli._setup_llm_key"),
-            patch("openkb.agent.linter.run_knowledge_lint", return_value="No issues."),
-        ):
+        with patch("ultrakb.cli._find_kb_dir", return_value=kb_dir):
             result = runner.invoke(cli, ["lint"])
         assert result.exit_code == 0
         assert "Running structural lint" in result.output
         assert "Running knowledge lint" in result.output
         assert "Report written to" in result.output
+        assert len(observation.reports) == 1
+        assert_semantic_lint_delivery(observation.reports[0], observation, live_llm)
+        saved = list((kb_dir / "wiki/reports").glob("lint_*.md"))
+        assert len(saved) == 1
+        assert observation.reports[0] in saved[0].read_text(encoding="utf-8")

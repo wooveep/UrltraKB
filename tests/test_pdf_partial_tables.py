@@ -36,7 +36,7 @@ def test_partial_native_table_preserves_blank_merged_cell_and_later_category(tmp
     rows = Tables(content).rows
 
     assert len(rows) == 5
-    assert rows[0][0]["data-openkb-cell"] == "unresolved"
+    assert rows[0][0]["data-ultrakb-cell"] == "unresolved"
     assert rows[0][1:] == [{"text": "Feature"}, {"text": "Description"}]
     assert rows[1] == [
         {"text": "", "rowspan": "3"},
@@ -63,7 +63,7 @@ def test_partial_native_table_preserves_blank_merged_cell_and_later_category(tmp
 def test_native_grid_limit_retains_all_text_with_an_explicit_layout_gap(
     tmp_path, monkeypatch, mode
 ):
-    monkeypatch.setattr("openkb.pdf_layout._MAX_TABLE_SLOTS", 8)
+    monkeypatch.setattr("ultrakb.pdf_layout._MAX_TABLE_SLOTS", 8)
     path = partial_table_pdf(tmp_path / "limited.pdf")
 
     content, _ = convert(path, tmp_path, mode)

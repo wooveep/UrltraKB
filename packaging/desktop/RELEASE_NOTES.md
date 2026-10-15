@@ -1,4 +1,4 @@
-# UrltraKB 1.2.2
+# UltraKB 1.2.2
 
 基于 `dev-1.2.0` 发布原生桌面工作台、命令行和独立 REST API。
 
@@ -14,10 +14,10 @@
 
 | 平台 | 安装包 | 使用方式 |
 | --- | --- | --- |
-| Debian amd64 | `UrltraKB-1.2.2-debian-amd64.deb` | `sudo apt install ./UrltraKB-1.2.2-debian-amd64.deb` |
-| Debian arm64 | `UrltraKB-1.2.2-debian-arm64.deb` | `sudo apt install ./UrltraKB-1.2.2-debian-arm64.deb` |
-| Windows x64 | `UrltraKB-1.2.2-windows-x64.zip` | 解压后运行 `UrltraKB.exe`，保留完整目录 |
-| macOS arm64 | `UrltraKB-1.2.2-macos-arm64.zip` | 解压后将 `UrltraKB.app` 移至 Applications |
+| Debian amd64 | `UltraKB-1.2.2-debian-amd64.deb` | `sudo apt install ./UltraKB-1.2.2-debian-amd64.deb` |
+| Debian arm64 | `UltraKB-1.2.2-debian-arm64.deb` | `sudo apt install ./UltraKB-1.2.2-debian-arm64.deb` |
+| Windows x64 | `UltraKB-1.2.2-windows-x64.zip` | 解压后运行 `UltraKB.exe`，保留完整目录 |
+| macOS arm64 | `UltraKB-1.2.2-macos-arm64.zip` | 解压后将 `UltraKB.app` 移至 Applications |
 
 附件同时提供各平台对应的 `-source.zip`、`-build.json` 和统一的
 `SHA256SUMS.txt`，全部绑定 `v1.2.2` 的同一提交。程序内含 Python 运行时，

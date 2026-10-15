@@ -2,7 +2,7 @@
 
 import pytest
 
-from openkb.application.pages import read_page, save_page
+from ultrakb.application.pages import read_page, save_page
 
 
 def test_editor_retains_metadata_and_rejects_a_stale_draft(kb_dir):
@@ -26,7 +26,7 @@ def test_corrupt_recovery_record_blocks_saving_and_retains_evidence(kb_dir):
     page = kb_dir / "wiki/concepts/attention.md"
     page.write_text("Original\n")
     opened = read_page(kb_dir, "concepts/attention")
-    journal = kb_dir / ".openkb/journal/broken.json"
+    journal = kb_dir / ".ultrakb/journal/broken.json"
     journal.parent.mkdir()
     journal.write_text("{incomplete")
 
@@ -38,8 +38,8 @@ def test_corrupt_recovery_record_blocks_saving_and_retains_evidence(kb_dir):
 
 
 def test_create_and_reopen_existing_knowledge_base_without_changing_cwd(tmp_path, monkeypatch):
-    from openkb import config
-    from openkb.application.knowledge_bases import get_kb_list, initialize_kb, open_kb
+    from ultrakb import config
+    from ultrakb.application.knowledge_bases import get_kb_list, initialize_kb, open_kb
 
     monkeypatch.setattr(config, "GLOBAL_CONFIG_DIR", tmp_path / "settings")
     monkeypatch.setattr(config, "GLOBAL_CONFIG_PATH", tmp_path / "settings/global.yaml")
@@ -52,22 +52,22 @@ def test_create_and_reopen_existing_knowledge_base_without_changing_cwd(tmp_path
 
 
 def test_open_rejects_invalid_runtime_fields_before_registering(kb_dir, tmp_path, monkeypatch):
-    from openkb import config
-    from openkb.application.knowledge_bases import open_kb
+    from ultrakb import config
+    from ultrakb.application.knowledge_bases import open_kb
 
     monkeypatch.setattr(config, "GLOBAL_CONFIG_DIR", tmp_path / "settings")
     monkeypatch.setattr(config, "GLOBAL_CONFIG_PATH", tmp_path / "settings/global.yaml")
-    (kb_dir / ".openkb/config.yaml").write_text("model: []\nlanguage: {}\n")
+    (kb_dir / ".ultrakb/config.yaml").write_text("model: []\nlanguage: {}\n")
     with pytest.raises(ValueError, match="model.*string"):
         open_kb(kb_dir)
     assert not config.GLOBAL_CONFIG_PATH.exists()
 
 
 def test_open_accepts_legacy_zero_threshold_after_settings_save(kb_dir, tmp_path, monkeypatch):
-    from openkb import config
-    from openkb.application.knowledge_bases import open_kb
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
+    from ultrakb import config
+    from ultrakb.application.knowledge_bases import open_kb
+    from ultrakb.application.settings import apply_kb_config_patch
+    from ultrakb.application.settings_data import KbConfigPatchRequest
 
     monkeypatch.setattr(config, "GLOBAL_CONFIG_DIR", tmp_path / "settings")
     monkeypatch.setattr(config, "GLOBAL_CONFIG_PATH", tmp_path / "settings/global.yaml")

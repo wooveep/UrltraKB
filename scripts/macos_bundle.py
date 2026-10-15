@@ -37,7 +37,7 @@ def bundle_toc(program: Path, inventory: dict) -> list[tuple[str, str, str]]:
 def info_plist(identity: dict) -> dict:
     version = identity["version"]
     return {
-        "CFBundleDisplayName": "UrltraKB",
+        "CFBundleDisplayName": "UltraKB",
         "CFBundleShortVersionString": version.split(".dev")[0] if ".dev" in version else version,
         "CFBundleVersion": version.split(".dev")[1].split("+")[0] if ".dev" in version else version,
         "LSMinimumSystemVersion": "14.0",
@@ -69,15 +69,16 @@ def stage_macos(program: Path, app: Path, identity: dict, inventory: dict) -> Pa
         bundle_toc(program, inventory),
         name=app.name,
         version=info_plist(identity)["CFBundleShortVersionString"],
-        bundle_identifier="io.github.wooveep.urltrakb",
+        bundle_identifier="io.github.wooveep.ultrakb",
         info_plist=info_plist(identity),
         icon=str(
-            Path(__file__).resolve().parents[1] / "openkb/desktop/assets/brand/openkb-app-icon.ico"
+            Path(__file__).resolve().parents[1]
+            / "ultrakb/desktop/assets/brand/ultrakb-app-icon.ico"
         ),
     )
     office = program / "_internal/office"
     if office.is_dir():
-        from openkb.office.runtime import validate_runtime
+        from ultrakb.office.runtime import validate_runtime
 
         copied = app / "Contents/Resources/office"
         shutil.copytree(office, copied, symlinks=True)

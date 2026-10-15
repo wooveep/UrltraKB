@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>openkb · knowledge graph</title>
+<title>ultrakb · knowledge graph</title>
 <style>
 :root{
   --bg:#080b11;--ink:#eef2f7;--soft:#aeb8c7;--mut:#6f7c8f;
@@ -210,7 +210,7 @@ html,body{
 <canvas id="c"></canvas>
 <div class="mindmap" id="mindmap"></div>
 
-<div class="brand">openkb<small>knowledge graph</small></div>
+<div class="brand">ultrakb<small>knowledge graph</small></div>
 
 <div class="hud">
   <span class="stat"><b id="ncount">0</b><span class="lab">nodes</span></span>
@@ -289,12 +289,12 @@ let orbiting = false, oStartX = 0, oStartY = 0, yawStart = 0, pitchStart = 0;
 let panOrigX = 0, panOrigY = 0, pendingInspect = null;   // radial: bg-drag pan + click-to-inspect
 let didDrag = false;
 let alpha = 1;                   // simulated-annealing "temperature"; cools to 0 so motion stops
-// synthetic centre for the radial view ("OpenKB" → documents → concepts)
-const ROOT = { id:"__openkb__", label:"OpenKB", type:"__root__", x:0, y:0, sx:0, sy:0, rz:0, pp:1, r:15, show:true };
+// synthetic centre for the radial view ("UltraKB" → documents → concepts)
+const ROOT = { id:"__ultrakb__", label:"UltraKB", type:"__root__", x:0, y:0, sx:0, sy:0, rz:0, pp:1, r:15, show:true };
 let treeEdges = [];              // radial hierarchy edges (root→doc, doc→concept)
 const DEFAULT_SPREAD = 1.7;      // open the nebula out by default so it isn't a clump
 let spread = DEFAULT_SPREAD;     // spacing knob: >1 spreads nodes apart, <1 packs them tighter
-let mode = "graph";              // "graph" = 3D nebula (default) · "mindmap" = horizontal tree · "radial" = OpenKB-centred circle
+let mode = "graph";              // "graph" = 3D nebula (default) · "mindmap" = horizontal tree · "radial" = UltraKB-centred circle
 let idleFrames = 0;              // frames since last interaction → drives idle auto-rotation
 let autoFit = true;              // keep gently framing the cloud until the user takes control
 
@@ -320,13 +320,13 @@ function seed(){
   });
 }
 
-/* ===================== mind-map: OpenKB → documents → concepts (horizontal tree, DOM) ===================== */
+/* ===================== mind-map: UltraKB → documents → concepts (horizontal tree, DOM) ===================== */
 const mmEl = document.getElementById("mindmap");
 const mmCollapsed = new Set();   // node ids whose children are hidden
 let mmQuery = "", mmRootY = 0;
 const mmResolveSrc = s => { const id = String(s).replace(/\.md$/i, ""); return (byId[id] && byId[id].id.startsWith("summaries/")) ? id : null; };
 const ROOT_W = 104, NODE_W = 184, COL = 234, ROW = 31, PADX = 34, PADY = 30, NH = 22;
-// shared OpenKB → documents → concepts grouping (each concept under its primary source summary)
+// shared UltraKB → documents → concepts grouping (each concept under its primary source summary)
 function buildProvenance(){
   const docs = nodes.filter(n => n.id.startsWith("summaries/") && typeVisible(n.type));
   const kidsOf = {}; docs.forEach(d => kidsOf[d.id] = []);
@@ -343,7 +343,7 @@ function buildMindmap(){
   const keep = n => !q || n.label.toLowerCase().includes(q) || n.id.toLowerCase().includes(q);
   const { docs, kidsOf, rootDirect } = buildProvenance();
   const mk = n => ({ id:n.id, label:n.label, type:n.type, kids:[] });
-  const root = { id:"__openkb__", label:"OpenKB", type:"__root__", kids:[] };
+  const root = { id:"__ultrakb__", label:"UltraKB", type:"__root__", kids:[] };
   docs.forEach(d => {
     const kids = kidsOf[d.id].filter(keep).map(mk);
     if(q && !keep(d) && !kids.length) return;      // search prunes empty branches
@@ -356,7 +356,7 @@ function buildMindmap(){
   (function place(item, depth){
     maxDepth = Math.max(maxDepth, depth);
     item.x = PADX + depth * COL;
-    item.w = item.id === "__openkb__" ? ROOT_W : NODE_W;
+    item.w = item.id === "__ultrakb__" ? ROOT_W : NODE_W;
     const expanded = item.kids.length && !mmCollapsed.has(item.id);
     if(expanded){
       item.kids.forEach(k => place(k, depth + 1));
@@ -377,7 +377,7 @@ function buildMindmap(){
   svg += `</svg>`;
   let html = "";
   flat.forEach(it => {
-    if(it.id === "__openkb__"){ html += `<div class="mm-node mm-root" style="left:${it.x}px;top:${it.y - 4}px">OpenKB</div>`; return; }
+    if(it.id === "__ultrakb__"){ html += `<div class="mm-node mm-root" style="left:${it.x}px;top:${it.y - 4}px">UltraKB</div>`; return; }
     const col = colorOf(it.type);
     const hasKids = it.id.startsWith("summaries/") && (kidsOf[it.id] || []).length;
     html += `<div class="mm-node" data-id="${esc(it.id)}" title="${esc(it.label)}" `
@@ -387,7 +387,7 @@ function buildMindmap(){
       + `</div>`;
   });
   const offY = Math.max(0, (mmEl.clientHeight - Hpx) / 2);   // centre vertically when it fits; else scroll
-  mmRootY = offY + flat.find(it => it.id === "__openkb__").y;  // for centring the scroll on OpenKB
+  mmRootY = offY + flat.find(it => it.id === "__ultrakb__").y;  // for centring the scroll on UltraKB
   mmEl.innerHTML = `<div class="mm-canvas" style="width:${Wpx}px;height:${Hpx}px;margin:${offY}px auto 0">${svg}${html}</div>`;
   mmEl.querySelectorAll("[data-tog]").forEach(el => el.onclick = e => {
     e.stopPropagation(); const id = el.dataset.tog;
@@ -397,7 +397,7 @@ function buildMindmap(){
   mmEl.querySelectorAll(".mm-node[data-id]").forEach(el => el.onclick = () => { const m = byId[el.dataset.id]; if(m) openPanel(m); });
 }
 
-/* ===================== radial view: same OpenKB→docs→concepts tree, fanned in a circle ===================== */
+/* ===================== radial view: same UltraKB→docs→concepts tree, fanned in a circle ===================== */
 function layoutRadial(){
   const { docs, kidsOf, rootDirect } = buildProvenance();
   nodes.forEach(n => { n.show = false; });
@@ -491,8 +491,8 @@ function setMode(m){
 }
 function updateHint(){
   hintEl.innerHTML =
-    mode === "mindmap" ? 'OpenKB → documents → concepts &nbsp; <kbd>+/−</kbd> expand a branch &nbsp; <kbd>click</kbd> read details'
-    : mode === "radial" ? 'centre <b>OpenKB</b> → documents → concepts &nbsp; faint = cross-refs &nbsp; <kbd>click</kbd> read &nbsp; <kbd>drag</kbd> pan'
+    mode === "mindmap" ? 'UltraKB → documents → concepts &nbsp; <kbd>+/−</kbd> expand a branch &nbsp; <kbd>click</kbd> read details'
+    : mode === "radial" ? 'centre <b>UltraKB</b> → documents → concepts &nbsp; faint = cross-refs &nbsp; <kbd>click</kbd> read &nbsp; <kbd>drag</kbd> pan'
     : '<kbd>scroll</kbd> zoom &nbsp; <kbd>drag bg</kbd> rotate &nbsp; <kbd>click</kbd> inspect<br>'
       + '<kbd>drag node</kbd> pull out &amp; pin &nbsp; <kbd>dbl-click</kbd> release';
 }
@@ -601,7 +601,7 @@ function drawRoot(){
   ctx.shadowColor = "rgba(120,200,255,.95)"; ctx.shadowBlur = 24; ctx.fill(); ctx.shadowBlur = 0;
   ctx.fillStyle = "rgba(238,242,247,.98)"; ctx.font = "700 13px ui-monospace,monospace"; ctx.textAlign = "center";
   ctx.shadowColor = "rgba(4,6,10,.95)"; ctx.shadowBlur = 5;
-  ctx.fillText("OpenKB", x, y + r + 16);
+  ctx.fillText("UltraKB", x, y + r + 16);
   ctx.shadowBlur = 0;
 }
 
@@ -716,7 +716,7 @@ function drawNode(n, t){
 }
 
 function frame(t){
-  if(mode === "radial"){         // canvas: OpenKB-rooted radial tree (flat)
+  if(mode === "radial"){         // canvas: UltraKB-rooted radial tree (flat)
     if(alpha > 0.005) step();
     project();
     ROOT.pp = 1; ROOT.rz = 0;

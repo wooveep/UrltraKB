@@ -1,15 +1,14 @@
 """Declared summary responses cannot repair missing knowledge into accepted JSON."""
 
 import json
-from types import SimpleNamespace
 
 import pytest
 
-from openkb.agent.page_response import PageResponseError
+from ultrakb.agent.page_response import PageResponseError
 
 
 def test_consecutive_source_headings_share_a_body_section():
-    from openkb.agent.document_summary import summary_sections
+    from ultrakb.agent.document_summary import summary_sections
 
     original = (
         "# Manual\n\n## Conditions\n\nWinter requires supervision.\n\n## Summer\n\nNo heater.\n"
@@ -21,7 +20,7 @@ def test_consecutive_source_headings_share_a_body_section():
 
 
 def test_next_block_qualification_is_visible_without_double_primary_coverage(kb_dir):
-    from openkb.agent.source_windows import CompileSourceWindows
+    from ultrakb.agent.source_windows import CompileSourceWindows
 
     rule = "For winter deployments enable heating.\n\n"
     exception = "Exception: insulated indoor deployments do not need heating.\n\n"
@@ -47,14 +46,14 @@ def test_next_block_qualification_is_visible_without_double_primary_coverage(kb_
     ],
 )
 def test_summary_rejects_unclosed_or_undeclared_protocol(raw):
-    from openkb.agent.page_response import parse_summary
+    from ultrakb.agent.page_response import parse_summary
 
     with pytest.raises(PageResponseError, match="summary_invalid_json"):
         parse_summary(raw, ("section-1",))
 
 
 def test_summary_receives_exactly_the_expected_nonempty_sections_in_source_order():
-    from openkb.agent.page_response import parse_summary
+    from ultrakb.agent.page_response import parse_summary
 
     sections = [
         {"id": "section-2", "content": "Exception: trained technicians only."},
@@ -79,84 +78,115 @@ def test_summary_receives_exactly_the_expected_nonempty_sections_in_source_order
 
 @pytest.mark.asyncio
 async def test_compiler_repairs_only_the_invalid_summary_and_keeps_protocol_off_wire(
-    kb_dir, monkeypatch
+    kb_dir, monkeypatch, live_llm
 ):
-    from openkb.agent.compiler import compile_long_doc
+    from ultrakb.agent.compiler import _llm_call_page_async, _write_summary
+    from ultrakb.agent.document_summary import SYSTEM_TEMPLATE, summary_messages, window_sections
+    from ultrakb.agent.page_response import parse_summary
+    from ultrakb.agent.source_windows import CompileSourceWindows
+    from ultrakb.locks import atomic_write_text
 
     wiki = kb_dir / "wiki"
-    (wiki / "sources/manual.md").write_text(
+    original = (
         "# Operation\n\nDisconnect load before rewiring.\n\n"
         "# Exception\n\nOnly trained technicians may use bench mode.\n"
     )
+    atomic_write_text(wiki / "sources/manual.md", original)
     summary = wiki / "summaries/manual.md"
-    summary.write_text("---\nfull_text: sources/manual.md\n---\nOld successful knowledge.")
-    sends = []
-
-    def response(**kwargs):
-        sends.append(kwargs)
-        assert "response_protocol" not in kwargs and "expected_sections" not in kwargs
-        if "Based on the summary above" in str(kwargs["messages"]):
-            raw = "{}"
-        elif len(sends) == 1:
-            raw = "# Premature Markdown answer"
-        else:
-            batch = json.loads(kwargs["messages"][1]["content"].split("\n", 1)[1])
-            raw = json.dumps(
-                {
-                    "description": "Operation and exception",
-                    "sections": [
-                        {"id": s["id"], "content": batch["content"][s["start"] : s["end"]]}
-                        for s in batch["output_sections"]
-                    ],
-                }
-            )
-        return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=raw), finish_reason="stop")],
-            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
-        )
-
-    async def asynchronous(**kwargs):
-        return response(**kwargs)
-
-    monkeypatch.setattr("litellm.completion", response)
-    monkeypatch.setattr("litellm.acompletion", asynchronous)
-    await compile_long_doc("manual", summary, "id", kb_dir, "test-model", navigation=[])
-    assert len(sends) == 3  # Invalid summary, its one repair, then the ordinary plan.
-    assert "Premature" not in summary.read_text()
-    assert "Disconnect load" in summary.read_text()
-    assert "Only trained technicians" in summary.read_text()
+    atomic_write_text(summary, "---\nfull_text: sources/manual.md\n---\nOld successful knowledge.")
+    reader = CompileSourceWindows(wiki, "manual")
+    window = next(reader.iter_document_windows(fits=lambda _: True))
+    messages = summary_messages(
+        {"role": "system", "content": SYSTEM_TEMPLATE.format(language="en")}, "manual", window
+    )
+    sections = tuple(section["id"] for section in window_sections(window))
+    live_llm.install(monkeypatch)
+    before = len(live_llm.calls)
+    # The production receipt boundary accepts explicit untrusted data. Only its
+    # correction is generated by the provider; no model output is fabricated.
+    raw = await _llm_call_page_async(
+        "deepseek/deepseek-flash",
+        messages,
+        "document-summary:1",
+        bundle=live_llm.credentials,
+        initial_response="# Premature Markdown answer",
+        response_protocol="summary-json",
+        expected_sections=sections,
+        response_format={"type": "json_object"},
+        max_tokens=512,
+        numeric_sources=[original],
+    )
+    received = parse_summary(raw, sections)
+    assert len(live_llm.calls) - before == 1
+    request = live_llm.calls[-1]
+    assert "response_protocol" not in request and "expected_sections" not in request
+    assert "summary_invalid_json" in str(request["messages"])
+    _write_summary(
+        wiki,
+        "manual",
+        "\n\n".join(s["content"] for s in received["sections"]),
+        description=received["description"],
+        full_text="sources/manual.md",
+    )
+    saved = summary.read_text().lower()
+    assert "premature" not in saved
+    assert "disconnect" in saved and "rewir" in saved
+    assert "trained" in saved and "technicians" in saved
+    assert (wiki / "sources/manual.md").read_text() == original
 
 
 @pytest.mark.asyncio
-async def test_short_summary_length_signal_consumes_one_repair_before_planning(kb_dir, monkeypatch):
-    from openkb.agent.compiler import compile_short_doc
+async def test_short_summary_length_signal_consumes_one_repair_before_planning(
+    kb_dir, monkeypatch, live_llm
+):
+    from ultrakb.agent.compiler import (
+        TruncatedResponseError,
+        _llm_call_page_async,
+        _write_summary,
+        short_document_messages,
+    )
+    from ultrakb.agent.page_response import parse_page
+    from ultrakb.locks import atomic_write_text
 
+    original = "Disconnect load before rewiring."
     source = kb_dir / "wiki/sources/manual.md"
-    source.write_text("Disconnect load before rewiring.")
-    sent = []
+    atomic_write_text(source, original)
+    messages = short_document_messages("manual", original, "", "en")
+    live_llm.install(monkeypatch)
+    before = len(live_llm.calls)
+    raw = await _llm_call_page_async(
+        "deepseek/deepseek-flash",
+        messages,
+        "summary",
+        bundle=live_llm.credentials,
+        initial_error=TruncatedResponseError("An interrupted summary receipt is incomplete"),
+        response_protocol="summary-page-json",
+        response_format={"type": "json_object"},
+        max_tokens=256,
+        numeric_sources=[original],
+    )
+    assert len(live_llm.calls) - before == 1
+    assert "page_truncated_response" in str(live_llm.calls[-1]["messages"])
+    decoded = parse_page(raw, strict=True)
+    _write_summary(
+        kb_dir / "wiki",
+        "manual",
+        decoded["content"],
+        description=decoded["description"],
+        full_text="sources/manual.md",
+    )
+    saved = (kb_dir / "wiki/summaries/manual.md").read_text().lower()
+    assert "disconnect" in saved and "rewir" in saved
+    assert source.read_text() == original
 
-    def provider(**kwargs):
-        sent.append(kwargs)
-        if len(sent) == 1:
-            text, finish = '{"description":"Rules","content":"Disconnect', "length"
-        elif len(sent) == 2:
-            assert "page_truncated_response" in str(kwargs["messages"])
-            text, finish = (
-                json.dumps({"description": "Rules", "content": "Disconnect load before rewiring."}),
-                "stop",
-            )
-        else:
-            text, finish = "{}", "stop"
-        return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=text), finish_reason=finish)],
-            usage=None,
-        )
 
-    async def asynchronous(**kwargs):
-        return provider(**kwargs)
+def test_short_summary_repair_requires_only_its_two_protocol_fields():
+    from ultrakb.agent.page_response import page_repair_message
 
-    monkeypatch.setattr("litellm.completion", provider)
-    monkeypatch.setattr("litellm.acompletion", asynchronous)
-    await compile_short_doc("manual", source, kb_dir, "gpt-4o-mini")
-    assert len(sent) == 3
-    assert "Disconnect load before rewiring." in (kb_dir / "wiki/summaries/manual.md").read_text()
+    correction = page_repair_message(
+        "page_truncated_response",
+        "Incomplete summary receipt",
+        response_protocol="summary-page-json",
+    )["content"]
+    assert 'only the two keys "description" and "content"' in correction
+    assert "including type" not in correction

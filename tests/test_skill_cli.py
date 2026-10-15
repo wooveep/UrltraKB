@@ -1,22 +1,23 @@
-"""End-to-end tests for `openkb skill new` via click.testing.CliRunner.
+"""End-to-end tests for `ultrakb skill new` via click.testing.CliRunner.
 
-The agent runner is patched so these tests don't burn LLM tokens. They
-verify the CLI wiring: KB detection, name validation, overwrite logic,
-marketplace.json regeneration, exit codes."""
+Successful generation uses the budgeted real DeepSeek creator. Pure cases
+verify KB detection, name validation, artifact history and scorecard rendering."""
 
 from __future__ import annotations
 
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 from click.testing import CliRunner
 
-from openkb.cli import cli
+from ultrakb.cli import cli
+
+pytest_plugins = ("test_vendor_sdk",)
 
 
 def _make_kb(tmp_path):
-    (tmp_path / ".openkb").mkdir()
-    (tmp_path / ".openkb" / "config.yaml").write_text("model: gpt-4o-mini\n")
+    (tmp_path / ".ultrakb").mkdir()
+    (tmp_path / ".ultrakb" / "config.yaml").write_text("model: gpt-4o-mini\n")
     from kb_fixtures import mark_current_kb
 
     mark_current_kb(tmp_path)
@@ -29,30 +30,17 @@ def _make_kb(tmp_path):
     return tmp_path
 
 
-def _fake_compile(kb_dir, skill_name, **_kw):
-    """Side-effect for the patched run_skill_create: write a minimal SKILL.md."""
-    target = kb_dir / "output" / "skills" / skill_name
-    target.mkdir(parents=True, exist_ok=True)
-    (target / "SKILL.md").write_text(
-        f"---\nname: {skill_name}\ndescription: test description\n---\n\n# {skill_name}\n"
-    )
+def test_skill_new_succeeds_and_writes_files(kb_dir, model_service):
+    from short_generation import assert_formatter_delivery, retained_formatter
 
-
-def test_skill_new_succeeds_and_writes_files(tmp_path):
-    kb = _make_kb(tmp_path)
+    kb = kb_dir
+    intent = retained_formatter(kb, model_service.credentials)
     runner = CliRunner()
 
-    async def fake_run(kb_dir, skill_name, intent, model, **_kw):
-        _fake_compile(kb_dir, skill_name)
-
-    with (
-        patch("openkb.cli._find_kb_dir", return_value=kb),
-        patch("openkb.skill.generator.run_skill_create", new=AsyncMock(side_effect=fake_run)),
-    ):
-        result = runner.invoke(cli, ["skill", "new", "demo", "test intent"])
+    result = runner.invoke(cli, ["--kb-dir", str(kb), "skill", "new", "demo", intent])
 
     assert result.exit_code == 0, result.output
-    assert (kb / "output" / "skills" / "demo" / "SKILL.md").exists()
+    assert_formatter_delivery(kb, "demo", model_service)
     assert (kb / ".claude-plugin" / "marketplace.json").exists()
     manifest = json.loads((kb / ".claude-plugin" / "marketplace.json").read_text())
     assert manifest["plugins"][0]["skills"] == ["./output/skills/demo"]
@@ -61,7 +49,7 @@ def test_skill_new_succeeds_and_writes_files(tmp_path):
 def test_skill_new_rejects_invalid_name(tmp_path):
     kb = _make_kb(tmp_path)
     runner = CliRunner()
-    with patch("openkb.cli._find_kb_dir", return_value=kb):
+    with patch("ultrakb.cli._find_kb_dir", return_value=kb):
         result = runner.invoke(cli, ["skill", "new", "BadName", "x"])
     assert result.exit_code != 0
     assert "lowercase" in result.output.lower()
@@ -69,7 +57,7 @@ def test_skill_new_rejects_invalid_name(tmp_path):
 
 def test_skill_new_errors_without_kb(tmp_path):
     runner = CliRunner()
-    with patch("openkb.cli._find_kb_dir", return_value=None):
+    with patch("ultrakb.cli._find_kb_dir", return_value=None):
         result = runner.invoke(cli, ["skill", "new", "demo", "x"])
     assert result.exit_code != 0
     assert "No knowledge base" in result.output
@@ -77,14 +65,14 @@ def test_skill_new_errors_without_kb(tmp_path):
 
 def test_skill_new_errors_with_empty_wiki(tmp_path):
     kb = tmp_path
-    (kb / ".openkb").mkdir()
-    (kb / ".openkb" / "config.yaml").write_text("model: gpt-4o-mini\n")
+    (kb / ".ultrakb").mkdir()
+    (kb / ".ultrakb" / "config.yaml").write_text("model: gpt-4o-mini\n")
     from kb_fixtures import mark_current_kb
 
     mark_current_kb(kb)
     # No wiki/ directory
     runner = CliRunner()
-    with patch("openkb.cli._find_kb_dir", return_value=kb):
+    with patch("ultrakb.cli._find_kb_dir", return_value=kb):
         result = runner.invoke(cli, ["skill", "new", "demo", "x"])
     assert result.exit_code != 0
     assert "wiki" in result.output.lower()
@@ -95,17 +83,17 @@ def test_skill_new_errors_with_freshly_init_wiki(tmp_path):
     No documents have been ingested. The skill factory must refuse to compile
     rather than spend tokens on an empty wiki."""
     kb = tmp_path
-    (kb / ".openkb").mkdir()
-    (kb / ".openkb" / "config.yaml").write_text("model: gpt-4o-mini\n")
+    (kb / ".ultrakb").mkdir()
+    (kb / ".ultrakb" / "config.yaml").write_text("model: gpt-4o-mini\n")
     from kb_fixtures import mark_current_kb
 
     mark_current_kb(kb)
-    # Mirror openkb init's layout: empty concepts + summaries, just index.md
+    # Mirror ultrakb init's layout: empty concepts + summaries, just index.md
     (kb / "wiki" / "concepts").mkdir(parents=True)
     (kb / "wiki" / "summaries").mkdir(parents=True)
     (kb / "wiki" / "index.md").write_text("# index\n")
     runner = CliRunner()
-    with patch("openkb.cli._find_kb_dir", return_value=kb):
+    with patch("ultrakb.cli._find_kb_dir", return_value=kb):
         result = runner.invoke(cli, ["skill", "new", "demo", "x"])
     assert result.exit_code != 0
     assert "compiled content" in result.output.lower() or "ingest" in result.output.lower()
@@ -115,7 +103,7 @@ def test_skill_new_aborts_when_target_exists_without_yes(tmp_path):
     kb = _make_kb(tmp_path)
     (kb / "output" / "skills" / "demo").mkdir(parents=True)
     runner = CliRunner()
-    with patch("openkb.cli._find_kb_dir", return_value=kb):
+    with patch("ultrakb.cli._find_kb_dir", return_value=kb):
         # Simulate non-interactive abort (CliRunner doesn't supply a TTY,
         # which our error path treats as "must pass -y").
         result = runner.invoke(cli, ["skill", "new", "demo", "x"], input="n\n")
@@ -125,30 +113,29 @@ def test_skill_new_aborts_when_target_exists_without_yes(tmp_path):
     assert "exists" in out or "overwrite" in out or "aborted" in out
 
 
-def test_skill_new_overwrites_with_yes_flag(tmp_path):
-    kb = _make_kb(tmp_path)
+def test_skill_new_overwrites_with_yes_flag(kb_dir, model_service):
+    from short_generation import assert_formatter_delivery, retained_formatter
+
+    kb = kb_dir
+    intent = retained_formatter(kb, model_service.credentials)
     (kb / "output" / "skills" / "demo").mkdir(parents=True)
     (kb / "output" / "skills" / "demo" / "stale.txt").write_text("old")
     runner = CliRunner()
 
-    async def fake_run(kb_dir, skill_name, intent, model, **_kw):
-        _fake_compile(kb_dir, skill_name)
-
-    with (
-        patch("openkb.cli._find_kb_dir", return_value=kb),
-        patch("openkb.skill.generator.run_skill_create", new=AsyncMock(side_effect=fake_run)),
-    ):
-        result = runner.invoke(cli, ["skill", "new", "demo", "x", "-y"])
+    result = runner.invoke(cli, ["--kb-dir", str(kb), "skill", "new", "demo", intent, "-y"])
 
     assert result.exit_code == 0, result.output
     assert not (kb / "output" / "skills" / "demo" / "stale.txt").exists()
-    assert (kb / "output" / "skills" / "demo" / "SKILL.md").exists()
+    assert_formatter_delivery(kb, "demo", model_service)
 
 
-def test_skill_new_saves_iteration_when_overwriting(tmp_path):
+def test_skill_new_saves_iteration_when_overwriting(kb_dir, model_service):
     """Overwriting with -y must copy the old skill into the workspace
     under iteration-1/ before the generator runs."""
-    kb = _make_kb(tmp_path)
+    from short_generation import assert_formatter_delivery, retained_formatter
+
+    kb = kb_dir
+    intent = retained_formatter(kb, model_service.credentials)
     target = kb / "output" / "skills" / "demo"
     target.mkdir(parents=True)
     (target / "SKILL.md").write_text(
@@ -157,16 +144,10 @@ def test_skill_new_saves_iteration_when_overwriting(tmp_path):
 
     runner = CliRunner()
 
-    async def fake_run(kb_dir, skill_name, intent, model, **_kw):
-        _fake_compile(kb_dir, skill_name)
-
-    with (
-        patch("openkb.cli._find_kb_dir", return_value=kb),
-        patch("openkb.skill.generator.run_skill_create", new=AsyncMock(side_effect=fake_run)),
-    ):
-        result = runner.invoke(cli, ["skill", "new", "demo", "x", "-y"])
+    result = runner.invoke(cli, ["--kb-dir", str(kb), "skill", "new", "demo", intent, "-y"])
 
     assert result.exit_code == 0, result.output
+    assert_formatter_delivery(kb, "demo", model_service)
     iter1 = kb / "output" / "skills" / "demo-workspace" / "iteration-1"
     assert iter1.is_dir()
     assert (iter1 / "SKILL.md").exists()
@@ -176,7 +157,7 @@ def test_skill_new_saves_iteration_when_overwriting(tmp_path):
 
 
 def test_skill_history_command_lists_iterations(tmp_path):
-    """`openkb skill history <name>` lists existing iteration directories."""
+    """`ultrakb skill history <name>` lists existing iteration directories."""
     kb = _make_kb(tmp_path)
     ws = kb / "output" / "skills" / "demo-workspace"
     (ws / "iteration-1").mkdir(parents=True)
@@ -185,7 +166,7 @@ def test_skill_history_command_lists_iterations(tmp_path):
     (ws / "iteration-2" / "SKILL.md").write_text("---\nname: demo\ndescription: v2\n---\n")
 
     runner = CliRunner()
-    with patch("openkb.cli._find_kb_dir", return_value=kb):
+    with patch("ultrakb.cli._find_kb_dir", return_value=kb):
         result = runner.invoke(cli, ["skill", "history", "demo"])
 
     assert result.exit_code == 0, result.output
@@ -196,14 +177,14 @@ def test_skill_history_command_lists_iterations(tmp_path):
 def test_skill_history_command_when_no_iterations(tmp_path):
     kb = _make_kb(tmp_path)
     runner = CliRunner()
-    with patch("openkb.cli._find_kb_dir", return_value=kb):
+    with patch("ultrakb.cli._find_kb_dir", return_value=kb):
         result = runner.invoke(cli, ["skill", "history", "demo"])
     assert result.exit_code == 0, result.output
     assert "No previous iterations" in result.output
 
 
 def test_skill_rollback_restores_from_workspace(tmp_path):
-    """`openkb skill rollback <name>` copies the latest iteration back
+    """`ultrakb skill rollback <name>` copies the latest iteration back
     into output/skills/<name>/."""
     kb = _make_kb(tmp_path)
     ws = kb / "output" / "skills" / "demo-workspace"
@@ -217,7 +198,7 @@ def test_skill_rollback_restores_from_workspace(tmp_path):
     (current / "SKILL.md").write_text("---\nname: demo\ndescription: broken\n---\n")
 
     runner = CliRunner()
-    with patch("openkb.cli._find_kb_dir", return_value=kb):
+    with patch("ultrakb.cli._find_kb_dir", return_value=kb):
         result = runner.invoke(cli, ["skill", "rollback", "demo", "-y"])
 
     assert result.exit_code == 0, result.output
@@ -240,7 +221,7 @@ def test_skill_rollback_to_specific_iteration(tmp_path):
     (current / "SKILL.md").write_text("placeholder")
 
     runner = CliRunner()
-    with patch("openkb.cli._find_kb_dir", return_value=kb):
+    with patch("ultrakb.cli._find_kb_dir", return_value=kb):
         result = runner.invoke(cli, ["skill", "rollback", "demo", "--to", "1", "-y"])
 
     assert result.exit_code == 0, result.output
@@ -250,14 +231,14 @@ def test_skill_rollback_to_specific_iteration(tmp_path):
 def test_skill_rollback_errors_when_no_iterations(tmp_path):
     kb = _make_kb(tmp_path)
     runner = CliRunner()
-    with patch("openkb.cli._find_kb_dir", return_value=kb):
+    with patch("ultrakb.cli._find_kb_dir", return_value=kb):
         result = runner.invoke(cli, ["skill", "rollback", "demo", "-y"])
     assert result.exit_code != 0
     assert "No iterations" in result.output
 
 
 def test_skill_validate_passes_on_valid_skill(tmp_path):
-    """`openkb skill validate <name>` exits 0 and prints OK for a well-formed skill."""
+    """`ultrakb skill validate <name>` exits 0 and prints OK for a well-formed skill."""
     kb = _make_kb(tmp_path)
     target = kb / "output" / "skills" / "demo"
     target.mkdir(parents=True)
@@ -268,7 +249,7 @@ def test_skill_validate_passes_on_valid_skill(tmp_path):
     )
 
     runner = CliRunner()
-    with patch("openkb.cli._find_kb_dir", return_value=kb):
+    with patch("ultrakb.cli._find_kb_dir", return_value=kb):
         result = runner.invoke(cli, ["skill", "validate", "demo"])
 
     assert result.exit_code == 0, result.output
@@ -277,7 +258,7 @@ def test_skill_validate_passes_on_valid_skill(tmp_path):
 
 
 def test_skill_validate_fails_on_invalid_frontmatter(tmp_path):
-    """`openkb skill validate <name>` exits non-zero on malformed YAML."""
+    """`ultrakb skill validate <name>` exits non-zero on malformed YAML."""
     kb = _make_kb(tmp_path)
     target = kb / "output" / "skills" / "broken"
     target.mkdir(parents=True)
@@ -285,7 +266,7 @@ def test_skill_validate_fails_on_invalid_frontmatter(tmp_path):
     (target / "SKILL.md").write_text("# just a body, no frontmatter\n")
 
     runner = CliRunner()
-    with patch("openkb.cli._find_kb_dir", return_value=kb):
+    with patch("ultrakb.cli._find_kb_dir", return_value=kb):
         result = runner.invoke(cli, ["skill", "validate", "broken"])
 
     assert result.exit_code != 0, result.output
@@ -303,9 +284,9 @@ def test_skill_new_keeps_existing_skill_when_configuration_capture_fails(tmp_pat
 
     runner = CliRunner()
     with (
-        patch("openkb.cli._find_kb_dir", return_value=kb),
+        patch("ultrakb.cli._find_kb_dir", return_value=kb),
         patch(
-            "openkb.application.execution.capture_config",
+            "ultrakb.application.execution.capture_config",
             side_effect=RuntimeError("invalid config"),
         ),
     ):
@@ -317,7 +298,7 @@ def test_skill_new_keeps_existing_skill_when_configuration_capture_fails(tmp_pat
 
 
 # --------------------------------------------------------------------------
-# `openkb skill eval` — trigger-accuracy evaluator
+# `ultrakb skill eval` — trigger-accuracy evaluator
 # --------------------------------------------------------------------------
 
 
@@ -333,12 +314,14 @@ def _make_skill_dir(kb_dir, name="demo", description="Triggers for demo question
 
 
 def test_skill_eval_runs_with_provided_eval_set(tmp_path):
-    """Pass a pre-saved eval set + a perfect-grader mock — expect 100% pass."""
+    """Render a complete domain scorecard loaded from the provided eval set."""
+    from ultrakb.skill.evaluator import assemble_eval_result
+
     kb = _make_kb(tmp_path)
-    _make_skill_dir(kb, "demo")
+    skill_dir = _make_skill_dir(kb, "demo")
 
     # Save an eval set we can point --eval-set at.
-    eval_dir = kb / ".openkb" / "eval-sets"
+    eval_dir = kb / ".ultrakb" / "eval-sets"
     eval_dir.mkdir(parents=True)
     eval_path = eval_dir / "demo.json"
     eval_path.write_text(
@@ -350,18 +333,20 @@ def test_skill_eval_runs_with_provided_eval_set(tmp_path):
         )
     )
 
-    async def perfect_grader(description, question, *, model):
-        return "trigger" if question.startswith("t") else "no-trigger"
-
-    async def perfect_coverage(content, question, *, model):
-        return "supported", ""
+    async def delivered_scorecard(directory, *, eval_set, **kwargs):
+        assert directory == skill_dir
+        assert [prompt.question for prompt in eval_set] == ["t0", "t1", "n0", "n1"]
+        return assemble_eval_result(
+            eval_set,
+            ["trigger", "trigger", "no-trigger", "no-trigger"],
+            [("supported", ""), ("supported", "")],
+        )
 
     runner = CliRunner()
     with (
-        patch("openkb.cli._find_kb_dir", return_value=kb),
-        patch("openkb.cli._setup_llm_key", return_value=None),
-        patch("openkb.skill.evaluator.grade_one", side_effect=perfect_grader),
-        patch("openkb.skill.evaluator.grade_coverage", side_effect=perfect_coverage),
+        patch("ultrakb.cli._find_kb_dir", return_value=kb),
+        patch("ultrakb.cli._setup_llm_key", return_value=None),
+        patch("ultrakb.skill.evaluator.run_eval", side_effect=delivered_scorecard),
     ):
         result = runner.invoke(
             cli,
@@ -382,11 +367,13 @@ def test_skill_eval_runs_with_provided_eval_set(tmp_path):
 
 
 def test_skill_eval_reports_misses(tmp_path):
-    """Grader always returns 'trigger' — the no-trigger half must show as misses."""
-    kb = _make_kb(tmp_path)
-    _make_skill_dir(kb, "demo")
+    """A domain scorecard exposes both no-trigger misses in CLI output."""
+    from ultrakb.skill.evaluator import assemble_eval_result
 
-    eval_dir = kb / ".openkb" / "eval-sets"
+    kb = _make_kb(tmp_path)
+    skill_dir = _make_skill_dir(kb, "demo")
+
+    eval_dir = kb / ".ultrakb" / "eval-sets"
     eval_dir.mkdir(parents=True)
     eval_path = eval_dir / "demo.json"
     eval_path.write_text(
@@ -398,18 +385,20 @@ def test_skill_eval_reports_misses(tmp_path):
         )
     )
 
-    async def biased_grader(description, question, *, model):
-        return "trigger"
-
-    async def perfect_coverage(content, question, *, model):
-        return "supported", ""
+    async def delivered_scorecard(directory, *, eval_set, **kwargs):
+        assert directory == skill_dir
+        assert [prompt.question for prompt in eval_set] == ["t0", "t1", "n0", "n1"]
+        return assemble_eval_result(
+            eval_set,
+            ["trigger", "trigger", "trigger", "trigger"],
+            [("supported", ""), ("supported", "")],
+        )
 
     runner = CliRunner()
     with (
-        patch("openkb.cli._find_kb_dir", return_value=kb),
-        patch("openkb.cli._setup_llm_key", return_value=None),
-        patch("openkb.skill.evaluator.grade_one", side_effect=biased_grader),
-        patch("openkb.skill.evaluator.grade_coverage", side_effect=perfect_coverage),
+        patch("ultrakb.cli._find_kb_dir", return_value=kb),
+        patch("ultrakb.cli._setup_llm_key", return_value=None),
+        patch("ultrakb.skill.evaluator.run_eval", side_effect=delivered_scorecard),
     ):
         result = runner.invoke(
             cli,

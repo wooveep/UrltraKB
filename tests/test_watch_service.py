@@ -1,4 +1,4 @@
-"""Tests for openkb.watch_service (per-KB watcher registry + worker).
+"""Tests for ultrakb.watch_service (per-KB watcher registry + worker).
 
 All ingest is mocked so no real LLM/compilation runs, per AGENTS.md.
 Worker behavior is driven by putting batches directly on the queue to avoid
@@ -13,8 +13,8 @@ import time
 from collections import deque
 from pathlib import Path
 
-from openkb.application.documents import AddFileResult
-from openkb.watch_service import (
+from ultrakb.application.documents import AddFileResult
+from ultrakb.watch_service import (
     WatcherState,
     WatchRegistry,
     _public_event,
@@ -27,8 +27,8 @@ pytest_plugins = ("test_pdf_readback",)
 def test_asset_event_reimports_its_markdown_source(kb_dir, pdf_model):
     from figure_fixtures import png_bytes
 
-    from openkb.application.documents import import_document
-    from openkb.documents import read_document_source
+    from ultrakb.application.documents import import_document
+    from ultrakb.documents import read_document_source
 
     source = kb_dir / "raw/figure.md"
     image = kb_dir / "raw/figure.png"
@@ -61,7 +61,7 @@ def _fake_add_ok(path: Path, kb_dir: Path, bundle=None, **kwargs) -> AddFileResu
 
 def _drain_worker(state: WatcherState, timeout: float = 2.0) -> None:
     """Run the worker loop on already-queued batches, then stop it."""
-    from openkb.watch_service import _run_worker
+    from ultrakb.watch_service import _run_worker
 
     state.queue.put(None)
     t = threading.Thread(target=_run_worker, args=(state,))
@@ -88,7 +88,7 @@ def _make_state(kb_dir: Path, kb: str = "test-kb") -> WatcherState:
 
 
 def test_start_is_idempotent(kb_dir, monkeypatch):
-    monkeypatch.setattr("openkb.watch_service.start_watch", lambda *a, **k: object())
+    monkeypatch.setattr("ultrakb.watch_service.start_watch", lambda *a, **k: object())
     reg = WatchRegistry()
     s1 = reg.start("test-kb", kb_dir, debounce=0.0)
     s2 = reg.start("test-kb", kb_dir, debounce=0.0)
@@ -108,7 +108,7 @@ def test_status_inactive_returns_active_false():
 
 
 def test_status_active_fields_and_recent_events(kb_dir, monkeypatch):
-    monkeypatch.setattr("openkb.watch_service.start_watch", lambda *a, **k: object())
+    monkeypatch.setattr("ultrakb.watch_service.start_watch", lambda *a, **k: object())
     reg = WatchRegistry()
     state = reg.start("test-kb", kb_dir, debounce=0.0)
     _record_event(state, "file_done", {"original_name": "a.md", "status": "added"})
@@ -124,7 +124,7 @@ def test_status_active_fields_and_recent_events(kb_dir, monkeypatch):
 
 
 def test_stop_all_clears_registry(kb_dir, monkeypatch):
-    monkeypatch.setattr("openkb.watch_service.start_watch", lambda *a, **k: object())
+    monkeypatch.setattr("ultrakb.watch_service.start_watch", lambda *a, **k: object())
     reg = WatchRegistry()
     reg.start("a", kb_dir, debounce=0.0)
     reg.start("b", kb_dir, debounce=0.0)
@@ -139,7 +139,7 @@ def test_worker_added_records_file_start_done_and_counter(kb_dir, monkeypatch):
     state = _make_state(kb_dir)
     state.queue.put([str(kb_dir / "raw" / "paper.md")])
     monkeypatch.setattr(
-        "openkb.watch_service._add_for_api",
+        "ultrakb.watch_service._add_for_api",
         lambda path, kb, bundle=None, **kwargs: AddFileResult(
             path.name, str(path), "added", "Added."
         ),
@@ -161,7 +161,7 @@ def test_worker_skipped_and_failed_branches(kb_dir, monkeypatch):
             return AddFileResult(path.name, None, "skipped", "Already in KB.")
         raise RuntimeError("explode")
 
-    monkeypatch.setattr("openkb.watch_service._add_for_api", fake_add)
+    monkeypatch.setattr("ultrakb.watch_service._add_for_api", fake_add)
     _drain_worker(state)
     dones = _events_of(state, "file_done")
     assert [d["status"] for d in dones] == ["skipped"]
@@ -177,7 +177,7 @@ def test_worker_unsupported_suffix_is_skipped_without_ingest(kb_dir, monkeypatch
     state.queue.put([str(kb_dir / "raw" / "image.xyz")])
     called = []
     monkeypatch.setattr(
-        "openkb.watch_service._add_for_api",
+        "ultrakb.watch_service._add_for_api",
         lambda path, kb, bundle=None, **kwargs: called.append(path)
         or AddFileResult("x", None, "added", "x"),
     )
@@ -198,7 +198,7 @@ def test_worker_does_not_die_on_exception(kb_dir, monkeypatch):
             raise RuntimeError("nope")
         return AddFileResult(path.name, str(path), "added", "ok")
 
-    monkeypatch.setattr("openkb.watch_service._add_for_api", fake_add)
+    monkeypatch.setattr("ultrakb.watch_service._add_for_api", fake_add)
     _drain_worker(state)
     assert state.counters == {"added": 1, "skipped": 0, "failed": 1}
 
@@ -215,7 +215,7 @@ def test_ring_buffer_keeps_most_recent_ordered():
 def test_end_to_end_debounce_processes_real_file(kb_dir, monkeypatch):
     seen = []
     monkeypatch.setattr(
-        "openkb.watch_service._add_for_api",
+        "ultrakb.watch_service._add_for_api",
         lambda path, kb, bundle=None, **kwargs: seen.append(path.name)
         or AddFileResult(path.name, str(path), "added", "ok"),
     )
@@ -236,7 +236,7 @@ def test_end_to_end_debounce_processes_real_file(kb_dir, monkeypatch):
 
 def test_record_event_appends_inside_lock():
     """_record_event must append inside the lock so watcher_stopped ordering is preserved."""
-    from openkb.watch_service import WatcherState, _record_event
+    from ultrakb.watch_service import WatcherState, _record_event
 
     state = WatcherState(kb="t", kb_dir=None, raw_dir=None, debounce=0, started_at=0.0)
     _record_event(state, "file_done", {"path": "a.md"})
@@ -249,7 +249,7 @@ def test_record_event_appends_inside_lock():
 
 def test_stop_then_start_does_not_double_worker(kb_dir, monkeypatch):
     """After stop(), start() must not spawn a second worker."""
-    monkeypatch.setattr("openkb.watch_service._add_for_api", _fake_add_ok)
+    monkeypatch.setattr("ultrakb.watch_service._add_for_api", _fake_add_ok)
     reg = WatchRegistry()
     reg.start("t", kb_dir, debounce=0.1)
     reg.stop("t")
@@ -262,7 +262,7 @@ def test_stop_then_start_does_not_double_worker(kb_dir, monkeypatch):
 
 def test_start_returns_existing_if_running(kb_dir, monkeypatch):
     """start() is idempotent."""
-    monkeypatch.setattr("openkb.watch_service._add_for_api", _fake_add_ok)
+    monkeypatch.setattr("ultrakb.watch_service._add_for_api", _fake_add_ok)
     reg = WatchRegistry()
     s1 = reg.start("t", kb_dir, debounce=0.1)
     s2 = reg.start("t", kb_dir, debounce=0.1)
@@ -274,7 +274,7 @@ def test_worker_exception_clears_running(kb_dir, monkeypatch):
     """When the worker exits (via stop sentinel), running must be cleared."""
 
     monkeypatch.setattr(
-        "openkb.watch_service._add_for_api",
+        "ultrakb.watch_service._add_for_api",
         lambda path, kb_dir, bundle=None, **kwargs: AddFileResult("x", str(path), "added", "ok"),
     )
     reg = WatchRegistry()
@@ -289,7 +289,7 @@ def test_record_event_seq_monotonic_under_burst():
     """watcher_stopped terminator must have a higher seq than preceding events."""
     from collections import deque
 
-    from openkb.watch_service import WatcherState, _record_event
+    from ultrakb.watch_service import WatcherState, _record_event
 
     state = WatcherState(kb="t", kb_dir=None, raw_dir=None, debounce=0, started_at=0.0, events=None)
     state.events = deque(maxlen=3)
@@ -313,7 +313,7 @@ def test_stop_draining_when_worker_stuck(kb_dir, monkeypatch):
     def slow_process(state, raw_path):
         block.wait(timeout=10)
 
-    monkeypatch.setattr("openkb.watch_service._process_file", slow_process)
+    monkeypatch.setattr("ultrakb.watch_service._process_file", slow_process)
 
     reg = WatchRegistry()
     state = reg.start("t", kb_dir, debounce=0.1)

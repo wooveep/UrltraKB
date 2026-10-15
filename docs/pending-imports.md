@@ -15,11 +15,11 @@ XLS 的 LNK 外链和 OlePres 表示缓存、PPT 的 ExOleLink、MetafileBlob �
 CLI 正文结束显示发现和文件导入待办数。显式排空可运行工作：
 
 ```bash
-openkb process-pending --kb /path/to/kb
-openkb pending list --kb /path/to/kb
-openkb pending retry JOB_ID --kb /path/to/kb
-openkb pending budget GROUP_ID max_sources=200 --kb /path/to/kb
-openkb pending cancel-group GROUP_ID --kb /path/to/kb
+ultrakb process-pending --kb /path/to/kb
+ultrakb pending list --kb /path/to/kb
+ultrakb pending retry JOB_ID --kb /path/to/kb
+ultrakb pending budget GROUP_ID max_sources=200 --kb /path/to/kb
+ultrakb pending cancel-group GROUP_ID --kb /path/to/kb
 ```
 
 命令完成后退出，没有隐式后台进程。桌面在打开的知识库中逐个派发待办，显式用户任务优先。资料管理的“查看待处理工作”可以查看两种工作状态、调整执行组预算、显式重试或取消执行组。任务列表的停止只停止当前任务；取消执行组停止本组所有未完成工作，保留已完成知识。

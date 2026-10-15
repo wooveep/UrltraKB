@@ -4,9 +4,9 @@ import json
 
 import pytest
 
-from openkb.application.query_views import QuerySelection, QueryView
-from openkb.knowledge_scope import legacy_scope
-from openkb.state import HashRegistry
+from ultrakb.application.query_views import QuerySelection, QueryView
+from ultrakb.knowledge_scope import legacy_scope
+from ultrakb.state import HashRegistry
 
 
 def selection(kb_dir, versions=()):
@@ -22,7 +22,7 @@ def selection(kb_dir, versions=()):
 def agent_for(kb_dir):
     from agents import Agent
 
-    from openkb.agent.query_evidence import restrict_query_agent
+    from ultrakb.agent.query_evidence import restrict_query_agent
 
     return restrict_query_agent(Agent(name="fixture", instructions=""), selection(kb_dir))
 
@@ -40,14 +40,14 @@ async def invoke(agent, name, **arguments):
 
 @pytest.mark.asyncio
 async def test_file_activity_observes_metadata_without_parsing_original_json(kb_dir):
-    from openkb.application.execution import ExecutionContext
-    from openkb.locks import kb_ingest_lock
+    from ultrakb.application.execution import ExecutionContext
+    from ultrakb.locks import kb_ingest_lock
 
     original = '{"status":"error","hits":[7]}'
     (kb_dir / "wiki/sources/note.md").write_text(original)
     events = []
     context = ExecutionContext(on_event=events.append)
-    with kb_ingest_lock(kb_dir / ".openkb"), context.begin(kb_dir):
+    with kb_ingest_lock(kb_dir / ".ultrakb"), context.begin(kb_dir):
         result = await invoke(agent_for(kb_dir), "read_file", path="sources/note")
     assert result.endswith(original)
     completed = [
@@ -198,8 +198,8 @@ async def test_selected_page_returns_image_location_without_an_image_tool(kb_dir
 
 @pytest.mark.asyncio
 async def test_image_changes_have_actionable_feedback_in_the_storage_reader(kb_dir):
-    from openkb.agent.tools import read_wiki_image
-    from openkb.state import HashRegistry
+    from ultrakb.agent.tools import read_wiki_image
+    from ultrakb.state import HashRegistry
 
     path = "sources/images/diagram.png"
     image = kb_dir / "wiki" / path
@@ -232,7 +232,7 @@ async def test_derived_page_read_points_to_original_without_certifying_its_claim
 
 
 def test_answer_outcome_survives_runtime_receipt_readback():
-    from openkb.runtime.records import UnitResult
+    from ultrakb.runtime.records import UnitResult
 
     result = UnitResult("completed", answer_outcome="insufficient_evidence")
     # JSON is the actual persisted receipt boundary.

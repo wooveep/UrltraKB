@@ -18,8 +18,8 @@ DOCX、PPTX 的内部 PDF 使用同一提取；幻灯片的 `body` 直接取该�
 CLI 返回包含正文、修订和覆盖信息的 JSON：
 
 ```sh
-openkb --kb-dir /path/to/kb source SOURCE_ID --pages 2-3
-openkb --kb-dir /path/to/kb source SOURCE_ID \
+ultrakb --kb-dir /path/to/kb source SOURCE_ID --pages 2-3
+ultrakb --kb-dir /path/to/kb source SOURCE_ID \
   --knowledge-revision KNOWLEDGE_REVISION_ID --pages 3
 ```
 
@@ -72,7 +72,7 @@ PDF 原生表格必须有提取阶段记录的几何区域；打印出的 HTML �
 已有成功正文时继续显示该正文及其度量，失败的新目标另列 `target_processing`。
 
 ```sh
-openkb --kb-dir /path/to/kb source SOURCE_ID --chars 0:120
+ultrakb --kb-dir /path/to/kb source SOURCE_ID --chars 0:120
 ```
 
 API 对应可选字段为 `chars: "0:120"`；桌面原文窗口提供相同范围输入。

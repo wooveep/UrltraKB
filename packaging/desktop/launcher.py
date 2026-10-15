@@ -13,27 +13,27 @@ if __name__ == "__main__":
         if getattr(sys, name) is None:
             setattr(sys, name, open(os.devnull, "w", encoding="utf-8"))
     if sys.argv[1:2] == ["--cnki-worker"]:
-        from openkb.cnki.worker import main
+        from ultrakb.cnki.worker import main
 
         raise SystemExit(main(sys.argv[2:]))
-    program = Path(sys.executable).stem.lower().removeprefix("urltrakb")
+    program = Path(sys.executable).stem.lower().removeprefix("ultrakb")
     if program in {"cli", "api"}:
-        from openkb.runtime.assets import configure_sdk_resources
+        from ultrakb.runtime.assets import configure_sdk_resources
 
         configure_sdk_resources()
     if program == "cli":
-        from openkb.cli import cli
+        from ultrakb.cli import cli
 
         cli()
     elif program == "api":
-        from openkb.api import main
+        from ultrakb.api import main
 
         main()
     elif program == "verify":
-        from openkb.desktop.verification import main
+        from ultrakb.desktop.verification import main
 
         raise SystemExit(main())
     else:
-        from openkb.desktop.bootstrap import main
+        from ultrakb.desktop.bootstrap import main
 
         raise SystemExit(main())

@@ -1,4 +1,4 @@
-"""Direct unit tests for ``openkb.agent.chat._handle_slash_critique``.
+"""Direct unit tests for ``ultrakb.agent.chat._handle_slash_critique``.
 
 The ``/critique <path>`` slash command is the user-facing entry point
 for the html-critic skill. It does path resolution, file-not-found
@@ -14,14 +14,14 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from prompt_toolkit.styles import Style
 
-from openkb.agent.chat import _handle_slash_critique
-from openkb.agent.skill_runner import SkillNotFoundError
+from ultrakb.agent.chat import _handle_slash_critique
+from ultrakb.agent.skill_runner import SkillNotFoundError
 
 
 def _make_kb_with_config(tmp_path: Path) -> Path:
     """Critique needs a config.yaml to read the model from."""
-    (tmp_path / ".openkb").mkdir()
-    (tmp_path / ".openkb" / "config.yaml").write_text(
+    (tmp_path / ".ultrakb").mkdir()
+    (tmp_path / ".ultrakb" / "config.yaml").write_text(
         "model: openai/gpt-4o\nlanguage: en\n", encoding="utf-8"
     )
     from kb_fixtures import mark_current_kb
@@ -37,7 +37,7 @@ _STYLE = Style.from_dict({})
 async def test_critique_no_arg_prints_usage(tmp_path: Path, capsys):
     """``/critique`` with no arg must print Usage and NOT call run_skill."""
     kb_dir = _make_kb_with_config(tmp_path)
-    with patch("openkb.agent.skill_runner.run_skill", new=AsyncMock()) as run_skill:
+    with patch("ultrakb.agent.skill_runner.run_skill", new=AsyncMock()) as run_skill:
         await _handle_slash_critique("", kb_dir, _STYLE)
         # whitespace only — same as empty
         await _handle_slash_critique("   ", kb_dir, _STYLE)
@@ -52,7 +52,7 @@ async def test_critique_missing_file_prints_error(tmp_path: Path, capsys):
     """When the target file doesn't exist, print an ERROR and skip
     run_skill — no point asking the critic to read a nonexistent file."""
     kb_dir = _make_kb_with_config(tmp_path)
-    with patch("openkb.agent.skill_runner.run_skill", new=AsyncMock()) as run_skill:
+    with patch("ultrakb.agent.skill_runner.run_skill", new=AsyncMock()) as run_skill:
         await _handle_slash_critique("output/decks/ghost/index.html", kb_dir, _STYLE)
 
     out = capsys.readouterr().out
@@ -70,12 +70,12 @@ async def test_critique_invokes_html_critic_skill(tmp_path: Path, capsys):
     target.parent.mkdir(parents=True)
     target.write_text("<html>existing deck</html>", encoding="utf-8")
 
-    with patch("openkb.agent.skill_runner.run_skill", new=AsyncMock()) as run_skill:
+    with patch("ultrakb.agent.skill_runner.run_skill", new=AsyncMock()) as run_skill:
         await _handle_slash_critique("output/decks/real/index.html", kb_dir, _STYLE)
 
     run_skill.assert_called_once()
     kwargs = run_skill.call_args.kwargs
-    assert kwargs["skill_name"] == "openkb-html-critic"
+    assert kwargs["skill_name"] == "ultrakb-html-critic"
     assert "output/decks/real/index.html" in kwargs["intent"]
     assert kwargs["kb_dir"] == kb_dir
     out = capsys.readouterr().out
@@ -91,7 +91,7 @@ async def test_critique_accepts_absolute_path_inside_kb(tmp_path: Path):
     target.parent.mkdir(parents=True)
     target.write_text("<html></html>", encoding="utf-8")
 
-    with patch("openkb.agent.skill_runner.run_skill", new=AsyncMock()) as run_skill:
+    with patch("ultrakb.agent.skill_runner.run_skill", new=AsyncMock()) as run_skill:
         await _handle_slash_critique(str(target), kb_dir, _STYLE)
 
     run_skill.assert_called_once()
@@ -103,7 +103,7 @@ async def test_critique_accepts_absolute_path_inside_kb(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_critique_catches_skill_not_found(tmp_path: Path, capsys):
-    """If the openkb-html-critic skill is missing, surface a friendly
+    """If the ultrakb-html-critic skill is missing, surface a friendly
     [ERROR] line instead of crashing the chat turn."""
     kb_dir = _make_kb_with_config(tmp_path)
     target = kb_dir / "output" / "test.html"
@@ -111,15 +111,15 @@ async def test_critique_catches_skill_not_found(tmp_path: Path, capsys):
     target.write_text("<html></html>", encoding="utf-8")
 
     async def missing(**_):
-        raise SkillNotFoundError("Skill 'openkb-html-critic' not found. Available: foo.")
+        raise SkillNotFoundError("Skill 'ultrakb-html-critic' not found. Available: foo.")
 
-    with patch("openkb.agent.skill_runner.run_skill", new=AsyncMock(side_effect=missing)):
+    with patch("ultrakb.agent.skill_runner.run_skill", new=AsyncMock(side_effect=missing)):
         # Should NOT raise — chat turn must survive
         await _handle_slash_critique(str(target), kb_dir, _STYLE)
 
     out = capsys.readouterr().out
     assert "[ERROR]" in out
-    assert "openkb-html-critic" in out or "not found" in out.lower()
+    assert "ultrakb-html-critic" in out or "not found" in out.lower()
 
 
 @pytest.mark.asyncio
@@ -132,9 +132,9 @@ async def test_critique_catches_runtime_error_from_run_skill(tmp_path: Path, cap
     target.write_text("<html></html>", encoding="utf-8")
 
     async def hits_cap(**_):
-        raise RuntimeError("Skill 'openkb-html-critic' hit the 40-step cap")
+        raise RuntimeError("Skill 'ultrakb-html-critic' hit the 40-step cap")
 
-    with patch("openkb.agent.skill_runner.run_skill", new=AsyncMock(side_effect=hits_cap)):
+    with patch("ultrakb.agent.skill_runner.run_skill", new=AsyncMock(side_effect=hits_cap)):
         await _handle_slash_critique(str(target), kb_dir, _STYLE)
 
     out = capsys.readouterr().out

@@ -1,6 +1,5 @@
-"""OpenKB indexing and source reading share the same native PDF structure."""
+"""UltraKB indexing and source reading share the same native PDF structure."""
 
-import json
 import shutil
 from copy import deepcopy
 
@@ -8,47 +7,50 @@ import pymupdf
 import pytest
 from pageindex import IndexConfig
 from pageindex.backend.input_package import freeze_pages, materialize_pages
-from pageindex.llm import IndexResponse
+from test_index_llm import RecordingIndexLLM
 from test_pdf_tables import Tables, merged_table_pdf
 
-from openkb.images import convert_pdf_to_pages
-from openkb.index_client import create_index_client
-from openkb.index_pdf import NativePdfParser
+from ultrakb.images import convert_pdf_to_pages
+from ultrakb.index_client import create_index_client
+from ultrakb.index_pdf import NativePdfParser
+
+pytest_plugins = ("test_vendor_sdk",)
 
 
-class TableIndexModel:
-    def __init__(self):
-        self.structure_inputs = []
+class RecordingPdfIndex(RecordingIndexLLM):
+    """The shared genuine adapter records structure prompts for layout assertions."""
 
-    def complete(self, messages, *, stage):
-        prompt = messages[-1]["content"]
-        if stage == "structure":
-            self.structure_inputs.append(prompt)
-            return IndexResponse(
-                json.dumps(
-                    [
-                        {
-                            "title": "Before the table: keep this condition.",
-                            "structure": "1",
-                            "physical_index": "<physical_index_1>",
-                        }
-                    ]
-                )
-            )
-        if "toc_detected" in prompt:
-            return IndexResponse('{"toc_detected":"no"}')
-        if "start_begin" in prompt:
-            return IndexResponse('{"start_begin":"no"}')
-        return IndexResponse('{"answer":"yes"}')
-
-    async def acomplete(self, messages, *, stage):
-        return self.complete(messages, stage=stage)
+    @property
+    def structure_inputs(self):
+        return [messages[-1]["content"] for stage, messages in self.calls if stage == "structure"]
 
 
-def test_real_index_input_keeps_the_same_merged_cells_as_source_reading(tmp_path):
-    path = merged_table_pdf(tmp_path / "table.pdf")
+def test_indexed_table_fixture_keeps_existing_geometry_and_body(tmp_path):
+    plain = merged_table_pdf(tmp_path / "plain.pdf")
+    headed = merged_table_pdf(tmp_path / "headed.pdf", heading="1. Table policies")
+    plain_text = convert_pdf_to_pages(plain, "plain", tmp_path / "plain-images")[0]["content"]
+    headed_text = convert_pdf_to_pages(headed, "headed", tmp_path / "headed-images")[0]["content"]
+    assert headed_text.startswith("1. Table policies\n")
+    assert headed_text.partition("\n")[2] == plain_text
+    assert Tables(headed_text).rows == Tables(plain_text).rows
+    with pymupdf.open(plain) as original, pymupdf.open(headed) as indexed:
+        for before, after in zip(
+            original[0].get_drawings(), indexed[0].get_drawings(), strict=True
+        ):
+            assert {key: value for key, value in after.items() if key != "seqno"} == {
+                key: value for key, value in before.items() if key != "seqno"
+            }
+            assert after["seqno"] == before["seqno"] + 1
+        for text in ("alpha", "beta", "gamma", "shared-group"):
+            assert indexed[0].search_for(text) == original[0].search_for(text)
+
+
+def test_real_index_input_keeps_the_same_merged_cells_as_source_reading(
+    tmp_path, model_service, live_llm
+):
+    path = merged_table_pdf(tmp_path / "table.pdf", heading="1. Table policies")
     original = path.read_bytes()
-    runtime = TableIndexModel()
+    runtime = RecordingPdfIndex(live_llm=live_llm)
     options = IndexConfig(
         llm_client=runtime,
         if_add_node_summary=False,
@@ -63,6 +65,7 @@ def test_real_index_input_keeps_the_same_merged_cells_as_source_reading(tmp_path
         pages = collection.get_page_content(identity, "1")
     assert pages[0]["content"] == expected
     assert Tables(pages[0]["content"]).rows[1][-1] == {"text": "shared-group", "rowspan": "3"}
+    assert runtime.structure_inputs
     assert all('rowspan="3"' in prompt for prompt in runtime.structure_inputs)
     assert 'rowspan="3"' in document["structure"][0]["text"]
     assert path.read_bytes() == original
@@ -70,18 +73,23 @@ def test_real_index_input_keeps_the_same_merged_cells_as_source_reading(tmp_path
     shutil.copytree(tmp_path / "index", tmp_path / "moved")
     shutil.rmtree(tmp_path / "index")
     path.unlink()
-    with create_index_client(storage_path=tmp_path / "moved", index_config=options) as client:
+    cached_options = options.model_copy(update={"llm_client": RecordingPdfIndex()})
+    with create_index_client(
+        storage_path=tmp_path / "moved", index_config=cached_options
+    ) as client:
         assert client.collection().get_page_content(identity, "1")[0]["content"] == expected
 
 
-def test_missing_cache_recovers_with_its_saved_pdf_parser(monkeypatch, tmp_path):
+def test_missing_cache_recovers_with_its_saved_pdf_parser(
+    monkeypatch, tmp_path, model_service, live_llm
+):
     from pageindex.parser.pdf import PdfParser
 
-    from openkb.condb_storage import ConDBPageIndexStorage
+    from ultrakb.condb_storage import ConDBPageIndexStorage
 
-    path = merged_table_pdf(tmp_path / "old.pdf")
+    path = merged_table_pdf(tmp_path / "old.pdf", heading="1. Table policies")
     options = IndexConfig(
-        llm_client=TableIndexModel(),
+        llm_client=RecordingPdfIndex(live_llm=live_llm),
         if_add_node_summary=False,
         if_add_doc_description=False,
         if_add_node_text=True,
@@ -92,10 +100,15 @@ def test_missing_cache_recovers_with_its_saved_pdf_parser(monkeypatch, tmp_path)
         identity = collection.add(str(path))
         before = collection.get_page_content(identity, "1")[0]["content"]
     assert "<table>" not in before
+    sent = len(model_service.requests)
     monkeypatch.setattr(ConDBPageIndexStorage, "get_pages", lambda *args: None)
-    with create_index_client(storage_path=tmp_path / "index", index_config=options) as client:
+    cached_options = options.model_copy(update={"llm_client": RecordingPdfIndex()})
+    with create_index_client(
+        storage_path=tmp_path / "index", index_config=cached_options
+    ) as client:
         after = client.collection().get_page_content(identity, "1")[0]["content"]
     assert after == before
+    assert len(model_service.requests) == sent
 
 
 @pytest.mark.parametrize(

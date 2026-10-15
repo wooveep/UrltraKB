@@ -1,0 +1,289 @@
+"""Generic skill runner — the shared core between CLI and chat surfaces.
+
+A skill (Anthropic-style ``SKILL.md`` with YAML frontmatter and a body of
+agent instructions) is loaded by ``run_skill``, which builds an Agent
+whose ``instructions`` are that body. The agent gets the standard wiki
+read-tool set plus a constrained ``write_file`` tool scoped to
+``wiki/explorations/**`` and ``output/**``, and ``read_output_or_skill_file``
+for inspecting prior artifacts.
+
+This decouples generators from hard-coded prompts. ``ultrakb deck new`` /
+``ultrakb skill new`` / any future ``ultrakb <type> new`` command becomes a
+two-line wrapper around ``run_skill(skill_name=..., intent=...)``.
+
+Skill frontmatter that ``run_skill`` honours (all optional; under the
+top-level ``od:`` key):
+
+* ``mode`` — the artifact type. ``"deck"`` triggers deck-specific
+  post-run handling (output-path templating + validation). Unknown modes
+  are accepted; they just don't trigger extra hooks.
+* ``output_path_template`` — a path string with ``{slug}`` placeholder,
+  relative to KB root. When set, ``run_skill`` injects the resolved path
+  into the agent's intent and verifies the file exists post-run.
+* ``deck_grammar`` — passed to :func:`ultrakb.deck.validator.validate_deck`
+  when ``mode == "deck"``. See that module for the contract.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Optional
+
+from agents import Runner, function_tool
+from agents.exceptions import MaxTurnsExceeded
+
+from ultrakb.agent.query import build_query_agent, build_run_config_from_bundle
+from ultrakb.agent.skills import (
+    PreparedSkill,
+    prepare_skill,
+)
+from ultrakb.agent.skills import SkillNotFoundError as SkillNotFoundError
+from ultrakb.agent.tools import read_kb_file, write_kb_file
+from ultrakb.config import LlmCredentialBundle
+from ultrakb.knowledge_scope import KnowledgeScope, resolve_scope
+
+MAX_TURNS = 80
+MAX_TURNS_WITH_CRITIQUE = 120
+
+
+@dataclass
+class SkillRunResult:
+    """Outcome of a :func:`run_skill` call.
+
+    ``validation`` is populated only when the skill declared a
+    deck-mode artifact and the post-run validator was therefore invoked;
+    otherwise ``None``. ``output_path`` is the KB-relative path the
+    runner enforced via ``output_path_template``, or ``None`` if the
+    skill left output placement to itself.
+    """
+
+    skill_name: str
+    output_path: Optional[Path] = None
+    validation: Optional[Any] = None  # ultrakb.deck.validator.ValidationResult
+    metadata: dict = field(default_factory=dict)  # skill's ``od:`` block
+
+
+async def run_skill(
+    *,
+    skill_name: str,
+    intent: str,
+    kb_dir: Path,
+    model: str,
+    language: str = "en",
+    max_turns: int = MAX_TURNS,
+    seed: Optional[str] = None,
+    slug: Optional[str] = None,
+    extra_skill_roots: tuple[str | Path, ...] = (),
+    bundle: LlmCredentialBundle | None = None,
+    prepared: PreparedSkill | None = None,
+    scope: KnowledgeScope | None = None,
+) -> SkillRunResult:
+    """Load ``skill_name`` and run it as an agent with ``intent``.
+
+    When the skill's frontmatter declares ``od.mode == "deck"`` and
+    ``od.output_path_template`` is set, ``run_skill``:
+
+      1. Templates the path with the provided ``slug``.
+      2. Adds a "Write to: <path>" line to the agent's intent so the
+         skill knows the expected destination.
+      3. After the agent run, checks the file exists and (if the skill
+         declared ``od.deck_grammar``) runs ``validate_deck`` against it.
+
+    Args:
+        skill_name: Name (frontmatter ``name:``) of the skill to invoke.
+        intent: Natural-language brief for what to produce.
+        kb_dir: KB root. Used both for skill discovery and for the
+            agent's wiki read-tools / write-file scoping.
+        model: LiteLLM-formatted model string from KB config.
+        language: Passed through to the underlying query agent for
+            answer-language consistency.
+        max_turns: Hard cap on agent loop iterations.
+        seed: Optional kick-off user message. Defaults to a short nudge
+            that points the agent at its own instructions.
+        slug: Required when the skill declares
+            ``od.output_path_template`` (it substitutes ``{slug}``).
+            Otherwise ignored.
+        extra_skill_roots: Additional directories to scan beyond the
+            built-in ``<kb>/skills``, ``~/.ultrakb/skills``,
+            ``~/.claude/skills``.
+        bundle: Optional per-request LLM credential/config bundle. When
+            provided (REST path), it is forwarded to the query agent so
+            concurrent requests never share process-global credentials.
+            ``None`` (CLI default) preserves the existing behavior.
+
+    Returns:
+        A :class:`SkillRunResult` carrying the resolved output path (if
+        any) and the validation result (for deck-mode skills).
+
+    Raises:
+        SkillNotFoundError: if no skill with ``skill_name`` is found.
+        RuntimeError: on turn-cap, model error, or missing
+            output file after a templated-path run.
+    """
+    request = prepare_skill_run(
+        skill_name=skill_name,
+        intent=intent,
+        kb_dir=kb_dir,
+        model=model,
+        language=language,
+        max_turns=max_turns,
+        seed=seed,
+        slug=slug,
+        extra_skill_roots=extra_skill_roots,
+        bundle=bundle,
+        prepared=prepared,
+        scope=scope,
+    )
+    try:
+        if request.run_config:
+            await Runner.run(
+                request.agent,
+                request.seed,
+                max_turns=request.max_turns,
+                run_config=request.run_config,
+            )
+        else:
+            await Runner.run(request.agent, request.seed, max_turns=request.max_turns)
+    except MaxTurnsExceeded as exc:
+        raise RuntimeError(
+            f"Skill {skill_name!r} hit the {max_turns}-step cap before "
+            f"finishing. The intent may be too broad or the wiki too large; "
+            f"try a tighter intent or split into smaller skills."
+        ) from exc
+    return finish_skill_run(request.definition)
+
+
+@dataclass(frozen=True)
+class PreparedSkillRun:
+    """The complete SDK input, frozen before generation and artifact validation."""
+
+    agent: Any
+    seed: str
+    definition: PreparedSkill
+    max_turns: int
+    run_config: Any
+
+
+def prepare_skill_run(
+    *,
+    skill_name: str,
+    intent: str,
+    kb_dir: Path,
+    model: str,
+    language: str = "en",
+    max_turns: int = MAX_TURNS,
+    seed: Optional[str] = None,
+    slug: Optional[str] = None,
+    extra_skill_roots: tuple[str | Path, ...] = (),
+    bundle: LlmCredentialBundle | None = None,
+    prepared: PreparedSkill | None = None,
+    scope: KnowledgeScope | None = None,
+) -> PreparedSkillRun:
+    """Prepare prompt, tools, selected evidence scope and SDK settings without generation."""
+    from ultrakb.agent.query_evidence import restrict_query_agent
+    from ultrakb.application.query_views import resolve_query_views
+
+    selection = resolve_query_views(kb_dir, intent, scope=scope)
+    scope = resolve_scope(kb_dir, scope)
+    definition = prepared or prepare_skill(
+        kb_dir, skill_name, slug=slug, extra_roots=extra_skill_roots, scope=scope
+    )
+    if definition.name != skill_name:
+        raise ValueError("Prepared skill does not match the requested skill")
+    if not selection.views and selection.missing:
+        from ultrakb.agent.query_evidence import selection_catalog
+
+        raise ValueError(selection_catalog(selection))
+    body, output_path = definition.body, definition.output_path
+    if output_path is not None:
+        rel = output_path.relative_to(kb_dir.resolve()).as_posix()
+        intent = (
+            f"Output file (write the artifact here, full file in one "
+            f"write_file call): {rel}\n\n{intent}"
+        )
+
+    wiki_root = str(scope.wiki_dir)
+    kb_root = str(kb_dir)
+    base = build_query_agent(wiki_root, model, language=language, bundle=bundle)
+
+    @function_tool
+    def write_file(path: str, content: str) -> str:
+        """Write a text file under the KB.
+
+        Allowed paths (relative to KB root):
+          * ``wiki/explorations/**`` — chat-derived notes.
+          * ``output/**``            — generator artifacts (skills, decks, etc.).
+
+        Any other path is rejected. Parent directories are created.
+        """
+        return write_kb_file(path, content, kb_root, scope=scope)
+
+    @function_tool
+    def read_output_or_skill_file(path: str) -> str:
+        """Read any text file under the KB's ``output/`` or ``skills/``.
+
+        Use this when the skill needs to inspect a previously-generated
+        artifact (e.g. critique an existing deck) or another skill's
+        body. For wiki content, prefer the dedicated wiki read tools.
+
+        Args:
+            path: File path relative to the KB root, e.g.
+                ``"output/decks/foo/index.html"``.
+        """
+        target = (kb_dir / path).resolve()
+        if not any(target.is_relative_to(kb_dir.resolve() / area) for area in ("output", "skills")):
+            return "Use the permitted wiki readers for knowledge evidence."
+        return read_kb_file(path, kb_root, scope=scope)
+
+    agent = base.clone(
+        name=f"skill::{skill_name}",
+        instructions=(base.instructions or "")
+        + "\n\n# Skill instructions (you are this skill)\n\n"
+        + body
+        + "\n\n## User intent\n\n"
+        + intent,
+        tools=[*base.tools, write_file, read_output_or_skill_file],
+    )
+    agent = restrict_query_agent(agent, selection)
+
+    user_seed = seed or (
+        f"Follow the skill instructions above. Begin work now. User intent: {intent}"
+    )
+
+    # Per-KB credential isolation: when a bundle is supplied (REST path) the
+    # RunConfig carries a dedicated LitellmModel with this KB's api_key/base_url,
+    # overriding the process-global provider for this run only. When bundle is
+    # None (CLI path) build_run_config_from_bundle returns None and the call is
+    # byte-identical to the pre-bundle behavior (no run_config kwarg passed).
+    run_config = build_run_config_from_bundle(model, bundle)
+    return PreparedSkillRun(agent, user_seed, definition, max_turns, run_config)
+
+
+def finish_skill_run(definition: PreparedSkill) -> SkillRunResult:
+    """Validate the delivered artifact and assemble its functional outcome."""
+    skill_name = definition.name
+    output_path, od_meta = definition.output_path, definition.metadata
+    result = SkillRunResult(
+        skill_name=skill_name,
+        output_path=output_path,
+        metadata=od_meta if isinstance(od_meta, dict) else {},
+    )
+
+    # Post-run hooks driven by skill frontmatter.
+    if output_path is not None and not output_path.is_file():
+        raise RuntimeError(
+            f"Skill {skill_name!r} finished but did not write the expected "
+            f"output file at {output_path}. The skill is either misconfigured "
+            f"or the wiki lacks content matching the intent."
+        )
+
+    if od_meta.get("mode") == "deck" and output_path is not None:
+        # Lazy import — skill_runner shouldn't pull in deck-specific code
+        # at import time, only when actually running a deck skill.
+        from ultrakb.deck.validator import DeckGrammar, validate_deck
+
+        grammar: Optional[DeckGrammar] = od_meta.get("deck_grammar")
+        result.validation = validate_deck(output_path.parent, grammar=grammar)
+
+    return result

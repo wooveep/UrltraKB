@@ -13,7 +13,7 @@ with no native build or install hooks. The wheel SHA256 is
 the source archive SHA256 is
 `599383381a0bf3dfbd932ca0ca6515acd174ed48870cbf7fee123d698c192c1c`.
 Both distribution artifacts are locked by `uv.lock`. The entire BSD/PIL license
-from the wheel metadata is retained at `openkb/pending/olefile-LICENSE.txt`.
+from the wheel metadata is retained at `ultrakb/pending/olefile-LICENSE.txt`.
 
 Compound streams are opened with `DEFECT_INCORRECT`, read under shared byte/time
 budgets, checked against their declared lengths, and decoded only at supported

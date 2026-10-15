@@ -3,12 +3,12 @@
 import pytest
 from figure_fixtures import png_bytes
 
-pytest_plugins = ("test_pdf_readback", "block_fixtures")
+pytest_plugins = ("test_pdf_readback", "block_fixtures", "processing_fixtures")
 
 
 @pytest.fixture(autouse=True)
 def isolated_global_settings(tmp_path_factory, monkeypatch):
-    from openkb import config
+    from ultrakb import config
 
     directory = tmp_path_factory.mktemp("global-settings")
     monkeypatch.setattr(config, "GLOBAL_CONFIG_DIR", directory)
@@ -16,9 +16,10 @@ def isolated_global_settings(tmp_path_factory, monkeypatch):
     monkeypatch.setattr(config, "GLOBAL_CONFIG_LOCK_PATH", directory / ".lock")
 
 
-def test_xml_freezes_structure_without_interpreting_business_values(kb_dir, tmp_path, pdf_model):
-    from openkb.application.documents import import_document
-    from openkb.documents import read_document_source
+def test_xml_freezes_structure_without_interpreting_business_values(
+    kb_dir, tmp_path, processing_only
+):
+    from ultrakb.documents import read_document_source
 
     original = (
         '<?xml version="1.0"?>\r\n<catalog><entry code="001"><![CDATA[A < B]]>'
@@ -26,8 +27,7 @@ def test_xml_freezes_structure_without_interpreting_business_values(kb_dir, tmp_
     )
     path = tmp_path / "catalog.xml"
     path.write_bytes(original.encode("utf-16"))
-    result = import_document(kb_dir, path)
-    assert result.status == "added", result.message
+    result = processing_only(path)
     assert result.source_id is not None
     path.unlink()
     saved = read_document_source(kb_dir, result.source_id)
@@ -43,26 +43,23 @@ def test_xml_freezes_structure_without_interpreting_business_values(kb_dir, tmp_
     [("utf-16-le", "UTF-16LE", "signature"), ("iso8859-1", "ISO-8859-1", "declaration")],
 )
 def test_xml_honors_encoding_signatures_and_declarations(
-    kb_dir, tmp_path, pdf_model, codec, declared, basis
+    kb_dir, tmp_path, processing_only, codec, declared, basis
 ):
-    from openkb.application.documents import import_document
-    from openkb.documents import read_document_source
+    from ultrakb.documents import read_document_source
 
     text = f'<?xml version="1.0" encoding="{declared}"?><root>café</root>'
     path = tmp_path / "declared.xml"
     path.write_bytes(text.encode(codec))
-    result = import_document(kb_dir, path)
-    assert result.status == "added", result.message
+    result = processing_only(path)
     saved = read_document_source(kb_dir, result.source_id)
     assert saved["content"] == "```xml\n" + text + "\n```\n"
     assert saved["encoding"]["basis"] == basis
 
 
-def test_html_keeps_structure_and_freezes_local_and_data_images(kb_dir, tmp_path, pdf_model):
+def test_html_keeps_structure_and_freezes_local_and_data_images(kb_dir, tmp_path, processing_only):
     import base64
 
-    from openkb.application.documents import import_document
-    from openkb.documents import read_document_source
+    from ultrakb.documents import read_document_source
 
     image = tmp_path / "local.png"
     image.write_bytes(png_bytes())
@@ -78,8 +75,7 @@ def test_html_keeps_structure_and_freezes_local_and_data_images(kb_dir, tmp_path
     )
     path = tmp_path / "guide.html"
     path.write_bytes(original.encode())
-    result = import_document(kb_dir, path)
-    assert result.status == "added", result.message
+    result = processing_only(path)
     assert result.source_id is not None
     path.unlink()
     image.unlink()
@@ -101,14 +97,13 @@ def test_html_keeps_structure_and_freezes_local_and_data_images(kb_dir, tmp_path
 
 
 def test_html_download_policy_freezes_assets_and_single_false_overrides_kb(
-    kb_dir, tmp_path, pdf_model, monkeypatch
+    kb_dir, tmp_path, processing_only, monkeypatch
 ):
     import io
 
-    from openkb.application.documents import import_document
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
-    from openkb.documents import read_document_source
+    from ultrakb.application.settings import apply_kb_config_patch
+    from ultrakb.application.settings_data import KbConfigPatchRequest
+    from ultrakb.documents import read_document_source
 
     payload = b'<svg xmlns="http://www.w3.org/2000/svg"><text>remote diagram</text></svg>'
     requested = []
@@ -127,8 +122,7 @@ def test_html_download_policy_freezes_assets_and_single_false_overrides_kb(
     path.write_text(
         '<h1>hello</h1><p>Body.<img src="https://example.test/chart.svg"></p>', encoding="utf-8"
     )
-    imported = import_document(kb_dir, path)
-    assert imported.status == "added", imported.message
+    imported = processing_only(path)
     saved = read_document_source(kb_dir, imported.source_id)
     assert saved["resource_policy"] == {"download_remote_assets": True, "source": "kb"}
     assert len(requested) == 1 and saved["resources"][0]["status"] == "retained"
@@ -144,7 +138,7 @@ def test_html_download_policy_freezes_assets_and_single_false_overrides_kb(
     )
     other = tmp_path / "disabled.html"
     other.write_bytes(path.read_bytes())
-    disabled = import_document(kb_dir, other, download_remote_assets=False)
+    disabled = processing_only(other, download_remote_assets=False)
     blocked = read_document_source(kb_dir, disabled.source_id)
     assert blocked["resource_policy"] == {"download_remote_assets": False, "source": "single"}
     assert blocked["resources"][0]["status"] == "not_requested" and len(requested) == 1
@@ -158,7 +152,7 @@ def test_import_override_reports_network_failure_without_losing_html_body(
     import json
     from urllib.error import URLError
 
-    from openkb.documents import read_document_source
+    from ultrakb.documents import read_document_source
 
     def unavailable(*args, **kwargs):
         if protocol_failure:
@@ -173,8 +167,8 @@ def test_import_override_reports_network_failure_without_losing_html_body(
     if adapter == "cli":
         from click.testing import CliRunner
 
-        from openkb.cli import cli
-        from openkb.source_catalog import list_sources
+        from ultrakb.cli import cli
+        from ultrakb.source_catalog import list_sources
 
         output = CliRunner().invoke(
             cli, ["--kb-dir", str(kb_dir), "add", str(path), "--download-remote-assets"]
@@ -184,10 +178,10 @@ def test_import_override_reports_network_failure_without_losing_html_body(
     else:
         from fastapi.testclient import TestClient
 
-        from openkb.api import create_app
-        from openkb.config import register_kb_alias
+        from ultrakb.api import create_app
+        from ultrakb.config import register_kb_alias
 
-        monkeypatch.delenv("OPENKB_API_TOKEN", raising=False)
+        monkeypatch.delenv("ULTRAKB_API_TOKEN", raising=False)
         register_kb_alias("markup", kb_dir)
         with TestClient(create_app()) as client:
             response = client.post(
@@ -231,30 +225,11 @@ def test_import_override_reports_network_failure_without_losing_html_body(
 def test_markup_uses_frozen_blocks_and_original_anchors(
     kb_dir, tmp_path, block_model, monkeypatch, extension, body, expected, wide_short_prompt
 ):
-    import json
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.settings import apply_kb_config_patch
+    from ultrakb.application.settings_data import KbConfigPatchRequest
+    from ultrakb.documents import read_document_source
 
-    import litellm
-
-    from openkb.application.documents import import_document
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
-    from openkb.documents import read_document_source
-
-    respond = litellm.completion
-
-    def completion(**kwargs):
-        result = respond(**kwargs)
-        if extension == "xml" and "CONTENT BLOCK STRUCTURE" in str(kwargs["messages"]):
-            entries = json.loads(result.choices[0].message.content)
-            entries[0]["anchor"]["range"] = [13, 18]
-            result.choices[0].message.content = json.dumps(entries)
-        return result
-
-    async def acompletion(**kwargs):
-        return completion(**kwargs)
-
-    monkeypatch.setattr(litellm, "completion", completion)
-    monkeypatch.setattr(litellm, "acompletion", acompletion)
     apply_kb_config_patch(
         kb_dir,
         KbConfigPatchRequest(
@@ -273,8 +248,8 @@ def test_markup_uses_frozen_blocks_and_original_anchors(
 
 
 def test_xml_rejects_entities_and_retains_original_for_diagnosis(kb_dir, tmp_path, pdf_model):
-    from openkb.application.documents import import_document
-    from openkb.documents import read_document_source
+    from ultrakb.application.documents import import_document
+    from ultrakb.documents import read_document_source
 
     raw = b'<!DOCTYPE root [<!ENTITY external SYSTEM "file:///should-not-read">]><root>&external;</root>'
     path = tmp_path / "entity.xml"
@@ -287,8 +262,8 @@ def test_xml_rejects_entities_and_retains_original_for_diagnosis(kb_dir, tmp_pat
 
 
 def test_xml_rejects_declaration_that_disagrees_with_actual_encoding(kb_dir, tmp_path, pdf_model):
-    from openkb.application.documents import import_document
-    from openkb.documents import read_document_source
+    from ultrakb.application.documents import import_document
+    from ultrakb.documents import read_document_source
 
     path = tmp_path / "mislabeled.xml"
     path.write_bytes('<?xml version="1.0" encoding="UTF-8"?><root>café</root>'.encode("utf-16"))
@@ -298,9 +273,8 @@ def test_xml_rejects_declaration_that_disagrees_with_actual_encoding(kb_dir, tmp
     assert source["encoding"]["basis"] == "bom" and source["knowledge_revision_id"] is None
 
 
-def test_indented_html_images_use_html_rules_and_base_urls(kb_dir, tmp_path, pdf_model):
-    from openkb.application.documents import import_document
-    from openkb.documents import read_document_source
+def test_indented_html_images_use_html_rules_and_base_urls(kb_dir, tmp_path, processing_only):
+    from ultrakb.documents import read_document_source
 
     path = tmp_path / "base.html"
     path.write_text(
@@ -309,8 +283,7 @@ def test_indented_html_images_use_html_rules_and_base_urls(kb_dir, tmp_path, pdf
         encoding="utf-8",
     )
     (tmp_path / "chart.png").write_bytes(b"wrong local file")
-    result = import_document(kb_dir, path)
-    assert result.status == "added", result.message
+    result = processing_only(path)
     saved = read_document_source(kb_dir, result.source_id)
     assert not saved["assets"]
     assert len(saved["resources"]) == 1
@@ -319,9 +292,8 @@ def test_indented_html_images_use_html_rules_and_base_urls(kb_dir, tmp_path, pdf
     assert r"!\[literal\](other.png)" in saved["content"]
 
 
-def test_html_percent_encoded_image_is_available_offline(kb_dir, tmp_path, pdf_model):
-    from openkb.application.documents import import_document
-    from openkb.documents import read_document_source
+def test_html_percent_encoded_image_is_available_offline(kb_dir, tmp_path, processing_only):
+    from ultrakb.documents import read_document_source
 
     path = tmp_path / "inline.html"
     path.write_text(
@@ -329,8 +301,7 @@ def test_html_percent_encoded_image_is_available_offline(kb_dir, tmp_path, pdf_m
         'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%2F%3E"></p>',
         encoding="utf-8",
     )
-    result = import_document(kb_dir, path)
-    assert result.status == "added", result.message
+    result = processing_only(path)
     source = read_document_source(kb_dir, result.source_id)
     image = source["resources"][0]
     assert image["status"] == "retained"
@@ -347,14 +318,13 @@ def test_html_percent_encoded_image_is_available_offline(kb_dir, tmp_path, pdf_m
     ],
 )
 def test_html_download_policy_preserves_explicit_false_and_inheritance(
-    kb_dir, tmp_path, pdf_model, monkeypatch, kb_value, single, basis, expected
+    kb_dir, tmp_path, processing_only, monkeypatch, kb_value, single, basis, expected
 ):
     import io
 
-    from openkb.application.documents import import_document
-    from openkb.application.settings import apply_global_config_patch, apply_kb_config_patch
-    from openkb.application.settings_data import GlobalConfigPatchRequest, KbConfigPatchRequest
-    from openkb.documents import read_document_source
+    from ultrakb.application.settings import apply_global_config_patch, apply_kb_config_patch
+    from ultrakb.application.settings_data import GlobalConfigPatchRequest, KbConfigPatchRequest
+    from ultrakb.documents import read_document_source
 
     requested = []
 
@@ -371,8 +341,7 @@ def test_html_download_policy_preserves_explicit_false_and_inheritance(
     )
     path = tmp_path / "precedence.html"
     path.write_text('<p>Diagram <img src="https://example.test/image.svg"></p>', encoding="utf-8")
-    result = import_document(kb_dir, path, download_remote_assets=single)
-    assert result.status == "added", result.message
+    result = processing_only(path, download_remote_assets=single)
     saved = read_document_source(kb_dir, result.source_id)
     assert saved["resource_policy"] == {"source": basis, "download_remote_assets": expected}
     assert len(requested) == int(expected)
@@ -381,9 +350,9 @@ def test_html_download_policy_preserves_explicit_false_and_inheritance(
 def test_watched_html_local_image_change_retains_both_source_revisions(kb_dir, pdf_model):
     from test_native_watch import TaskSink, eventually
 
-    from openkb.application.documents import import_document
-    from openkb.documents import read_document_source
-    from openkb.runtime.watch import NativeWatch
+    from ultrakb.application.documents import import_document
+    from ultrakb.documents import read_document_source
+    from ultrakb.runtime.watch import NativeWatch
 
     path = kb_dir / "raw/diagram.html"
     path.write_text('<p>Diagram <img src="figure.png"></p>', encoding="utf-8")
@@ -440,8 +409,8 @@ def test_watched_html_local_image_change_retains_both_source_revisions(kb_dir, p
 def test_html_preserves_enclosing_and_base_relative_links(
     kb_dir, tmp_path, pdf_model, markup, label, target
 ):
-    from openkb.application.documents import import_document
-    from openkb.documents import read_document_source
+    from ultrakb.application.documents import import_document
+    from ultrakb.documents import read_document_source
 
     path = tmp_path / "links.html"
     path.write_text(markup, encoding="utf-8")
@@ -457,9 +426,11 @@ def test_html_preserves_enclosing_and_base_relative_links(
         assert "<h1>" in rendered
 
 
-def test_html_heading_and_table_images_remain_readable(kb_dir, tmp_path, pdf_model):
-    from openkb.application.documents import import_document
-    from openkb.documents import read_document_source
+def test_html_heading_and_table_images_remain_readable(kb_dir, tmp_path):
+    from publication_fixtures import publish_document
+
+    from ultrakb.config import resolve_credential_bundle
+    from ultrakb.documents import read_document_source
 
     (tmp_path / "figure.svg").write_bytes(b'<svg xmlns="http://www.w3.org/2000/svg"/>')
     path = tmp_path / "figures.html"
@@ -468,7 +439,12 @@ def test_html_heading_and_table_images_remain_readable(kb_dir, tmp_path, pdf_mod
         '<table><tr><td><img src="figure.svg" alt="diagram"></td></tr></table>',
         encoding="utf-8",
     )
-    result = import_document(kb_dir, path)
+    result = publish_document(
+        kb_dir,
+        path,
+        "Retained HTML heading and table images.",
+        bundle=resolve_credential_bundle(kb_dir),
+    )
     assert result.status == "added", result.message
     source = read_document_source(kb_dir, result.source_id)
     assert (

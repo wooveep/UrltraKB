@@ -35,7 +35,7 @@ def test_inventory_attributes_vendor_sources_and_resources(monkeypatch, file, co
     monkeypatch.syspath_prepend(str(root / "scripts"))
     from scripts.inventory_desktop import Inputs
 
-    inputs = Inputs(root, {"version": metadata.version("openkb"), "commit": "fixture"})
+    inputs = Inputs(root, {"version": metadata.version("ultrakb"), "commit": "fixture"})
     key, path = inputs.owner(root / "vendor" / file)
     assert key == "python/" + component
     assert path == "vendor/" + file

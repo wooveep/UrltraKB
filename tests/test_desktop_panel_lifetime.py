@@ -13,8 +13,8 @@ from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QApplication
 from shiboken6 import isValid
 
-from openkb.desktop.documents import DocumentsDialog
-from openkb.desktop.window import Workbench
+from ultrakb.desktop.documents import DocumentsDialog
+from ultrakb.desktop.window import Workbench
 
 
 class DeferredIO:

@@ -14,8 +14,8 @@ FIXTURES = Path(__file__).parent / "fixtures/office"
 def test_binary_word_retains_final_body_blank_page_and_image(
     kb_dir, tmp_path, office_runtime, pdf_model
 ):
-    from openkb.application.documents import import_document
-    from openkb.documents import read_document_source
+    from ultrakb.application.documents import import_document
+    from ultrakb.documents import read_document_source
 
     path = tmp_path / "中文 Word 97.doc"
     shutil.copyfile(FIXTURES / "writer.doc", path)
@@ -43,8 +43,8 @@ def test_binary_word_retains_final_body_blank_page_and_image(
 def test_binary_word_failure_keeps_original_and_explains_why(
     kb_dir, tmp_path, writer_document, office_runtime, pdf_model, kind
 ):
-    from openkb.application.documents import import_document
-    from openkb.documents import read_document_source
+    from ultrakb.application.documents import import_document
+    from ultrakb.documents import read_document_source
 
     path = tmp_path / "input.doc"
     if kind == "encrypted":
@@ -72,9 +72,9 @@ def test_binary_word_upload_and_cli_read_the_same_source(kb_dir, office_runtime,
     from click.testing import CliRunner
     from fastapi.testclient import TestClient
 
-    from openkb.api import create_app
-    from openkb.cli import cli
-    from openkb.config import register_kb_alias
+    from ultrakb.api import create_app
+    from ultrakb.cli import cli
+    from ultrakb.config import register_kb_alias
 
     register_kb_alias("legacy-word", kb_dir)
     original = (FIXTURES / "writer.doc").read_bytes()

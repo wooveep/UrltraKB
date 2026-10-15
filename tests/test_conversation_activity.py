@@ -6,10 +6,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from openkb.application.execution import ExecutionContext
-from openkb.runtime.records import TaskView, UnitIdentity
-from openkb.runtime.requests import AskQuestion
-from openkb.runtime.tasks import TaskManager, _Task
+from ultrakb.application.execution import ExecutionContext
+from ultrakb.runtime.records import TaskView, UnitIdentity
+from ultrakb.runtime.requests import AskQuestion
+from ultrakb.runtime.tasks import TaskManager, _Task
 
 
 def test_concurrent_activity_events_pair_and_keep_private_errors_out():
@@ -106,7 +106,7 @@ def test_activity_surface_keeps_stable_steps_counts_and_cleanup(kb_dir, monkeypa
     from PySide6.QtWidgets import QApplication
 
     application = QApplication.instance() or QApplication([])
-    from openkb.desktop.conversation_activity import ConversationActivity
+    from ultrakb.desktop.conversation_activity import ConversationActivity
 
     widget = ConversationActivity()
     task = TaskView(

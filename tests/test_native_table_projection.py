@@ -3,10 +3,10 @@
 import copy
 import json
 
-from openkb.agent.evidence_payload import project_evidence, slice_evidence
-from openkb.agent.source_windows import CompileSourceWindows
-from openkb.source_contract import NATIVE_PAGE_POLICY
-from openkb.source_pages import read_page_selection
+from ultrakb.agent.evidence_payload import project_evidence, slice_evidence
+from ultrakb.agent.source_windows import CompileSourceWindows
+from ultrakb.source_contract import NATIVE_PAGE_POLICY
+from ultrakb.source_pages import read_page_selection
 
 TABLE = (
     "<table>\n<tr><td>Category</td><td>Feature</td><td>Description</td></tr>\n"
@@ -138,7 +138,7 @@ def test_table_identity_is_scoped_to_original_physical_page():
 
 
 def test_document_windows_parse_tables_once_including_adjacent_context(kb_dir, monkeypatch):
-    from openkb.agent import table_evidence
+    from ultrakb.agent import table_evidence
 
     body = "\n\n".join([TABLE] * 5)
     pages = [native_page(body)]

@@ -2,12 +2,13 @@
 
 import asyncio
 
+from application_llm_fixtures import real_application_model  # noqa: F401
 from test_query_views import _import_rule
 
 
 def test_selected_refresh_reuses_current_summaries_without_model_work(kb_dir, monkeypatch):
-    from openkb.application.refresh import refresh_selected_sources, refresh_status
-    from openkb.application.views import view_scope
+    from ultrakb.application.refresh import refresh_selected_sources, refresh_status
+    from ultrakb.application.views import view_scope
 
     problem = _import_rule(kb_dir, monkeypatch, "problem", "Old operating rule.")
     normal = _import_rule(kb_dir, monkeypatch, "normal", "Independent operating rule.")
@@ -19,15 +20,15 @@ def test_selected_refresh_reuses_current_summaries_without_model_work(kb_dir, mo
     assert "summaries/normal.md" in refresh_status(kb_dir, scope=scope)["needs_refresh"]
     retained = {
         str(p.relative_to(kb_dir)): p.read_bytes()
-        for p in (kb_dir / ".openkb/normalized").rglob("*")
+        for p in (kb_dir / ".ultrakb/normalized").rglob("*")
         if p.is_file()
     }
 
     def forbidden(*args, **kwargs):
         raise AssertionError("Current summaries must not be recompiled or sent to a model")
 
-    monkeypatch.setattr("openkb.agent.compiler.compile_short_doc", forbidden)
-    monkeypatch.setattr("openkb.agent.compiler.compile_long_doc", forbidden)
+    monkeypatch.setattr("ultrakb.agent.compiler.compile_short_doc", forbidden)
+    monkeypatch.setattr("ultrakb.agent.compiler.compile_long_doc", forbidden)
     monkeypatch.setattr("litellm.completion", forbidden)
     monkeypatch.setattr("litellm.acompletion", forbidden)
 
@@ -40,9 +41,9 @@ def test_selected_refresh_reuses_current_summaries_without_model_work(kb_dir, mo
 
 
 def test_selected_refresh_cannot_certify_a_manually_changed_normal_summary(kb_dir, monkeypatch):
-    from openkb.application.pages import read_page, save_page
-    from openkb.application.refresh import refresh_selected_sources, refresh_status
-    from openkb.application.views import view_scope
+    from ultrakb.application.pages import read_page, save_page
+    from ultrakb.application.refresh import refresh_selected_sources, refresh_status
+    from ultrakb.application.views import view_scope
 
     problem = _import_rule(kb_dir, monkeypatch, "problem", "Old operating rule.")
     normal = _import_rule(kb_dir, monkeypatch, "normal", "Independent operating rule.")

@@ -45,8 +45,8 @@ def indexed_document(root, *, name="source", key="policy-key", identity="documen
 
 
 def test_storage_contract_roundtrip_dedup_collections_and_relocation(tmp_path):
-    from openkb.condb_storage import ConDBPageIndexStorage
-    from openkb.index_location import IndexLocation
+    from ultrakb.condb_storage import ConDBPageIndexStorage
+    from ultrakb.index_location import IndexLocation
 
     package = tmp_path / "staging"
     inputs = package / "separate-inputs"
@@ -94,17 +94,17 @@ def test_storage_contract_roundtrip_dedup_collections_and_relocation(tmp_path):
         assert storage.list_collections() == []
 
 
-def test_real_client_is_portable_sealed_and_never_mutates_on_reads(tmp_path, monkeypatch):
+def test_real_client_is_portable_sealed_and_never_mutates_on_reads(tmp_path, monkeypatch, live_llm):
     from pageindex import IndexConfig
     from test_index_llm import RecordingIndexLLM
 
-    from openkb.index_client import create_index_client
-    from openkb.index_location import IndexLocation
-    from openkb.index_packages import seal_index_package
+    from ultrakb.index_client import create_index_client
+    from ultrakb.index_location import IndexLocation
+    from ultrakb.index_packages import seal_index_package
 
     source = tmp_path / "source.md"
     source.write_text("# 原标题\n完整原文🙂\n## 第二节\n更多正文")
-    runtime = RecordingIndexLLM()
+    runtime = RecordingIndexLLM(live_llm=live_llm)
     package = tmp_path / "work"
     with create_index_client(
         storage_path=str(package),
@@ -139,8 +139,8 @@ def test_real_client_is_portable_sealed_and_never_mutates_on_reads(tmp_path, mon
 
 
 def test_mapping_failure_rolls_back_the_tree_and_complete_document(tmp_path):
-    from openkb.condb_storage import ConDBPageIndexStorage
-    from openkb.index_location import IndexLocation
+    from ultrakb.condb_storage import ConDBPageIndexStorage
+    from ultrakb.index_location import IndexLocation
 
     with ConDBPageIndexStorage(IndexLocation.package(tmp_path / "index")) as storage:
         storage.create_collection("default")
@@ -156,8 +156,8 @@ def test_mapping_failure_rolls_back_the_tree_and_complete_document(tmp_path):
 
 @pytest.mark.parametrize("collection,identity", [("default", "wrong"), ("wrong", "document")])
 def test_document_identity_cannot_retarget_a_validated_input(tmp_path, collection, identity):
-    from openkb.condb_storage import ConDBPageIndexStorage
-    from openkb.index_location import IndexLocation
+    from ultrakb.condb_storage import ConDBPageIndexStorage
+    from ultrakb.index_location import IndexLocation
 
     with ConDBPageIndexStorage(IndexLocation.package(tmp_path / "index")) as storage:
         storage.create_collection(collection)
@@ -173,8 +173,8 @@ def test_document_identity_cannot_retarget_a_validated_input(tmp_path, collectio
     "damage", ["source", "range", "pages", "path", "missing_kind", "unknown_kind", "unit_count"]
 )
 def test_document_input_or_locator_corruption_is_rejected_before_commit(tmp_path, damage):
-    from openkb.condb_storage import ConDBPageIndexStorage
-    from openkb.index_location import IndexLocation
+    from ultrakb.condb_storage import ConDBPageIndexStorage
+    from ultrakb.index_location import IndexLocation
 
     with ConDBPageIndexStorage(IndexLocation.package(tmp_path / "index")) as storage:
         storage.create_collection("default")
@@ -199,19 +199,19 @@ def test_document_input_or_locator_corruption_is_rejected_before_commit(tmp_path
         assert storage.list_documents("default") == []
 
 
-def test_dedup_failure_keeps_the_existing_document_and_managed_input(kb_dir, monkeypatch):
+def test_dedup_failure_keeps_the_existing_document_and_managed_input(kb_dir, monkeypatch, live_llm):
     from pathlib import Path
 
     from pageindex import IndexConfig
     from test_index_llm import RecordingIndexLLM
 
-    from openkb import indexer
-    from openkb.index_client import create_index_client
-    from openkb.knowledge_scope import legacy_scope
+    from ultrakb import indexer
+    from ultrakb.index_client import create_index_client
+    from ultrakb.knowledge_scope import legacy_scope
 
     source = kb_dir / "input.md"
     source.write_text("# Title\nRetained original.")
-    options = IndexConfig(llm_client=RecordingIndexLLM(), require_llm_client=True)
+    options = IndexConfig(llm_client=RecordingIndexLLM(live_llm=live_llm), require_llm_client=True)
     monkeypatch.setattr(indexer, "_build_index_config", lambda *a, **kw: options)
     monkeypatch.setattr(
         indexer, "_convert_pdf_to_pages", lambda *a: [{"page": 1, "content": "Retained original."}]
@@ -224,7 +224,7 @@ def test_dedup_failure_keeps_the_existing_document_and_managed_input(kb_dir, mon
     monkeypatch.setattr(indexer, "_write_long_doc_artifacts", fail)
     with pytest.raises(OSError, match="injected output failure"):
         indexer.index_long_document(source, kb_dir, scope=legacy_scope(kb_dir))
-    with create_index_client(storage_path=kb_dir / ".openkb", index_config=options) as reader:
+    with create_index_client(storage_path=kb_dir / ".ultrakb", index_config=options) as reader:
         document = reader.collection().get_document(result.doc_id, include_text=True)
         assert Path(document["file_path"]).is_file()
         assert "Retained original." in document["structure"][0]["text"]
@@ -232,7 +232,7 @@ def test_dedup_failure_keeps_the_existing_document_and_managed_input(kb_dir, mon
 
 @pytest.mark.parametrize("entry", ["context.sqlite", "files"])
 def test_working_package_cannot_follow_an_external_storage_symlink(tmp_path, entry):
-    from openkb.index_location import IndexLocation
+    from ultrakb.index_location import IndexLocation
 
     package = tmp_path / "index"
     package.mkdir()

@@ -1,13 +1,11 @@
-"""Tests for openkb.agent.linter (Task 14)."""
+"""Tests for ultrakb.agent.linter (Task 14)."""
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
-
 import pytest
 
-from openkb.agent.linter import build_lint_agent, run_knowledge_lint
-from openkb.schema import SCHEMA_MD
+from ultrakb.agent.linter import build_lint_agent, run_knowledge_lint
+from ultrakb.schema import SCHEMA_MD
 
 
 class TestBuildLintAgent:
@@ -48,21 +46,21 @@ class TestLintAgentParallelToolCalls:
     """
 
     def test_unset_omits_the_setting(self, tmp_path):
-        from openkb.config import set_parallel_tool_calls
+        from ultrakb.config import set_parallel_tool_calls
 
         set_parallel_tool_calls(None, False)  # not configured
         agent = build_lint_agent(str(tmp_path), "bedrock/eu.anthropic.claude-sonnet-4-6")
         assert agent.model_settings.parallel_tool_calls is None
 
     def test_explicit_null_omits(self, tmp_path):
-        from openkb.config import set_parallel_tool_calls
+        from ultrakb.config import set_parallel_tool_calls
 
         set_parallel_tool_calls(None, True)  # explicit null
         agent = build_lint_agent(str(tmp_path), "gpt-4o-mini")
         assert agent.model_settings.parallel_tool_calls is None
 
     def test_explicit_bools_flow_through(self, tmp_path):
-        from openkb.config import set_parallel_tool_calls
+        from ultrakb.config import set_parallel_tool_calls
 
         set_parallel_tool_calls(True, True)
         assert build_lint_agent(str(tmp_path), "m").model_settings.parallel_tool_calls is True
@@ -72,42 +70,43 @@ class TestLintAgentParallelToolCalls:
 
 class TestRunKnowledgeLint:
     @pytest.mark.asyncio
-    async def test_returns_final_output(self, tmp_path):
-        (tmp_path / "wiki").mkdir()
+    async def test_returns_final_output(self, kb_dir, live_llm, monkeypatch):
+        from ultrakb.agent.query import build_run_config_from_bundle
+        from ultrakb.locks import atomic_write_text
 
-        mock_result = MagicMock()
-        mock_result.final_output = "## Lint Report\n\nNo issues found."
+        live_llm.install(monkeypatch)
+        atomic_write_text(
+            kb_dir / "wiki/index.md", "# Index\n[[summaries/orion]]\n[[concepts/orion]]"
+        )
+        atomic_write_text(
+            kb_dir / "wiki/summaries/orion.md",
+            "# Orion\nOrion costs 17 credits under standard conditions.",
+        )
+        atomic_write_text(
+            kb_dir / "wiki/concepts/orion.md",
+            "# Orion\nOrion costs 23 credits under standard conditions.",
+        )
+        monkeypatch.setattr("ultrakb.agent.linter.MAX_TURNS", 5)
+        result = await run_knowledge_lint(
+            kb_dir,
+            "deepseek/deepseek-flash",
+            bundle=live_llm.credentials,
+            run_config=build_run_config_from_bundle(
+                "deepseek/deepseek-flash", live_llm.credentials
+            ),
+        )
+        assert "orion" in result.lower() and "17" in result and "23" in result
 
-        with patch("openkb.agent.linter.Runner.run", new_callable=AsyncMock) as mock_run:
-            mock_run.return_value = mock_result
-            result = await run_knowledge_lint(tmp_path, "gpt-4o-mini")
+    def test_calls_runner_with_correct_agent(self, tmp_path):
+        agent = build_lint_agent(str(tmp_path), "deepseek/deepseek-flash")
+        assert agent.name == "wiki-linter"
+        assert {tool.name for tool in agent.tools} == {"list_files", "read_file"}
 
-        assert "No issues found" in result
+    def test_handles_empty_final_output(self):
+        from ultrakb.agent.linter import semantic_report
 
-    @pytest.mark.asyncio
-    async def test_calls_runner_with_correct_agent(self, tmp_path):
-        (tmp_path / "wiki").mkdir()
-
-        captured = {}
-
-        async def fake_run(agent, message, **kwargs):
-            captured["agent"] = agent
-            return MagicMock(final_output="report")
-
-        with patch("openkb.agent.linter.Runner.run", side_effect=fake_run):
-            await run_knowledge_lint(tmp_path, "gpt-4o-mini")
-
-        assert captured["agent"].name == "wiki-linter"
-
-    @pytest.mark.asyncio
-    async def test_handles_empty_final_output(self, tmp_path):
-        (tmp_path / "wiki").mkdir()
-
-        mock_result = MagicMock()
-        mock_result.final_output = None
-
-        with patch("openkb.agent.linter.Runner.run", new_callable=AsyncMock) as mock_run:
-            mock_run.return_value = mock_result
-            result = await run_knowledge_lint(tmp_path, "gpt-4o-mini")
-
-        assert "completed" in result.lower() or result != ""
+        issues = []
+        assert "completed" in semantic_report(None, on_issue=issues.append).lower()
+        assert issues == ["semantic_report_missing"]
+        with pytest.raises(ValueError, match="must be text"):
+            semantic_report({"invalid": "report"})

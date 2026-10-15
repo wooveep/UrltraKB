@@ -12,14 +12,14 @@ import json
 
 from fastapi.testclient import TestClient
 
-from openkb.api import create_app
+from ultrakb.api import create_app
 
 
 def _client(monkeypatch, token: str | None = "secret") -> TestClient:
     if token is None:
-        monkeypatch.delenv("OPENKB_API_TOKEN", raising=False)
+        monkeypatch.delenv("ULTRAKB_API_TOKEN", raising=False)
     else:
-        monkeypatch.setenv("OPENKB_API_TOKEN", token)
+        monkeypatch.setenv("ULTRAKB_API_TOKEN", token)
     return TestClient(create_app())
 
 
@@ -32,12 +32,12 @@ def _use_named_kb(monkeypatch, kb_dir, name: str = "test-kb") -> str:
         assert kb == name
         return kb_dir
 
-    monkeypatch.setattr("openkb.api_helpers.resolve_kb_alias", resolve)
+    monkeypatch.setattr("ultrakb.api_helpers.resolve_kb_alias", resolve)
     return name
 
 
 def _write_hashes(kb_dir, hashes: dict) -> None:
-    (kb_dir / ".openkb" / "hashes.json").write_text(json.dumps(hashes), encoding="utf-8")
+    (kb_dir / ".ultrakb" / "hashes.json").write_text(json.dumps(hashes), encoding="utf-8")
 
 
 def test_document_source_short_md(monkeypatch, kb_dir):

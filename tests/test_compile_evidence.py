@@ -4,8 +4,8 @@ import json
 
 import pytest
 
-from openkb.agent.compile_evidence import CompileEvidence, LongDocumentEvidence
-from openkb.agent.page_response import PageResponseError
+from ultrakb.agent.compile_evidence import CompileEvidence, LongDocumentEvidence
+from ultrakb.agent.page_response import PageResponseError
 
 
 def test_frozen_selection_preserves_locator_and_never_reads_another_source(kb_dir):
@@ -83,7 +83,7 @@ def test_retained_docx_responses_keep_original_urls_without_repair():
 
 @pytest.mark.parametrize("units", [[0], [True], [1, 1], list(range(1, 8)), "1-2"])
 def test_plan_rejects_invalid_evidence_ranges(units):
-    from openkb.agent.compile_plan import normalize_plan
+    from ultrakb.agent.compile_plan import normalize_plan
 
     with pytest.raises(ValueError, match="evidence_units"):
         normalize_plan(

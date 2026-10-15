@@ -3,20 +3,22 @@
 import json
 
 import pytest
-from test_compile_windows import compile_boundary
+from test_compile_windows import _plan
 
-pytest_plugins = ("test_pdf_readback",)
+from ultrakb.locks import atomic_write_text
+
+pytest_plugins = ("processing_fixtures",)
 
 
 def test_oversized_pdf_compile_window_keeps_paragraphs_and_native_continuation(kb_dir, monkeypatch):
-    from openkb.agent.source_windows import CompileSourceWindows
+    from ultrakb.agent.source_windows import CompileSourceWindows
 
     first = "Irrigation valve startup requires a precheck.\n\n"
     body = first + "Unrelated recorded operating context.\n\n" * 100 + "Winter needs supervision.\n"
     (kb_dir / "wiki/sources/current.json").write_text(
         json.dumps([{"page": 1, "unit_kind": "page", "content": body}])
     )
-    monkeypatch.setattr("openkb.agent.source_windows.MAX_EVIDENCE_CHARS", 900)
+    monkeypatch.setattr("ultrakb.agent.source_windows.MAX_EVIDENCE_CHARS", 900)
     context = CompileSourceWindows(kb_dir / "wiki", "current").prepare(
         {"name": "valve", "reading_locations": {"pages": "1"}}, long=True
     )
@@ -34,54 +36,33 @@ def test_oversized_pdf_compile_window_keeps_paragraphs_and_native_continuation(k
 def test_compile_plan_reads_a_resumed_pdf_suffix_before_patching(
     kb_dir, monkeypatch, unread_suffix
 ):
-    from openkb.agent.compile_plan import request_compile_plan
-    from openkb.agent.source_windows import CompileSourceWindows
-    from openkb.source_pages import read_page_selection
+    from ultrakb.agent.source_windows import CompileSourceWindows
+    from ultrakb.config import LlmCredentialBundle
+    from ultrakb.llm_execution import CompletionExecutor, ModelCallPolicy, RoleBindings
 
     first = "Irrigation valve startup requires a precheck.\n\n"
     suffix = "Winter needs trained supervision.\n"
     if unread_suffix:
         suffix = "Winter needs trained supervision. " * 100
     body = first + "Unrelated operating context.\n\n" * 100 + suffix
-    raw = [{"page": 1, "unit_kind": "page", "content": body}]
-    (kb_dir / "wiki/sources/current.json").write_text(json.dumps(raw))
-    (kb_dir / "wiki/concepts/valve.md").write_text("# Valve\n\nRetained conditions.")
-    monkeypatch.setattr("openkb.agent.source_windows.MAX_EVIDENCE_CHARS", 900)
-    windows = CompileSourceWindows(kb_dir / "wiki", "current")
-    requests = []
-    offset = read_page_selection(raw, "1")["content"].index(suffix)
-
-    def request(correction):
-        requests.append(correction)
-        return json.dumps(
-            {
-                "concepts": {
-                    "update": [
-                        {
-                            "name": "valve",
-                            "reading_locations": {
-                                "pages": "1",
-                                **({"offset": offset} if correction else {}),
-                            },
-                        }
-                    ]
-                }
-            }
-        )
-
-    def get_plan():
-        return request_compile_plan(
-            request,
-            json.loads,
-            existing={"concepts": {"valve"}, "entities": set()},
-            entity_types=frozenset({"other"}),
-            sanitize=lambda name: name,
-            validate_updates=lambda plan: windows.validate_updates(plan, long=True),
-        )
-
-    plan = get_plan()
-    assert len(requests) == 1  # Ordinary continuation never requests a corrected model plan.
-    context = windows.prepare(plan.concepts.update[0], "concepts/valve.md", long=True)
+    wiki = kb_dir / "wiki"
+    atomic_write_text(
+        wiki / "sources/current.json",
+        json.dumps([{"page": 1, "unit_kind": "page", "content": body}]),
+    )
+    atomic_write_text(wiki / "concepts/valve.md", "# Valve\n\nRetained conditions.")
+    monkeypatch.setattr("ultrakb.agent.source_windows.MAX_EVIDENCE_CHARS", 900)
+    windows = CompileSourceWindows(wiki, "current")
+    plan = _plan(wiki, {"update": [{"name": "valve", "reading_locations": {"pages": "1"}}]})
+    executor = CompletionExecutor(
+        RoleBindings("deepseek/deepseek-flash", LlmCredentialBundle()),
+        ModelCallPolicy(max_calls=0, retries=0),
+    )
+    with executor.activate():
+        assert windows.validate_updates(plan, long=True) is None
+        context = windows.prepare(plan.concepts.update[0], "concepts/valve.md", long=True)
+    # Ordinary reader continuation is local and must not request a new model plan.
+    assert executor.calls == 0
     content = "".join(w["content"] for w in context.windows)
     assert first in content and suffix in content
     native = [span for window in context.windows for span in window.get("page_spans", [])]
@@ -91,8 +72,8 @@ def test_compile_plan_reads_a_resumed_pdf_suffix_before_patching(
 
 
 def test_compile_matching_uses_aliases_from_the_retained_page(kb_dir):
-    from openkb.agent.compile_plan import normalize_plan
-    from openkb.agent.source_windows import CompileSourceWindows
+    from ultrakb.agent.compile_plan import normalize_plan
+    from ultrakb.agent.source_windows import CompileSourceWindows
 
     wiki = kb_dir / "wiki"
     (wiki / "sources/current.json").write_text(
@@ -123,7 +104,7 @@ def test_compile_matching_uses_aliases_from_the_retained_page(kb_dir):
 
 
 def test_compile_text_reader_applies_the_returned_selection_offset(kb_dir):
-    from openkb.agent.source_windows import CompileSourceWindows
+    from ultrakb.agent.source_windows import CompileSourceWindows
 
     text = "# Prior conditions\n\nRecorded setup.\n\n# Winter\n\nSupervision is required.\n"
     offset = text.index("# Winter")
@@ -139,7 +120,7 @@ def test_compile_text_reader_applies_the_returned_selection_offset(kb_dir):
 def test_pdf_compile_projection_returns_local_metadata_without_pixels(kb_dir, monkeypatch):
     from PIL import Image
 
-    from openkb.agent.source_windows import CompileSourceWindows
+    from ultrakb.agent.source_windows import CompileSourceWindows
 
     wiki = kb_dir / "wiki"
     (wiki / "sources/images").mkdir(exist_ok=True)
@@ -163,7 +144,7 @@ def test_pdf_compile_projection_returns_local_metadata_without_pixels(kb_dir, mo
             ]
         )
     )
-    monkeypatch.setattr("openkb.agent.source_windows.MAX_EVIDENCE_CHARS", 900)
+    monkeypatch.setattr("ultrakb.agent.source_windows.MAX_EVIDENCE_CHARS", 900)
     context = CompileSourceWindows(wiki, "current").prepare(
         {"name": "setup", "reading_locations": {"pages": "1-2"}},
         long=True,
@@ -178,7 +159,7 @@ def test_pdf_compile_projection_returns_local_metadata_without_pixels(kb_dir, mo
     [("River Valve", "RIVER VALVE"), ("灌溉阀组", "灌溉阀组"), ("Straße", "STRASSE")],
 )
 def test_long_update_finds_complementary_originals_without_navigation_match(kb_dir, subject, title):
-    from openkb.agent.source_windows import CompileSourceWindows
+    from ultrakb.agent.source_windows import CompileSourceWindows
 
     wiki = kb_dir / "wiki"
     (wiki / "sources/current.json").write_text(
@@ -211,79 +192,85 @@ def test_long_update_finds_complementary_originals_without_navigation_match(kb_d
 
 
 @pytest.mark.parametrize("repair", ["retain", "withdraw", "related", "format_then_update"])
-def test_no_current_long_window_keeps_existing_multisource_page(
-    kb_dir, physical_pdf, pdf_model, monkeypatch, repair
-):
-    import litellm
+def test_no_current_long_window_keeps_existing_multisource_page(kb_dir, processing_only, repair):
+    from test_compile_windows import _publication
 
-    from openkb.application.documents import import_document
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
-    from openkb.unit_publication import read_head
+    from ultrakb.agent.compile_delivery import publish_compile_results
+    from ultrakb.agent.page_updates import PageUpdate
+    from ultrakb.agent.source_windows import CompileSourceWindows
+    from ultrakb.compilation_report import collect_compile_report
+    from ultrakb.unit_publication import read_head
 
-    index_response = litellm.completion
-    calls = []
-    for name, action in (("old-a", "create"), ("old-b", "update")):
-        path = kb_dir / f"{name}.txt"
-        path.write_text(f"{name}: a supported condition.\n")
-        compile_boundary(monkeypatch, {"concepts": {action: [{"name": "orchard"}]}}, calls)
-        assert import_document(kb_dir, path).status == "added"
-    old = (kb_dir / "wiki/concepts/orchard.md").read_bytes()
-    head = read_head(kb_dir)
-    apply_kb_config_patch(
-        kb_dir, KbConfigPatchRequest(kb=str(kb_dir), config={"pdf_short_max_pages": 0})
-    )
-    calls.clear()
-    planning = []
-
-    def plan(messages):
-        planning.append(messages)
-        if repair == "format_then_update":
-            return (
-                {"concepts": 42}
-                if len(planning) == 1
-                else {"concepts": {"update": [{"name": "orchard"}]}}
+    for name, action in [("old-a", "create"), ("old-b", "update")]:
+        source = kb_dir / f"{name}.txt"
+        source.write_text(f"{name}: a supported condition.\n")
+        retained = processing_only(source)
+        with _publication(kb_dir, retained) as (wiki, doc):
+            plan = _plan(wiki, {action: [{"name": "orchard"}]})
+            if action == "create":
+                body = "# Orchard\n\nold-a: a supported condition."
+            else:
+                page = wiki / "concepts/orchard.md"
+                patch = PageUpdate(page.read_text())
+                body = patch.apply(
+                    json.dumps(
+                        {
+                            "base_sha256": patch.digest,
+                            "edits": [
+                                {
+                                    "block_id": patch.request()["blocks"][-1]["id"],
+                                    "operation": "insert_after",
+                                    "content": "\n\nold-b: a supported condition.",
+                                }
+                            ],
+                        }
+                    ),
+                    current=page.read_text(),
+                )["content"]
+            publish_compile_results(
+                wiki,
+                doc,
+                plan,
+                summary=f"{name}: a supported condition.",
+                rewrite_summary=True,
+                concept_results=[("orchard", body, action == "update", "Orchard conditions")],
             )
-        if len(planning) == 1 or repair == "retain":
-            return {"concepts": {"update": [{"name": "orchard"}]}}
-        return {} if repair == "withdraw" else {"concepts": {"related": ["orchard"]}}
-
-    compile_boundary(monkeypatch, plan, calls)
-    compile_response = litellm.completion
-
-    def routed(**kwargs):
-        return (
-            compile_response
-            if "wiki compilation agent" in str(kwargs["messages"])
-            else index_response
-        )(**kwargs)
-
-    async def asynchronous(**kwargs):
-        return routed(**kwargs)
-
-    monkeypatch.setattr("litellm.completion", routed)
-    monkeypatch.setattr("litellm.acompletion", asynchronous)
-    result = import_document(kb_dir, physical_pdf)
-    if repair in {"withdraw", "related"}:
-        assert result.status == "added", result
-        assert "compile_plan_update_withdrawn" in result.quality
-    else:
-        assert result.status == "failed", result
-        assert "page_update_originals_unread" in result.quality
-    assert (kb_dir / "wiki/concepts/orchard.md").read_bytes() == old
-    if repair not in {"withdraw", "related"}:
-        assert read_head(kb_dir) == head
+    wiki = kb_dir / "wiki"
+    old = (wiki / "concepts/orchard.md").read_bytes()
+    assert "summaries/old-a.md" in old.decode() and "summaries/old-b.md" in old.decode()
+    head = read_head(kb_dir)
+    atomic_write_text(
+        wiki / "sources/current.json",
+        json.dumps(
+            [{"page": 1, "unit_kind": "page", "content": "Unrelated native document content."}]
+        ),
+    )
+    windows = CompileSourceWindows(wiki, "current", kb_dir=kb_dir)
+    with collect_compile_report() as report:
+        if repair == "format_then_update":
+            with pytest.raises(ValueError):
+                _plan(wiki, {"concepts": 42})
+        proposal = _plan(wiki, {"update": [{"name": "orchard"}]})
+        diagnostic = windows.validate_updates(proposal, long=True)
+        assert diagnostic is not None
+        assert "Relevant current originals have not been located" in diagnostic
+        if repair in {"withdraw", "related"}:
+            final = _plan(wiki, {} if repair == "withdraw" else {"related": ["orchard"]})
+            assert windows.validate_updates(final, long=True) is None
+            assert "compile_plan_update_withdrawn" in report.quality
+            publish_compile_results(
+                wiki, "current", final, summary="New native navigation.", rewrite_summary=True
+            )
+        else:
+            assert windows.validate_updates(proposal, long=True) is not None
+            assert read_head(kb_dir) == head
+    assert (wiki / "concepts/orchard.md").read_bytes() == old
     if repair == "related":
-        assert (
-            "[[concepts/orchard]]"
-            in (kb_dir / "wiki/summaries" / f"{physical_pdf.stem}.md").read_text()
-        )
-    assert len(planning) == 2
-    assert not any("Update the concept page" in str(call) for call in calls)
+        assert "[[concepts/orchard]]" in (wiki / "summaries/current.md").read_text()
 
 
 def test_partial_prior_window_has_scoped_update_policy_and_continuation(kb_dir, monkeypatch):
-    from openkb.agent.source_windows import CompileSourceWindows
+    from ultrakb.agent.source_windows import CompileSourceWindows
 
     wiki = kb_dir / "wiki"
     (wiki / "sources/current.json").write_text(
@@ -295,7 +282,7 @@ def test_partial_prior_window_has_scoped_update_policy_and_continuation(kb_dir, 
     (wiki / "concepts/topic.md").write_text(
         "---\nsources: [sources/old.md]\n---\nSupported orchard conditions."
     )
-    monkeypatch.setattr("openkb.agent.source_windows.MAX_EVIDENCE_CHARS", 1800)
+    monkeypatch.setattr("ultrakb.agent.source_windows.MAX_EVIDENCE_CHARS", 1800)
     context = CompileSourceWindows(wiki, "current").prepare(
         {"name": "topic", "reading_locations": {"pages": "1"}},
         "concepts/topic.md",

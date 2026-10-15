@@ -43,8 +43,8 @@
     "Version 0.1.0+urltrakb.1 and packaged source identity; exclude demo-only Anthropic dependency, retaining the imported ctree runtime dependency closure."
   ],
   "local_patch": {
-    "date": "2026-10-07",
-    "purpose": "Audited local SDK source and packaging baseline (#107); role-filtered injected incremental builder, stable exchange transaction and separate versioned lossless checkpoint/retrieval exports 本地 `.3` 仅更新 LiteLLM 精确依赖到 `1.87.2+urltrakb.3`；算法、检查点及检索交换格式不变。",
+    "date": "2026-10-14",
+    "purpose": "Audited local SDK source and packaging baseline (#107); role-filtered injected incremental builder, stable exchange transaction and separate versioned lossless checkpoint/retrieval exports 本地 `.3` 仅更新 LiteLLM 精确依赖到 `1.87.2+urltrakb.3`；算法、检查点及检索交换格式不变。 Extract the existing stage-response parsing boundary for local malformed-data coverage; live tests use real DeepSeek and the indexing algorithm is unchanged.",
     "modified": {
       "ctree/utils.py": "44afe9747856e5b46676cbe79f64710c64deacc909e85b25f41763669e336e6a",
       "ctree/ctree.py": "7f871cff571405480cc7ea98ec3f1a965727363c14217255a87d18a11f3b007a",
@@ -52,13 +52,13 @@
     },
     "added": {
       "pyproject.toml": "f5c5495c8a467a3012d801143607fd6aa62e4064993cfc13585490df6f974cc8",
-      "README.urltrakb.md": "f8e8b9106d32dc206a9e1a8a288daaa3719b521a6a8da47e7d73a643ee8b1d8f",
+      "README.urltrakb.md": "eae58bf7dd54dc5a14c69a56ed2e93706a697022b4392b9866208885a59ad7e9",
       "ctree/_urltrakb_source.json": "542a0172aed8652a13fb018c85fd6757adc4a5ccf1791bebd1c311bb44b51bb2",
       "ctree/nodes.py": "47be440ae98caefe40b3cbfad68baf9083b371875c9f0d428668e04071b5861e",
       "ctree/llm.py": "90c36aebbfdb2f1af725c8c2b4d35ded5ccb15be5f4c8108dc2abfce653a5434",
       "ctree/prompts.py": "546d7c274706acf6806bcda45c2d69dd5fdacd19e14edf5e051f8552034a38e1",
       "ctree/state.py": "450b982503ff49b1e809f992a96222f4ba9e6f22c1180b0ae89d8075f5a30630",
-      "ctree/builder.py": "7a3319ab56f69a7adafbeb88d693b07e8d732d54a35634ada11f797e841bd73b",
+      "ctree/builder.py": "7529c9425f3df888e745e99fb0c88b6ee2cdc255e2cee0df5a6ddd39995d8ee1",
       "ctree/export.py": "def50f671f7d7000d1d1dc822d4b385433e7647bb170dd1283cc60bb469c677a"
     },
     "deleted": [

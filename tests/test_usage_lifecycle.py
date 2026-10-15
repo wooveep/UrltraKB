@@ -11,7 +11,7 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def isolated_lifecycle(tmp_path, monkeypatch):
-    from openkb import config, lifecycle
+    from ultrakb import config, lifecycle
 
     profile = tmp_path.with_name(tmp_path.name + "-profile")
     monkeypatch.setattr(config, "GLOBAL_CONFIG_DIR", profile)
@@ -28,12 +28,12 @@ def isolated_lifecycle(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("asynchronous", [False, True])
 def test_deletion_after_usage_precheck_does_not_recreate_kb(kb_dir, monkeypatch, asynchronous):
-    from openkb.application.documents import import_document
-    from openkb.application.knowledge_bases import initialize_kb
-    from openkb.application.recompilation import recompile_document
-    from openkb.kb_admin import delete_kb
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.knowledge_bases import initialize_kb
+    from ultrakb.application.recompilation import recompile_document
+    from ultrakb.kb_admin import delete_kb
 
-    config = kb_dir / ".openkb/config.yaml"
+    config = kb_dir / ".ultrakb/config.yaml"
     original = Path.is_file
     deleted = False
 
@@ -62,8 +62,8 @@ def test_deletion_after_usage_precheck_does_not_recreate_kb(kb_dir, monkeypatch,
 def test_deletion_waits_for_first_and_final_usage_write(
     kb_dir, monkeypatch, asynchronous, checkpoint
 ):
-    import openkb.kb_admin as admin
-    import openkb.llm_usage_execution as usage
+    import ultrakb.kb_admin as admin
+    import ultrakb.llm_usage_execution as usage
 
     writing, finish, removing, attempted = (threading.Event() for _ in range(4))
     original_write = usage._write_execution
@@ -114,9 +114,9 @@ def test_deletion_waits_for_first_and_final_usage_write(
 
 @pytest.mark.parametrize("asynchronous", [False, True])
 def test_cancelled_usage_boundary_creates_no_execution(kb_dir, asynchronous):
-    from openkb.application.execution import ExecutionContext
-    from openkb.llm_usage_execution import track_import_usage
-    from openkb.locks import LockCancelled
+    from ultrakb.application.execution import ExecutionContext
+    from ultrakb.llm_usage_execution import track_import_usage
+    from ultrakb.locks import LockCancelled
 
     @track_import_usage
     def operation(kb_dir, *, context):
@@ -132,13 +132,13 @@ def test_cancelled_usage_boundary_creates_no_execution(kb_dir, asynchronous):
             asyncio.run(async_operation(kb_dir, context=context))
         else:
             operation(kb_dir, context=context)
-    assert not (kb_dir / ".openkb/usage").exists()
+    assert not (kb_dir / ".ultrakb/usage").exists()
 
 
 def test_async_usage_wait_releases_event_loop(kb_dir):
-    from openkb.application.execution import ExecutionContext
-    from openkb.lifecycle import exclusive_lifecycle
-    from openkb.llm_usage_execution import track_import_usage
+    from ultrakb.application.execution import ExecutionContext
+    from ultrakb.lifecycle import exclusive_lifecycle
+    from ultrakb.llm_usage_execution import track_import_usage
 
     held, finish = threading.Event(), threading.Event()
 

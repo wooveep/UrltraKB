@@ -6,7 +6,6 @@ import pytest
 from agents import RunConfig, Runner
 from test_llm_execution import executor_for
 from test_managed_agent import agent_for
-from test_vendor_sdk import response, streamed_response
 
 pytest_plugins = ("test_vendor_sdk",)
 
@@ -43,8 +42,10 @@ async def test_image_tool_output_is_rejected_before_provider_serialization(model
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("stream", [False, True])
-async def test_old_image_output_stays_text_during_retry_and_streaming(model_service, stream):
-    from openkb.agent.chat_session import sanitize_history
+async def test_old_image_output_stays_text_during_repeated_delivery_and_streaming(
+    model_service, stream
+):
+    from ultrakb.agent.chat_session import sanitize_history
 
     history = [
         {"role": "user", "content": "Read a figure."},
@@ -62,32 +63,23 @@ async def test_old_image_output_stays_text_during_retry_and_streaming(model_serv
             ],
         },
     ]
-    model_service.replies.extend(
-        [
-            (503, {"error": {"message": "busy"}}),
-            (
-                200,
-                streamed_response({"role": "assistant", "content": "Text only."})
-                if stream
-                else response(),
-            ),
-        ]
-    )
-    executor = executor_for(model_service, retries=1, backoff=0)
-    if stream:
-        run = Runner.run_streamed(
-            agent_for(executor),
-            sanitize_history(history),
-            run_config=RunConfig(tracing_disabled=True),
-        )
-        async for _ in run.stream_events():
-            pass
-    else:
-        await Runner.run(
-            agent_for(executor),
-            sanitize_history(history),
-            run_config=RunConfig(tracing_disabled=True),
-        )
+    executor = executor_for(model_service, retries=0, max_calls=2)
+    for _ in range(2):
+        if stream:
+            run = Runner.run_streamed(
+                agent_for(executor),
+                sanitize_history(history),
+                run_config=RunConfig(tracing_disabled=True),
+            )
+            async for _ in run.stream_events():
+                pass
+        else:
+            run = await Runner.run(
+                agent_for(executor),
+                sanitize_history(history),
+                run_config=RunConfig(tracing_disabled=True),
+            )
+        assert run.final_output
     assert len(model_service.requests) == executor.calls == 2
     for request in model_service.requests:
         text = json.dumps(request)

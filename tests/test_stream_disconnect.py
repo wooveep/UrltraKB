@@ -20,9 +20,9 @@ import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
-from openkb import api_helpers
-from openkb.api_helpers import _stream_deck, _stream_recompile, _stream_skill
-from openkb.api_models import DeckRequest, RecompileRequest, SkillRequest
+from ultrakb import api_helpers
+from ultrakb.api_helpers import _stream_deck, _stream_recompile, _stream_skill
+from ultrakb.api_models import DeckRequest, RecompileRequest, SkillRequest
 
 
 def _fake_request(disconnected: bool) -> MagicMock:

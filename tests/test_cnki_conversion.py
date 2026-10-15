@@ -14,9 +14,9 @@ def pdf_bytes():
 
 
 def test_kdh_conversion_keeps_original_and_validates_final_pdf(tmp_path, pdf_bytes):
-    from openkb.cnki.convert import convert_cnki
-    from openkb.cnki.records import CNKIConversion
-    from openkb.state import HashRegistry
+    from ultrakb.cnki.convert import convert_cnki
+    from ultrakb.cnki.records import CNKIConversion
+    from ultrakb.state import HashRegistry
 
     key = b"FZHMEI"
     data = b"KDH 2.00".ljust(254, b"\0") + bytes(
@@ -55,8 +55,8 @@ def caj_bytes(pdf_bytes, *, fragment=False):
 def test_caj_reconstructs_missing_containers_and_complete_duplicate_objects(
     tmp_path, pdf_bytes, fragment
 ):
-    from openkb.cnki.convert import convert_cnki
-    from openkb.cnki.records import CNKIConversion
+    from ultrakb.cnki.convert import convert_cnki
+    from ultrakb.cnki.records import CNKIConversion
 
     source = tmp_path / "source.CAJ"
     source.write_bytes(caj_bytes(pdf_bytes, fragment=fragment))
@@ -72,7 +72,7 @@ def test_caj_reconstructs_missing_containers_and_complete_duplicate_objects(
     "data", [b"HN\0\0", b"\xc8\0\0\0", b"TEB\0", b"unknown", b"CAJ\0", b"KDH "]
 )
 def test_unsupported_or_truncated_content_does_not_publish_artifacts(tmp_path, data):
-    from openkb.cnki.convert import convert_cnki
+    from ultrakb.cnki.convert import convert_cnki
 
     source, output = tmp_path / "fake.caj", tmp_path / "internal.pdf"
     source.write_bytes(data)
@@ -89,7 +89,7 @@ def test_failed_native_attempt_cleans_process_and_never_publishes_pdf(
     import subprocess
     import sys
 
-    from openkb.cnki.convert import convert_cnki
+    from ultrakb.cnki.convert import convert_cnki
 
     source, output = tmp_path / "中文 路径.caj", tmp_path / "managed.pdf"
     source.write_bytes(pdf_bytes)
@@ -140,7 +140,7 @@ def test_failed_native_attempt_cleans_process_and_never_publishes_pdf(
 def test_parallel_conversion_uses_private_directories_and_identical_pdfs(tmp_path, pdf_bytes):
     from concurrent.futures import ThreadPoolExecutor
 
-    from openkb.cnki.convert import convert_cnki
+    from ultrakb.cnki.convert import convert_cnki
 
     source = tmp_path / "same source.caj"
     source.write_bytes(pdf_bytes)
@@ -169,7 +169,7 @@ def test_invalid_worker_receipt_never_publishes_artifacts(
     import subprocess
     import sys
 
-    from openkb.cnki.convert import convert_cnki
+    from ultrakb.cnki.convert import convert_cnki
 
     source, output = tmp_path / "source.caj", tmp_path / "internal.pdf"
     source.write_bytes(pdf_bytes)
@@ -195,7 +195,7 @@ def test_invalid_worker_receipt_never_publishes_artifacts(
 def test_password_pdf_and_wrong_caj_page_count_fail(tmp_path, pdf_bytes):
     import struct
 
-    from openkb.cnki.convert import convert_cnki
+    from ultrakb.cnki.convert import convert_cnki
 
     with pymupdf.open(stream=pdf_bytes, filetype="pdf") as pdf:
         password = pdf.tobytes(
@@ -212,7 +212,7 @@ def test_password_pdf_and_wrong_caj_page_count_fail(tmp_path, pdf_bytes):
 
 
 def test_kdh_rewrites_nonstandard_stream_markers_before_publication(tmp_path, pdf_bytes):
-    from openkb.cnki.convert import convert_cnki
+    from ultrakb.cnki.convert import convert_cnki
 
     key = b"FZHMEI"
     data = pdf_bytes.replace(b"stream\n", b"stream\r")
@@ -234,8 +234,8 @@ def test_frozen_launcher_dispatches_worker_before_application_imports(monkeypatc
     import sys
 
     calls = []
-    monkeypatch.setattr("openkb.cnki.worker.main", lambda argv: calls.append(argv) or 0)
-    monkeypatch.setattr(sys, "argv", ["UrltraKB", "--cnki-worker", "original", "pdf", "receipt"])
+    monkeypatch.setattr("ultrakb.cnki.worker.main", lambda argv: calls.append(argv) or 0)
+    monkeypatch.setattr(sys, "argv", ["UltraKB", "--cnki-worker", "original", "pdf", "receipt"])
     with pytest.raises(SystemExit) as result:
         runpy.run_path(
             str(Path(__file__).parents[1] / "packaging/desktop/launcher.py"), run_name="__main__"

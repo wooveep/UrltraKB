@@ -1,26 +1,26 @@
 # Configuration & setup
 
-Everything that controls how OpenKB talks to your LLM lives in two places:
-`.openkb/config.yaml` (model, language, tuning) and a `.env` file (your API key).
+Everything that controls how UltraKB talks to your LLM lives in two places:
+`.ultrakb/config.yaml` (model, language, tuning) and a `.env` file (your API key).
 
 ---
 
 ## Install
 
 ```bash
-pip install openkb
+pip install ultrakb
 ```
 
-OpenKB pins a **pre-release** of its PageIndex dependency
+UltraKB pins a **pre-release** of its PageIndex dependency
 (`pageindex==0.3.0.dev3`), which some installers skip by default. If an install
 can't resolve `pageindex`, allow pre-releases:
 
 ```bash
-uv tool install openkb --prerelease=allow   # uv
-pip install --pre openkb                     # pip
+uv tool install ultrakb --prerelease=allow   # uv
+pip install --pre ultrakb                     # pip
 ```
 
-If `openkb` isn't found *after* a successful install, the console-script directory
+If `ultrakb` isn't found *after* a successful install, the console-script directory
 isn't on your `PATH` (e.g. `pip --user` installs to `~/.local/bin`) — add it to
 `PATH`.
 
@@ -30,7 +30,7 @@ isn't on your `PATH` (e.g. `pip --user` installs to `~/.local/bin`) — add it t
 
 ```bash
 mkdir my-kb && cd my-kb
-openkb init
+ultrakb init
 ```
 
 `init` is interactive in a terminal and prompts for three things:
@@ -47,20 +47,20 @@ openkb init
 Skip the prompts entirely with flags — handy in scripts:
 
 ```bash
-openkb init --model anthropic/claude-sonnet-4-6 --language en
-openkb init -m gpt-5.4 -l zh
+ultrakb init --model anthropic/claude-sonnet-4-6 --language en
+ultrakb init -m gpt-5.4 -l zh
 ```
 
 > **Non-interactive (pipes/CI):** prompts are gated on a TTY. When stdin isn't a
 > terminal, `init` uses the defaults instead of hanging, so
-> `printf 'gpt-5.4\n\nen\n' | openkb init` works in a script.
+> `printf 'gpt-5.4\n\nen\n' | ultrakb init` works in a script.
 
 `init` creates: `raw/`, `wiki/{summaries,concepts,entities,sources/images}`,
-`wiki/AGENTS.md`, `wiki/index.md`, `wiki/log.md`, and `.openkb/config.yaml`.
+`wiki/AGENTS.md`, `wiki/index.md`, `wiki/log.md`, and `.ultrakb/config.yaml`.
 
 ---
 
-## 2. `.openkb/config.yaml` reference
+## 2. `.ultrakb/config.yaml` reference
 
 The file `init` writes is small; everything else is optional. This is the shipped
 [`config.yaml.example`](../../config.yaml.example), verbatim:
@@ -77,7 +77,7 @@ pageindex_threshold: 20          # PDF pages threshold for PageIndex
 # concurrency: 5
 
 # Optional: whether the LLM agents (query, chat, lint, skill) may call tools
-# in parallel. Leave it UNSET (commented out) to keep OpenKB's per-agent
+# in parallel. Leave it UNSET (commented out) to keep UltraKB's per-agent
 # defaults. Setting it applies the SAME value to every agent:
 #   true    allow parallel tool calls
 #   false   force sequential tool calls
@@ -111,14 +111,14 @@ pageindex_threshold: 20          # PDF pages threshold for PageIndex
 | `model` | `gpt-5.4` | LLM used for all compile/query/chat work. |
 | `language` | `en` | Language the wiki is written in. |
 | `pageindex_threshold` | `20` | PDFs with this many pages **or more** take the long-doc (PageIndex) path; shorter ones go through the short-doc path. See [local indexing](../../vendor/PageIndex/README.urltrakb.md). |
-| `concurrency` | `null` | Caps concurrent LLM calls OpenKB makes during ingest — both PageIndex's indexing of a long document and OpenKB's own concept/entity compilation. The two never run at once for the same document, so one setting covers both. Lower it if you hit provider rate limits or "too many open files" on large PDFs. `null` lets each stage apply its own default. |
-| `parallel_tool_calls` | unset | Whether the LLM agents (query, chat, lint, skill) may call tools in parallel. Unset keeps OpenKB's per-agent defaults; `true`/`false` force allow/sequential for every agent; `null` omits the setting (provider default). **Amazon Bedrock needs `null`** (see below). |
+| `concurrency` | `null` | Caps concurrent LLM calls UltraKB makes during ingest — both PageIndex's indexing of a long document and UltraKB's own concept/entity compilation. The two never run at once for the same document, so one setting covers both. Lower it if you hit provider rate limits or "too many open files" on large PDFs. `null` lets each stage apply its own default. |
+| `parallel_tool_calls` | unset | Whether the LLM agents (query, chat, lint, skill) may call tools in parallel. Unset keeps UltraKB's per-agent defaults; `true`/`false` force allow/sequential for every agent; `null` omits the setting (provider default). **Amazon Bedrock needs `null`** (see below). |
 | `entity_types` | 7 defaults | Custom vocabulary for entity pages. `other` is always kept. |
 | `litellm:` | – | A pass-through block for LiteLLM. See below. |
 
 ### The `litellm:` block
 
-OpenKB forwards this block to LiteLLM so you can tune anything LiteLLM supports —
+UltraKB forwards this block to LiteLLM so you can tune anything LiteLLM supports —
 you set it, LiteLLM uses it. Two keys are special:
 
 - `timeout` and `extra_headers` are applied **per request** (they're needed on
@@ -179,7 +179,7 @@ headers; other providers ignore them.
 
 ## 3. API keys & providers
 
-Set one universal key and OpenKB routes it to the right provider based on your
+Set one universal key and UltraKB routes it to the right provider based on your
 `model`. The shipped [`.env.example`](../../.env.example):
 
 ```bash
@@ -191,7 +191,7 @@ LLM_API_KEY=your-key-here
 
 - **Provider auto-detection:** `model: anthropic/claude-sonnet-4-6` → your
   `LLM_API_KEY` is exported as `ANTHROPIC_API_KEY` automatically.
-- **OAuth providers** (`chatgpt/*`, `github_copilot/*`) need **no** key — OpenKB
+- **OAuth providers** (`chatgpt/*`, `github_copilot/*`) need **no** key — UltraKB
   won't warn about a missing one.
 - **PageIndex** indexes and stores documents locally using the project source.
   Its model calls use the configured LLM provider; no separate service key is used.
@@ -207,12 +207,12 @@ LLM_API_KEY=your-key-here
   ```
 
   ```yaml
-  # <kb>/.openkb/config.yaml
+  # <kb>/.ultrakb/config.yaml
   model: bedrock/eu.anthropic.claude-sonnet-4-6
   parallel_tool_calls: null   # REQUIRED for Bedrock Claude: sending
                               # parallel_tool_calls at all (any value) makes
                               # LiteLLM send a malformed tool_choice that Bedrock
-                              # rejects (#175). null tells OpenKB to omit it.
+                              # rejects (#175). null tells UltraKB to omit it.
                               # Write it as bare `null` — not `None` or "null".
   ```
 
@@ -220,7 +220,7 @@ LLM_API_KEY=your-key-here
 
 1. your shell environment
 2. `<kb>/.env`
-3. `~/.config/openkb/.env` (a global key shared across all your KBs)
+3. `~/.config/ultrakb/.env` (a global key shared across all your KBs)
 
 ---
 
@@ -228,18 +228,18 @@ LLM_API_KEY=your-key-here
 
 Most commands need to know which KB they act on. Resolution order:
 
-1. `--kb-dir /path/to/kb` (or `OPENKB_DIR=/path/to/kb`) — explicit override.
-2. Walk up from the current directory looking for a `.openkb/` folder.
-3. The global default registered by `openkb use <path>` (stored in
-   `~/.config/openkb/global.yaml`).
+1. `--kb-dir /path/to/kb` (or `ULTRAKB_DIR=/path/to/kb`) — explicit override.
+2. Walk up from the current directory looking for a `.ultrakb/` folder.
+3. The global default registered by `ultrakb use <path>` (stored in
+   `~/.config/ultrakb/global.yaml`).
 
 ```bash
 # Run a query against a specific KB from anywhere
-openkb --kb-dir ~/research-kb query "what changed in v2?"
+ultrakb --kb-dir ~/research-kb query "what changed in v2?"
 
 # Make one KB the default, then forget about paths
-openkb use ~/research-kb
-openkb status        # now resolves ~/research-kb from any directory
+ultrakb use ~/research-kb
+ultrakb status        # now resolves ~/research-kb from any directory
 ```
 
 ---

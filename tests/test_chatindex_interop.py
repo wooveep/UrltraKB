@@ -7,21 +7,54 @@ import pytest
 from contextdb import ConDB, ContextTree, TreeDB
 from contextdb.adapter import ChatIndexAdapter
 from ctree import CTree
-from test_chatindex import Recorder
 
 
 def conversation(*, nested=False, count=14):
-    llm = Recorder()
-    llm.new_topic = nested
-    tree = CTree(llm=llm, max_children=3 if nested else 20, conversation_id="interop-session")
+    """Create explicit lossless checkpoint data; interoperability needs no generation."""
+    from ctree.builder import bounds
+    from ctree.nodes import MessageNode, TopicNode
+    from ctree.state import digest
+
+    tree = CTree(max_children=3 if nested else 20, conversation_id="interop-session")
+    children = []
     for ordinal in range(count):
-        tree.add_exchange(
-            f"turn-{ordinal}", f"用户原文 {ordinal} " + "🙂中文" * 100, "SECRET_ASSISTANT"
+        user = {"role": "user", "content": f"用户原文 {ordinal} " + "🙂中文" * 100}
+        assistant = {"role": "assistant", "content": "SECRET_ASSISTANT"}
+        identity = f"turn-{ordinal}"
+        tree.turns.append({"turn_id": identity, "ordinal": ordinal, "messages": [user, assistant]})
+        children.append(
+            MessageNode(
+                node_id="exchange-" + digest(identity),
+                turn_id=identity,
+                message_index=ordinal,
+                user_message=user,
+                assistant_message=assistant,
+            )
         )
-        if ordinal == 6:
-            tree = CTree.restore_state(tree.snapshot_state(), llm=llm)
-    tree.refresh_summaries()
-    return tree, llm
+
+    def topic(items):
+        node = TopicNode(
+            node_id=f"topic-{tree.next_node_id:08d}", topic_name="User facts", children=items
+        )
+        tree.next_node_id += 1
+        bounds(node)
+        return node
+
+    children = [
+        topic(children[i : i + tree.max_children])
+        for i in range(0, len(children), tree.max_children)
+    ]
+    while len(children) > tree.max_children:
+        children = [
+            topic(children[i : i + tree.max_children])
+            for i in range(0, len(children), tree.max_children)
+        ]
+    tree.root.children = children
+    bounds(tree.root)
+    tree.current_node = tree.root
+    while tree.current_node.children and isinstance(tree.current_node.children[-1], TopicNode):
+        tree.current_node = tree.current_node.children[-1]
+    return CTree.restore_state(tree.snapshot_state()), None
 
 
 @pytest.mark.parametrize("nested", [False, True])
@@ -34,7 +67,7 @@ def test_real_export_roundtrip_keeps_full_user_messages_and_order(
     def forbidden(*a, **kw):
         pytest.fail("Serialization or storage called a model")
 
-    monkeypatch.setattr(llm, "complete", forbidden)
+    assert llm is None
     monkeypatch.setattr("litellm.completion", forbidden)
     exported = tree.export_retrieval_tree()
     with TreeDB(str(tmp_path / "context.sqlite")) as db:
@@ -160,10 +193,19 @@ def test_empty_current_export_and_public_import_remain_supported(tmp_path):
         assert db.storage.get_children(tree_id, root) == []
 
 
+class ReadOnlyGuard:
+    def chat(self, *args, **kwargs):
+        pytest.fail("Reading a terminal document attempted model generation")
+
+    chat_with_cache = chat
+
+
 def test_generic_conversation_type_still_returns_document_content(tmp_path):
     with ConDB(str(tmp_path / "context.sqlite")) as db:
         tree_id = db.store({"type": "conversation", "content": "Retained notes."}, format="generic")
-        result = db.query(tree_id, "Read my notes", llm=Recorder(), strategy="beam", max_turns=1)
+        result = db.query(
+            tree_id, "Read my notes", llm=ReadOnlyGuard(), strategy="beam", max_turns=1
+        )
         assert len(result.contents) == 1
         assert result.contents[0]["content"]["content"] == "Retained notes."
 

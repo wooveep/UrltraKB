@@ -9,7 +9,6 @@ import sys
 
 import pytest
 from click.testing import CliRunner
-from test_import_entrypoints import _model_boundary_worker
 
 pytest_plugins = ("cnki_fixtures", "test_pdf_readback")
 
@@ -18,10 +17,10 @@ pytest_plugins = ("cnki_fixtures", "test_pdf_readback")
 def test_cnki_adapters_publish_a_single_source_with_an_internal_pdf(
     kb_dir, cnki_source, pdf_model, monkeypatch, entry
 ):
-    from openkb.application.knowledge_bases import get_kb_list
-    from openkb.documents import read_document_source
+    from ultrakb.application.knowledge_bases import get_kb_list
+    from ultrakb.documents import read_document_source
 
-    cli = importlib.import_module("openkb.cli")
+    cli = importlib.import_module("ultrakb.cli")
     monkeypatch.setattr(cli, "_setup_llm_key", lambda _: None)
     external = kb_dir / "input" / cnki_source.name
     external.parent.mkdir()
@@ -29,14 +28,13 @@ def test_cnki_adapters_publish_a_single_source_with_an_internal_pdf(
     original = external.read_bytes()
     resources = None
     if entry == "desktop":
-        from openkb.runtime.requests import ImportFile
-        from openkb.runtime.tasks import TaskManager
+        from ultrakb.runtime.requests import ImportFile
+        from ultrakb.runtime.tasks import TaskManager
 
-        monkeypatch.setattr("openkb.runtime.tasks.run_unit", _model_boundary_worker)
         manager = TaskManager(history_dir=kb_dir / "task-history")
         try:
             identity = manager.submit(kb_dir, [ImportFile(str(external))])
-            result = manager.wait(identity, timeout=30)
+            result = manager.wait(identity, timeout=120)
             assert result.succeeded == 1, result
             assert result.processes_reaped
             resources = result.results[0].resources
@@ -46,10 +44,10 @@ def test_cnki_adapters_publish_a_single_source_with_an_internal_pdf(
     elif entry == "api":
         from fastapi.testclient import TestClient
 
-        from openkb.api import create_app
+        from ultrakb.api import create_app
 
-        monkeypatch.setattr("openkb.api_helpers.resolve_kb_alias", lambda _: kb_dir)
-        monkeypatch.delenv("OPENKB_API_TOKEN", raising=False)
+        monkeypatch.setattr("ultrakb.api_helpers.resolve_kb_alias", lambda _: kb_dir)
+        monkeypatch.delenv("ULTRAKB_API_TOKEN", raising=False)
         with TestClient(create_app()) as client:
             response = client.post(
                 "/api/v1/add",
@@ -64,7 +62,7 @@ def test_cnki_adapters_publish_a_single_source_with_an_internal_pdf(
             watched = kb_dir / "raw" / external.name
             shutil.copy2(external, watched)
             monkeypatch.setattr(
-                "openkb.watcher.watch_directory",
+                "ultrakb.watcher.watch_directory",
                 lambda raw, callback, **options: callback([str(watched)]),
             )
             command = ["watch"]
@@ -89,8 +87,8 @@ def test_native_watch_does_not_queue_derived_pdf(kb_dir, cnki_source, pdf_model)
 
     from test_native_watch import TaskSink, eventually
 
-    from openkb.application.documents import import_document
-    from openkb.runtime.watch import NativeWatch
+    from ultrakb.application.documents import import_document
+    from ultrakb.runtime.watch import NativeWatch
 
     source = kb_dir / "raw" / cnki_source.name
     shutil.move(cnki_source, source)
@@ -112,8 +110,8 @@ def test_native_source_reader_opens_cnki_pdf_without_office_metadata(
     kb_dir, cnki_source, pdf_model, tmp_path
 ):
     pytest.importorskip("PySide6")
-    from openkb.application.documents import import_document
-    from openkb.documents import read_document_source
+    from ultrakb.application.documents import import_document
+    from ultrakb.documents import read_document_source
 
     imported = import_document(kb_dir, cnki_source)
     source = read_document_source(kb_dir, imported.source_id)
@@ -125,7 +123,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from PySide6.QtWidgets import QApplication, QWidget, QPushButton, QLabel
 from PySide6.QtGui import QDesktopServices
-from openkb.desktop.source_reader import SourceReader
+from ultrakb.desktop.source_reader import SourceReader
 app = QApplication([])
 opened = []
 QDesktopServices.openUrl = lambda url: opened.append(url.toLocalFile()) or True

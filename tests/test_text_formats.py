@@ -4,18 +4,16 @@ import json
 
 import pytest
 
-pytest_plugins = ("test_pdf_readback", "block_fixtures")
+pytest_plugins = ("test_pdf_readback", "block_fixtures", "processing_fixtures")
 
 
-def test_txt_freezes_encoding_and_original_unicode_positions(kb_dir, tmp_path, pdf_model):
-    from openkb.application.documents import import_document
-    from openkb.documents import read_document_source
+def test_txt_freezes_encoding_and_original_unicode_positions(kb_dir, tmp_path, processing_only):
+    from ultrakb.documents import read_document_source
 
     original = "前言 e\u0301。\r\n# 这仍是文本\r\n![literal](missing.png)\r\n"
     path = tmp_path / "note.txt"
     path.write_bytes(original.encode("utf-16"))
-    result = import_document(kb_dir, path)
-    assert result.status == "added", result.message
+    result = processing_only(path)
     assert result.source_id is not None
     path.unlink()
     saved = read_document_source(
@@ -28,16 +26,14 @@ def test_txt_freezes_encoding_and_original_unicode_positions(kb_dir, tmp_path, p
     assert selected["origin_locators"][0]["original_span"] == [4, 6]
 
 
-def test_csv_retains_quoted_multiline_empty_and_literal_cells(kb_dir, tmp_path, pdf_model):
-    from openkb.api_models import DocumentSourceResponse
-    from openkb.application.documents import import_document
-    from openkb.documents import read_document_source
+def test_csv_retains_quoted_multiline_empty_and_literal_cells(kb_dir, tmp_path, processing_only):
+    from ultrakb.api_models import DocumentSourceResponse
+    from ultrakb.documents import read_document_source
 
     original = 'code,note,empty\r\n001,"a,b\r\n""quoted""",\r\n=1+1,2026-09-30,""\r\n'
     path = tmp_path / "data.csv"
     path.write_bytes(original.encode())
-    result = import_document(kb_dir, path)
-    assert result.status == "added", result.message
+    result = processing_only(path)
     saved = read_document_source(kb_dir, result.source_id)
     cells = [item for item in saved["origin_locators"] if item.get("csv")]
     assert [item["csv"]["value"] for item in cells] == [
@@ -70,31 +66,14 @@ def test_csv_retains_quoted_multiline_empty_and_literal_cells(kb_dir, tmp_path, 
 def test_text_formats_reuse_block_index_and_exact_revision_reads(
     kb_dir, tmp_path, block_model, monkeypatch, extension, body, expected, wide_short_prompt
 ):
-    import litellm
     from click.testing import CliRunner
 
-    from openkb.application.documents import import_document
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
-    from openkb.cli import cli
-    from openkb.documents import read_document_source
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.settings import apply_kb_config_patch
+    from ultrakb.application.settings_data import KbConfigPatchRequest
+    from ultrakb.cli import cli
+    from ultrakb.documents import read_document_source
 
-    respond = litellm.completion
-
-    def completion(**kwargs):
-        response = respond(**kwargs)
-        if "CONTENT BLOCK STRUCTURE" in str(kwargs["messages"]):
-            entries = json.loads(response.choices[0].message.content)
-            start = expected.index("hello")
-            entries[0]["anchor"]["range"] = [start, start + 5]
-            response.choices[0].message.content = json.dumps(entries)
-        return response
-
-    async def acompletion(**kwargs):
-        return completion(**kwargs)
-
-    monkeypatch.setattr(litellm, "completion", completion)
-    monkeypatch.setattr(litellm, "acompletion", acompletion)
     apply_kb_config_patch(
         kb_dir,
         KbConfigPatchRequest(
@@ -136,8 +115,8 @@ def test_text_formats_reuse_block_index_and_exact_revision_reads(
 def test_parse_failures_keep_the_source_without_publishing_empty_knowledge(
     kb_dir, tmp_path, pdf_model, extension, raw, error
 ):
-    from openkb.application.documents import import_document
-    from openkb.documents import read_document_source
+    from ultrakb.application.documents import import_document
+    from ultrakb.documents import read_document_source
 
     path = tmp_path / f"broken.{extension}"
     path.write_bytes(raw)
@@ -151,8 +130,8 @@ def test_parse_failures_keep_the_source_without_publishing_empty_knowledge(
 def test_watched_csv_does_not_reimport_its_managed_normalization(kb_dir, pdf_model):
     from test_native_watch import TaskSink, eventually
 
-    from openkb.application.documents import import_document
-    from openkb.runtime.watch import NativeWatch
+    from ultrakb.application.documents import import_document
+    from ultrakb.runtime.watch import NativeWatch
 
     path = kb_dir / "raw/input.csv"
     path.write_bytes(b"code,value\n001,example\n")
@@ -171,45 +150,40 @@ def test_watched_csv_does_not_reimport_its_managed_normalization(kb_dir, pdf_mod
         assert watch.join(5)
 
 
-def test_csv_generated_column_labels_cannot_anchor_original_sections(
-    kb_dir, tmp_path, block_model, monkeypatch, wide_short_prompt
-):
-    import litellm
+def test_csv_generated_column_labels_cannot_anchor_original_sections():
+    from pageindex.index.block_policy import BlockContractError, BlockPolicy
 
-    from openkb.application.documents import import_document
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
+    from ultrakb.csv_source import normalize_csv
 
-    respond = litellm.completion
-
-    def completion(**kwargs):
-        response = respond(**kwargs)
-        if "CONTENT BLOCK STRUCTURE" in str(kwargs["messages"]):
-            entries = json.loads(response.choices[0].message.content)
-            entries[0]["anchor"].update(range=[2, 10], excerpt="Column 1")
-            response.choices[0].message.content = json.dumps(entries)
-        return response
-
-    async def acompletion(**kwargs):
-        return completion(**kwargs)
-
-    monkeypatch.setattr(litellm, "completion", completion)
-    monkeypatch.setattr(litellm, "acompletion", acompletion)
-    apply_kb_config_patch(
-        kb_dir,
-        KbConfigPatchRequest(
-            kb=str(kb_dir), config={"model": "gpt-4o", "model_capacity": {"max_input_tokens": 4096}}
-        ),
+    text, origins = normalize_csv("hello,world\n", 0)
+    policy = BlockPolicy(
+        {
+            "unit_count": 1,
+            "source": {
+                "text": text,
+                "blocks": [{"ordinal": 1, "source_spans": [[0, len(text)]]}],
+                "origins": [origin.model_dump(mode="json") for origin in origins],
+            },
+        }
     )
-    path = tmp_path / "labels.csv"
-    path.write_bytes(b"hello,world\n")
-    result = import_document(kb_dir, path)
-    assert result.status == "failed" and "Unverified content-block anchors" in result.message
+    entry = {
+        "structure": "1",
+        "title": "Data",
+        "title_origin": "generated",
+        "physical_index": 1,
+        "anchor": {"unit": 1, "part": "body", "range": [2, 10], "excerpt": "Column 1"},
+    }
+    assert policy.validate_entry(entry) == "generated_evidence"
+    with pytest.raises(BlockContractError, match="Unverified content-block anchors"):
+        policy.validate_order([entry])
+    start = text.index("hello")
+    entry["anchor"] = {"unit": 1, "part": "body", "range": [start, start + 5], "excerpt": "hello"}
+    assert policy.valid(entry)
 
 
 def test_csv_parse_failure_retains_its_successful_encoding_decision(kb_dir, tmp_path, pdf_model):
-    from openkb.application.documents import import_document
-    from openkb.documents import read_document_source
+    from ultrakb.application.documents import import_document
+    from ultrakb.documents import read_document_source
 
     path = tmp_path / "broken.csv"
     path.write_bytes('head,value\r\n"missing quote,123'.encode("utf-16"))
@@ -221,34 +195,15 @@ def test_csv_parse_failure_retains_its_successful_encoding_decision(kb_dir, tmp_
 
 
 def test_large_csv_cell_keeps_exact_value_without_repeating_it_in_range_reads(
-    kb_dir, tmp_path, block_model, monkeypatch
+    kb_dir, tmp_path, processing_only
 ):
     import csv
     from pathlib import Path
 
-    import litellm
+    from ultrakb.application.settings import apply_kb_config_patch
+    from ultrakb.application.settings_data import KbConfigPatchRequest
+    from ultrakb.documents import read_document_source
 
-    from openkb.application.documents import import_document
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
-    from openkb.documents import read_document_source
-
-    respond = litellm.completion
-    start = len("| Column 1 |\n| --- |\n| ")
-
-    def completion(**kwargs):
-        response = respond(**kwargs)
-        if "CONTENT BLOCK STRUCTURE" in str(kwargs["messages"]):
-            entries = json.loads(response.choices[0].message.content)
-            entries[0]["anchor"]["range"] = [start, start + 5]
-            response.choices[0].message.content = json.dumps(entries)
-        return response
-
-    async def acompletion(**kwargs):
-        return completion(**kwargs)
-
-    monkeypatch.setattr(litellm, "completion", completion)
-    monkeypatch.setattr(litellm, "acompletion", acompletion)
     apply_kb_config_patch(
         kb_dir,
         KbConfigPatchRequest(
@@ -259,8 +214,7 @@ def test_large_csv_cell_keeps_exact_value_without_repeating_it_in_range_reads(
     path = tmp_path / "handbook.csv"
     with path.open("w", encoding="utf-8", newline="") as output:
         csv.writer(output).writerow([value])
-    result = import_document(kb_dir, path)
-    assert result.status == "added", result.message
+    result = processing_only(path)
     saved = read_document_source(kb_dir, result.source_id)
     cells = [item["csv"] for item in saved["origin_locators"] if item.get("csv")]
     assert [cell["value"] for cell in cells] == [value]

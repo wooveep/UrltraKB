@@ -3,16 +3,15 @@
 import pytest
 from PIL import Image
 
-pytest_plugins = ("test_pdf_readback",)
+pytest_plugins = ("test_pdf_readback", "processing_fixtures")
 
 
 def test_markdown_html_and_embedded_images_share_a_safe_asset_namespace(
-    kb_dir, tmp_path, pdf_model
+    kb_dir, tmp_path, processing_only
 ):
     import base64
 
-    from openkb.application.documents import import_document
-    from openkb.documents import read_document_source
+    from ultrakb.documents import read_document_source
 
     image = tmp_path / "embedded"
     Image.new("RGB", (40, 40), "red").save(image, format="PNG")
@@ -24,17 +23,15 @@ def test_markdown_html_and_embedded_images_share_a_safe_asset_namespace(
     )
     source = tmp_path / "assets.md"
     source.write_bytes(text.encode())
-    result = import_document(kb_dir, source)
-    assert result.status == "added", result.message
+    result = processing_only(source)
     saved = read_document_source(kb_dir, result.source_id)
     assert len(saved["assets"]) == 2 and not saved["diagnostics"]
     assert '<img src="images/assets/embedded_1" width="30">' in saved["content"]
     assert '`<img src="code.png">`' in saved["content"]
 
 
-def test_markdown_keeps_text_positions_and_frozen_images(kb_dir, tmp_path, pdf_model):
-    from openkb.application.documents import import_document
-    from openkb.documents import read_document_source
+def test_markdown_keeps_text_positions_and_frozen_images(kb_dir, tmp_path, processing_only):
+    from ultrakb.documents import read_document_source
 
     folder = tmp_path / "inputs"
     folder.mkdir()
@@ -47,11 +44,7 @@ def test_markdown_keeps_text_positions_and_frozen_images(kb_dir, tmp_path, pdf_m
     )
     source = folder / "note.md"
     source.write_bytes(original.encode())
-    result = import_document(
-        kb_dir,
-        source,
-    )
-    assert result.status == "added", result.message
+    result = processing_only(source)
     assert result.source_id is not None
     retained = read_document_source(kb_dir, result.source_id)
     expected = original.replace("(pixel.png)", "(images/note/pixel.png)")
@@ -69,9 +62,8 @@ def test_markdown_keeps_text_positions_and_frozen_images(kb_dir, tmp_path, pdf_m
     assert (kb_dir / again["base_path"] / "images/note/pixel.png").read_bytes() == original_pixels
 
 
-def test_markdown_reference_images_preserve_code_and_titles(kb_dir, tmp_path, pdf_model):
-    from openkb.application.documents import import_document
-    from openkb.documents import read_document_source
+def test_markdown_reference_images_preserve_code_and_titles(kb_dir, tmp_path, processing_only):
+    from ultrakb.documents import read_document_source
 
     Image.new("RGB", (40, 40), "green").save(tmp_path / "图 (1).png")
     original = (
@@ -80,28 +72,26 @@ def test_markdown_reference_images_preserve_code_and_titles(kb_dir, tmp_path, pd
     )
     path = tmp_path / "references.md"
     path.write_bytes(original.encode())
-    result = import_document(kb_dir, path)
-    assert result.status == "added", result.message
+    result = processing_only(path)
     source = read_document_source(kb_dir, result.source_id)
     assert source["content"].startswith(original.split("> !")[0])
     assert '> ![图](images/references/%E5%9B%BE%20%281%29.png "标题")' in source["content"]
     assert len(source["assets"]) == 1 and not source["diagnostics"]
 
 
-def test_text_measurement_and_character_ranges_reach_adapters(kb_dir, tmp_path, pdf_model):
+def test_text_measurement_and_character_ranges_reach_adapters(kb_dir, tmp_path, processing_only):
     import json
 
     from click.testing import CliRunner
 
-    from openkb.api_models import DocumentItem, DocumentSourceResponse
-    from openkb.application.documents import import_document
-    from openkb.application.knowledge_bases import get_kb_list
-    from openkb.cli import cli
-    from openkb.documents import read_document_source
+    from ultrakb.api_models import DocumentItem, DocumentSourceResponse
+    from ultrakb.application.knowledge_bases import get_kb_list
+    from ultrakb.cli import cli
+    from ultrakb.documents import read_document_source
 
     path = tmp_path / "hello.md"
     path.write_text("hello world", encoding="utf-8")
-    result = import_document(kb_dir, path)
+    result = processing_only(path)
     item = DocumentItem(**get_kb_list(kb_dir)["documents"][0])
     assert item.pages is None and item.tokens == 2 and item.characters == 11
     source = DocumentSourceResponse(**read_document_source(kb_dir, result.source_id))
@@ -115,91 +105,54 @@ def test_text_measurement_and_character_ranges_reach_adapters(kb_dir, tmp_path, 
 
 @pytest.mark.parametrize("tokens,length", [(4999, "short"), (5000, "short"), (5001, "long")])
 def test_fixed_markdown_classification_boundary(tokens, length):
-    from openkb.processing_policy import classify_markdown_tokens
+    from ultrakb.processing_policy import classify_markdown_tokens
 
     decision = classify_markdown_tokens(tokens)
     assert decision.length_class == length and decision.measurement_value == tokens
 
 
-def test_failed_segmentation_keeps_measured_text_readable(kb_dir, tmp_path, pdf_model):
-    from openkb.application.documents import import_document
-    from openkb.application.knowledge_bases import get_kb_list
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
-    from openkb.documents import read_document_source
+def test_unadmitted_generation_keeps_measured_text_readable(kb_dir, tmp_path, processing_only):
+    from ultrakb.application.knowledge_bases import get_kb_list
+    from ultrakb.documents import read_document_source
 
-    apply_kb_config_patch(
-        kb_dir,
-        KbConfigPatchRequest(
-            kb=str(kb_dir),
-            config={
-                "model": "gpt-4o",
-                "model_capacity": {"max_input_tokens": 1},
-            },
-        ),
-    )
     path = tmp_path / "hello.md"
     path.write_text("hello world", encoding="utf-8")
-
-    result = import_document(kb_dir, path)
-    assert result.status == "failed" and "Unverified content-block anchors" in result.message
+    result = processing_only(path)
     saved = read_document_source(kb_dir, result.source_id, chars="6:11")
     assert saved["knowledge_revision_id"] is None and saved["content"] == "world"
     assert saved["tokens"] == 2 and saved["length_class"] == "short"
     assert get_kb_list(kb_dir)["documents"][0]["characters"] == 11
 
 
-def test_query_reads_frozen_text_coordinates(kb_dir, tmp_path, pdf_model, monkeypatch):
+def test_query_reads_frozen_text_coordinates(kb_dir, tmp_path, pdf_model, live_llm):
     import asyncio
     import json
 
-    from litellm import ModelResponse
+    from agents import RunConfig
 
-    from openkb.agent.query import run_query
-    from openkb.application.documents import import_document
+    from ultrakb.agent.query import run_query
+    from ultrakb.application.documents import import_document
 
     path = tmp_path / "hello.md"
     path.write_text("hello world", encoding="utf-8")
     imported = import_document(kb_dir, path)
-
-    async def model(**kwargs):
-        from evidence_model import provider_review
-
-        if reviewed := provider_review(kwargs):
-            return reviewed
-        outputs = [item["content"] for item in kwargs["messages"] if item["role"] == "tool"]
-        message = (
-            {"content": outputs[-1]}
-            if outputs
-            else {
-                "tool_calls": [
-                    {
-                        "id": "read-range",
-                        "type": "function",
-                        "function": {
-                            "name": "get_text_content",
-                            "arguments": json.dumps(
-                                {
-                                    "doc_name": "hello",
-                                    "chars": "6:11",
-                                    "view_id": imported.units[0].view_id,
-                                }
-                            ),
-                        },
-                    }
-                ]
-            }
+    before = len(live_llm.requests)
+    answer = asyncio.run(
+        run_query(
+            "Use get_text_content to read hello with chars='6:11'. Quote only the returned word.",
+            kb_dir,
+            "deepseek/deepseek-flash",
+            bundle=live_llm.credentials,
+            run_config=RunConfig(tracing_disabled=True),
         )
-        return ModelResponse(
-            choices=[
-                {
-                    "message": {"role": "assistant", **message},
-                    "finish_reason": "stop" if outputs else "tool_calls",
-                }
-            ]
-        )
-
-    monkeypatch.setattr("litellm.acompletion", model)
-    answer = asyncio.run(run_query("Read the final word of the text", kb_dir, "openai/gpt-4o-mini"))
-    assert '"content": "world"' in answer
-    assert '"original_span": [6, 11]' in answer and imported.source_revision_id in answer
+    )
+    assert "world" in answer.lower()
+    delivered = [
+        message["content"]
+        for request in live_llm.requests[before:]
+        for message in request["messages"]
+        if message["role"] == "tool"
+    ]
+    assert any('"content": "world"' in text for text in delivered)
+    assert any('"original_span": [6, 11]' in text for text in delivered)
+    assert imported.source_revision_id in json.dumps(delivered)

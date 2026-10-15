@@ -9,9 +9,9 @@ been removed, including title rules derived from sample manuals. Titles and
 version-like strings are ordinary source text.
 
 ```bash
-openkb add notes.pdf
-openkb add budget.xlsx
-openkb query "What do these documents say about the project?"
+ultrakb add notes.pdf
+ultrakb add budget.xlsx
+ultrakb query "What do these documents say about the project?"
 ```
 
 Query, chat, CLI, HTTP and desktop use the same source readers. Product names and

@@ -7,55 +7,22 @@ import json
 
 import pymupdf
 import pytest
+from native_source_fixtures import LITERAL_TABLE
 from pageindex import IndexConfig
-from pageindex.llm import IndexResponse
 from PIL import Image
 from test_answer_evidence_regression import agent_for, invoke
-from test_native_source_contract import LITERAL_TABLE
+from test_index_llm import RecordingIndexLLM
 from test_pdf_tables import merged_table_pdf
 
-from openkb.agent.source_windows import CompileSourceWindows
-from openkb.images import convert_pdf_to_pages
-from openkb.index_client import create_index_client
-from openkb.index_pdf import NativePdfParser
-from openkb.indexer import index_long_document
-from openkb.locks import atomic_write_json, atomic_write_text
-from openkb.office.records import Slide
-from openkb.office.slide_content import attach_slides
-from openkb.office.slide_package import SlidePackage
-
-
-class SlideModel:
-    def __init__(self):
-        self.inputs = []
-
-    def complete(self, messages, *, stage):
-        prompt = messages[-1]["content"]
-        self.inputs.append(prompt)
-        if stage == "structure":
-            first = "Before the table: keep this condition."
-            return IndexResponse(
-                json.dumps(
-                    [
-                        {
-                            "structure": "1",
-                            "title": "Presentation",
-                            "title_origin": "generated",
-                            "physical_index": 1,
-                            "anchor": {
-                                "unit": 1,
-                                "part": "body",
-                                "range": [0, len(first)],
-                                "excerpt": first,
-                            },
-                        }
-                    ]
-                )
-            )
-        return IndexResponse('{"answer":"yes"}')
-
-    async def acomplete(self, messages, *, stage):
-        return self.complete(messages, stage=stage)
+from ultrakb.agent.source_windows import CompileSourceWindows
+from ultrakb.images import convert_pdf_to_pages
+from ultrakb.index_client import create_index_client
+from ultrakb.index_pdf import NativePdfParser
+from ultrakb.indexer import index_long_document
+from ultrakb.locks import atomic_write_json, atomic_write_text
+from ultrakb.office.records import Slide
+from ultrakb.office.slide_content import attach_slides
+from ultrakb.office.slide_package import SlidePackage
 
 
 def slide_fixture(tmp_path):
@@ -97,7 +64,10 @@ def slide_fixture(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_slide_body_index_compile_and_question_share_native_pdf_roles(kb_dir, tmp_path):
+async def test_slide_body_index_compile_and_question_share_native_pdf_roles(
+    kb_dir, tmp_path, live_llm, monkeypatch
+):
+    live_llm.install(monkeypatch)
     pdf, package, slides = slide_fixture(tmp_path)
     original = package.read_bytes()
     pages = attach_slides(
@@ -105,7 +75,7 @@ async def test_slide_body_index_compile_and_question_share_native_pdf_roles(kb_d
     )
     atomic_write_json(kb_dir / "wiki/sources/manual.json", pages)
     native = NativePdfParser().parse(str(pdf), images_dir=str(tmp_path / "native-images"))
-    runtime = SlideModel()
+    runtime = RecordingIndexLLM(live_llm=live_llm)
     options = IndexConfig(
         llm_client=runtime, if_add_node_summary=False, if_add_doc_description=False
     )
@@ -151,30 +121,30 @@ async def test_slide_body_index_compile_and_question_share_native_pdf_roles(kb_d
             else:
                 assert LITERAL_TABLE in payload["content"]
                 assert not payload["units"][0]["images"]
-    assert any('rowspan=\\"3\\"' in prompt for prompt in runtime.inputs)
+    assert any(
+        'rowspan=\\"3\\"' in str(message["content"])
+        for _, messages in runtime.calls
+        for message in messages
+    )
     assert package.read_bytes() == original
 
 
 @pytest.mark.parametrize("format", ["pdf", "pptx"])
-def test_import_retains_the_contract_used_by_the_real_index(kb_dir, tmp_path, monkeypatch, format):
-    from types import SimpleNamespace
+def test_import_retains_the_contract_used_by_the_real_index(
+    kb_dir, tmp_path, monkeypatch, live_llm, format
+):
+    from ultrakb.application.settings import apply_kb_config_patch
+    from ultrakb.application.settings_data import KbConfigPatchRequest
 
-    from test_index_pdf_layout import TableIndexModel
-
+    live_llm.install(monkeypatch)
+    apply_kb_config_patch(
+        kb_dir, KbConfigPatchRequest(kb=str(kb_dir), config={"model": "deepseek/deepseek-flash"})
+    )
     pdf, package, slides = slide_fixture(tmp_path)
-    runtime = SlideModel() if format == "pptx" else TableIndexModel()
-
-    class LocalModel:
-        def complete(self, role, request):
-            response = runtime.complete(request.payload()["messages"], stage=request.stage)
-            return SimpleNamespace(text=response.text, finish_reason="stop")
-
-        async def acomplete(self, role, request):
-            return self.complete(role, request)
-
-    monkeypatch.setattr("openkb.llm_execution.compiler_executor", lambda *args: LocalModel())
+    runtime = RecordingIndexLLM(live_llm=live_llm)
     path = package if format == "pptx" else pdf
-    result = index_long_document(path, kb_dir, doc_name="manual")
+    with runtime.adapter.executor.activate():
+        result = index_long_document(path, kb_dir, doc_name="manual")
     pages = json.loads((kb_dir / "wiki/sources/manual.json").read_text())
     windows = CompileSourceWindows(kb_dir / "wiki", "manual")
     payload = windows.current_original_evidence()
@@ -185,7 +155,7 @@ def test_import_retains_the_contract_used_by_the_real_index(kb_dir, tmp_path, mo
         assert 'rowspan="3"' in pages[0]["parts"]["body"]
         assert pages[0]["parts"]["notes"] == slides[0].notes
     with create_index_client(
-        storage_path=kb_dir / ".openkb", index_config=IndexConfig(llm_client=runtime)
+        storage_path=kb_dir / ".ultrakb", index_config=IndexConfig(llm_client=runtime)
     ) as client:
         indexed = client.collection().get_page_content(result.doc_id, "1")[0]
         assert 'rowspan="3"' in indexed["content"]
@@ -193,7 +163,7 @@ def test_import_retains_the_contract_used_by_the_real_index(kb_dir, tmp_path, mo
 
 @pytest.mark.parametrize("part", ["body", "notes"])
 def test_normal_compile_plan_preserves_the_slide_partition(kb_dir, tmp_path, part):
-    from openkb.agent.compile_plan import normalize_plan
+    from ultrakb.agent.compile_plan import normalize_plan
 
     pdf, _, slides = slide_fixture(tmp_path)
     pages = attach_slides(
@@ -230,7 +200,7 @@ def test_normal_compile_plan_preserves_the_slide_partition(kb_dir, tmp_path, par
     ],
 )
 def test_normal_compile_plan_rejects_unproved_part_coordinates(location):
-    from openkb.agent.compile_plan import normalize_plan
+    from ultrakb.agent.compile_plan import normalize_plan
 
     with pytest.raises(ValueError, match="reading_locations.part"):
         normalize_plan(
@@ -241,51 +211,47 @@ def test_normal_compile_plan_rejects_unproved_part_coordinates(location):
         )
 
 
-def test_slide_index_rejects_generated_media_anchors_with_bounded_correction(tmp_path):
-    from pageindex.index.page_parts_policy import PagePartsContractError
+def test_slide_index_rejects_generated_media_anchors_after_correction(tmp_path):
+    from pageindex.index.page_parts_policy import PagePartsContractError, PagePartsPolicy
+    from pageindex.index.physical_sections import require_corrected_navigation
+
+    from ultrakb.office.slide_package import FrozenSlideParser
 
     _, package, _ = slide_fixture(tmp_path)
     before = package.read_bytes()
-
-    class MediaAnchorModel(SlideModel):
-        def __init__(self):
-            super().__init__()
-            self.anchor_requests = []
-
-        def complete(self, messages, *, stage):
-            if stage not in {"structure", "correction"}:
-                return super().complete(messages, stage=stage)
-            prompt = messages[-1]["content"]
-            self.anchor_requests.append(stage)
-            unit, _ = json.JSONDecoder().raw_decode(prompt[prompt.index('{"unit": 1,') :])
-            body = unit["parts"]["body"]
-            start = body.index("![image](")
-            end = body.index("\n", start)
-            return IndexResponse(
-                json.dumps(
-                    [
-                        {
-                            "structure": "1",
-                            "title": "Invented image chapter",
-                            "title_origin": "generated",
-                            "physical_index": 1,
-                            "anchor": {
-                                "unit": 1,
-                                "part": "body",
-                                "range": [start, end],
-                                "excerpt": body[start:end],
-                            },
-                        }
-                    ]
-                )
-            )
-
-    runtime = MediaAnchorModel()
-    options = IndexConfig(
-        llm_client=runtime, if_add_node_summary=False, if_add_doc_description=False
+    parsed = FrozenSlideParser().parse(str(package), images_dir=str(tmp_path / "images"))
+    policy = PagePartsPolicy(
+        {
+            "unit_count": len(parsed.nodes),
+            "page_parts": [node.metadata["parts"] for node in parsed.nodes],
+            "page_generated_spans": [
+                [
+                    span["generated_span"]
+                    for span in node.metadata["content_spans"]
+                    if "generated_span" in span
+                ]
+                for node in parsed.nodes
+            ],
+        }
     )
-    with create_index_client(storage_path=tmp_path / "index", index_config=options) as client:
-        with pytest.raises(PagePartsContractError, match="after correction"):
-            client.collection().add(str(package))
-    assert runtime.anchor_requests == ["structure", "correction", "correction", "correction"]
+    body = policy.parts[0]["body"]
+    start = body.index("![image](")
+    end = body.index("\n", start)
+    untrusted = {
+        "structure": "1",
+        "title": "Invented image chapter",
+        "title_origin": "generated",
+        "physical_index": 1,
+        "anchor": {
+            "unit": 1,
+            "part": "body",
+            "range": [start, end],
+            "excerpt": body[start:end],
+        },
+    }
+    assert not policy.valid(untrusted)
+    with pytest.raises(ValueError, match="Unverified"):
+        policy.validate_order([untrusted])
+    with pytest.raises(PagePartsContractError, match="after correction"):
+        require_corrected_navigation([{"list_index": 0}], policy)
     assert package.read_bytes() == before

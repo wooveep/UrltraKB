@@ -6,16 +6,16 @@ import shutil
 import pytest
 from click.testing import CliRunner
 
-from openkb.mutation import RecoveryRequired
-from openkb.state import HashRegistry
+from ultrakb.mutation import RecoveryRequired
+from ultrakb.state import HashRegistry
 
-cli_module = importlib.import_module("openkb.cli")
+cli_module = importlib.import_module("ultrakb.cli")
 
 
 @pytest.mark.parametrize("failure", ["repair", "replacement"])
 def test_cli_watch_stops_before_later_files_after_fatal_failure(kb_dir, monkeypatch, failure):
-    import openkb.agent.compiler as compiler
-    import openkb.watcher as watcher
+    import ultrakb.agent.compiler as compiler
+    import ultrakb.watcher as watcher
 
     first = kb_dir / "raw/first.md"
     later = kb_dir / "raw/later.md"
@@ -43,4 +43,4 @@ def test_cli_watch_stops_before_later_files_after_fatal_failure(kb_dir, monkeypa
     assert result.exception is None, result.output
     assert "Watching stopped" in result.output
     assert len(calls) == (1 if failure == "repair" else 0)
-    assert HashRegistry(kb_dir / ".openkb/hashes.json").all_entries() == {}
+    assert HashRegistry(kb_dir / ".ultrakb/hashes.json").all_entries() == {}

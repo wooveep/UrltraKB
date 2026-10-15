@@ -1,13 +1,13 @@
 # REST API
 
-This guide covers the independent OpenKB REST API (FastAPI). The native desktop opens local knowledge bases directly; the API does not serve a browser application at `/`.
+This guide covers the independent UltraKB REST API (FastAPI). The native desktop opens local knowledge bases directly; the API does not serve a browser application at `/`.
 
 > The interactive API reference is served live at [`/docs`](http://127.0.0.1:7566/docs) (OpenAPI/Swagger) once the server is running — you can import `/openapi.json` directly into Postman.
 
 ## REST API
 
 
-OpenKB ships a FastAPI service for using a knowledge base from Postman,
+UltraKB ships a FastAPI service for using a knowledge base from Postman,
 frontends, or other HTTP clients.
 
 Install the API dependencies if needed:
@@ -19,42 +19,42 @@ pip install -e ".[api]"
 Start the API server:
 
 ```powershell
-$env:OPENKB_API_TOKEN="test-token"
-$env:OPENKB_KB_ROOT="D:\project\OpenKB\kbs"
-.\.venv\Scripts\python.exe -m openkb.api --host 127.0.0.1 --port 7566
+$env:ULTRAKB_API_TOKEN="test-token"
+$env:ULTRAKB_KB_ROOT="D:\project\UltraKB\kbs"
+.\.venv\Scripts\python.exe -m ultrakb.api --host 127.0.0.1 --port 7566
 ```
 
 ### Authentication and common behavior
 
-Auth is **opt-in**, controlled by the `OPENKB_API_TOKEN` server environment
+Auth is **opt-in**, controlled by the `ULTRAKB_API_TOKEN` server environment
 variable:
 
 - **Unset (default)** — the API is unauthenticated. This is the local-first
-  default for `openkb-api`.
+  default for `ultrakb-api`.
 - **Set** — every request must carry the token:
 
   ```text
-  Authorization: Bearer <OPENKB_API_TOKEN>
+  Authorization: Bearer <ULTRAKB_API_TOKEN>
   ```
 
   A missing or wrong token is rejected with `401`.
 
-> **Exposing the server?** Always set `OPENKB_API_TOKEN` when binding to a
+> **Exposing the server?** Always set `ULTRAKB_API_TOKEN` when binding to a
 > non-loopback host (e.g. `--host 0.0.0.0`) — otherwise the API, and every KB
-> it can reach, is world-open. `openkb-api` prints a warning in that case.
+> it can reach, is world-open. `ultrakb-api` prints a warning in that case.
 
-`OPENKB_KB_ROOT` is optional. It controls where REST-created knowledge bases
-are stored. If unset, OpenKB uses `~/.config/openkb/kbs`.
+`ULTRAKB_KB_ROOT` is optional. It controls where REST-created knowledge bases
+are stored. If unset, UltraKB uses `~/.config/ultrakb/kbs`.
 
 REST clients identify a knowledge base with `kb`, not a filesystem path. For
-example, `postman-kb` resolves to `$OPENKB_KB_ROOT/postman-kb`.
+example, `postman-kb` resolves to `$ULTRAKB_KB_ROOT/postman-kb`.
 
 Common status codes across all endpoints:
 
 - `200` — success.
-- `400` — invalid request body, unknown `kb`, or a KB that isn't an OpenKB dir
-  (missing `.openkb/` or `wiki/`).
-- `401` — missing or wrong bearer token (only when `OPENKB_API_TOKEN` is set).
+- `400` — invalid request body, unknown `kb`, or a KB that isn't an UltraKB dir
+  (missing `.ultrakb/` or `wiki/`).
+- `401` — missing or wrong bearer token (only when `ULTRAKB_API_TOKEN` is set).
 - `404` — referenced document/watcher not found (remove/recompile/watch-stop).
 - `409` — ambiguous identifier (remove/recompile) with `candidates` in `detail`.
 - `500` — server error.
@@ -131,7 +131,7 @@ Request (`InitRequest`):
 is created; secret values are not echoed back in the response.
 
 When `model`, `api_key`, and `openai_api_base` are all omitted, the new KB inherits the operator's project-root `config.yaml` and LLM
-credentials from the server's working-directory `.env` (server-level `OPENKB_*`
+credentials from the server's working-directory `.env` (server-level `ULTRAKB_*`
 vars are filtered out), so a newly created KB can use the server's existing model connection.
 
 Response (`InitResponse`, `200`): `kb` (string), `created` (bool, `false` if the
@@ -280,7 +280,7 @@ Request (`LintRequest`):
 | `fix` | bool   | no       | `false` | rewrite/strip broken `[[wikilinks]]` first |
 
 When `fix: true`, broken wikilinks are rewritten/stripped under the KB ingest
-lock (mirroring `openkb lint --fix`) before the report runs, so the report
+lock (mirroring `ultrakb lint --fix`) before the report runs, so the report
 reflects the post-fix state. The semantic lint is a multi-turn LLM agent run, so
 the response can take tens of seconds to minutes regardless of `fix`; the `fix`
 pass itself is a local, millisecond file rewrite.
@@ -301,7 +301,7 @@ Response (`LintResponse`, `200`):
 #### Remove Documents
 
 Remove a document and clean up its wiki pages, images, registry, and PageIndex
-state, the same pipeline as `openkb remove`.
+state, the same pipeline as `ultrakb remove`.
 
 ```http
 POST /api/v1/remove
@@ -330,7 +330,7 @@ Response (`RemoveResponse`, `200`): `status` (`removed`, `partial`, `dry_run`),
 
 #### Recompile
 
-Re-compile one or all documents, mirroring `openkb recompile`.
+Re-compile one or all documents, mirroring `ultrakb recompile`.
 
 ```http
 POST /api/v1/recompile
@@ -358,7 +358,7 @@ Response (`RecompileResponse`, `200`): `status` (`done`), `total`, `recompiled`,
 #### Watch (auto-compile on file change)
 
 Start/stop/inspect a filesystem watcher that auto-compiles files dropped into
-`raw/` (same as `openkb watch`), plus an SSE feed of watcher events.
+`raw/` (same as `ultrakb watch`), plus an SSE feed of watcher events.
 
 ```http
 POST /api/v1/watch/start

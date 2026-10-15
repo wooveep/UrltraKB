@@ -7,13 +7,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from openkb.agent.page_response import PageResponseError
-from openkb.compile_checkpoints import CompileCheckpoints
-from openkb.compile_recovery import explicit_compile_retry
-from openkb.lifecycle import current_generation
-from openkb.llm_usage import _SCOPE, UsageRequest, UsageScope
-from openkb.llm_usage_models import UsageExecution
-from openkb.model_task import ModelTask
+from ultrakb.agent.page_response import PageResponseError
+from ultrakb.compile_checkpoints import CompileCheckpoints
+from ultrakb.compile_recovery import explicit_compile_retry
+from ultrakb.lifecycle import current_generation
+from ultrakb.llm_usage import _SCOPE, UsageRequest, UsageScope
+from ultrakb.llm_usage_models import UsageExecution
+from ultrakb.model_task import ModelTask
 
 
 def write(path, value):
@@ -35,7 +35,7 @@ def interrupted_summary(kb_dir):
         stages={"compile": 1},
         inputs={source: revision},
     )
-    task_path = kb_dir / ".openkb/model-tasks" / f"{task_id}.json"
+    task_path = kb_dir / ".ultrakb/model-tasks" / f"{task_id}.json"
     write(task_path, task.model_dump(mode="json"))
     for identity, operation in (
         (old_execution, "import_document"),
@@ -49,7 +49,8 @@ def interrupted_summary(kb_dir):
             source_ids=[source],
         )
         write(
-            kb_dir / ".openkb/usage/executions" / f"{identity}.json", record.model_dump(mode="json")
+            kb_dir / ".ultrakb/usage/executions" / f"{identity}.json",
+            record.model_dump(mode="json"),
         )
     request = UsageRequest(
         request_attempt_id="3" * 32,
@@ -66,7 +67,7 @@ def interrupted_summary(kb_dir):
         started_at="2026-10-12T00:00:00+00:00",
         send_status="sent",
     )
-    request_path = kb_dir / ".openkb/usage/requests" / f"{request.request_attempt_id}.json"
+    request_path = kb_dir / ".ultrakb/usage/requests" / f"{request.request_attempt_id}.json"
     write(request_path, request.model_dump(mode="json"))
     scope = UsageScope(
         kb_dir,

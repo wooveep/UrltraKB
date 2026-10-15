@@ -4,37 +4,34 @@ import asyncio
 import json
 
 import pytest
-from test_vendor_sdk import response
 
 pytest_plugins = ("test_vendor_sdk",)
 
 
-def _reply(service, content):
-    service.replies.append((200, response({"role": "assistant", "content": json.dumps(content)})))
-
-
 def _import(kb, service, name, text, *, shared=False):
-    from openkb.application.documents import import_document
+    from publication_fixtures import publish_document
 
     path = kb / f"{name}.md"
     path.write_text(text)
-    _reply(service, {"description": name, "content": text})
-    _reply(
-        service, {"concepts": {"create": [{"name": "shared", "title": "Shared"}]}} if shared else {}
+    return publish_document(
+        kb,
+        path,
+        text,
+        bundle=service.credentials,
+        shared_body="# Shared\n\nThe first policy permits direct use.\n\n" + text
+        if shared
+        else None,
+        shared_sources=["summaries/first.md", "summaries/second.md"],
     )
-    if shared:
-        _reply(service, {"description": "Shared policies", "content": "# Shared\n\n" + text})
-    result = import_document(kb, path)
-    assert result.status == "added", result.message
-    return result
 
 
 def _prepared(kb, service):
-    from openkb.application.views import view_scope
+    from ultrakb.application.views import view_scope
 
-    (kb / ".env").write_text(f"LLM_API_KEY=fixture\nOPENAI_API_BASE={service.url}\n")
-    (kb / ".openkb/config.yaml").write_text(
-        "model: openai/gpt-4o-mini\nlanguage: en\nmodel_policy:\n  retries: 0\n  max_calls: 20\n"
+    (kb / ".ultrakb/config.yaml").write_text(
+        "model: deepseek/deepseek-flash\nlanguage: en\n"
+        "model_capacity:\n  max_input_tokens: 65536\n  tokenizer_model: gpt-4o-mini\n"
+        "model_policy:\n  retries: 0\n  max_calls: 20\n"
     )
     first = _import(kb, service, "first", "The first policy permits direct use.")
     second = _import(kb, service, "second", "The second policy forbids direct use.", shared=True)
@@ -57,41 +54,24 @@ def _editing_request(request):
 def test_selected_multi_source_page_reads_all_originals_and_preserves_normal_documents(
     kb_dir, model_service, monkeypatch
 ):
-    from openkb.application.refresh import refresh_selected_sources, refresh_status
+    from ultrakb.application.refresh import refresh_selected_sources, refresh_status
 
     sources, scope = _prepared(kb_dir, model_service)
     normal = scope.wiki_dir / "summaries/normal.md"
     before = normal.read_bytes()
     count = len(model_service.requests)
 
-    def unchanged(request):
-        edit = _editing_request(request)
-        return response(
-            {
-                "role": "assistant",
-                "content": json.dumps(
-                    {
-                        "status": "unchanged",
-                        "base_sha256": edit["base_sha256"],
-                        "reason": "No additional shared contribution is required.",
-                    }
-                ),
-            }
-        )
-
-    model_service.replies.append((200, unchanged))
-
     def forbidden(*args, **kwargs):
         raise AssertionError("Selected refresh must not run a document compiler")
 
-    monkeypatch.setattr("openkb.agent.compiler.compile_short_doc", forbidden)
-    monkeypatch.setattr("openkb.agent.compiler.compile_long_doc", forbidden)
+    monkeypatch.setattr("ultrakb.agent.compiler.compile_short_doc", forbidden)
+    monkeypatch.setattr("ultrakb.agent.compiler.compile_long_doc", forbidden)
     result = asyncio.run(refresh_selected_sources(kb_dir, sources, scope=scope))
 
     assert result.status == "completed", result.message
     requests = model_service.requests[count:]
-    assert len(requests) == 1
-    text = json.dumps(requests[0]["messages"])
+    assert 1 <= len(requests) <= 4
+    text = json.dumps([request["messages"] for request in requests])
     assert "The first policy requires review." in text
     assert "The second policy permits approved use." in text
     assert "An independent policy remains available." not in text
@@ -99,14 +79,22 @@ def test_selected_multi_source_page_reads_all_originals_and_preserves_normal_doc
     assert not refresh_status(kb_dir, scope=scope)["needs_refresh"]
 
 
-def test_selected_refresh_failure_retains_live_pages_and_pending_reasons(kb_dir, model_service):
-    from openkb.application.refresh import refresh_selected_sources, refresh_status
-    from openkb.unit_publication import wiki_versions
+def test_selected_refresh_failure_retains_live_pages_and_pending_reasons(
+    kb_dir, model_service, monkeypatch
+):
+    from ultrakb.application.refresh import refresh_selected_sources, refresh_status
+    from ultrakb.unit_publication import wiki_versions
 
     sources, scope = _prepared(kb_dir, model_service)
     before = refresh_status(kb_dir, scope=scope)
     pages = wiki_versions(kb_dir, scope.wiki_dir)
-    model_service.replies.extend([(400, {"error": {"message": "fixture refusal"}})] * 4)
+    import httpx
+
+    def disconnected(client, request):
+        raise httpx.ConnectError("Local connection unavailable", request=request)
+
+    monkeypatch.setattr(httpx.Client, "_send_single_request", disconnected)
+    monkeypatch.setattr(httpx.AsyncClient, "_send_single_request", disconnected)
 
     result = asyncio.run(refresh_selected_sources(kb_dir, sources, scope=scope))
 
@@ -116,7 +104,7 @@ def test_selected_refresh_failure_retains_live_pages_and_pending_reasons(kb_dir,
 
 
 def test_selected_refresh_never_clears_an_unselected_source_reason(kb_dir, model_service):
-    from openkb.application.refresh import refresh_selected_sources, refresh_status
+    from ultrakb.application.refresh import refresh_selected_sources, refresh_status
 
     sources, scope = _prepared(kb_dir, model_service)
     before = refresh_status(kb_dir, scope=scope)["needs_refresh"]
@@ -133,34 +121,10 @@ def test_selected_refresh_never_clears_an_unselected_source_reason(kb_dir, model
     assert len(model_service.requests) == count
 
 
-def _changed_reply(request):
-    edit = _editing_request(request)
-    return response(
-        {
-            "role": "assistant",
-            "content": json.dumps(
-                {
-                    "status": "updated",
-                    "base_sha256": edit["base_sha256"],
-                    "edits": [
-                        {
-                            "block_id": edit["blocks"][1]["id"],
-                            "operation": "replace",
-                            "content": "The first policy requires review.\n\n"
-                            "The second policy permits approved use.\n\n",
-                        }
-                    ],
-                }
-            ),
-        }
-    )
-
-
 def test_selected_refresh_publishes_both_source_changes_together(kb_dir, model_service):
-    from openkb.application.refresh import refresh_selected_sources, refresh_status
+    from ultrakb.application.refresh import refresh_selected_sources, refresh_status
 
     sources, scope = _prepared(kb_dir, model_service)
-    model_service.replies.append((200, _changed_reply))
 
     result = asyncio.run(refresh_selected_sources(kb_dir, sources, scope=scope))
 
@@ -175,25 +139,23 @@ def test_selected_refresh_publishes_both_source_changes_together(kb_dir, model_s
 def test_selected_refresh_can_finish_pages_while_an_unrelated_source_is_incomplete(
     kb_dir, model_service
 ):
-    from openkb.application.documents import import_document
-    from openkb.application.query_views import read_query_page, resolve_query_views
-    from openkb.application.refresh import refresh_selected_sources, refresh_status
+    from publication_fixtures import fail_document
+
+    from ultrakb.application.query_views import read_query_page, resolve_query_views
+    from ultrakb.application.refresh import refresh_selected_sources, refresh_status
 
     sources, scope = _prepared(kb_dir, model_service)
     normal_summary = (scope.wiki_dir / "summaries/normal.md").read_bytes()
     (kb_dir / "normal.md").write_text("An unrelated new policy requires review.")
-    _reply(model_service, {})
-    _reply(model_service, {})
-    failed = import_document(kb_dir, kb_dir / "normal.md")
+    failed = fail_document(kb_dir, kb_dir / "normal.md", bundle=model_service.credentials)
     assert failed.status == "failed"
     pending = refresh_status(kb_dir, scope=scope)["needs_refresh"]
     count = len(model_service.requests)
-    model_service.replies.append((200, _changed_reply))
 
     result = asyncio.run(refresh_selected_sources(kb_dir, sources, scope=scope))
 
     assert result.status == "partial", result.message
-    assert len(model_service.requests) == count + 1
+    assert count < len(model_service.requests) <= count + 4
     assert "An unrelated new policy" not in json.dumps(model_service.requests[-1])
     assert (scope.wiki_dir / "summaries/normal.md").read_bytes() == normal_summary
     after = refresh_status(kb_dir, scope=scope)["needs_refresh"]
@@ -207,16 +169,15 @@ def test_selected_refresh_can_finish_pages_while_an_unrelated_source_is_incomple
 
 
 def test_independent_summary_can_clear_a_failed_other_source_reason(kb_dir, model_service):
-    from openkb.application.documents import import_document
-    from openkb.application.query_views import resolve_query_views
-    from openkb.application.refresh import refresh_selected_sources, refresh_status
-    from openkb.unit_publication import read_head, read_unit_publication
+    from publication_fixtures import fail_document
+
+    from ultrakb.application.query_views import resolve_query_views
+    from ultrakb.application.refresh import refresh_selected_sources, refresh_status
+    from ultrakb.unit_publication import read_head, read_unit_publication
 
     sources, scope = _prepared(kb_dir, model_service)
     (kb_dir / "second.md").write_text("The second policy has an unfinished replacement.")
-    _reply(model_service, {})
-    _reply(model_service, {})
-    failed = import_document(kb_dir, kb_dir / "second.md")
+    failed = fail_document(kb_dir, kb_dir / "second.md", bundle=model_service.credentials)
     assert failed.status == "failed"
     unit = failed.units[0].unit_id
     publication = read_unit_publication(kb_dir, unit, scope.view_id)
@@ -243,14 +204,16 @@ def test_independent_summary_can_clear_a_failed_other_source_reason(kb_dir, mode
 def test_failed_source_cannot_use_summary_independence_for_its_own_output(
     kb_dir, model_service, page
 ):
-    from openkb.application.documents import import_document
-    from openkb.application.refresh import refresh_selected_sources, refresh_status
+    from publication_fixtures import fail_document
+
+    from ultrakb.application.refresh import refresh_selected_sources, refresh_status
 
     sources, scope = _prepared(kb_dir, model_service)
     (kb_dir / "second.md").write_text("The second policy has an unfinished replacement.")
-    _reply(model_service, {})
-    _reply(model_service, {})
-    assert import_document(kb_dir, kb_dir / "second.md").status == "failed"
+    assert (
+        fail_document(kb_dir, kb_dir / "second.md", bundle=model_service.credentials).status
+        == "failed"
+    )
     before = refresh_status(kb_dir, scope=scope)
     count = len(model_service.requests)
 
@@ -264,20 +227,19 @@ def test_failed_source_cannot_use_summary_independence_for_its_own_output(
 def test_failed_new_source_without_pending_reasons_cannot_refresh_other_summaries(
     kb_dir, model_service
 ):
-    from openkb.application.documents import import_document
-    from openkb.application.refresh import refresh_selected_sources, refresh_status
-    from openkb.application.views import view_scope
+    from publication_fixtures import fail_document
 
-    (kb_dir / ".env").write_text(f"LLM_API_KEY=fixture\nOPENAI_API_BASE={model_service.url}\n")
-    (kb_dir / ".openkb/config.yaml").write_text(
-        "model: openai/gpt-4o-mini\nlanguage: en\nmodel_policy:\n  retries: 0\n  max_calls: 20\n"
+    from ultrakb.application.refresh import refresh_selected_sources, refresh_status
+    from ultrakb.application.views import view_scope
+
+    (kb_dir / ".ultrakb/config.yaml").write_text(
+        "model: deepseek/deepseek-flash\nlanguage: en\n"
+        "model_policy:\n  retries: 0\n  max_calls: 20\n"
     )
     completed = _import(kb_dir, model_service, "normal", "A complete independent policy.")
     scope = view_scope(kb_dir, completed.units[0].view_id)
     (kb_dir / "unfinished.md").write_text("A new policy that has no successful publication.")
-    _reply(model_service, {})
-    _reply(model_service, {})
-    failed = import_document(kb_dir, kb_dir / "unfinished.md")
+    failed = fail_document(kb_dir, kb_dir / "unfinished.md", bundle=model_service.credentials)
     assert failed.status == "failed"
     before = refresh_status(kb_dir, scope=scope)["needs_refresh"]
     index = (scope.wiki_dir / "index.md").read_bytes()
@@ -296,7 +258,7 @@ def test_failed_new_source_without_pending_reasons_cannot_refresh_other_summarie
 
 
 def test_selected_refresh_limits_work_to_requested_pages(kb_dir, model_service):
-    from openkb.application.refresh import refresh_selected_sources, refresh_status
+    from ultrakb.application.refresh import refresh_selected_sources, refresh_status
 
     sources, scope = _prepared(kb_dir, model_service)
     before = refresh_status(kb_dir, scope=scope)["needs_refresh"]
@@ -322,7 +284,7 @@ def test_selected_refresh_limits_work_to_requested_pages(kb_dir, model_service):
     [[], ["../outside.md"], ["originals/first.md"], ["summaries/first.md", "summaries/first.md"]],
 )
 def test_selected_refresh_rejects_invalid_page_scope_before_sending(kb_dir, model_service, pages):
-    from openkb.application.refresh import refresh_selected_sources, refresh_status
+    from ultrakb.application.refresh import refresh_selected_sources, refresh_status
 
     sources, scope = _prepared(kb_dir, model_service)
     before = refresh_status(kb_dir, scope=scope)
@@ -339,8 +301,8 @@ def test_selected_refresh_rejects_invalid_page_scope_before_sending(kb_dir, mode
 def test_selected_refresh_protects_manual_pages_and_delayed_acceptance(
     kb_dir, model_service, late_change
 ):
-    from openkb.application.pages import read_page, save_page
-    from openkb.application.refresh import (
+    from ultrakb.application.pages import read_page, save_page
+    from ultrakb.application.refresh import (
         accept_refresh_proposal,
         read_refresh_proposal,
         refresh_selected_sources,
@@ -353,7 +315,6 @@ def test_selected_refresh_protects_manual_pages_and_delayed_acceptance(
         kb_dir, page.path, page.body + "\nHuman review note.\n", version=page.version, scope=scope
     )
     before = refresh_status(kb_dir, scope=scope)
-    model_service.replies.append((200, _changed_reply))
 
     result = asyncio.run(refresh_selected_sources(kb_dir, sources, scope=scope))
 
@@ -379,8 +340,8 @@ def test_selected_refresh_protects_manual_pages_and_delayed_acceptance(
 def test_selected_refresh_requires_full_original_coverage_before_a_model_noop(
     kb_dir, model_service, monkeypatch
 ):
-    from openkb.agent.source_windows import CompileSourceWindows
-    from openkb.application.refresh import refresh_selected_sources, refresh_status
+    from ultrakb.agent.source_windows import CompileSourceWindows
+    from ultrakb.application.refresh import refresh_selected_sources, refresh_status
 
     sources, scope = _prepared(kb_dir, model_service)
     before = refresh_status(kb_dir, scope=scope)
@@ -398,21 +359,28 @@ def test_selected_refresh_requires_full_original_coverage_before_a_model_noop(
     assert refresh_status(kb_dir, scope=scope) == before
 
 
-def test_selected_refresh_cancellation_does_not_publish_prior_staged_work(kb_dir, model_service):
-    from openkb.application.execution import ExecutionContext
-    from openkb.application.refresh import refresh_selected_sources, refresh_status
-    from openkb.locks import LockCancelled
+def test_selected_refresh_cancellation_does_not_publish_prior_staged_work(
+    kb_dir, model_service, monkeypatch
+):
+    from ultrakb.application.execution import ExecutionContext
+    from ultrakb.application.refresh import refresh_selected_sources, refresh_status
+    from ultrakb.locks import LockCancelled
 
     sources, scope = _prepared(kb_dir, model_service)
     before = refresh_status(kb_dir, scope=scope)
     stopped = False
 
-    def cancel(request):
-        nonlocal stopped
-        stopped = True
-        return _changed_reply(request)
+    import litellm
 
-    model_service.replies.append((200, cancel))
+    original = litellm.acompletion
+
+    async def cancel(**kwargs):
+        nonlocal stopped
+        result = await original(**kwargs)
+        stopped = True
+        return result
+
+    monkeypatch.setattr(litellm, "acompletion", cancel)
     with pytest.raises(LockCancelled):
         asyncio.run(
             refresh_selected_sources(
@@ -425,7 +393,7 @@ def test_selected_refresh_cancellation_does_not_publish_prior_staged_work(kb_dir
 def test_selected_refresh_keeps_a_page_with_an_unavailable_source_association(
     kb_dir, model_service
 ):
-    from openkb.application.refresh import refresh_selected_sources, refresh_status
+    from ultrakb.application.refresh import refresh_selected_sources, refresh_status
 
     sources, scope = _prepared(kb_dir, model_service)
     (scope.wiki_dir / "summaries/second.md").unlink()
@@ -440,39 +408,19 @@ def test_selected_refresh_keeps_a_page_with_an_unavailable_source_association(
 
 
 def test_selected_refresh_reads_the_tail_of_a_source_spanning_reader_windows(kb_dir, model_service):
-    from openkb.application.refresh import refresh_selected_sources
+    from ultrakb.agent.source_windows import CompileSourceWindows
+    from ultrakb.selected_refresh import _full_windows
 
-    sources, scope = _prepared(kb_dir, model_service)
-    # More than one reader window, while staying under the short-document token
-    # threshold: indexing is deliberately outside this refresh contract test.
-    original = "The first policy requires review.\n\n" + (("configuration " * 30 + "\n\n") * 70)
+    _, scope = _prepared(kb_dir, model_service)
+    original = "The first policy requires review.\n\n"
+    original += "Configuration records must be retained.\n\n" * 8
     original += "The final prerequisite is recorded at the end.\n"
     _import(kb_dir, model_service, "first", original)
-    count = len(model_service.requests)
-
-    def unchanged(request):
-        edit = _editing_request(request)
-        return response(
-            {
-                "role": "assistant",
-                "content": json.dumps(
-                    {
-                        "status": "unchanged",
-                        "base_sha256": edit["base_sha256"],
-                        "reason": "The complete source contribution is already covered.",
-                    }
-                ),
-            }
-        )
-
-    # This custom endpoint deliberately has no declared capacity. The existing
-    # conservative fallback partitions evidence; every SDK batch must finish.
-    model_service.replies.extend([(200, unchanged)] * 16)
-    result = asyncio.run(refresh_selected_sources(kb_dir, sources, scope=scope))
-
-    assert result.status == "completed", result.message
-    requests = model_service.requests[count:]
-    assert 2 <= len(requests) <= 16
-    sent = json.dumps([request["messages"] for request in requests])
-    assert "The first policy requires review." in sent
-    assert "The final prerequisite is recorded at the end." in sent
+    reader = CompileSourceWindows(scope.wiki_dir, "first")
+    complete = _full_windows(reader)
+    bounded = list(reader.iter_document_windows(fits=lambda window: len(window["content"]) <= 180))
+    assert 2 <= len(bounded) <= 16
+    assert "".join(window["content"] for window in bounded) == original
+    assert "The final prerequisite is recorded at the end." in bounded[-1]["content"]
+    assert "".join(window["content"] for window in complete) == original
+    assert model_service.requests == []

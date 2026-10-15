@@ -2,7 +2,7 @@
 
 import json
 
-from openkb.agent.evidence_payload import project_evidence
+from ultrakb.agent.evidence_payload import project_evidence
 
 
 def worksheet():
@@ -95,7 +95,7 @@ def test_serialized_budget_is_enforced_with_explicit_continuation():
 def test_continuation_context_uses_original_text_coordinates(kb_dir):
     from test_original_structure import frozen_text
 
-    from openkb.text_source import read_text_selection
+    from ultrakb.text_source import read_text_selection
 
     text = "# Under load\n\n| Object | Value |\n| --- | --- |\n| Unit | 20 ms |\n"
     raw = frozen_text(kb_dir, "x" * 148 + "\n\n" + text)
@@ -108,8 +108,8 @@ def test_continuation_context_uses_original_text_coordinates(kb_dir):
 
 
 def test_continuation_context_uses_physical_page_coordinates():
-    from openkb.source_contract import NATIVE_PAGE_POLICY
-    from openkb.source_pages import read_page_selection
+    from ultrakb.source_contract import NATIVE_PAGE_POLICY
+    from ultrakb.source_pages import read_page_selection
 
     text = (
         "# Under load\n\n<table>\n<tr><th>Object</th><th>Value</th></tr>\n"
@@ -141,7 +141,7 @@ def test_continuation_context_uses_physical_page_coordinates():
 
 
 def test_physical_pipe_text_does_not_certify_a_markdown_table_header():
-    from openkb.source_pages import read_page_selection
+    from ultrakb.source_pages import read_page_selection
 
     text = "# Under load\n\n| Object | Value |\n| --- | --- |\n| Unit | 20 ms |\n"
     source = read_page_selection([{"page": 1, "unit_kind": "page", "content": text}])

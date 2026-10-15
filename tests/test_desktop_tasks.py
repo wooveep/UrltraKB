@@ -1,11 +1,11 @@
 """Real spawn execution at the agreed task lifecycle/application boundary."""
 
-from openkb.application.pages import read_page
+from ultrakb.application.pages import read_page
 
 
 def test_task_saves_page_in_spawn_worker_and_retains_confirmed_history(kb_dir, tmp_path):
-    from openkb.runtime.requests import SavePage
-    from openkb.runtime.tasks import TaskManager
+    from ultrakb.runtime.requests import SavePage
+    from ultrakb.runtime.tasks import TaskManager
 
     path = kb_dir / "wiki/concepts/attention.md"
     path.write_text("Original\n")
@@ -39,9 +39,9 @@ def test_waiting_kb_does_not_starve_another_kb_and_stop_withdraws_waiter(kb_dir,
     import shutil
     import time
 
-    from openkb.locks import kb_ingest_lock
-    from openkb.runtime.requests import SavePage
-    from openkb.runtime.tasks import TaskManager
+    from ultrakb.locks import kb_ingest_lock
+    from ultrakb.runtime.requests import SavePage
+    from ultrakb.runtime.tasks import TaskManager
 
     page = kb_dir / "wiki/concepts/attention.md"
     page.write_text("Original\n")
@@ -50,7 +50,7 @@ def test_waiting_kb_does_not_starve_another_kb_and_stop_withdraws_waiter(kb_dir,
     version = read_page(kb_dir, "concepts/attention").version
     manager = TaskManager(history_dir=tmp_path / "history", max_workers=1)
     try:
-        with kb_ingest_lock(kb_dir / ".openkb"):
+        with kb_ingest_lock(kb_dir / ".ultrakb"):
             waiting = manager.submit(kb_dir, [SavePage("concepts/attention", "Blocked", version)])
             independent = manager.submit(
                 other, [SavePage("concepts/attention", "Independent", version)]
@@ -71,13 +71,13 @@ def test_waiting_kb_does_not_starve_another_kb_and_stop_withdraws_waiter(kb_dir,
 
 
 def test_repair_block_stops_batch_before_starting_more_units(kb_dir, tmp_path):
-    from openkb.runtime.requests import SavePage
-    from openkb.runtime.tasks import TaskManager
+    from ultrakb.runtime.requests import SavePage
+    from ultrakb.runtime.tasks import TaskManager
 
     page = kb_dir / "wiki/concepts/attention.md"
     page.write_text("Original\n")
     version = read_page(kb_dir, "concepts/attention").version
-    journal = kb_dir / ".openkb/journal/broken.json"
+    journal = kb_dir / ".ultrakb/journal/broken.json"
     journal.parent.mkdir()
     journal.write_text("{incomplete")
     manager = TaskManager(history_dir=tmp_path / "history", max_workers=1)

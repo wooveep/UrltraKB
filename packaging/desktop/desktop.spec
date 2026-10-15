@@ -11,31 +11,31 @@ sys.path.insert(0, str(repo / "scripts"))
 from local_vendors import verify_local_vendors
 
 verify_local_vendors(repo)
-assets = repo / "openkb/rendering/assets"
+assets = repo / "ultrakb/rendering/assets"
 if not (assets / "manifest.json").is_file():
     raise RuntimeError("Run scripts/prepare_desktop_assets.py before freezing")
 datas = collect_data_files(
-    "openkb",
+    "ultrakb",
     excludes=[
         "**/web/**", "**/rendering/assets/**", "**/desktop/assets/fonts/**", "**/rust-helper/**",
     ],
 )
-datas += [(str(assets), "openkb/rendering/assets")]
+datas += [(str(assets), "ultrakb/rendering/assets")]
 # Conversion provenance hashes these exact helpers in both source and frozen runs.
-datas += [(str(repo / "openkb/cnki" / name), "openkb/cnki") for name in ("engine.py", "worker.py")]
+datas += [(str(repo / "ultrakb/cnki" / name), "ultrakb/cnki") for name in ("engine.py", "worker.py")]
 # The manifest is the runtime whitelist; reference fonts stay in the source tree.
 fonts = json.loads((repo / "assets/fonts/manifest.json").read_text("utf-8"))
 font_files = {"manifest.json", "README.md"} | {f[k] for f in fonts for k in ("file", "license")}
 datas += [
-    (str(repo / "assets/fonts" / name), "openkb/desktop/assets/fonts")
+    (str(repo / "assets/fonts" / name), "ultrakb/desktop/assets/fonts")
     for name in sorted(font_files)
 ]
-datas += [(str(packaging / "build/token-cache"), "openkb/token-cache")]
-datas += copy_metadata("openkb", recursive=True)
+datas += [(str(packaging / "build/token-cache"), "ultrakb/token-cache")]
+datas += copy_metadata("ultrakb", recursive=True)
 datas += copy_metadata("pymupdf")
-for skill in ("openkb-deck-neon", "openkb-deck-editorial", "openkb-html-critic"):
-    datas.append((str(repo / "skills" / skill), "openkb/_skills/" + skill))
-hidden = ["openkb.cli", "openkb.api", "openkb.cnki.worker", "tiktoken_ext.openai_public"]
+for skill in ("ultrakb-deck-neon", "ultrakb-deck-editorial", "ultrakb-html-critic"):
+    datas.append((str(repo / "skills" / skill), "ultrakb/_skills/" + skill))
+hidden = ["ultrakb.cli", "ultrakb.api", "ultrakb.cnki.worker", "tiktoken_ext.openai_public"]
 for package in ("litellm", "magika", "pageindex", "ctree", "contextdb", "trafilatura", "markitdown"):
     # The desktop uses LiteLLM's model clients, never its proxy administration UI.
     datas += collect_data_files(
@@ -61,11 +61,11 @@ executables = [
     EXE(
         pyz, analysis.scripts, [], exclude_binaries=True, name=name,
         debug=False, bootloader_ignore_signals=False, strip=False, upx=False,
-        console=name != "UrltraKB", disable_windowed_traceback=False,
-        icon=str(repo / "openkb/desktop/assets/brand/openkb-app-icon.ico")
+        console=name != "UltraKB", disable_windowed_traceback=False,
+        icon=str(repo / "ultrakb/desktop/assets/brand/ultrakb-app-icon.ico")
         if sys.platform == "win32" else None,
         target_arch="arm64" if sys.platform == "darwin" else None,
     )
-    for name in ("UrltraKB", "UrltraKBCLI", "UrltraKBAPI", "UrltraKBVerify")
+    for name in ("UltraKB", "UltraKBCLI", "UltraKBAPI", "UltraKBVerify")
 ]
-COLLECT(*executables, analysis.binaries, analysis.datas, strip=False, upx=False, name="UrltraKB")
+COLLECT(*executables, analysis.binaries, analysis.datas, strip=False, upx=False, name="UltraKB")

@@ -6,9 +6,9 @@ import io
 import pytest
 from starlette.datastructures import UploadFile
 
-from openkb.api_helpers import _add_saved_file, _reserve_add_uploads, _write_add_uploads
-from openkb.application.documents import AddFileResult
-from openkb.state import HashRegistry
+from ultrakb.api_helpers import _add_saved_file, _reserve_add_uploads, _write_add_uploads
+from ultrakb.application.documents import AddFileResult
+from ultrakb.state import HashRegistry
 
 
 def test_upload_body_is_invisible_to_raw_watch_until_complete(kb_dir, monkeypatch):
@@ -29,7 +29,7 @@ def test_upload_body_is_invisible_to_raw_watch_until_complete(kb_dir, monkeypatc
         assert path.parent == root / "raw" and path.read_bytes() == b"# complete input"
         return AddFileResult(path.name, str(path), "added", "Added")
 
-    monkeypatch.setattr("openkb.api_helpers._add_for_api", consume)
+    monkeypatch.setattr("ultrakb.api_helpers._add_for_api", consume)
     asyncio.run(run())
 
 
@@ -43,11 +43,11 @@ def test_skipped_cleanup_keeps_a_raw_file_registered_during_the_operation(
         assert (await _add_saved_file(kb_dir, *ready[0])).status == "skipped"
 
     def consume(path, root, **kwargs):
-        registry = HashRegistry(root / ".openkb/hashes.json")
+        registry = HashRegistry(root / ".ultrakb/hashes.json")
         registry.add(registry.hash_file(path), {"name": path.name, path_key: f"raw/{path.name}"})
         return AddFileResult(path.name, None, "skipped", "Already registered")
 
-    monkeypatch.setattr("openkb.api_helpers._add_for_api", consume)
+    monkeypatch.setattr("ultrakb.api_helpers._add_for_api", consume)
     asyncio.run(run())
     assert (kb_dir / "raw/paper.md").read_bytes() == b"# original"
 
@@ -72,7 +72,7 @@ def test_cancelled_body_cleans_only_owned_private_files(kb_dir):
 
 
 def test_disconnect_after_first_stream_event_removes_private_inputs(kb_dir):
-    from openkb.api_helpers import _stream_add_uploads
+    from ultrakb.api_helpers import _stream_add_uploads
 
     async def run():
         upload = UploadFile(filename="paper.md", file=io.BytesIO(b"# original"))
@@ -89,14 +89,14 @@ def test_disconnect_after_first_stream_event_removes_private_inputs(kb_dir):
 def test_disconnect_retracts_upload_waiting_for_kb_lease(kb_dir, monkeypatch):
     import threading
 
-    from openkb.api_helpers import _stream_add_uploads
-    from openkb.locks import kb_ingest_lock
+    from ultrakb.api_helpers import _stream_add_uploads
+    from ultrakb.locks import kb_ingest_lock
 
     acquired, release = threading.Event(), threading.Event()
     calls = []
 
     def hold():
-        with kb_ingest_lock(kb_dir / ".openkb"):
+        with kb_ingest_lock(kb_dir / ".ultrakb"):
             acquired.set()
             assert release.wait(10)
 
@@ -113,7 +113,7 @@ def test_disconnect_retracts_upload_waiting_for_kb_lease(kb_dir, monkeypatch):
         assert not ready[0][0].exists()
 
     monkeypatch.setattr(
-        "openkb.api_helpers._add_for_api", lambda *args, **kwargs: calls.append(args)
+        "ultrakb.api_helpers._add_for_api", lambda *args, **kwargs: calls.append(args)
     )
     holder = threading.Thread(target=hold)
     holder.start()
@@ -129,7 +129,7 @@ def test_disconnect_retracts_upload_waiting_for_kb_lease(kb_dir, monkeypatch):
 def test_upload_does_not_follow_dangling_raw_symlink(kb_dir, tmp_path):
     import os
 
-    from openkb.application.uploads import published_input
+    from ultrakb.application.uploads import published_input
 
     if os.name == "nt":
         pytest.skip("POSIX symlink fixture")
@@ -143,8 +143,8 @@ def test_upload_does_not_follow_dangling_raw_symlink(kb_dir, tmp_path):
 
 
 def test_disconnect_before_iterator_starts_removes_private_upload(kb_dir):
-    from openkb.api_helpers import _stream_add_uploads
-    from openkb.api_uploads import UploadStreamingResponse
+    from ultrakb.api_helpers import _stream_add_uploads
+    from ultrakb.api_uploads import UploadStreamingResponse
 
     async def run():
         upload = UploadFile(filename="paper.md", file=io.BytesIO(b"# original"))

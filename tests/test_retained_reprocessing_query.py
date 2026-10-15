@@ -2,14 +2,14 @@
 
 import pytest
 
-from openkb.agent.query_evidence import selection_catalog
-from openkb.application.documents import import_document
-from openkb.application.query_views import read_query_page, resolve_query_views
-from openkb.application.reprocessing import preview_reprocessing, reprocess_source
-from openkb.source_reading import source_capabilities
-from openkb.unit_publication import read_head
+from ultrakb.agent.query_evidence import selection_catalog
+from ultrakb.application.documents import import_document
+from ultrakb.application.query_views import read_query_page, resolve_query_views
+from ultrakb.application.reprocessing import preview_reprocessing, reprocess_source
+from ultrakb.source_reading import source_capabilities
+from ultrakb.unit_publication import read_head
 
-pytest_plugins = ("test_workbook_import",)
+pytest_plugins = ("test_office_import", "block_fixtures", "workbook_fixtures")
 
 
 def write_original(path, text):
@@ -31,13 +31,12 @@ def write_original(path, text):
             pdf.save(path)
 
 
-@pytest.fixture(params=["markdown", "pdf"])
-def failed_reprocess(kb_dir, tmp_path, monkeypatch, pdf_model, request):
+def _failed_reprocess(kb_dir, tmp_path, monkeypatch, source_format):
     import litellm
 
-    path = tmp_path / ("operations.md" if request.param == "markdown" else "operations.pdf")
+    path = tmp_path / ("operations.md" if source_format == "markdown" else "operations.pdf")
     write_original(path, "The pump must stop before the inspection valve opens.")
-    first = import_document(kb_dir, path)
+    first = publish_retained(kb_dir, path)
     assert first.status == "added", first.message
     head = read_head(kb_dir, "legacy")
     before = resolve_query_views(kb_dir)
@@ -47,7 +46,7 @@ def failed_reprocess(kb_dir, tmp_path, monkeypatch, pdf_model, request):
     completion, acompletion = litellm.completion, litellm.acompletion
 
     def rejected(**kwargs):
-        raise ValueError("Offline fixture: new summary cannot be generated")
+        raise ValueError("Local delivery boundary rejects summary generation")
 
     async def arejected(**kwargs):
         return rejected(**kwargs)
@@ -59,6 +58,20 @@ def failed_reprocess(kb_dir, tmp_path, monkeypatch, pdf_model, request):
     assert failed.status == "failed", failed.message
     assert read_head(kb_dir, "legacy").knowledge_revision_id == head.knowledge_revision_id
     return first, failed, original, path, preview, completion, acompletion
+
+
+def publish_retained(kb_dir, path):
+    """Publish actual converted source data at the storage boundary, with no LLM."""
+    from publication_fixtures import publish_document
+
+    from ultrakb.config import resolve_credential_bundle
+
+    return publish_document(kb_dir, path, None, bundle=resolve_credential_bundle(kb_dir))
+
+
+@pytest.fixture(params=["markdown", "pdf"])
+def failed_reprocess(kb_dir, tmp_path, monkeypatch, pdf_model, request):
+    return _failed_reprocess(kb_dir, tmp_path, monkeypatch, request.param)
 
 
 def test_failed_same_original_reprocess_keeps_labelled_native_reading(kb_dir, failed_reprocess):
@@ -87,7 +100,7 @@ def test_unrelated_publication_keeps_failed_reprocessing_original_readable(
     monkeypatch.setattr("litellm.acompletion", acompletion)
     other = tmp_path / "other.md"
     other.write_text("The unrelated compressor has a separate inspection schedule.")
-    assert import_document(kb_dir, other).status == "added"
+    assert publish_retained(kb_dir, other).status == "added"
 
     selected = resolve_query_views(kb_dir)
     view = selected.views[0]
@@ -114,16 +127,16 @@ def test_missing_retained_native_file_reads_exact_ancestor_without_repair(
     from agents import Agent
     from test_answer_evidence_regression import invoke
 
-    from openkb.agent.query_evidence import restrict_query_agent
-    from openkb.application.query_views import read_selected_file
-    from openkb.application.views import view_scope
+    from ultrakb.agent.query_evidence import restrict_query_agent
+    from ultrakb.application.query_views import read_selected_file
+    from ultrakb.application.views import view_scope
 
     first, failed, original, original_path, _, completion, acompletion = failed_reprocess
     monkeypatch.setattr("litellm.completion", completion)
     monkeypatch.setattr("litellm.acompletion", acompletion)
     other = tmp_path / "other.md"
     other.write_text("The unrelated compressor has a separate inspection schedule.")
-    assert import_document(kb_dir, other).status == "added"
+    assert publish_retained(kb_dir, other).status == "added"
     current = resolve_query_views(kb_dir).views[0]
     original_images = {
         name: read_selected_file(current, name)
@@ -172,18 +185,24 @@ def test_missing_retained_native_file_reads_exact_ancestor_without_repair(
 def test_retained_fallback_does_not_hide_tampering(
     kb_dir, failed_reprocess, tmp_path, monkeypatch, damage
 ):
-    from openkb.application.query_views import read_selected_file
+    from ultrakb.application.query_views import read_selected_file
 
     _, _, _, path, _, completion, acompletion = failed_reprocess
-    if damage == "image" and path.suffix != ".pdf":
-        pytest.skip("Only the PDF fixture has a native image")
     monkeypatch.setattr("litellm.completion", completion)
     monkeypatch.setattr("litellm.acompletion", acompletion)
     other = tmp_path / "other.md"
     other.write_text("A separate source remains available.")
-    assert import_document(kb_dir, other).status == "added"
+    assert publish_retained(kb_dir, other).status == "added"
     view = resolve_query_views(kb_dir).views[0]
     native = source_capabilities(view)["operations"]["path"]
+    if damage == "image" and path.suffix != ".pdf":
+        # The actual Markdown original has text only. Its retained fallback
+        # must not acquire invented image evidence while the PDF case below
+        # still verifies that changing real pixels is rejected.
+        assert not any(name.startswith("sources/images/operations/") for name in view.files)
+        with pytest.raises(ValueError, match="not found"):
+            read_selected_file(view, "sources/images/operations/not-present.png")
+        return
     target = view.scope.wiki_dir / native
     if damage == "image":
         image = next(n for n in view.files if n.startswith("sources/images/operations/"))
@@ -212,15 +231,15 @@ def test_retained_native_inventory_excludes_unregistered_same_name_files(
 ):
     import json
 
-    from openkb.application.query_views import read_selected_file
-    from openkb.application.views import view_scope
+    from ultrakb.application.query_views import read_selected_file
+    from ultrakb.application.views import view_scope
 
     _, _, _, path, _, completion, acompletion = failed_reprocess
     monkeypatch.setattr("litellm.completion", completion)
     monkeypatch.setattr("litellm.acompletion", acompletion)
     other = tmp_path / "other.md"
     other.write_text("A separate source remains available.")
-    assert import_document(kb_dir, other).status == "added"
+    assert publish_retained(kb_dir, other).status == "added"
     view = resolve_query_views(kb_dir).views[0]
     native = source_capabilities(view)["operations"]["path"]
     (view.scope.wiki_dir / native).unlink()
@@ -247,9 +266,9 @@ def test_retained_native_inventory_excludes_unregistered_same_name_files(
 def test_retained_reading_never_restores_deliberately_inactive_sources(
     kb_dir, failed_reprocess, action
 ):
-    from openkb.application.refresh import confirm_empty_source
-    from openkb.application.removal import remove_document
-    from openkb.source_catalog import read_source
+    from ultrakb.application.refresh import confirm_empty_source
+    from ultrakb.application.removal import remove_document
+    from ultrakb.source_catalog import read_source
 
     first, _, _, path, *_ = failed_reprocess
     if action == "withdraw":
@@ -270,11 +289,11 @@ def test_retained_reading_never_restores_deliberately_inactive_sources(
 def test_retained_reading_rejects_unproven_reprocessing_identity(kb_dir, failed_reprocess, damage):
     import json
 
-    from openkb.source_catalog import read_source_revision
+    from ultrakb.source_catalog import read_source_revision
 
     _, failed, *_ = failed_reprocess
     revision = read_source_revision(kb_dir, failed.source_revision_id)
-    path = kb_dir / ".openkb/catalog/source-revisions" / f"{failed.source_revision_id}.json"
+    path = kb_dir / ".ultrakb/catalog/source-revisions" / f"{failed.source_revision_id}.json"
     raw = json.loads(path.read_text())
     if damage == "cycle":
         raw["reprocessed_from"] = failed.source_revision_id
@@ -294,25 +313,33 @@ def test_retained_reading_rejects_unproven_reprocessing_identity(kb_dir, failed_
     assert not resolve_query_views(kb_dir).has_evidence
 
 
-def test_resume_updates_native_status_but_keeps_unchanged_summary_pending(
-    kb_dir, failed_reprocess, monkeypatch
-):
-    import litellm
+def test_resume_updates_native_status_but_keeps_unchanged_summary_pending(kb_dir, failed_reprocess):
+    from processing_fixtures import source_processing_context
+    from retained_publication_fixtures import publish_processed_source
 
-    from openkb.application.views import view_scope
+    from ultrakb.application.views import view_scope
 
-    first, _, _, _, preview, completion, acompletion = failed_reprocess
+    first, _, _, _, preview, *_ = failed_reprocess
     old_head = read_head(kb_dir, "legacy").knowledge_revision_id
-    monkeypatch.setattr(litellm, "completion", completion)
-    monkeypatch.setattr(litellm, "acompletion", acompletion)
-    completed = reprocess_source(kb_dir, first.source_id, version=preview["version"])
+    summary = kb_dir / "wiki/summaries/operations.md"
+    before = summary.read_bytes()
+    completed = publish_processed_source(kb_dir, first.source_id, preserve_summary=True)
     assert completed.status == "added", completed.message
+    assert summary.read_bytes() == before
+    head = read_head(kb_dir, "legacy")
+    context = source_processing_context()
+    resumed = reprocess_source(kb_dir, first.source_id, version=preview["version"], context=context)
+    assert resumed.status == "skipped", resumed.message
+    assert resumed.source_revision_id == completed.source_revision_id
+    assert resumed.units[0].successful_revision_id == completed.units[0].successful_revision_id
+    assert read_head(kb_dir, "legacy") == head
+    assert context.executor.calls == 0
     selection = resolve_query_views(kb_dir)
     source = source_capabilities(selection.views[0])["operations"]
     assert source["source_revision_id"] == completed.source_revision_id
     assert "processing_status" not in source
-    # The fixture produces the exact old summary bytes. Existing publication
-    # deliberately preserves its old dependency rather than silently rebinding it.
+    # An unchanged candidate keeps the old dependency. Publishing the new native
+    # revision must not silently claim that this old summary was refreshed.
     assert "summaries/operations.md" in read_head(kb_dir, "legacy").needs_refresh
     assert "summaries/operations.md" not in selection.views[0].files
     historic = resolve_query_views(
@@ -344,7 +371,7 @@ def test_exact_input_exclusion_still_blocks_same_original_retention(kb_dir, fail
     import json
 
     first, *_ = failed_reprocess
-    path = kb_dir / ".openkb/catalog/sources" / f"{first.source_id}.json"
+    path = kb_dir / ".ultrakb/catalog/sources" / f"{first.source_id}.json"
     record = json.loads(path.read_text())
     head = read_head(kb_dir, "legacy")
     record["excluded_inputs"] = {value: "withdrawn" for value in head.inputs.values()}

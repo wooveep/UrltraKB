@@ -26,12 +26,17 @@ def ask(tree, stage, payload, validate):
                                 stage=stage + (".repair" if repair else ""),
                                 prompt_version=PROMPT_VERSION)
         try:
-            value = json.loads(raw) if isinstance(raw, str) else raw
-            return validate(value)
+            return parse_stage_response(raw, validate)
         except (json.JSONDecodeError, FormatError):
             if repair:
                 raise
     raise AssertionError("Unreachable")
+
+
+def parse_stage_response(raw, validate):
+    """Decode delivered stage data through the same validator used by repair."""
+    value = json.loads(raw) if isinstance(raw, str) else raw
+    return validate(value)
 
 
 def new_topic(tree, title, children=()):

@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from openkb.agent.source_windows import CompileSourceWindows
+from ultrakb.agent.source_windows import CompileSourceWindows
 
 
 @pytest.mark.parametrize("previous_page", [None, "concepts/pump.md"])
@@ -95,7 +95,7 @@ def test_selected_section_includes_all_descendants_through_bounded_reads(
             ],
         }
     ]
-    monkeypatch.setattr("openkb.agent.source_windows.MAX_EVIDENCE_CHARS", 600)
+    monkeypatch.setattr("ultrakb.agent.source_windows.MAX_EVIDENCE_CHARS", 600)
     context = CompileSourceWindows(wiki, "current", navigation=navigation).prepare(
         {"name": "pump", "reading_locations": {"node_ids": node_ids}}, long=True
     )
@@ -158,7 +158,7 @@ def test_navigation_ids_are_scoped_to_the_selected_original_version(kb_dir):
 
 @pytest.mark.parametrize("invalid_range", [(0, 0), (4, 3), (True, 3)])
 def test_invalid_descendant_native_ranges_are_rejected(kb_dir, invalid_range):
-    from openkb.agent.page_response import PageResponseError
+    from ultrakb.agent.page_response import PageResponseError
 
     wiki = kb_dir / "wiki"
     (wiki / "sources/current.json").write_text(
@@ -277,10 +277,10 @@ def test_disjoint_selected_sections_do_not_read_the_gap(kb_dir):
 
 
 def test_explicit_section_ids_retain_block_coordinates(kb_dir, tmp_path):
-    from openkb.block_package import freeze_block_package
-    from openkb.inputs import prepared_input
-    from openkb.locks import atomic_write_json, atomic_write_text
-    from openkb.text_source import freeze_markdown
+    from ultrakb.block_package import freeze_block_package
+    from ultrakb.inputs import prepared_input
+    from ultrakb.locks import atomic_write_json, atomic_write_text
+    from ultrakb.text_source import freeze_markdown
 
     labels = (
         "Unrelated preface.",

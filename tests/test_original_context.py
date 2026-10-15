@@ -348,7 +348,7 @@ async def test_each_retained_occurrence_has_its_own_location_without_pixel_actio
 
 
 def test_projected_native_spans_define_context_coverage():
-    from openkb.original_context import original_context
+    from ultrakb.original_context import original_context
 
     source = {
         "path": "sources/sheet.content.json",

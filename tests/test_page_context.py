@@ -2,7 +2,7 @@
 
 
 def test_page_context_includes_sources_outlinks_and_backlinks(kb_dir):
-    from openkb.application.reading import read_page_context
+    from ultrakb.application.reading import read_page_context
 
     (kb_dir / "wiki/sources/paper.md").write_text("Original source")
     (kb_dir / "wiki/concepts/related.md").write_text("Related")
@@ -27,7 +27,7 @@ def test_page_context_includes_sources_outlinks_and_backlinks(kb_dir):
 def test_reader_refuses_an_external_wiki_directory(kb_dir):
     import pytest
 
-    from openkb.application.pages import read_page
+    from ultrakb.application.pages import read_page
 
     outside = kb_dir.with_name(kb_dir.name + "-outside")
     (kb_dir / "wiki").rename(outside)
@@ -41,7 +41,7 @@ def test_reader_refuses_an_external_wiki_directory(kb_dir):
 
 
 def test_unreadable_neighbor_keeps_current_page_and_marks_incomplete_links(kb_dir):
-    from openkb.application.reading import read_page_context
+    from ultrakb.application.reading import read_page_context
 
     (kb_dir / "wiki/concepts/good.md").write_text("Readable content")
     (kb_dir / "wiki/concepts/bad.md").write_bytes(b"\xff")

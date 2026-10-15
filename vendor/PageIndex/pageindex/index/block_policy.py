@@ -8,7 +8,7 @@ import copy
 import json
 import re
 
-BLOCK_INDEX_POLICY = "original-anchor-v2:normalize-title-origin:bounded-correction"
+BLOCK_INDEX_POLICY = "original-anchor-v3:unique-original-quote:bounded-correction"
 
 
 class BlockContractError(ValueError):
@@ -43,17 +43,29 @@ class BlockPolicy:
         unit = self.units[ordinal - 1]
         body = [{"range": span, "text": self.text[span[0]:span[1]]}
                 for span in unit["source_spans"]]
+        evidence = [
+            {"range": [max(a, left), min(b, right)],
+             "excerpt": self.text[max(a, left):min(b, right)]}
+            for a, b in self.evidence
+            for left, right in unit["source_spans"]
+            if a < right and b > left]
+        heading_evidence = []
+        for heading in unit.get("headings", []):
+            start, stop = heading["source_span"]
+            for original in evidence:
+                left, right = max(start, original["range"][0]), min(stop, original["range"][1])
+                if (left < right and self.text[left:right].strip()
+                        and not any(left < b and right > a for a, b in self.generated)):
+                    candidate = {"range": [left, right], "excerpt": self.text[left:right],
+                                 "heading_title": heading["title"]}
+                    if candidate not in heading_evidence:
+                        heading_evidence.append(candidate)
         return json.dumps({"unit": ordinal, "part": "body", "source": body,
                            "generated_formatting": [span for span in self.generated
                                                     if any(a < span[1] and b > span[0]
                                                            for a, b in unit["source_spans"])],
                            "headings": unit.get("headings", []),
-                           "original_evidence": [
-                               {"range": [max(a, left), min(b, right)],
-                                "excerpt": self.text[max(a, left):min(b, right)]}
-                               for a, b in self.evidence
-                               for left, right in unit["source_spans"]
-                               if a < right and b > left],
+                           "original_evidence": evidence + heading_evidence,
                            "display_context": unit.get("display_context", [])}, ensure_ascii=False)
 
     def prompt(self, part, previous=None):
@@ -69,12 +81,17 @@ headings list, anchored inside that heading's source_span. If headings is empty,
 title_origin MUST be "generated". A sheet name or display context is not a heading.
 Every title MUST have a real anchor in the original body: unit ordinal, part="body",
 range=[start,end] in zero-based Unicode code points (end exclusive), exact excerpt.
+Select a short, unique, verbatim quote from the declared block's original source.
 Display context (repeated headings/headers/fences) is supplementary, never an anchor.
 Generated formatting ranges (such as synthetic CSV column names) are not original
 evidence. Anchor only outside these ranges, in an actual source value or text.
 When original_evidence is listed, copy one of its range/excerpt pairs exactly;
 these are precomputed original evidence spans. Do not guess character offsets or
 use the whole block range when it also includes generated formatting.
+For an original title, choose a candidate whose heading_title equals that title
+in the same unit. These candidates intersect that heading's source_span with this
+block's original evidence; their exact excerpts are sliced from the retained text.
+Do not use a larger body candidate outside the original heading's source_span.
 Return a JSON list of {structure: "1.1", title, title_origin, physical_index: integer,
 anchor: {unit: integer, part: "body", range: [start,end], excerpt: "exact original"}}.
 physical_index is the block ordinal and must match anchor.unit. Include each section
@@ -125,8 +142,45 @@ Continue any previous structure with additional sections only. No other output.
     def valid(self, item, start_index=1, count=None):
         return self.validate_entry(item, start_index, count) is None
 
+    def normalize_anchor(self, item, start_index=1, count=None):
+        """Resolve a unique original quote without changing its attribution/title."""
+        if self.valid(item, start_index, count):
+            return False
+        if not isinstance(item, dict):
+            return False
+        number, anchor = item.get("physical_index"), item.get("anchor")
+        stop = start_index + (len(self.units) if count is None else count)
+        if (type(number) is not int or not start_index <= number < stop
+                or not 1 <= number <= len(self.units) or not isinstance(anchor, dict)
+                or type(anchor.get("unit")) is not int or anchor["unit"] != number
+                or anchor.get("part") != "body"):
+            return False
+        span, excerpt = anchor.get("range"), anchor.get("excerpt")
+        if (not isinstance(span, list) or len(span) != 2
+                or any(type(value) is not int for value in span)
+                or not 0 <= span[0] < span[1]
+                or not isinstance(excerpt, str) or not excerpt.strip()):
+            return False
+        positions = []
+        for left, right in self.units[number - 1]["source_spans"]:
+            position = self.text.find(excerpt, left, right)
+            while position >= 0:
+                end = position + len(excerpt)
+                if not any(position < b and end > a for a, b in self.generated):
+                    positions.append(position)
+                position = self.text.find(excerpt, position + 1, right)
+        if len(positions) != 1:
+            return False
+        left = positions[0]
+        candidate = dict(item, anchor=dict(anchor, range=[left, left + len(excerpt)]))
+        if not self.valid(candidate, start_index, count):
+            return False
+        item["anchor"] = candidate["anchor"]
+        return True
+
     def normalize_title_origin(self, item, start_index=1, count=None):
         """Only relabel a fully verified original anchor lacking a declared heading."""
+        self.normalize_anchor(item, start_index, count)
         if self.validate_entry(item, start_index, count) != "missing_original_heading":
             return False
         candidate = dict(item, title_origin="generated")
@@ -180,13 +234,26 @@ Continue any previous structure with additional sections only. No other output.
         return items
 
     async def fix(self, item, first, last, model, complete, extract):
-        if self.normalize_title_origin(item, first, last-first+1):
+        self.normalize_title_origin(item, first, last-first+1)
+        if self.valid(item, first, last-first+1):
             return {key: copy.deepcopy(item[key])
                     for key in ("title", "title_origin", "physical_index", "anchor")}
+        prompt = self.correction_prompt(item, first, last)
+        result = extract(await complete(model=model, prompt=prompt))
+        return self.parse_correction(result, first, last)
+
+    def correction_prompt(self, item, first, last):
+        """Prepare the same single-entry array contract enforced by the parser."""
         prompt = self.prompt("\n".join(self.render(i) for i in range(first, last + 1)))
         prompt += "\nValidation failure: " + str(self.validate_entry(item, first, last-first+1))
-        prompt += "\nCorrect ONLY this entry's original anchor/title; return one list entry:\n" + json.dumps(item)
-        result = extract(await complete(model=model, prompt=prompt))
+        prompt += ("\nCorrect ONLY this entry's original anchor/title. Return ONLY a JSON array "
+                   "containing exactly one corrected entry: [{...}]. A bare JSON object, an "
+                   "empty array, or multiple entries are invalid. No fences or explanation. "
+                   "Entry to correct:\n" + json.dumps(item))
+        return prompt
+
+    def parse_correction(self, result, first, last):
+        """Parse delivered correction fields without accepting internal tree controls."""
         if isinstance(result, list) and len(result) == 1:
             self.normalize_title_origin(result[0], first, last-first+1)
         if isinstance(result, list) and len(result) == 1 and self.valid(result[0], first, last-first+1):

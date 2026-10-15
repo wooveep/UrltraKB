@@ -23,7 +23,7 @@ Cache recovery and recompilation consume the same frozen package without Office.
 The locked release is LibreOffice **26.2.6.3**, build
 `8221e31b3ac356a1623c672912a3d2b492f7e3d1`, with its Python **3.12.14** and UNO bridge.
 Official Linux DEB bundle, Windows MSI, macOS arm64 DMG and corresponding core source URLs, sizes
-and SHA-256 values are in `openkb/office/runtime-lock.json`. Preparation verifies
+and SHA-256 values are in `ultrakb/office/runtime-lock.json`. Preparation verifies
 these archives and probes the actual executables. It extracts the complete Office
 tree, preserves upstream licenses and fonts, adds the eight unmodified fonts in
 `assets/fonts/manifest.json`, and records every resulting file and contained link.
@@ -106,7 +106,7 @@ python scripts/build_office_desktop.py --office-archive /path/to/official-packag
 
 This builds the application, builds the Windows launcher with Rust 1.95.0 where
 needed, then stages the private runtime at
-`packaging/desktop/dist/UrltraKB/_internal/office`. It keeps Office out of
+`packaging/desktop/dist/UltraKB/_internal/office`. It keeps Office out of
 PyInstaller's main-interpreter dependency collection. Run the existing desktop
 inventory next; it records Office, its Python, application fonts, the launcher
 and generated provenance under their own components. Existing runtime packaging
@@ -127,7 +127,7 @@ external Office path.
 For development, `scripts/prepare_office_runtime.py --archive ... --source ...
 --output ...` prepares an independent runtime. Set the absolute
 `office_runtime_path` in KB or global settings; it is also available in desktop
-settings. The default development location is `openkb/office/assets/runtime`.
+settings. The default development location is `ultrakb/office/assets/runtime`.
 
 Before assembling companion materials, run
 `scripts/prepare_office_materials.py --runtime ... --source ... --inputs ...
@@ -140,7 +140,7 @@ does not replace the release's nested dependency/license review.
 
 ## Validation status
 
-Small real DOCX integration tests run with `OPENKB_TEST_OFFICE_RUNTIME` pointing
+Small real DOCX integration tests run with `ULTRAKB_TEST_OFFICE_RUNTIME` pointing
 to a prepared distribution. They exercise final-visible text, Chinese fonts,
 blank pages, missing-font substitution, full/segmented compilation, API/CLI
 readback, retained recompile, failure preservation, corrupt PDF references,

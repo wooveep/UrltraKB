@@ -6,20 +6,20 @@ import pytest
 
 
 def test_catalog_includes_root_children_and_same_named_registered_paths(tmp_path, monkeypatch):
-    from openkb import config
-    from openkb.application.catalog import knowledge_bases
+    from ultrakb import config
+    from ultrakb.application.catalog import knowledge_bases
 
     root = tmp_path / "root"
     child, other, ghost = root / "notes", tmp_path / "elsewhere/notes", tmp_path / "missing"
     for path in (child, other):
-        (path / ".openkb").mkdir(parents=True)
+        (path / ".ultrakb").mkdir(parents=True)
         from kb_fixtures import mark_current_kb
 
         mark_current_kb(path)
         (path / "wiki").mkdir()
     global_path = tmp_path / "global.yaml"
     monkeypatch.setattr(config, "GLOBAL_CONFIG_PATH", global_path)
-    monkeypatch.setenv("OPENKB_KB_ROOT", str(root))
+    monkeypatch.setenv("ULTRAKB_KB_ROOT", str(root))
     global_path.write_text(
         json.dumps(
             {
@@ -36,8 +36,8 @@ def test_catalog_includes_root_children_and_same_named_registered_paths(tmp_path
 def test_old_unverified_process_summary_does_not_block_directory_management(tmp_path):
     import uuid
 
-    from openkb.runtime.records import TaskView
-    from openkb.runtime.tasks import TaskManager
+    from ultrakb.runtime.records import TaskView
+    from ultrakb.runtime.tasks import TaskManager
 
     root, history = tmp_path / "kb", tmp_path / "history"
     history.mkdir()
@@ -58,28 +58,28 @@ def test_old_unverified_process_summary_does_not_block_directory_management(tmp_
 def test_catalog_keeps_unfinished_deletion_at_its_original_path(tmp_path, monkeypatch):
     import pytest
 
-    from openkb import config
-    from openkb.application.catalog import knowledge_bases
-    from openkb.kb_admin import delete_kb
-    from openkb.lifecycle import deletion_binding
+    from ultrakb import config
+    from ultrakb.application.catalog import knowledge_bases
+    from ultrakb.kb_admin import delete_kb
+    from ultrakb.lifecycle import deletion_binding
 
     original, victim = tmp_path / "a/notes", tmp_path / "b/notes"
     for path in (original, victim):
-        (path / ".openkb").mkdir(parents=True)
+        (path / ".ultrakb").mkdir(parents=True)
         from kb_fixtures import mark_current_kb
 
         mark_current_kb(path)
         (path / "wiki").mkdir()
     global_path = tmp_path / "global.yaml"
     monkeypatch.setattr(config, "GLOBAL_CONFIG_PATH", global_path)
-    monkeypatch.setenv("OPENKB_KB_ROOT", str(tmp_path / "a"))
+    monkeypatch.setenv("ULTRAKB_KB_ROOT", str(tmp_path / "a"))
     global_path.write_text(json.dumps({"known_kbs": [str(original), str(victim)]}))
     with monkeypatch.context() as patch:
 
         def fail(*args, **kwargs):
             raise OSError("partial deletion")
 
-        patch.setattr("openkb.kb_admin.shutil.rmtree", fail)
+        patch.setattr("ultrakb.kb_admin.shutil.rmtree", fail)
         with pytest.raises(OSError):
             delete_kb(original)
     original.rename(tmp_path / "retained")
@@ -98,18 +98,18 @@ def test_partial_delete_of_unregistered_root_child_remains_discoverable(tmp_path
 
     import pytest
 
-    from openkb import config
-    from openkb.application.catalog import knowledge_bases
-    from openkb.kb_admin import delete_kb
+    from ultrakb import config
+    from ultrakb.application.catalog import knowledge_bases
+    from ultrakb.kb_admin import delete_kb
 
     root = tmp_path / "kbs/notes"
-    (root / ".openkb").mkdir(parents=True)
+    (root / ".ultrakb").mkdir(parents=True)
     from kb_fixtures import mark_current_kb
 
     mark_current_kb(root)
     (root / "wiki").mkdir()
     monkeypatch.setattr(config, "GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
-    monkeypatch.setenv("OPENKB_KB_ROOT", str(root.parent))
+    monkeypatch.setenv("ULTRAKB_KB_ROOT", str(root.parent))
     config.GLOBAL_CONFIG_PATH.write_text(json.dumps({"default_kb": "keep-default"}))
     rmtree = shutil.rmtree
 
@@ -120,7 +120,7 @@ def test_partial_delete_of_unregistered_root_child_remains_discoverable(tmp_path
         return rmtree(path, *args, **kwargs)
 
     with monkeypatch.context() as patch:
-        patch.setattr("openkb.kb_admin.shutil.rmtree", partial)
+        patch.setattr("ultrakb.kb_admin.shutil.rmtree", partial)
         with pytest.raises(OSError):
             delete_kb(root)
     assert ("notes", root) in knowledge_bases()
@@ -137,18 +137,18 @@ def test_partial_root_deletion_retry_never_selects_another_same_named_kb(
     import asyncio
     import shutil
 
-    from openkb import config
-    from openkb.kb_admin import delete_kb
+    from ultrakb import config
+    from ultrakb.kb_admin import delete_kb
 
     root, other = tmp_path / "kbs/notes", tmp_path / "elsewhere/notes"
     for path in (root, other):
-        (path / ".openkb").mkdir(parents=True)
+        (path / ".ultrakb").mkdir(parents=True)
         from kb_fixtures import mark_current_kb
 
         mark_current_kb(path)
         (path / "wiki").mkdir()
     monkeypatch.setattr(config, "GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
-    monkeypatch.setenv("OPENKB_KB_ROOT", str(root.parent))
+    monkeypatch.setenv("ULTRAKB_KB_ROOT", str(root.parent))
     config.GLOBAL_CONFIG_PATH.write_text(json.dumps({"known_kbs": [str(other)]}))
     rmtree = shutil.rmtree
 
@@ -159,21 +159,21 @@ def test_partial_root_deletion_retry_never_selects_another_same_named_kb(
         return rmtree(path, *args, **kwargs)
 
     with monkeypatch.context() as patch:
-        patch.setattr("openkb.kb_admin.shutil.rmtree", partial)
+        patch.setattr("ultrakb.kb_admin.shutil.rmtree", partial)
         with pytest.raises(OSError):
             delete_kb(root)
     if entry == "cli":
         from click.testing import CliRunner
 
-        from openkb.cli import cli
+        from ultrakb.cli import cli
 
         result = CliRunner().invoke(cli, ["delete-kb", "notes", "--yes"])
         assert "Unfinished deletion" in result.output
     else:
         from fastapi import HTTPException
 
-        from openkb.api_kbs_router import delete_kb_endpoint
-        from openkb.api_models import KbDeleteRequest
+        from ultrakb.api_kbs_router import delete_kb_endpoint
+        from ultrakb.api_models import KbDeleteRequest
 
         with pytest.raises(HTTPException, match="Unfinished deletion"):
             asyncio.run(delete_kb_endpoint(KbDeleteRequest(kb="notes", confirm_name="notes")))

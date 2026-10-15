@@ -12,7 +12,7 @@ def test_import_form_has_no_product_or_version_assumptions():
     script = """
 from types import SimpleNamespace
 from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QVBoxLayout, QWidget
-from openkb.desktop.views import source_metadata_form
+from ultrakb.desktop.views import source_metadata_form
 app = QApplication([])
 root = QWidget()
 layout = QVBoxLayout(root)

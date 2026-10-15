@@ -1,4 +1,4 @@
-"""Direct unit tests for :mod:`openkb.agent.skill_runner`.
+"""Direct unit tests for :mod:`ultrakb.agent.skill_runner`.
 
 Pre-existing test files mocked ``run_skill`` at every caller (deck
 creator, generator, chat slash). That covered the dispatch boundary but
@@ -21,11 +21,10 @@ we can verify the assembly path end-to-end without spending tokens:
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 
-from openkb.agent.skill_runner import (
+from ultrakb.agent.skill_runner import (
     MAX_TURNS,
     SkillNotFoundError,
     SkillRunResult,
@@ -95,112 +94,79 @@ async def test_run_skill_raises_skill_not_found_with_available_list(tmp_path: Pa
 
 @pytest.mark.asyncio
 async def test_run_skill_loads_body_into_instructions(tmp_path: Path):
+    from ultrakb.agent.skill_runner import finish_skill_run, prepare_skill_run
+
     kb_dir = _make_kb(tmp_path)
     _install_skill(kb_dir, "marker-skill", body="UNIQUE-BODY-MARKER")
-
-    captured: dict = {}
-
-    async def fake_runner_run(agent, seed, **kw):
-        captured["instructions"] = agent.instructions
-        captured["tools"] = [getattr(t, "name", "?") for t in agent.tools]
-        return MagicMock()
-
-    with patch("openkb.agent.skill_runner.Runner.run", new=fake_runner_run):
-        result = await run_skill(
-            skill_name="marker-skill",
-            intent="DO-THE-INTENT",
-            kb_dir=kb_dir,
-            model="openai/gpt-4o",
-        )
-
-    # Body and intent are both present in the constructed agent's instructions.
-    assert "UNIQUE-BODY-MARKER" in captured["instructions"]
-    assert "DO-THE-INTENT" in captured["instructions"]
-    assert "## User intent" in captured["instructions"]
-    # The skill-runner's two distinguishing tools are wired in.
-    assert "write_file" in captured["tools"]
-    assert "read_output_or_skill_file" in captured["tools"]
-    # Return shape
-    assert isinstance(result, SkillRunResult)
-    assert result.skill_name == "marker-skill"
+    request = prepare_skill_run(
+        skill_name="marker-skill",
+        intent="DO-THE-INTENT",
+        kb_dir=kb_dir,
+        model="deepseek/deepseek-flash",
+    )
+    assert "UNIQUE-BODY-MARKER" in request.agent.instructions
+    assert "DO-THE-INTENT" in request.agent.instructions
+    assert "## User intent" in request.agent.instructions
+    names = [tool.name for tool in request.agent.tools]
+    assert "write_file" in names and "read_output_or_skill_file" in names
+    result = finish_skill_run(request.definition)
+    assert isinstance(result, SkillRunResult) and result.skill_name == "marker-skill"
 
 
 @pytest.mark.asyncio
 async def test_run_skill_templates_output_path_and_enforces_existence(tmp_path: Path):
+    from ultrakb.agent.skill_runner import finish_skill_run, prepare_skill_run
+    from ultrakb.locks import atomic_write_text
+
     kb_dir = _make_kb(tmp_path)
     _install_skill(
         kb_dir,
         "templated",
-        od={
-            "mode": "deck",
-            "output_path_template": "output/decks/{slug}/index.html",
-        },
+        od={"mode": "deck", "output_path_template": "output/decks/{slug}/index.html"},
     )
-
-    captured: dict = {}
-
-    async def fake_runner_run(agent, seed, **kw):
-        captured["instructions"] = agent.instructions
-        # Simulate the skill writing the expected file
-        out = kb_dir / "output" / "decks" / "my-slug" / "index.html"
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(
-            '<section class="slide" data-type="cover"></section>' * 8,
-            encoding="utf-8",
-        )
-        return MagicMock()
-
-    with patch("openkb.agent.skill_runner.Runner.run", new=fake_runner_run):
-        result = await run_skill(
-            skill_name="templated",
-            intent="brief",
-            kb_dir=kb_dir,
-            model="openai/gpt-4o",
-            slug="my-slug",
-        )
-
-    # Path was injected into agent's intent so the skill knows where to write
-    assert "output/decks/my-slug/index.html" in captured["instructions"]
-    # output_path resolved against kb_dir
-    assert result.output_path is not None
-    assert result.output_path.name == "index.html"
+    request = prepare_skill_run(
+        skill_name="templated",
+        intent="brief",
+        kb_dir=kb_dir,
+        model="deepseek/deepseek-flash",
+        slug="my-slug",
+    )
+    assert "output/decks/my-slug/index.html" in request.agent.instructions
+    # Artifact data tests delivery/validation; it is not a claimed model response.
+    atomic_write_text(
+        request.definition.output_path, '<section class="slide" data-type="cover"></section>' * 8
+    )
+    result = finish_skill_run(request.definition)
+    assert result.output_path is not None and result.output_path.name == "index.html"
     assert "my-slug" in str(result.output_path)
 
 
 @pytest.mark.asyncio
 async def test_run_skill_raises_if_templated_output_missing_post_run(tmp_path: Path):
-    """If the skill declared output_path_template but didn't write the
-    file, that's a hard error — the skill is misconfigured or the wiki
-    lacks content."""
+    from ultrakb.agent.skill_runner import finish_skill_run, prepare_skill_run
+
     kb_dir = _make_kb(tmp_path)
     _install_skill(
         kb_dir,
         "lazy-skill",
-        od={
-            "mode": "deck",
-            "output_path_template": "output/decks/{slug}/index.html",
-        },
+        od={"mode": "deck", "output_path_template": "output/decks/{slug}/index.html"},
     )
-
-    async def fake_runner_run(agent, seed, **kw):
-        return MagicMock()  # agent does nothing
-
-    with patch("openkb.agent.skill_runner.Runner.run", new=fake_runner_run):
-        with pytest.raises(RuntimeError, match="did not write the expected"):
-            await run_skill(
-                skill_name="lazy-skill",
-                intent="x",
-                kb_dir=kb_dir,
-                model="openai/gpt-4o",
-                slug="ghost",
-            )
+    request = prepare_skill_run(
+        skill_name="lazy-skill",
+        intent="x",
+        kb_dir=kb_dir,
+        model="deepseek/deepseek-flash",
+        slug="demo",
+    )
+    with pytest.raises(RuntimeError, match="did not write the expected"):
+        finish_skill_run(request.definition)
 
 
 @pytest.mark.asyncio
 async def test_run_skill_runs_deck_validator_when_mode_is_deck(tmp_path: Path):
-    """When ``od.mode == "deck"`` and ``output_path_template`` is set,
-    ``run_skill`` calls ``validate_deck`` with the skill's grammar after
-    the run completes."""
+    from ultrakb.agent.skill_runner import finish_skill_run, prepare_skill_run
+    from ultrakb.locks import atomic_write_text
+
     kb_dir = _make_kb(tmp_path)
     _install_skill(
         kb_dir,
@@ -208,101 +174,91 @@ async def test_run_skill_runs_deck_validator_when_mode_is_deck(tmp_path: Path):
         od={
             "mode": "deck",
             "output_path_template": "output/decks/{slug}/index.html",
-            "deck_grammar": {
-                "kind_attr": "data-type",
-                "required": ["cover", "closing"],
-            },
+            "deck_grammar": {"kind_attr": "data-type", "required": ["cover", "closing"]},
         },
     )
-
-    async def fake_runner_run(agent, seed, **kw):
-        out = kb_dir / "output" / "decks" / "demo" / "index.html"
-        out.parent.mkdir(parents=True, exist_ok=True)
-        # 5 slides, NO closing — grammar should reject
-        out.write_text(
-            '<section class="slide" data-type="cover"></section>'
-            + '<section class="slide" data-type="thesis"></section>' * 4,
-            encoding="utf-8",
-        )
-        return MagicMock()
-
-    with patch("openkb.agent.skill_runner.Runner.run", new=fake_runner_run):
-        result = await run_skill(
-            skill_name="deck-with-grammar",
-            intent="x",
-            kb_dir=kb_dir,
-            model="openai/gpt-4o",
-            slug="demo",
-        )
-
-    # Validation was applied with the skill's grammar; missing-closing fired
+    request = prepare_skill_run(
+        skill_name="deck-with-grammar",
+        intent="x",
+        kb_dir=kb_dir,
+        model="deepseek/deepseek-flash",
+        slug="demo",
+    )
+    atomic_write_text(
+        request.definition.output_path,
+        '<section class="slide" data-type="cover"></section>'
+        + '<section class="slide" data-type="thesis"></section>' * 4,
+    )
+    result = finish_skill_run(request.definition)
     assert result.validation is not None
-    assert any("closing" in e for e in result.validation.errors)
+    assert any("closing" in error for error in result.validation.errors)
 
 
 @pytest.mark.asyncio
 async def test_run_skill_no_validator_when_mode_not_deck(tmp_path: Path):
-    """Skills with ``od.mode`` other than ``"deck"`` (or no mode at all)
-    skip the validator — they're not deck-shaped artifacts."""
+    from ultrakb.agent.skill_runner import finish_skill_run, prepare_skill_run
+
     kb_dir = _make_kb(tmp_path)
-    _install_skill(kb_dir, "no-mode-skill")  # no od block at all
-
-    async def fake_runner_run(agent, seed, **kw):
-        return MagicMock()
-
-    with patch("openkb.agent.skill_runner.Runner.run", new=fake_runner_run):
-        result = await run_skill(
-            skill_name="no-mode-skill",
-            intent="x",
-            kb_dir=kb_dir,
-            model="openai/gpt-4o",
-        )
-
-    assert result.validation is None
+    _install_skill(kb_dir, "no-mode-skill")
+    request = prepare_skill_run(
+        skill_name="no-mode-skill", intent="x", kb_dir=kb_dir, model="deepseek/deepseek-flash"
+    )
+    assert finish_skill_run(request.definition).validation is None
 
 
 @pytest.mark.asyncio
 async def test_run_skill_translates_max_turns_exceeded(tmp_path: Path):
     kb_dir = _make_kb(tmp_path)
     _install_skill(kb_dir, "loopy")
-    from agents.exceptions import MaxTurnsExceeded
-
-    async def fake_runner_run(agent, seed, **kw):
-        raise MaxTurnsExceeded("model spun forever")
-
-    with patch("openkb.agent.skill_runner.Runner.run", new=fake_runner_run):
-        with pytest.raises(RuntimeError) as exc_info:
-            await run_skill(
-                skill_name="loopy",
-                intent="x",
-                kb_dir=kb_dir,
-                model="openai/gpt-4o",
-                max_turns=10,
-            )
-    msg = str(exc_info.value)
-    assert "10" in msg
-    assert "step cap" in msg or "step" in msg.lower()
-    assert "loopy" in msg
+    with pytest.raises(RuntimeError) as caught:
+        await run_skill(
+            skill_name="loopy",
+            intent="x",
+            kb_dir=kb_dir,
+            model="deepseek/deepseek-flash",
+            max_turns=0,
+        )
+    message = str(caught.value)
+    assert "0" in message and "step" in message.lower() and "loopy" in message
 
 
 @pytest.mark.asyncio
 async def test_run_skill_default_max_turns(tmp_path: Path):
-    """Default ``max_turns`` is the module-level ``MAX_TURNS`` constant."""
+    from ultrakb.agent.skill_runner import prepare_skill_run
+
     kb_dir = _make_kb(tmp_path)
     _install_skill(kb_dir, "default-budget")
+    request = prepare_skill_run(
+        skill_name="default-budget", intent="x", kb_dir=kb_dir, model="deepseek/deepseek-flash"
+    )
+    assert request.max_turns == MAX_TURNS
 
-    captured: dict = {}
 
-    async def fake_runner_run(agent, seed, **kw):
-        captured["max_turns"] = kw.get("max_turns")
-        return MagicMock()
-
-    with patch("openkb.agent.skill_runner.Runner.run", new=fake_runner_run):
-        await run_skill(
-            skill_name="default-budget",
-            intent="x",
-            kb_dir=kb_dir,
-            model="openai/gpt-4o",
-        )
-
-    assert captured["max_turns"] == MAX_TURNS
+@pytest.mark.asyncio
+async def test_real_skill_writes_and_validates_the_requested_artifact(
+    tmp_path, live_llm, monkeypatch
+):
+    live_llm.install(monkeypatch)
+    kb_dir = _make_kb(tmp_path)
+    _install_skill(
+        kb_dir,
+        "real-note",
+        body=(
+            "Write a short Markdown note using only the supplied user facts. "
+            "Write the whole output once with write_file. No wiki search is needed."
+        ),
+        od={"mode": "note", "output_path_template": "output/notes/{slug}.md"},
+    )
+    result = await run_skill(
+        skill_name="real-note",
+        intent="Supplied fact: Orion costs 17 credits.",
+        kb_dir=kb_dir,
+        model="deepseek/deepseek-flash",
+        bundle=live_llm.credentials,
+        slug="orion",
+        max_turns=4,
+    )
+    assert result.output_path.is_file()
+    text = result.output_path.read_text()
+    assert "Orion" in text and "17" in text
+    assert result.validation is None and result.metadata["mode"] == "note"

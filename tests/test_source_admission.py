@@ -1,12 +1,11 @@
 """Source identity and durable admission are independent of byte deduplication."""
 
 import json
-from types import SimpleNamespace
 
 import pytest
 
-from openkb.inputs import prepared_input
-from openkb.knowledge_scope import legacy_scope
+from ultrakb.inputs import prepared_input
+from ultrakb.knowledge_scope import legacy_scope
 
 
 @pytest.fixture
@@ -22,25 +21,22 @@ def pdf_source(kb_dir):
 
 
 @pytest.fixture
-def fixed_model(monkeypatch):
-    replies = iter(
-        [
-            {"description": "Notes", "content": "# Notes\n\nA source fact."},
-            {"create": [], "update": [], "related": []},
-        ]
+def source_llm(kb_dir, monkeypatch, live_llm):
+    """Genuine Flash replies; source/publication assertions do not prescribe wording."""
+    from ultrakb.locks import atomic_write_text
+
+    live_llm.install(monkeypatch)
+    atomic_write_text(
+        kb_dir / ".ultrakb/config.yaml",
+        "model: deepseek/deepseek-flash\nlanguage: en\n"
+        "role_generation:\n  compile:\n    max_tokens: 512\n    reasoning_effort: none\n"
+        "model_capacity:\n  max_input_tokens: 65536\n  tokenizer_model: gpt-4o-mini\n",
     )
-
-    def completion(**kwargs):
-        return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(next(replies))))],
-            usage=SimpleNamespace(prompt_tokens=10, completion_tokens=10),
-        )
-
-    monkeypatch.setattr("litellm.completion", completion)
+    return live_llm
 
 
 def test_equal_bytes_keep_distinct_sources(kb_dir, tmp_path, pdf_source):
-    from openkb.source_catalog import admit_source_revision, list_sources, read_source_revision
+    from ultrakb.source_catalog import admit_source_revision, list_sources, read_source_revision
 
     first, second = tmp_path / "first.pdf", tmp_path / "second.pdf"
     first.write_bytes(pdf_source.read_bytes())
@@ -59,7 +55,7 @@ def test_equal_bytes_keep_distinct_sources(kb_dir, tmp_path, pdf_source):
 
 
 def test_repeating_admission_reuses_the_frozen_target(kb_dir, pdf_source):
-    from openkb.source_catalog import admit_source_revision
+    from ultrakb.source_catalog import admit_source_revision
 
     with prepared_input(pdf_source) as ready:
         first = admit_source_revision(kb_dir, ready)
@@ -68,8 +64,8 @@ def test_repeating_admission_reuses_the_frozen_target(kb_dir, pdf_source):
 
 
 def test_body_failure_keeps_the_admitted_original(kb_dir, pdf_source, monkeypatch):
-    from openkb.application.documents import import_document
-    from openkb.source_catalog import read_source_revision
+    from ultrakb.application.documents import import_document
+    from ultrakb.source_catalog import read_source_revision
 
     def unavailable(**kwargs):
         raise ConnectionError("provider unavailable")
@@ -83,25 +79,27 @@ def test_body_failure_keeps_the_admitted_original(kb_dir, pdf_source, monkeypatc
     assert "provider unavailable" in result.message
 
 
-def test_lost_notification_does_not_repeat_committed_model_work(kb_dir, pdf_source, fixed_model):
-    from openkb.application.documents import import_document
+def test_lost_notification_does_not_repeat_committed_model_work(kb_dir, pdf_source, source_llm):
+    from ultrakb.application.documents import import_document
 
     def lost_notification(event):
         if event.get("stage") == "committed":
             raise BrokenPipeError("observer disappeared")
 
     first = import_document(kb_dir, pdf_source, on_event=lost_notification)
+    delivered_calls = len(source_llm.calls)
     replay = import_document(kb_dir, pdf_source)
+    assert len(source_llm.calls) == delivered_calls
     assert first.status == "added"
     assert replay.status == "skipped"
     assert replay.units[0].knowledge_revision_id == first.units[0].knowledge_revision_id
 
 
-def test_publish_commit_failure_restores_knowledge(kb_dir, pdf_source, fixed_model, monkeypatch):
-    from openkb.application.documents import import_document
-    from openkb.mutation import MutationSnapshot
-    from openkb.source_catalog import read_source_revision
-    from openkb.unit_publication import read_head
+def test_publish_commit_failure_restores_knowledge(kb_dir, pdf_source, source_llm, monkeypatch):
+    from ultrakb.application.documents import import_document
+    from ultrakb.mutation import MutationSnapshot
+    from ultrakb.source_catalog import read_source_revision
+    from ultrakb.unit_publication import read_head
 
     commit = MutationSnapshot.mark_committed
 
@@ -118,8 +116,8 @@ def test_publish_commit_failure_restores_knowledge(kb_dir, pdf_source, fixed_mod
     assert (kb_dir / read_source_revision(kb_dir, result.source_revision_id).original).exists()
 
 
-def test_unknown_legacy_baseline_is_preserved(kb_dir, pdf_source, fixed_model):
-    from openkb.application.documents import import_document
+def test_unknown_legacy_baseline_is_preserved(kb_dir, pdf_source, source_llm):
+    from ultrakb.application.documents import import_document
 
     page = kb_dir / "wiki/summaries/notes.md"
     page.write_text("Keep the existing human explanation.")
@@ -133,10 +131,10 @@ def test_unknown_legacy_baseline_is_preserved(kb_dir, pdf_source, fixed_model):
     assert result.units[0].proposal_id
 
 
-def test_published_source_is_listed_and_read_by_its_identity(kb_dir, pdf_source, fixed_model):
-    from openkb.application.documents import import_document
-    from openkb.application.knowledge_bases import get_kb_list
-    from openkb.documents import read_document_source
+def test_published_source_is_listed_and_read_by_its_identity(kb_dir, pdf_source, source_llm):
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.knowledge_bases import get_kb_list
+    from ultrakb.documents import read_document_source
 
     result = import_document(kb_dir, pdf_source)
     documents = get_kb_list(kb_dir)["documents"]
@@ -147,8 +145,8 @@ def test_published_source_is_listed_and_read_by_its_identity(kb_dir, pdf_source,
 
 
 def test_upload_cleanup_keeps_admitted_input_with_pending_discovery(kb_dir, pdf_source):
-    from openkb.application.uploads import published_input
-    from openkb.source_catalog import admit_source_revision
+    from ultrakb.application.uploads import published_input
+    from ultrakb.source_catalog import admit_source_revision
 
     with published_input(kb_dir, pdf_source) as uploaded:
         with prepared_input(uploaded.path) as ready:
@@ -158,9 +156,9 @@ def test_upload_cleanup_keeps_admitted_input_with_pending_discovery(kb_dir, pdf_
 
 
 def test_unknown_catalog_capability_blocks_a_writer(kb_dir, pdf_source):
-    from openkb.application.documents import import_document
+    from ultrakb.application.documents import import_document
 
-    catalog = kb_dir / ".openkb/catalog"
+    catalog = kb_dir / ".ultrakb/catalog"
     catalog.mkdir()
     (catalog / "schema.json").write_text(
         json.dumps({"schema_version": 1, "required_capabilities": ["future-inputs"]})
@@ -170,10 +168,10 @@ def test_unknown_catalog_capability_blocks_a_writer(kb_dir, pdf_source):
 
 
 def test_failed_new_target_keeps_the_exact_previous_success(
-    kb_dir, pdf_source, fixed_model, monkeypatch
+    kb_dir, pdf_source, source_llm, monkeypatch
 ):
-    from openkb.application.documents import import_document
-    from openkb.documents import read_document_source
+    from ultrakb.application.documents import import_document
+    from ultrakb.documents import read_document_source
 
     first = import_document(kb_dir, pdf_source)
     with pdf_source.open("ab") as stream:
@@ -193,8 +191,8 @@ def test_failed_new_target_keeps_the_exact_previous_success(
 
 
 def test_cancellation_before_admission_commit_keeps_no_partial_source(kb_dir, pdf_source):
-    from openkb.locks import LockCancelled
-    from openkb.source_catalog import admit_source_revision, list_sources
+    from ultrakb.locks import LockCancelled
+    from ultrakb.source_catalog import admit_source_revision, list_sources
 
     calls = 0
 
@@ -216,17 +214,15 @@ def test_cancellation_before_admission_commit_keeps_no_partial_source(kb_dir, pd
         ("unit_revision_id", "0" * 32),
     ],
 )
-def test_source_reader_rejects_corrupt_snapshot_links(
-    kb_dir, pdf_source, fixed_model, field, value
-):
-    from openkb.application.documents import import_document
-    from openkb.documents import read_document_source
+def test_source_reader_rejects_corrupt_snapshot_links(kb_dir, pdf_source, source_llm, field, value):
+    from ultrakb.application.documents import import_document
+    from ultrakb.documents import read_document_source
 
     result = import_document(kb_dir, pdf_source)
     revision_id = result.units[0].knowledge_revision_id
     manifest = (
         kb_dir
-        / f".openkb/knowledge/{result.units[0].view_id}/revisions/{revision_id}/manifest.json"
+        / f".ultrakb/knowledge/{result.units[0].view_id}/revisions/{revision_id}/manifest.json"
     )
     data = json.loads(manifest.read_text())
     data[field] = value
@@ -236,11 +232,11 @@ def test_source_reader_rejects_corrupt_snapshot_links(
 
 
 def test_cancelled_body_records_stopped_and_can_be_explicitly_retried(
-    kb_dir, pdf_source, fixed_model
+    kb_dir, pdf_source, source_llm
 ):
-    from openkb.application.documents import import_document
-    from openkb.application.knowledge_bases import get_kb_list
-    from openkb.locks import LockCancelled
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.knowledge_bases import get_kb_list
+    from ultrakb.locks import LockCancelled
 
     def cancel(event):
         if event.get("stage") == "converting":
@@ -252,29 +248,15 @@ def test_cancelled_body_records_stopped_and_can_be_explicitly_retried(
     assert import_document(kb_dir, pdf_source).status == "added"
 
 
-def test_earlier_success_is_readable_after_a_later_publication(
-    kb_dir, pdf_source, fixed_model, monkeypatch
-):
-    from openkb.application.documents import import_document
-    from openkb.documents import read_document_source
+def test_earlier_success_is_readable_after_a_later_publication(kb_dir, pdf_source, source_llm):
+    from ultrakb.application.documents import import_document
+    from ultrakb.documents import read_document_source
 
-    first = import_document(kb_dir, pdf_source)
+    first = import_document(kb_dir, pdf_source, bundle=source_llm.credentials)
+    assert first.status == "added", first
     with pdf_source.open("ab") as stream:
         stream.write(b"\n% next revision\n")
-    replies = iter(
-        [
-            {"description": "New notes", "content": "# New notes\n\nNew explanation."},
-            {"create": [], "update": [], "related": []},
-        ]
-    )
-    monkeypatch.setattr(
-        "litellm.completion",
-        lambda **kwargs: SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(next(replies))))],
-            usage=SimpleNamespace(prompt_tokens=10, completion_tokens=10),
-        ),
-    )
-    assert import_document(kb_dir, pdf_source).status == "added"
+    assert import_document(kb_dir, pdf_source, bundle=source_llm.credentials).status == "added"
     old = read_document_source(kb_dir, first.source_id, source_revision_id=first.source_revision_id)
     assert old["knowledge_revision_id"] == first.units[0].knowledge_revision_id
     assert old["source_revision_id"] == first.source_revision_id

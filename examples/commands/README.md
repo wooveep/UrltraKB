@@ -5,7 +5,7 @@ The everyday loop. Every command resolves the active KB the same way (see
 anywhere once a KB is initialized.
 
 > **Real artifact in this folder:** [`sample-wiki/`](sample-wiki/) is a complete
-> wiki compiled by `openkb add` from one paper —
+> wiki compiled by `ultrakb add` from one paper —
 > [1 summary](sample-wiki/summaries/attention-is-all-you-need.md),
 > [3 concepts](sample-wiki/concepts/), [9 entities](sample-wiki/entities/), and a
 > saved [`query --save`](sample-wiki/explorations/) answer. Notice how every page
@@ -29,9 +29,9 @@ anywhere once a KB is initialized.
 ## `add` — ingest documents
 
 ```bash
-openkb add ../docs/attention-is-all-you-need.pdf   # a single file
-openkb add ~/papers/                               # a directory (recursive)
-openkb add https://arxiv.org/pdf/2509.11420        # a URL
+ultrakb add ../docs/attention-is-all-you-need.pdf   # a single file
+ultrakb add ~/papers/                               # a directory (recursive)
+ultrakb add https://arxiv.org/pdf/2509.11420        # a URL
 ```
 
 - **Supported formats:** `.pdf .md .markdown .docx .pptx .xlsx .xls .html .htm
@@ -52,9 +52,9 @@ is what produced [`sample-wiki/`](sample-wiki/) in this folder.
 ## `query` — ask a one-off question
 
 ```bash
-openkb query "What are the main contributions of this paper?"
-openkb query "Compare the two training objectives" --save
-openkb query "How does this KB work?" --raw | less
+ultrakb query "What are the main contributions of this paper?"
+ultrakb query "Compare the two training objectives" --save
+ultrakb query "How does this KB work?" --raw | less
 ```
 
 - `--save` writes the answer to `wiki/explorations/<slug>.md` with a `query:`
@@ -73,11 +73,11 @@ openkb query "How does this KB work?" --raw | less
 Identify a doc by filename, its slug, or a unique substring:
 
 ```bash
-openkb remove attention-is-all-you-need.pdf     # exact filename
-openkb remove attention                         # unique substring
-openkb remove attention --dry-run               # preview, change nothing
-openkb remove attention --keep-empty            # keep concept & entity pages it solely sourced
-openkb remove attention --keep-raw --yes        # leave raw/ file, no prompt
+ultrakb remove attention-is-all-you-need.pdf     # exact filename
+ultrakb remove attention                         # unique substring
+ultrakb remove attention --dry-run               # preview, change nothing
+ultrakb remove attention --keep-empty            # keep concept & entity pages it solely sourced
+ultrakb remove attention --keep-raw --yes        # leave raw/ file, no prompt
 ```
 
 `remove` deletes the summary, sources, and extracted images; drops the doc from
@@ -94,10 +94,10 @@ Re-runs the compile step against already-ingested content (no re-conversion, no
 re-indexing):
 
 ```bash
-openkb recompile attention                      # one document
-openkb recompile --all --dry-run                # preview the full set
-openkb recompile --all --yes                    # rebuild everything
-openkb recompile --all --refresh-schema         # also refresh wiki/AGENTS.md
+ultrakb recompile attention                      # one document
+ultrakb recompile --all --dry-run                # preview the full set
+ultrakb recompile --all --yes                    # rebuild everything
+ultrakb recompile --all --refresh-schema         # also refresh wiki/AGENTS.md
 ```
 
 > ⚠️ Recompiling **overwrites** generated summaries and concept pages — any manual
@@ -109,8 +109,8 @@ openkb recompile --all --refresh-schema         # also refresh wiki/AGENTS.md
 ## `lint` — check (and fix) wiki integrity
 
 ```bash
-openkb lint            # report only
-openkb lint --fix      # repair broken wikilinks first, then report
+ultrakb lint            # report only
+ultrakb lint --fix      # repair broken wikilinks first, then report
 ```
 
 Checks broken `[[wikilinks]]`, orphaned pages, raw files with no wiki entry,
@@ -123,7 +123,7 @@ broken links or strips them to plain text when there's no match.
 ## `list` & `status`
 
 ```bash
-openkb status
+ultrakb status
 ```
 
 ```text
@@ -143,7 +143,7 @@ Knowledge Base Status:
   Last compile:  2026-06-25 14:30:22
 ```
 
-`openkb list` prints the document table (name · type · pages — long PDFs and historical imports
+`ultrakb list` prints the document table (name · type · pages — long PDFs and historical imports
 show as `pageindex`) followed by the compiled summaries, concepts,
 entities, and reports. (The counts above match [`sample-wiki/`](sample-wiki/).)
 
@@ -152,7 +152,7 @@ entities, and reports. (The counts above match [`sample-wiki/`](sample-wiki/).)
 ## `watch` — drop-in ingestion
 
 ```bash
-openkb watch
+ultrakb watch
 # in another terminal:  cp new-paper.pdf raw/   → auto-compiles
 ```
 
@@ -163,11 +163,11 @@ Watches `raw/` and runs `add` on each new supported file until you press Ctrl-C.
 ## `feedback` — report an issue
 
 ```bash
-openkb feedback "add support for EPUB" --type feature
-openkb feedback                      # interactive
+ultrakb feedback "add support for EPUB" --type feature
+ultrakb feedback                      # interactive
 ```
 
 Opens a **prefilled** GitHub issue (title, body, non-sensitive diagnostics like
-OpenKB/Python version and platform) in your browser — you file it with your own
+UltraKB/Python version and platform) in your browser — you file it with your own
 account. `--type` is one of `bug`, `feature`, `question`, `other`. Safe in
 non-interactive shells (it won't hang on the type prompt).

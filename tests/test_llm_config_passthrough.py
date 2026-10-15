@@ -16,7 +16,7 @@ import logging
 import litellm
 import pytest
 
-from openkb.cli import _KNOWN_PROVIDER_KEYS, _apply_litellm_settings, _setup_llm_key
+from ultrakb.cli import _KNOWN_PROVIDER_KEYS, _apply_litellm_settings, _setup_llm_key
 
 
 @pytest.fixture(autouse=True)
@@ -51,7 +51,7 @@ def test_apply_forwards_values_as_is_no_coercion():
 def test_apply_skips_unknown_key_with_warning(caplog):
     bogus = "definitely_not_a_litellm_setting_xyz"
     assert not hasattr(litellm, bogus)
-    with caplog.at_level(logging.WARNING, logger="openkb.cli"):
+    with caplog.at_level(logging.WARNING, logger="ultrakb.cli"):
         _apply_litellm_settings({bogus: 123})
     # Not silently created as a dead attribute…
     assert not hasattr(litellm, bogus)
@@ -65,7 +65,7 @@ def test_apply_refuses_to_overwrite_callable(caplog):
     — overwriting litellm.completion with a scalar would brick every later call.
     """
     assert callable(litellm.completion)
-    with caplog.at_level(logging.WARNING, logger="openkb.cli"):
+    with caplog.at_level(logging.WARNING, logger="ultrakb.cli"):
         _apply_litellm_settings({"completion": 5})
     assert callable(litellm.completion)  # untouched
     assert "completion" in caplog.text
@@ -108,9 +108,9 @@ def test_setup_llm_key_applies_litellm_block_from_config(tmp_path, monkeypatch):
     for key in _KNOWN_PROVIDER_KEYS:
         monkeypatch.delenv(key, raising=False)
 
-    openkb_dir = tmp_path / ".openkb"
-    openkb_dir.mkdir(parents=True)
-    (openkb_dir / "config.yaml").write_text(
+    ultrakb_dir = tmp_path / ".ultrakb"
+    ultrakb_dir.mkdir(parents=True)
+    (ultrakb_dir / "config.yaml").write_text(
         "model: gpt-4o-mini\nlitellm:\n  drop_params: true\n", encoding="utf-8"
     )
     litellm.drop_params = False
@@ -119,9 +119,9 @@ def test_setup_llm_key_applies_litellm_block_from_config(tmp_path, monkeypatch):
 
 
 def _write_kb_config(tmp_path, body: str):
-    openkb_dir = tmp_path / ".openkb"
-    openkb_dir.mkdir(parents=True)
-    (openkb_dir / "config.yaml").write_text(body, encoding="utf-8")
+    ultrakb_dir = tmp_path / ".ultrakb"
+    ultrakb_dir.mkdir(parents=True)
+    (ultrakb_dir / "config.yaml").write_text(body, encoding="utf-8")
 
 
 def _isolate_env(monkeypatch):
@@ -134,7 +134,7 @@ def test_litellm_block_routes_timeout_and_extra_headers_per_call(tmp_path, monke
     """`timeout` / `extra_headers` inside the litellm: block route to the
     per-call stashes (not litellm module globals); the rest stay globals.
     """
-    from openkb.config import get_extra_headers, get_timeout
+    from ultrakb.config import get_extra_headers, get_timeout
 
     _isolate_env(monkeypatch)
     _write_kb_config(
@@ -158,7 +158,7 @@ def test_litellm_block_routes_timeout_and_extra_headers_per_call(tmp_path, monke
 
 def test_litellm_block_timeout_wins_over_legacy_toplevel(tmp_path, monkeypatch):
     """The litellm: block value wins over the legacy top-level key."""
-    from openkb.config import get_timeout
+    from ultrakb.config import get_timeout
 
     _isolate_env(monkeypatch)
     _write_kb_config(
@@ -174,7 +174,7 @@ def test_litellm_block_timeout_wins_over_legacy_toplevel(tmp_path, monkeypatch):
 
 def test_legacy_toplevel_timeout_still_works(tmp_path, monkeypatch):
     """Back-compat: a top-level `timeout:` (no litellm: block) is still honored."""
-    from openkb.config import get_timeout
+    from ultrakb.config import get_timeout
 
     _isolate_env(monkeypatch)
     _write_kb_config(tmp_path, "model: gpt-4o-mini\ntimeout: 900\n")
@@ -186,7 +186,7 @@ def test_toplevel_parallel_tool_calls_sets_stash(tmp_path, monkeypatch):
     """End-to-end: a top-level `parallel_tool_calls:` in config.yaml lands in the
     process-wide stash (with the explicit flag) the next time _setup_llm_key runs.
     """
-    from openkb.config import get_parallel_tool_calls
+    from ultrakb.config import get_parallel_tool_calls
 
     _isolate_env(monkeypatch)
     _write_kb_config(tmp_path, "model: gpt-4o-mini\nparallel_tool_calls: true\n")
@@ -197,7 +197,7 @@ def test_toplevel_parallel_tool_calls_sets_stash(tmp_path, monkeypatch):
 def test_toplevel_parallel_tool_calls_absent_is_unset(tmp_path, monkeypatch):
     """No `parallel_tool_calls:` key → the stash reports "not configured"
     ((None, False)), so each agent builder applies its own default."""
-    from openkb.config import get_parallel_tool_calls
+    from ultrakb.config import get_parallel_tool_calls
 
     _isolate_env(monkeypatch)
     _write_kb_config(tmp_path, "model: gpt-4o-mini\n")
@@ -209,7 +209,7 @@ def test_litellm_block_extra_headers_win_over_legacy_toplevel(tmp_path, monkeypa
     """Symmetric with the timeout precedence test: a litellm: block extra_headers
     replaces the legacy top-level extra_headers.
     """
-    from openkb.config import get_extra_headers
+    from ultrakb.config import get_extra_headers
 
     _isolate_env(monkeypatch)
     _write_kb_config(
@@ -229,7 +229,7 @@ def test_litellm_block_empty_extra_headers_clears_legacy(tmp_path, monkeypatch):
     """Regression: an explicit empty `litellm: {extra_headers: {}}` CLEARS the
     legacy top-level headers, rather than silently reverting to them.
     """
-    from openkb.config import get_extra_headers
+    from ultrakb.config import get_extra_headers
 
     _isolate_env(monkeypatch)
     _write_kb_config(

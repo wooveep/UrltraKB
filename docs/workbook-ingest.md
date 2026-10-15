@@ -5,10 +5,10 @@ frozen Markdown, token classification, optional content-block index, publication
 and actual successful revision. One failed worksheet leaves the others published.
 Importing the same revision retries unfinished units and skips committed ones.
 
-`openkb list` shows worksheet identities beneath the source. Read a sheet with
-`openkb source SOURCE_ID --unit UNIT_ID --cells 'A1:B3,D7'`; omit `--cells` for its
-full frozen body. `openkb retry-worksheet SOURCE_ID --unit UNIT_ID` retries only
-that retained target. `openkb recompile SOURCE_ID --unit UNIT_ID` uses the saved
+`ultrakb list` shows worksheet identities beneath the source. Read a sheet with
+`ultrakb source SOURCE_ID --unit UNIT_ID --cells 'A1:B3,D7'`; omit `--cells` for its
+full frozen body. `ultrakb retry-worksheet SOURCE_ID --unit UNIT_ID` retries only
+that retained target. `ultrakb recompile SOURCE_ID --unit UNIT_ID` uses the saved
 normalization and index. The API source/recompile requests accept `unit_id`; the
 source request accepts `cells`. `/api/v1/document/retry-worksheet` accepts
 `source_id` and `unit_id`. Desktop reading opens the worksheet table, with read,
@@ -70,6 +70,6 @@ XLS lacks an OOXML sheet ID: reader hints are reconciled against retained identi
 or ordinal-only identities.
 
 The pinned [upstream license](https://github.com/python-excel/xlrd/blob/2.0.2/LICENSE)
-is retained as `openkb/workbooks/xlrd-LICENSE.txt`. This product includes software
+is retained as `ultrakb/workbooks/xlrd-LICENSE.txt`. This product includes software
 developed by David Giffin <david@giffin.org>. The subclass/loader adapter is based
 on Stephen John Machin's BSD-licensed xlrd loader; xlrd owns CFB and BIFF parsing.

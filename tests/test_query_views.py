@@ -1,46 +1,27 @@
 """Snapshot selection pins the actual readable source bytes for one question."""
 
-import json
-from types import SimpleNamespace
-
 import pytest
-
-
-async def _chat_chunks(delta, finish):
-    from openai.types.chat import ChatCompletionChunk
-
-    for data, reason in (({"role": "assistant", **delta}, None), ({}, finish)):
-        yield ChatCompletionChunk(
-            id="answer",
-            created=0,
-            model="test",
-            object="chat.completion.chunk",
-            choices=[{"index": 0, "delta": data, "finish_reason": reason}],
-        )
+from application_llm_fixtures import real_application_model  # noqa: F401
 
 
 def _import_rule(kb_dir, monkeypatch, name, fact):
+    """Publish retained factual input for view tests without repeating compilation."""
     import pymupdf
+    from publication_fixtures import publish_document
 
-    from openkb.application.documents import import_document
+    from ultrakb.config import resolve_credential_bundle
 
     path = kb_dir / f"{name}.pdf"
     with pymupdf.open() as pdf:
         pdf.new_page().insert_text((72, 72), fact)
         pdf.save(path)
-    replies = iter([{"description": "Connection rule", "content": fact}, {}])
-    monkeypatch.setattr(
-        "litellm.completion",
-        lambda **kwargs: SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(next(replies))))],
-            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
-        ),
-    )
-    result = import_document(
+    result = publish_document(
         kb_dir,
         path,
+        fact,
+        bundle=resolve_credential_bundle(kb_dir),
     )
-    assert result.status == "added"
+    assert result.status == "added", result.message
     return result
 
 
@@ -53,13 +34,13 @@ def independent_documents(kb_dir, monkeypatch):
 
 
 def test_query_pins_a_revision_and_reports_later_knowledge_changes(kb_dir, independent_documents):
-    from openkb.application.pages import read_page, save_page
-    from openkb.application.query_views import (
+    from ultrakb.application.pages import read_page, save_page
+    from ultrakb.application.query_views import (
         read_query_page,
         resolve_query_views,
         selection_current,
     )
-    from openkb.application.views import view_scope
+    from ultrakb.application.views import view_scope
 
     first, _ = independent_documents
     scope = view_scope(kb_dir, first.units[0].view_id)

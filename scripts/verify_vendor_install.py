@@ -20,9 +20,9 @@ def verify_install(*, wheel: bool = False) -> dict:
     from jinja2 import Environment, PackageLoader
     from litellm import get_llm_provider
 
-    import openkb
+    import ultrakb
 
-    paths = {**packages, "openkb": Path(openkb.__file__).resolve().parent}
+    paths = {**packages, "ultrakb": Path(ultrakb.__file__).resolve().parent}
     if wheel and any(
         not path.is_relative_to(Path(sys.prefix).resolve()) for path in paths.values()
     ):

@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from openkb.config import (
+from ultrakb.config import (
     DEFAULT_CONFIG,
     GLOBAL_SCALAR_KEYS,
     get_extra_headers,
@@ -54,7 +54,7 @@ def test_resolve_parallel_tool_calls_null_means_omit(caplog):
     # escape hatch for Amazon Bedrock, and is silent (not an invalid value) —
     # explicit and distinct from "absent" even though both currently carry a
     # value of None; was_explicit is what tells them apart.
-    with caplog.at_level(logging.WARNING, logger="openkb.config"):
+    with caplog.at_level(logging.WARNING, logger="ultrakb.config"):
         assert resolve_parallel_tool_calls({"parallel_tool_calls": None}) == (None, True)
     assert caplog.text == ""
 
@@ -64,7 +64,7 @@ def test_resolve_parallel_tool_calls_rejects_non_bool(caplog):
     # to never break any provider — omit the setting — rather than to a fixed
     # bool that could reproduce the exact failure (e.g. Amazon Bedrock) the
     # user may have been trying to escape via this exact key.
-    with caplog.at_level(logging.WARNING, logger="openkb.config"):
+    with caplog.at_level(logging.WARNING, logger="ultrakb.config"):
         assert resolve_parallel_tool_calls({"parallel_tool_calls": "true"}) == (None, True)
     assert "parallel_tool_calls" in caplog.text
 
@@ -169,18 +169,18 @@ def test_resolve_concurrency_valid_value():
 
 
 def test_resolve_concurrency_rejects_bool(caplog):
-    with caplog.at_level(logging.WARNING, logger="openkb.config"):
+    with caplog.at_level(logging.WARNING, logger="ultrakb.config"):
         result = resolve_concurrency({"concurrency": True})
     assert result is None
     assert "concurrency" in caplog.text
 
 
 def test_resolve_concurrency_rejects_non_positive(caplog):
-    with caplog.at_level(logging.WARNING, logger="openkb.config"):
+    with caplog.at_level(logging.WARNING, logger="ultrakb.config"):
         assert resolve_concurrency({"concurrency": 0}) is None
     assert "concurrency" in caplog.text
     caplog.clear()
-    with caplog.at_level(logging.WARNING, logger="openkb.config"):
+    with caplog.at_level(logging.WARNING, logger="ultrakb.config"):
         assert resolve_concurrency({"concurrency": -1}) is None
     assert "concurrency" in caplog.text
 
@@ -192,7 +192,7 @@ def test_resolve_concurrency_rejects_non_int():
 def test_resolve_concurrency_none_is_silent(caplog):
     # Explicit null / absent is the normal "unset — caller applies its own
     # default, or omits the setting entirely" case — no warning.
-    with caplog.at_level(logging.WARNING, logger="openkb.config"):
+    with caplog.at_level(logging.WARNING, logger="ultrakb.config"):
         assert resolve_concurrency({"concurrency": None}) is None
     assert caplog.text == ""
 
@@ -359,13 +359,13 @@ def test_resolve_litellm_settings_drops_non_string_keys():
 
 
 def test_resolve_litellm_settings_warns_on_non_mapping(caplog):
-    with caplog.at_level(logging.WARNING, logger="openkb.config"):
+    with caplog.at_level(logging.WARNING, logger="ultrakb.config"):
         assert resolve_litellm_settings({"litellm": ["drop_params"]}) == {}
     assert "must be a mapping" in caplog.text
 
 
 def test_resolve_litellm_settings_warns_on_non_string_key(caplog):
-    with caplog.at_level(logging.WARNING, logger="openkb.config"):
+    with caplog.at_level(logging.WARNING, logger="ultrakb.config"):
         resolve_litellm_settings({"litellm": {5: "x", "drop_params": True}})
     assert "non-string key" in caplog.text
 
@@ -374,7 +374,7 @@ def test_resolve_litellm_settings_warns_on_non_string_key(caplog):
 
 
 def _kb(tmp_path: Path) -> Path:
-    (tmp_path / ".openkb").mkdir(parents=True, exist_ok=True)
+    (tmp_path / ".ultrakb").mkdir(parents=True, exist_ok=True)
     from kb_fixtures import mark_current_kb
 
     mark_current_kb(tmp_path)
@@ -385,8 +385,8 @@ def _kb(tmp_path: Path) -> Path:
 def _isolated_global(monkeypatch, tmp_path):
     gdir = tmp_path / "global-config"
     gdir.mkdir()
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_DIR", gdir)
-    monkeypatch.setattr("openkb.config.GLOBAL_CONFIG_PATH", gdir / "global.yaml")
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", gdir)
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", gdir / "global.yaml")
     return gdir
 
 
@@ -409,7 +409,7 @@ def test_effective_global_only(_isolated_global, tmp_path):
 def test_effective_kb_override_wins_over_global(_isolated_global, tmp_path):
     save_global_config({"model": "global-model", "language": "fr"})
     kb = _kb(tmp_path / "kb")
-    save_config(kb / ".openkb" / "config.yaml", {"model": "kb-model"})
+    save_config(kb / ".ultrakb" / "config.yaml", {"model": "kb-model"})
     eff, src = resolve_effective_config(kb)
     assert eff["model"] == "kb-model"
     assert src["model"] == "kb"
@@ -422,7 +422,7 @@ def test_effective_three_layer_precedence(_isolated_global, tmp_path):
     save_global_config({"model": "global-model"})  # global sets only model
     kb = _kb(tmp_path / "kb")
     # kb sets only threshold
-    save_config(kb / ".openkb" / "config.yaml", {"pageindex_threshold": 7})
+    save_config(kb / ".ultrakb" / "config.yaml", {"pageindex_threshold": 7})
     eff, src = resolve_effective_config(kb)
     assert (eff["model"], src["model"]) == ("global-model", "global")
     assert (eff["pageindex_threshold"], src["pageindex_threshold"]) == (7, "kb")
@@ -432,7 +432,7 @@ def test_effective_three_layer_precedence(_isolated_global, tmp_path):
 def test_effective_scalar_null_in_kb_inherits_not_clobbers(_isolated_global, tmp_path):
     save_global_config({"model": "global-model"})
     kb = _kb(tmp_path / "kb")
-    save_config(kb / ".openkb" / "config.yaml", {"model": None})
+    save_config(kb / ".ultrakb" / "config.yaml", {"model": None})
     eff, src = resolve_effective_config(kb)
     assert eff["model"] == "global-model"  # null means inherit, not None
     assert src["model"] == "global"
@@ -443,7 +443,7 @@ def test_effective_preserves_non_scalar_kb_keys_including_meaningful_null(
 ):
     kb = _kb(tmp_path / "kb")
     save_config(
-        kb / ".openkb" / "config.yaml",
+        kb / ".ultrakb" / "config.yaml",
         {"litellm": {"drop_params": True}, "parallel_tool_calls": None},
     )
     eff, _ = resolve_effective_config(kb)
@@ -461,7 +461,7 @@ def test_effective_config_degrades_on_non_dict_yaml(_isolated_global, tmp_path):
     # global.yaml parses to a bare list; KB config.yaml to a bare scalar string.
     (_isolated_global / "global.yaml").write_text("- just\n- a\n- list\n", encoding="utf-8")
     kb = _kb(tmp_path / "kb")
-    (kb / ".openkb" / "config.yaml").write_text("just-a-string\n", encoding="utf-8")
+    (kb / ".ultrakb" / "config.yaml").write_text("just-a-string\n", encoding="utf-8")
 
     eff, src = resolve_effective_config(kb)
 
@@ -479,7 +479,7 @@ def test_converter_uses_global_threshold(_isolated_global, tmp_path, monkeypatch
     ``resolve_effective_config(kb_dir)`` rather than, say, an empty dict."""
     import pymupdf
 
-    import openkb.converter as conv
+    import ultrakb.converter as conv
 
     # Global threshold of 1: even a single-page PDF counts as "long". The
     # default threshold (20) would NOT trigger long-doc routing for 1 page,
@@ -520,14 +520,14 @@ def test_query_agent_uses_global_language(_isolated_global, tmp_path, monkeypatc
     Spies on ``resolve_effective_config`` as invoked *by* run_query and records
     the ``kb_dir`` it was called with, then confirms the global-only language
     value actually reaches ``build_query_agent``. If agent/query.py were
-    reverted to ``load_config(openkb_dir / "config.yaml")``/``{}``, the spy
+    reverted to ``load_config(ultrakb_dir / "config.yaml")``/``{}``, the spy
     would never fire (or ``load_config`` on a KB with no config.yaml would
     yield DEFAULT_CONFIG's language "en") and this test would fail.
     """
     import asyncio
 
-    import openkb.agent.query as q
-    import openkb.config as cfg
+    import ultrakb.agent.query as q
+    import ultrakb.config as cfg
 
     save_global_config({"language": "de"})
     kb = _kb(tmp_path / "kb")
@@ -568,7 +568,7 @@ def test_global_scalar_keys_match_api_writable_keys():
     # must stay identical: a scalar added to only one would let the global PATCH
     # persist a key the resolver ignores (or vice-versa). Guard the drift here
     # rather than merging the two sources (lower-risk).
-    from openkb.api_models import _KB_CONFIG_WRITABLE_KEYS
+    from ultrakb.api_models import _KB_CONFIG_WRITABLE_KEYS
 
     assert set(GLOBAL_SCALAR_KEYS) == set(_KB_CONFIG_WRITABLE_KEYS)
 
@@ -578,30 +578,30 @@ def test_global_scalar_keys_match_api_writable_keys():
 
 def test_kb_root_dir_env_wins_over_global(_isolated_global, monkeypatch, tmp_path):
     save_global_config({"kb_root": str(tmp_path / "from-global")})
-    monkeypatch.setenv("OPENKB_KB_ROOT", str(tmp_path / "from-env"))
+    monkeypatch.setenv("ULTRAKB_KB_ROOT", str(tmp_path / "from-env"))
     assert kb_root_dir() == (tmp_path / "from-env").resolve()
 
 
 def test_kb_root_dir_global_when_no_env(_isolated_global, monkeypatch, tmp_path):
-    monkeypatch.delenv("OPENKB_KB_ROOT", raising=False)
+    monkeypatch.delenv("ULTRAKB_KB_ROOT", raising=False)
     save_global_config({"kb_root": str(tmp_path / "from-global")})
     assert kb_root_dir() == (tmp_path / "from-global").resolve()
 
 
 def test_kb_root_dir_default_when_neither(_isolated_global, monkeypatch):
-    monkeypatch.delenv("OPENKB_KB_ROOT", raising=False)
+    monkeypatch.delenv("ULTRAKB_KB_ROOT", raising=False)
     # global.yaml is absent under _isolated_global -> the built-in default root.
     assert kb_root_dir() == (_isolated_global / "kbs").resolve()
 
 
 def test_kb_root_dir_blank_global_falls_through_to_default(_isolated_global, monkeypatch):
-    monkeypatch.delenv("OPENKB_KB_ROOT", raising=False)
+    monkeypatch.delenv("ULTRAKB_KB_ROOT", raising=False)
     save_global_config({"kb_root": "   "})  # whitespace-only == unset
     assert kb_root_dir() == (_isolated_global / "kbs").resolve()
 
 
 def test_resolve_init_kb_dir_default_uses_root(_isolated_global, monkeypatch):
-    monkeypatch.delenv("OPENKB_KB_ROOT", raising=False)
+    monkeypatch.delenv("ULTRAKB_KB_ROOT", raising=False)
     assert resolve_init_kb_dir("my-kb") == (_isolated_global / "kbs" / "my-kb").resolve()
 
 
@@ -634,7 +634,7 @@ def test_registered_kbs_unions_and_dedupes_by_path(_isolated_global, tmp_path):
 
 
 def test_validate_kb_name_accepts_unicode_and_rejects_unsafe():
-    from openkb.config import validate_kb_name
+    from ultrakb.config import validate_kb_name
 
     # Non-ASCII (e.g. CJK) letters are valid so a Chinese-named KB is addressable.
     assert validate_kb_name("笔记") == "笔记"
@@ -646,7 +646,7 @@ def test_validate_kb_name_accepts_unicode_and_rejects_unsafe():
 
 
 def test_resolve_kb_alias_resolves_known_kbs_by_basename(_isolated_global, tmp_path):
-    from openkb.config import resolve_kb_alias
+    from ultrakb.config import resolve_kb_alias
 
     # A KB registered in known_kbs (not an alias) that lives outside kb_root and
     # has a non-ASCII directory name must resolve by its basename — this is what
@@ -658,8 +658,8 @@ def test_resolve_kb_alias_resolves_known_kbs_by_basename(_isolated_global, tmp_p
 
 
 def _make_kb_dir(path: Path) -> Path:
-    """Create the minimal KB shape (`.openkb` + `wiki`) recognized as a KB dir."""
-    (path / ".openkb").mkdir(parents=True)
+    """Create the minimal KB shape (`.ultrakb` + `wiki`) recognized as a KB dir."""
+    (path / ".ultrakb").mkdir(parents=True)
     from kb_fixtures import mark_current_kb
 
     mark_current_kb(path)
@@ -670,11 +670,11 @@ def _make_kb_dir(path: Path) -> Path:
 def test_resolve_kb_alias_root_child_wins_over_off_root_known_kbs(
     _isolated_global, monkeypatch, tmp_path
 ):
-    from openkb.config import resolve_kb_alias
+    from ultrakb.config import resolve_kb_alias
 
     # A root-level KB "notes" and an off-root known_kbs KB with the SAME basename.
     root = tmp_path / "root"
-    monkeypatch.setenv("OPENKB_KB_ROOT", str(root))
+    monkeypatch.setenv("ULTRAKB_KB_ROOT", str(root))
     root_notes = _make_kb_dir(root / "notes")
     off_notes = tmp_path / "x" / "notes"
     off_notes.mkdir(parents=True)
@@ -689,13 +689,13 @@ def test_registered_kbs_hides_bare_known_kbs_colliding_with_root_child(
     _isolated_global, monkeypatch, tmp_path, caplog
 ):
     root = tmp_path / "root"
-    monkeypatch.setenv("OPENKB_KB_ROOT", str(root))
+    monkeypatch.setenv("ULTRAKB_KB_ROOT", str(root))
     _make_kb_dir(root / "notes")
     off_notes = tmp_path / "x" / "notes"
     off_notes.mkdir(parents=True)
     save_global_config({"known_kbs": [str(off_notes)]})
 
-    with caplog.at_level(logging.WARNING, logger="openkb.config"):
+    with caplog.at_level(logging.WARNING, logger="ultrakb.config"):
         result = registered_kbs()
 
     # The colliding off-root "notes" is HIDDEN (root child reserves the name),
@@ -707,11 +707,11 @@ def test_registered_kbs_hides_bare_known_kbs_colliding_with_root_child(
 def test_resolve_kb_alias_degrades_on_non_mapping_global_yaml(
     _isolated_global, monkeypatch, tmp_path
 ):
-    from openkb.config import resolve_kb_alias
+    from ultrakb.config import resolve_kb_alias
 
     # A hand-corrupted global.yaml (bare list) must not 500 resolution: the
     # loader coerces it to {} so resolve falls back to <kb_root>/<name>.
-    monkeypatch.delenv("OPENKB_KB_ROOT", raising=False)
+    monkeypatch.delenv("ULTRAKB_KB_ROOT", raising=False)
     (_isolated_global / "global.yaml").write_text("- a\n- b\n", encoding="utf-8")
     assert resolve_kb_alias("mykb") == (_isolated_global / "kbs" / "mykb").resolve()
 
@@ -720,8 +720,8 @@ def test_resolve_kb_alias_degrades_on_non_mapping_global_yaml(
 
 
 def test_delete_kb_physical_removal_and_unregister(_isolated_global, tmp_path):
-    from openkb.config import register_kb_alias, registered_kbs
-    from openkb.kb_admin import delete_kb
+    from ultrakb.config import register_kb_alias, registered_kbs
+    from ultrakb.kb_admin import delete_kb
 
     kb = _make_kb_dir(tmp_path / "doomed")
     register_kb_alias("doomed", kb)
@@ -733,7 +733,7 @@ def test_delete_kb_physical_removal_and_unregister(_isolated_global, tmp_path):
 
 
 def test_delete_kb_refuses_non_kb_directory(_isolated_global, tmp_path):
-    from openkb.kb_admin import delete_kb
+    from ultrakb.kb_admin import delete_kb
 
     plain = tmp_path / "not-a-kb"
     plain.mkdir()
@@ -744,8 +744,8 @@ def test_delete_kb_refuses_non_kb_directory(_isolated_global, tmp_path):
 
 
 def test_delete_kb_tolerates_ghost_registry_entry(_isolated_global, tmp_path):
-    from openkb.config import register_kb_alias, registered_kbs
-    from openkb.kb_admin import delete_kb
+    from ultrakb.config import register_kb_alias, registered_kbs
+    from ultrakb.kb_admin import delete_kb
 
     ghost = tmp_path / "ghost"  # registered but its directory never existed
     register_kb_alias("ghost", ghost)

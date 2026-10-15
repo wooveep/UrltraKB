@@ -55,9 +55,9 @@ async def test_wrong_reader_and_outside_range_offer_executable_actions(kb_dir):
 
 
 def test_final_query_and_skill_prompts_match_their_tools(kb_dir, tmp_path):
-    from openkb.agent.query import build_query_agent
-    from openkb.agent.query_evidence import restrict_query_agent
-    from openkb.skill.creator import build_skill_create_agent
+    from ultrakb.agent.query import build_query_agent
+    from ultrakb.agent.query_evidence import restrict_query_agent
+    from ultrakb.skill.creator import build_skill_create_agent
 
     source(kb_dir)
     query = restrict_query_agent(

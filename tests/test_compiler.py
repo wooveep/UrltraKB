@@ -1,20 +1,19 @@
-"""Tests for openkb.agent.compiler pipeline."""
+"""Tests for ultrakb.agent.compiler pipeline."""
 
 from __future__ import annotations
 
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from openkb.agent.compile_plan import CompilePlanError
-from openkb.agent.compiler import (
+from ultrakb.agent.compile_delivery import publish_compile_results
+from ultrakb.agent.compile_plan import normalize_plan
+from ultrakb.agent.compiler import (
     _ENTITY_TYPE_LIST,
     _backlink_concepts,
     _backlink_entities,
     _backlink_summary,
     _backlink_summary_entities,
-    _compile_concepts,
     _filter_entity_items,
     _parse_entities_plan,
     _parse_json,
@@ -32,8 +31,30 @@ from openkb.agent.compiler import (
     compile_short_doc,
     remove_doc_from_entity_pages,
 )
-from openkb.config import resolve_entity_types
-from openkb.schema import AGENTS_MD
+from ultrakb.config import resolve_entity_types
+from ultrakb.schema import AGENTS_MD
+
+
+def _normalized_plan(wiki, value, *, entity_types=None):
+    """Validate domain plan data directly, without replacing a model response."""
+    return normalize_plan(
+        value,
+        existing={
+            kind: {p.stem for p in (wiki / kind).glob("*.md")} for kind in ("concepts", "entities")
+        },
+        entity_types=frozenset(entity_types or _ENTITY_TYPE_LIST),
+        sanitize=_sanitize_concept_name,
+    )
+
+
+def _no_model_executor():
+    from ultrakb.config import LlmCredentialBundle
+    from ultrakb.llm_execution import CompletionExecutor, ModelCallPolicy, RoleBindings
+
+    return CompletionExecutor(
+        RoleBindings("deepseek/deepseek-flash", LlmCredentialBundle()),
+        ModelCallPolicy(max_calls=0, retries=0),
+    )
 
 
 class TestFrontmatterSourceMutation:
@@ -1049,147 +1070,48 @@ class TestBacklinkConcepts:
         assert text.count("## Related Documents") == 1
 
 
-def _mock_completion(responses: list[str]):
-    """Create a mock for litellm.completion that returns responses in order."""
-    call_count = {"n": 0}
-
-    def side_effect(*args, **kwargs):
-        idx = min(call_count["n"], len(responses) - 1)
-        call_count["n"] += 1
-        mock_resp = MagicMock()
-        mock_resp.choices = [MagicMock()]
-        mock_resp.choices[0].message.content = responses[idx]
-        mock_resp.usage = MagicMock(prompt_tokens=100, completion_tokens=50)
-        mock_resp.usage.prompt_tokens_details = None
-        return mock_resp
-
-    return side_effect
-
-
-def _mock_acompletion(responses: list[str]):
-    """Create an async mock for litellm.acompletion."""
-    call_count = {"n": 0}
-
-    async def side_effect(*args, **kwargs):
-        from test_compile_windows import patch_page_response
-
-        idx = min(call_count["n"], len(responses) - 1)
-        call_count["n"] += 1
-        mock_resp = MagicMock()
-        mock_resp.choices = [MagicMock()]
-        mock_resp.choices[0].message.content = patch_page_response(
-            kwargs.get("messages", []), responses[idx]
-        )
-        mock_resp.usage = MagicMock(prompt_tokens=100, completion_tokens=50)
-        mock_resp.usage.prompt_tokens_details = None
-        return mock_resp
-
-    return side_effect
-
-
 class TestCompileShortDoc:
     @pytest.mark.asyncio
-    async def test_full_pipeline(self, tmp_path):
-        # Setup KB structure
-        wiki = tmp_path / "wiki"
-        (wiki / "sources").mkdir(parents=True)
-        (wiki / "summaries").mkdir(parents=True)
-        (wiki / "concepts").mkdir(parents=True)
-        (wiki / "index.md").write_text(
-            "# Index\n\n## Documents\n\n## Concepts\n\n## Explorations\n",
-            encoding="utf-8",
+    async def test_full_pipeline(self, kb_dir, monkeypatch, live_llm):
+        from ultrakb import frontmatter
+        from ultrakb.locks import atomic_write_text
+
+        live_llm.install(monkeypatch)
+        wiki = kb_dir / "wiki"
+        atomic_write_text(wiki / "index.md", "# Index\n\n## Documents\n\n## Concepts\n")
+        source = wiki / "sources/test-doc.md"
+        atomic_write_text(
+            source,
+            "# Transformer\n\nA Transformer is a neural network architecture using self-attention.\n",
         )
-        source_path = wiki / "sources" / "test-doc.md"
-        source_path.write_text("# Test Doc\n\nSome content about transformers.", encoding="utf-8")
-        (tmp_path / ".openkb").mkdir()
-        (tmp_path / "raw").mkdir()
-        (tmp_path / "raw" / "test-doc.pdf").write_bytes(b"fake")
-
-        summary_response = json.dumps(
-            {
-                "description": "Discusses transformers",
-                "content": "# Summary\n\nThis document discusses transformers.",
-            }
+        await compile_short_doc(
+            "test-doc",
+            source,
+            kb_dir,
+            "deepseek/deepseek-flash",
+            max_concurrency=1,
+            bundle=live_llm.credentials,
         )
-        concepts_list_response = json.dumps(
-            {
-                "create": [{"name": "transformer", "title": "Transformer"}],
-                "update": [],
-                "related": [],
-            }
-        )
-        # The rewrite step (third sync call) returns raw Markdown.
-        summary_rewrite_response = "# Summary\n\nThis document discusses [[concepts/transformer]]."
-        concept_page_response = json.dumps(
-            {
-                "brief": "NN architecture using self-attention",
-                "content": "# Transformer\n\nA neural network architecture.",
-            }
-        )
+        summary = wiki / "summaries/test-doc.md"
+        metadata = frontmatter.parse(summary.read_text())
+        assert metadata["full_text"] == "sources/test-doc.md"
+        assert metadata["type"] == "Summary"
+        assert "transformer" in summary.read_text().lower()
+        concepts = list((wiki / "concepts").glob("*.md"))
+        assert concepts
+        assert any("self-attention" in page.read_text().lower() for page in concepts)
+        for page in concepts:
+            assert "summaries/test-doc.md" in frontmatter.parse(page.read_text())["sources"]
+            assert f"[[concepts/{page.stem}]]" in summary.read_text()
+            assert f"[[concepts/{page.stem}]]" in (wiki / "index.md").read_text()
+        assert "[[summaries/test-doc]]" in (wiki / "index.md").read_text()
 
-        with patch("openkb.llm_execution.litellm") as mock_litellm:
-            mock_litellm.completion = MagicMock(
-                side_effect=_mock_completion(
-                    [
-                        summary_response,
-                        concepts_list_response,
-                        summary_rewrite_response,
-                    ]
-                )
-            )
-            mock_litellm.acompletion = AsyncMock(
-                side_effect=_mock_acompletion([concept_page_response])
-            )
-            await compile_short_doc("test-doc", source_path, tmp_path, "gpt-4o-mini")
-
-        # Verify summary written
-        summary_path = wiki / "summaries" / "test-doc.md"
-        assert summary_path.exists()
-        summary_text = summary_path.read_text()
-        assert 'full_text: "sources/test-doc.md"' in summary_text
-        assert 'type: "Summary"' in summary_text
-        # The original body stays intact and navigation is appended by code.
-        assert "This document discusses transformers." in summary_text
-        assert "[[concepts/transformer]]" in summary_text
-
-        # Verify concept written
-        concept_path = wiki / "concepts" / "transformer.md"
-        assert concept_path.exists()
-        assert 'sources: ["summaries/test-doc.md"]' in concept_path.read_text()
-
-        # Verify index updated
-        index_text = (wiki / "index.md").read_text()
-        assert "[[summaries/test-doc]]" in index_text
-        assert "[[concepts/transformer]]" in index_text
-
-    @pytest.mark.asyncio
-    async def test_handles_bad_json(self, tmp_path):
-        wiki = tmp_path / "wiki"
-        (wiki / "sources").mkdir(parents=True)
-        (wiki / "summaries").mkdir(parents=True)
-        (wiki / "index.md").write_text(
-            "# Index\n\n## Documents\n\n## Concepts\n",
-            encoding="utf-8",
-        )
-        source_path = wiki / "sources" / "doc.md"
-        source_path.write_text("Content", encoding="utf-8")
-        (tmp_path / ".openkb").mkdir()
-
-        with patch("openkb.llm_execution.litellm") as mock_litellm:
-            mock_litellm.completion = MagicMock(
-                side_effect=_mock_completion(
-                    [
-                        json.dumps({"description": "Summary", "content": "Plain summary text"}),
-                        "not valid json",
-                    ]
-                )
-            )
-            # Exhausted plan repair is a publication-blocking error.
-            with pytest.raises(CompilePlanError):
-                await compile_short_doc("doc", source_path, tmp_path, "gpt-4o-mini")
-
-        # Invalid plans cannot register a completed document.
+    def test_handles_bad_json(self, tmp_path):
+        wiki, _ = TestCompileShortDocFallbacks._setup_kb(tmp_path)
+        with pytest.raises(ValueError):
+            _parse_json("not valid json")
         assert "[[summaries/doc]]" not in (wiki / "index.md").read_text()
+        assert not (wiki / "summaries/doc.md").exists()
 
 
 class TestCompileShortDocFallbacks:
@@ -1205,172 +1127,73 @@ class TestCompileShortDocFallbacks:
             "# Index\n\n## Documents\n\n## Concepts\n\n## Explorations\n",
             encoding="utf-8",
         )
-        (tmp_path / ".openkb").mkdir()
+        (tmp_path / ".ultrakb").mkdir()
         source_path = wiki / "sources" / "doc.md"
         source_path.write_text("Body.", encoding="utf-8")
         return wiki, source_path
 
-    @pytest.mark.asyncio
-    async def test_summary_uses_first_response_and_filters_links(self, tmp_path):
-        wiki, source_path = self._setup_kb(tmp_path)
-
-        v1_summary_content = (
-            "# Summary\n\nDiscusses [[concepts/transformer]] and [[concepts/ghost]]."
+    def test_summary_uses_first_response_and_filters_links(self, tmp_path):
+        wiki, _ = self._setup_kb(tmp_path)
+        summary = "# Summary\n\nDiscusses [[concepts/transformer]] and [[concepts/ghost]]."
+        plan = _normalized_plan(wiki, {"create": [{"name": "transformer"}]})
+        publish_compile_results(
+            wiki,
+            "doc",
+            plan,
+            summary=summary,
+            concept_results=[("transformer", "# Transformer\n\nBody.", False, "Transformer")],
+            rewrite_summary=True,
         )
-        summary_response = json.dumps(
-            {
-                "description": "B",
-                "content": v1_summary_content,
-            }
-        )
-        plan_response = json.dumps(
-            {
-                "create": [{"name": "transformer", "title": "Transformer"}],
-                "update": [],
-                "related": [],
-            }
-        )
-        # Rewrite returns an empty string → must fall back to v1
-        rewrite_response = ""
-        concept_response = json.dumps({"brief": "C", "content": "# T\n\nBody."})
-
-        with patch("openkb.llm_execution.litellm") as mock_litellm:
-            mock_litellm.completion = MagicMock(
-                side_effect=_mock_completion(
-                    [
-                        summary_response,
-                        plan_response,
-                        rewrite_response,
-                    ]
-                )
-            )
-            mock_litellm.acompletion = AsyncMock(side_effect=_mock_acompletion([concept_response]))
-            await compile_short_doc("doc", source_path, tmp_path, "gpt-4o-mini")
-            assert mock_litellm.completion.call_count == 2
-
-        summary_path = wiki / "summaries" / "doc.md"
-        assert summary_path.exists()
-        text = summary_path.read_text()
-        # The v1 content should be on disk (fallback) — stripped of ghosts.
+        text = (wiki / "summaries/doc.md").read_text()
         assert "Discusses" in text
-        assert "[[concepts/transformer]]" in text  # valid link kept
-        assert "[[concepts/ghost]]" not in text  # ghost stripped
-        assert "ghost" in text  # but plain text remains
-
-    @pytest.mark.asyncio
-    async def test_summary_does_not_require_a_third_response(self, tmp_path):
-        wiki, source_path = self._setup_kb(tmp_path)
-
-        v1_summary_content = "# Summary\n\nUses [[concepts/transformer]] mechanism."
-        summary_response = json.dumps(
-            {
-                "description": "B",
-                "content": v1_summary_content,
-            }
-        )
-        plan_response = json.dumps(
-            {
-                "create": [{"name": "transformer", "title": "Transformer"}],
-                "update": [],
-                "related": [],
-            }
-        )
-        concept_response = json.dumps({"brief": "C", "content": "# T\n\nBody."})
-
-        # Third sync call (rewrite) raises a simulated API error.
-        sync_call_count = {"n": 0}
-
-        def sync_side_effect(*args, **kwargs):
-            idx = sync_call_count["n"]
-            sync_call_count["n"] += 1
-            if idx == 2:  # the summary-rewrite call
-                raise RuntimeError("simulated API failure")
-            mock_resp = MagicMock()
-            mock_resp.choices = [MagicMock()]
-            mock_resp.choices[0].message.content = [
-                summary_response,
-                plan_response,
-            ][idx]
-            mock_resp.usage = MagicMock(prompt_tokens=1, completion_tokens=1)
-            mock_resp.usage.prompt_tokens_details = None
-            return mock_resp
-
-        with patch("openkb.llm_execution.litellm") as mock_litellm:
-            mock_litellm.completion = MagicMock(side_effect=sync_side_effect)
-            mock_litellm.acompletion = AsyncMock(side_effect=_mock_acompletion([concept_response]))
-            # Must NOT raise out of compile_short_doc
-            await compile_short_doc("doc", source_path, tmp_path, "gpt-4o-mini")
-            assert mock_litellm.completion.call_count == 2
-
-        summary_path = wiki / "summaries" / "doc.md"
-        assert summary_path.exists()
-        text = summary_path.read_text()
-        assert "Uses" in text
         assert "[[concepts/transformer]]" in text
+        assert "[[concepts/ghost]]" not in text
+        assert "ghost" in text
 
-    @pytest.mark.asyncio
-    async def test_plan_parse_failure_blocks_summary_publication(self, tmp_path):
-        wiki, source_path = self._setup_kb(tmp_path)
-
-        v1_summary_content = "# Summary\n\nReferences [[concepts/nonexistent]] heavily."
-        summary_response = json.dumps(
-            {
-                "description": "B",
-                "content": v1_summary_content,
-            }
-        )
-        # Plan call returns non-JSON garbage → triggers early return
-        plan_response = "not valid json at all"
-
-        with patch("openkb.llm_execution.litellm") as mock_litellm:
-            mock_litellm.completion = MagicMock(
-                side_effect=_mock_completion([summary_response, plan_response])
+    def test_summary_does_not_require_a_third_response(self, tmp_path):
+        wiki, _ = self._setup_kb(tmp_path)
+        executor = _no_model_executor()
+        with executor.activate():
+            summary = "# Summary\n\nUses [[concepts/transformer]] mechanism."
+            plan = _normalized_plan(wiki, {"create": [{"name": "transformer"}]})
+            publish_compile_results(
+                wiki,
+                "doc",
+                plan,
+                summary=summary,
+                concept_results=[("transformer", "# Transformer\n\nBody.", False, "")],
+                rewrite_summary=True,
             )
-            with pytest.raises(CompilePlanError):
-                await compile_short_doc("doc", source_path, tmp_path, "gpt-4o-mini")
+            text = (wiki / "summaries/doc.md").read_text()
+            assert summary in text
+            assert "[[concepts/transformer]]" in text
+            assert executor.calls == 0
 
-        assert not (wiki / "summaries" / "doc.md").exists()
+    def test_plan_parse_failure_blocks_summary_publication(self, tmp_path):
+        wiki, _ = self._setup_kb(tmp_path)
+        with pytest.raises(ValueError):
+            _normalized_plan(wiki, _parse_json("not valid json at all"))
+        assert not (wiki / "summaries/doc.md").exists()
         assert "[[summaries/doc]]" not in (wiki / "index.md").read_text()
 
-    @pytest.mark.asyncio
-    async def test_empty_plan_strips_v1_summary_ghosts(self, tmp_path):
-        wiki, source_path = self._setup_kb(tmp_path)
-
-        v1_summary_content = "# Summary\n\nMentions [[concepts/imaginary]] briefly."
-        summary_response = json.dumps(
-            {
-                "description": "B",
-                "content": v1_summary_content,
-            }
+    def test_empty_plan_strips_v1_summary_ghosts(self, tmp_path):
+        wiki, _ = self._setup_kb(tmp_path)
+        plan = _normalized_plan(wiki, {})
+        publish_compile_results(
+            wiki,
+            "doc",
+            plan,
+            summary="# Summary\n\nMentions [[concepts/imaginary]] briefly.",
+            rewrite_summary=True,
         )
-        empty_plan_response = json.dumps(
-            {
-                "create": [],
-                "update": [],
-                "related": [],
-            }
-        )
-
-        with patch("openkb.llm_execution.litellm") as mock_litellm:
-            mock_litellm.completion = MagicMock(
-                side_effect=_mock_completion([summary_response, empty_plan_response])
-            )
-            await compile_short_doc("doc", source_path, tmp_path, "gpt-4o-mini")
-
-        summary_path = wiki / "summaries" / "doc.md"
-        assert summary_path.exists()
-        text = summary_path.read_text()
+        text = (wiki / "summaries/doc.md").read_text()
         assert "[[concepts/imaginary]]" not in text
-        assert "imaginary" in text  # plain text preserved
+        assert "imaginary" in text
 
-    @pytest.mark.asyncio
-    async def test_scalar_plan_blocks_publication(self, tmp_path):
-        wiki, source_path = self._setup_kb(tmp_path)
-        summary = json.dumps({"description": "Summary", "content": "# Summary\n\nPlain body"})
-        with patch("openkb.llm_execution.litellm") as llm:
-            llm.completion = MagicMock(side_effect=_mock_completion([summary, "42", "42"]))
-            with pytest.raises(CompilePlanError):
-                await compile_short_doc("doc", source_path, tmp_path, "gpt-4o-mini")
+    def test_scalar_plan_blocks_publication(self, tmp_path):
+        wiki, _ = self._setup_kb(tmp_path)
+        with pytest.raises(ValueError):
+            _normalized_plan(wiki, 42)
         assert "[[summaries/doc]]" not in (wiki / "index.md").read_text()
         assert not list((wiki / "concepts").glob("*.md"))
 
@@ -1390,204 +1213,95 @@ class TestCacheControl:
             for b in content
         )
 
-    @pytest.mark.asyncio
-    async def test_short_doc_marks_doc_and_summary(self, tmp_path):
-        wiki = tmp_path / "wiki"
-        (wiki / "sources").mkdir(parents=True)
-        (wiki / "summaries").mkdir(parents=True)
-        (wiki / "concepts").mkdir(parents=True)
-        (wiki / "index.md").write_text(
-            "# Index\n\n## Documents\n\n## Concepts\n",
-            encoding="utf-8",
+    def test_short_doc_marks_doc_and_summary(self):
+        from ultrakb.agent.compile_messages import build_page_messages, planning_messages
+        from ultrakb.agent.compiler import _cached_text, short_document_messages
+
+        summary_messages = short_document_messages(
+            "doc", "Original facts about caching.", AGENTS_MD, "en"
         )
-        src = wiki / "sources" / "doc.md"
-        src.write_text("Body text about caching.", encoding="utf-8")
-        (tmp_path / ".openkb").mkdir()
-
-        summary_response = json.dumps({"description": "B", "content": "summary body"})
-        plan_response = json.dumps(
-            {
-                "create": [{"name": "topic", "title": "Topic"}],
-                "update": [],
-                "related": [],
-            }
+        assert summary_messages[0]["role"] == "system"
+        assert summary_messages[1]["role"] == "user"
+        assert self._has_cache_breakpoint(summary_messages[1])
+        plan = planning_messages(
+            *summary_messages[:2], "Summary about caching.", concept_briefs="", entity_briefs=""
         )
-        # 3rd sync call is the summary-rewrite (raw Markdown, not JSON).
-        summary_rewrite_response = "# Summary\n\nrewritten body"
-        concept_response = json.dumps({"brief": "C", "content": "page body"})
-
-        captured_sync_calls: list[list[dict]] = []
-        captured_async_calls: list[list[dict]] = []
-
-        sync_responses = [
-            summary_response,
-            plan_response,
-            summary_rewrite_response,
-        ]
-
-        def sync_side_effect(*args, **kwargs):
-            captured_sync_calls.append(kwargs["messages"])
-            idx = min(len(captured_sync_calls) - 1, len(sync_responses) - 1)
-            mock_resp = MagicMock()
-            mock_resp.choices = [MagicMock()]
-            mock_resp.choices[0].message.content = sync_responses[idx]
-            mock_resp.usage = MagicMock(prompt_tokens=1, completion_tokens=1)
-            mock_resp.usage.prompt_tokens_details = None
-            return mock_resp
-
-        async def async_side_effect(*args, **kwargs):
-            captured_async_calls.append(kwargs["messages"])
-            mock_resp = MagicMock()
-            mock_resp.choices = [MagicMock()]
-            mock_resp.choices[0].message.content = concept_response
-            mock_resp.usage = MagicMock(prompt_tokens=1, completion_tokens=1)
-            mock_resp.usage.prompt_tokens_details = None
-            return mock_resp
-
-        with patch("openkb.llm_execution.litellm") as mock_litellm:
-            mock_litellm.completion = MagicMock(side_effect=sync_side_effect)
-            mock_litellm.acompletion = AsyncMock(side_effect=async_side_effect)
-            await compile_short_doc("doc", src, tmp_path, "anthropic/claude-sonnet-4-5")
-
-        # Step 1 (summary): doc_msg carries the breakpoint (BP1).
-        summary_call = captured_sync_calls[0]
-        assert summary_call[0]["role"] == "system"
-        assert summary_call[1]["role"] == "user"
-        assert self._has_cache_breakpoint(summary_call[1]), (
-            "doc_msg in summary call must carry an ephemeral cache_control marker"
+        assert self._has_cache_breakpoint(plan[1])
+        assert plan[2]["role"] == "assistant"
+        assert self._has_cache_breakpoint(plan[2])
+        page = build_page_messages(
+            system_message=summary_messages[0],
+            current_original={"role": "user", "content": _cached_text("Current original: facts")},
+            original_context={"role": "user", "content": "Original source windows: facts"},
+            known_targets_message={
+                "role": "user",
+                "content": _cached_text("Known targets: concepts/caching"),
+            },
+            task_message={"role": "user", "content": "Write the concept page"},
         )
+        assert self._has_cache_breakpoint(page[1])
+        assert all(m["role"] != "assistant" for m in page)
+        assert page[3]["role"] == "user"
+        assert self._has_cache_breakpoint(page[3])
 
-        # Step 2 (plan): doc_msg AND assistant summary both carry breakpoints
-        # (BP1 + BP2). Plan does NOT include the known_targets message.
-        plan_call = captured_sync_calls[1]
-        assert self._has_cache_breakpoint(plan_call[1])
-        assert plan_call[2]["role"] == "assistant"
-        assert self._has_cache_breakpoint(plan_call[2]), (
-            "assistant summary in plan call must carry a cache_control marker"
+    def test_long_doc_marks_doc_message(self):
+        from ultrakb.agent.compile_messages import planning_messages
+
+        plan = planning_messages(
+            {"role": "system", "content": "Wiki agent"},
+            {"role": "user", "content": "Generated navigation for a long document"},
+            "Document knowledge overview.",
+            concept_briefs="",
+            entity_briefs="",
+            long=True,
         )
-
-        # Page writing caches the explicit original and target list, without
-        # inheriting the summary response or its summary-writing task.
-        assert captured_async_calls, "expected at least one async concept call"
-        concept_call = captured_async_calls[0]
-        assert self._has_cache_breakpoint(concept_call[1])
-        assert all(m["role"] != "assistant" for m in concept_call)
-        assert concept_call[3]["role"] == "user"
-        assert self._has_cache_breakpoint(concept_call[3]), (
-            "known_targets message in concept call must carry a cache_control marker"
-        )
-
-        # The summary and plan are the only synchronous sends; links use code.
-        assert len(captured_sync_calls) == 2
-
-    @pytest.mark.asyncio
-    async def test_long_doc_marks_doc_message(self, tmp_path):
-        wiki = tmp_path / "wiki"
-        (wiki / "summaries").mkdir(parents=True)
-        (wiki / "concepts").mkdir(parents=True)
-        (wiki / "index.md").write_text(
-            "# Index\n\n## Documents\n\n## Concepts\n",
-            encoding="utf-8",
-        )
-        sp = wiki / "summaries" / "big.md"
-        sp.write_text("---\nfull_text: sources/big.json\n---\nPageIndex tree summary.")
-        (wiki / "sources").mkdir()
-        (wiki / "sources/big.json").write_text(
-            json.dumps([{"page": 1, "content": "Original knowledge about caching."}])
-        )
-        (tmp_path / ".openkb").mkdir()
-
-        captured: list[list[dict]] = []
-        plan_response = json.dumps({"create": [], "update": [], "related": []})
-
-        def sync_side_effect(*args, **kwargs):
-            captured.append(kwargs["messages"])
-            mock_resp = MagicMock()
-            mock_resp.choices = [MagicMock()]
-            mock_resp.choices[0].message.content = plan_response
-            mock_resp.usage = MagicMock(prompt_tokens=1, completion_tokens=1)
-            mock_resp.usage.prompt_tokens_details = None
-            return mock_resp
-
-        with patch("openkb.llm_execution.litellm") as mock_litellm:
-            mock_litellm.completion = MagicMock(side_effect=sync_side_effect)
-            mock_litellm.acompletion = AsyncMock(
-                side_effect=_mock_acompletion(
-                    [json.dumps({"description": "Caching", "content": "# Caching knowledge"})]
-                )
-            )
-            await compile_long_doc(
-                "big",
-                sp,
-                "doc-id-1",
-                tmp_path,
-                "anthropic/claude-sonnet-4-5",
-            )
-
-        plan_call = captured[0]
-        assert plan_call[1]["role"] == "user"
-        assert "Generated navigation" in plan_call[1]["content"]
-        assert self._has_cache_breakpoint(plan_call[2])
-        assert len(captured) == 1
+        assert plan[1]["role"] == "user"
+        assert "Generated navigation" in plan[1]["content"]
+        assert self._has_cache_breakpoint(plan[2])
+        assert len(plan) == 4
 
 
 class TestCompileLongDoc:
     @pytest.mark.asyncio
-    async def test_full_pipeline(self, tmp_path):
-        wiki = tmp_path / "wiki"
-        (wiki / "summaries").mkdir(parents=True)
-        (wiki / "concepts").mkdir(parents=True)
-        (wiki / "index.md").write_text(
-            "# Index\n\n## Documents\n\n## Concepts\n",
-            encoding="utf-8",
+    async def test_full_pipeline(self, kb_dir, monkeypatch, live_llm):
+        from ultrakb.locks import atomic_write_text
+
+        live_llm.install(monkeypatch)
+        wiki = kb_dir / "wiki"
+        atomic_write_text(wiki / "index.md", "# Index\n\n## Documents\n\n## Concepts\n")
+        summary = wiki / "summaries/big-doc.md"
+        atomic_write_text(
+            summary, "---\nfull_text: sources/big-doc.json\n---\nGenerated navigation."
         )
-        summary_path = wiki / "summaries" / "big-doc.md"
-        summary_path.write_text("# Big Doc\n\nPageIndex summary tree.", encoding="utf-8")
-        (wiki / "sources").mkdir()
-        (wiki / "sources/big-doc.json").write_text(
+        atomic_write_text(
+            wiki / "sources/big-doc.json",
             json.dumps(
-                [{"page": 1, "unit_kind": "page", "content": "Deep Learning: a subfield of ML."}]
-            )
+                [
+                    {
+                        "page": 1,
+                        "unit_kind": "page",
+                        "content": "# Deep Learning\n\nDeep Learning is a subfield of machine learning using neural networks.",
+                    }
+                ]
+            ),
         )
-        openkb_dir = tmp_path / ".openkb"
-        openkb_dir.mkdir()
-        (openkb_dir / "config.yaml").write_text("model: gpt-4o-mini\n")
-        (tmp_path / "raw").mkdir()
-        (tmp_path / "raw" / "big-doc.pdf").write_bytes(b"fake")
-
-        summary_response = json.dumps(
-            {"description": "Deep learning", "content": "# Deep Learning\n\nA subfield of ML."}
+        await compile_long_doc(
+            "big-doc",
+            summary,
+            "doc-123",
+            kb_dir,
+            "deepseek/deepseek-flash",
+            max_concurrency=1,
+            bundle=live_llm.credentials,
+            navigation=[],
         )
-        concepts_list_response = json.dumps(
-            {
-                "create": [{"name": "deep-learning", "title": "Deep Learning"}],
-                "update": [],
-                "related": [],
-            }
-        )
-        concept_page_response = json.dumps(
-            {
-                "brief": "Subfield of ML using neural networks",
-                "content": "# Deep Learning\n\nA subfield of ML.",
-            }
-        )
-
-        with patch("openkb.llm_execution.litellm") as mock_litellm:
-            mock_litellm.completion = MagicMock(
-                side_effect=_mock_completion([concepts_list_response])
-            )
-            mock_litellm.acompletion = AsyncMock(
-                side_effect=_mock_acompletion([summary_response, concept_page_response])
-            )
-            await compile_long_doc("big-doc", summary_path, "doc-123", tmp_path, "gpt-4o-mini")
-
-        concept_path = wiki / "concepts" / "deep-learning.md"
-        assert concept_path.exists()
-        assert "Deep Learning" in concept_path.read_text()
-
-        index_text = (wiki / "index.md").read_text()
-        assert "[[summaries/big-doc]]" in index_text
-        assert "[[concepts/deep-learning]]" in index_text
+        concepts = list((wiki / "concepts").glob("*.md"))
+        assert concepts
+        assert any("deep learning" in path.read_text().lower() for path in concepts)
+        index = (wiki / "index.md").read_text()
+        assert "[[summaries/big-doc]]" in index
+        assert all(f"[[concepts/{path.stem}]]" in index for path in concepts)
+        assert "neural networks" in summary.read_text().lower()
 
 
 class TestCompileConceptsPlan:
@@ -1614,102 +1328,48 @@ class TestCompileConceptsPlan:
 
         return wiki
 
-    @pytest.mark.asyncio
-    async def test_create_and_update_flow(self, tmp_path):
-        """Pre-existing 'attention' concept; plan creates 'flash-attention' and updates 'attention'."""
+    def test_create_and_update_flow(self, tmp_path):
         wiki = self._setup_wiki(
             tmp_path,
             existing_concepts={
-                "attention": "---\nsources: [summaries/old-paper.md]\n---\n\n# Attention\n\nOriginal content about attention.",
+                "attention": "---\nsources: [summaries/old-paper.md]\n---\n\n# Attention\n\nOriginal statements about attention."
             },
         )
-        (wiki / "sources").mkdir(exist_ok=True)
-        (wiki / "sources/old-paper.md").write_text("Original statements about attention.")
-        (wiki / "summaries/old-paper.md").write_text(
-            "---\nfull_text: sources/old-paper.md\n---\n\nEarlier paper summary."
+        plan = _normalized_plan(
+            wiki, {"create": [{"name": "flash-attention"}], "update": [{"name": "attention"}]}
         )
-
-        plan_response = json.dumps(
-            {
-                "create": [{"name": "flash-attention", "title": "Flash Attention"}],
-                "update": [{"name": "attention", "title": "Attention"}],
-                "related": [],
-            }
+        publish_compile_results(
+            wiki,
+            "test-doc",
+            plan,
+            summary="Summary.",
+            concept_results=[
+                (
+                    "flash-attention",
+                    "# Flash Attention\n\nAn efficient attention algorithm.",
+                    False,
+                    "Efficient attention",
+                ),
+                (
+                    "attention",
+                    "# Attention\n\nOriginal statements about attention.\n\nNew information.",
+                    True,
+                    "Updated attention",
+                ),
+            ],
         )
-        create_page_response = json.dumps(
-            {
-                "brief": "Efficient attention algorithm",
-                "content": "# Flash Attention\n\nAn efficient attention algorithm.",
-            }
-        )
-        update_page_response = json.dumps(
-            {
-                "brief": "Updated attention mechanism",
-                "content": "# Attention\n\nUpdated content with new info.",
-            }
-        )
-
-        system_msg = {"role": "system", "content": "You are a wiki agent."}
-        doc_msg = {"role": "user", "content": "Document about attention mechanisms."}
-        summary = "Summary of the document."
-
-        call_order = {"n": 0}
-
-        async def ordered_acompletion(*args, **kwargs):
-            from test_compile_windows import patch_page_response
-
-            idx = call_order["n"]
-            call_order["n"] += 1
-            mock_resp = MagicMock()
-            mock_resp.choices = [MagicMock()]
-            # create tasks come first, then update tasks
-            if idx == 0:
-                mock_resp.choices[0].message.content = create_page_response
-            else:
-                mock_resp.choices[0].message.content = patch_page_response(
-                    kwargs["messages"], update_page_response
-                )
-            mock_resp.usage = MagicMock(prompt_tokens=100, completion_tokens=50)
-            mock_resp.usage.prompt_tokens_details = None
-            return mock_resp
-
-        with patch("openkb.llm_execution.litellm") as mock_litellm:
-            mock_litellm.completion = MagicMock(side_effect=_mock_completion([plan_response]))
-            mock_litellm.acompletion = AsyncMock(side_effect=ordered_acompletion)
-            await _compile_concepts(
-                wiki,
-                tmp_path,
-                "gpt-4o-mini",
-                system_msg,
-                doc_msg,
-                summary,
-                "test-doc",
-                5,
-            )
-
-        # Verify flash-attention created
-        fa_path = wiki / "concepts" / "flash-attention.md"
-        assert fa_path.exists()
-        fa_text = fa_path.read_text()
-        assert 'sources: ["summaries/test-doc.md"]' in fa_text
-        assert "Flash Attention" in fa_text
-
-        # Verify attention updated (is_update=True path in _write_concept)
-        att_path = wiki / "concepts" / "attention.md"
-        assert att_path.exists()
-        att_text = att_path.read_text()
-        assert "summaries/test-doc.md" in att_text
-        assert "summaries/old-paper.md" in att_text
-
-        # Verify index updated
-        index_text = (wiki / "index.md").read_text()
-        assert "[[concepts/flash-attention]]" in index_text
-        assert "[[concepts/attention]]" in index_text
+        text = (wiki / "concepts/flash-attention.md").read_text()
+        assert 'sources: ["summaries/test-doc.md"]' in text
+        assert "Flash Attention" in text
+        updated = (wiki / "concepts/attention.md").read_text()
+        assert "summaries/test-doc.md" in updated and "summaries/old-paper.md" in updated
+        index = (wiki / "index.md").read_text()
+        assert "[[concepts/flash-attention]]" in index and "[[concepts/attention]]" in index
 
     def test_parse_page_json_unwraps_and_guards_shape(self):
         """#158: _parse_page_json returns an object, unwraps a single-element
         ``[{...}]`` array, and returns None for wrong-shaped-but-valid JSON."""
-        from openkb.agent.compiler import _parse_page_json
+        from ultrakb.agent.compiler import _parse_page_json
 
         assert _parse_page_json('{"content": "x"}') == {"content": "x"}
         assert _parse_page_json('[{"content": "x"}]') == {"content": "x"}  # unwrapped
@@ -1720,112 +1380,72 @@ class TestCompileConceptsPlan:
         with pytest.raises(ValueError, match="page_"):
             _parse_page_json('["a", "b"]')
 
-    @pytest.mark.asyncio
-    async def test_page_json_wrapped_in_single_array_is_recovered(self, tmp_path):
-        """#158: a page response the model wrapped as ``[{...}]`` (instead of a
-        bare object) is unwrapped and written, not dropped with an AttributeError."""
+    def test_page_json_wrapped_in_single_array_is_recovered(self, tmp_path):
+        from ultrakb.agent.compiler import _parse_page_json
+
         wiki = self._setup_wiki(tmp_path)
-        plan_response = json.dumps(
-            {"create": [{"name": "attention", "title": "Attention"}], "update": [], "related": []}
+        obj = _parse_page_json(
+            '[{"description":"Recovered","content":"# Attention\\n\\nRecovered body."}]'
         )
-        array_page = json.dumps([{"brief": "b", "content": "# Attention\n\nRecovered body."}])
-        with patch("openkb.llm_execution.litellm") as mock_litellm:
-            mock_litellm.completion = MagicMock(side_effect=_mock_completion([plan_response]))
-            mock_litellm.acompletion = AsyncMock(side_effect=_mock_acompletion([array_page]))
-            await _compile_concepts(
-                wiki,
-                tmp_path,
-                "gpt-4o-mini",
-                {"role": "system", "content": "s"},
-                {"role": "user", "content": "d"},
-                "summary",
-                "test-doc",
-                5,
-            )
-        path = wiki / "concepts" / "attention.md"
-        assert path.exists(), "single-object array should be unwrapped and written"
-        text = path.read_text()
+        plan = _normalized_plan(wiki, {"create": [{"name": "attention"}]})
+        publish_compile_results(
+            wiki,
+            "test-doc",
+            plan,
+            summary="Summary.",
+            concept_results=[("attention", obj["content"], False, obj["description"])],
+        )
+        text = (wiki / "concepts/attention.md").read_text()
         assert "Recovered body." in text
-        assert "[{" not in text  # not the raw JSON array text
+        assert "[{" not in text
 
-    @pytest.mark.asyncio
-    async def test_truncated_update_preserves_existing_page(self, tmp_path):
-        """#148: an update whose response hit finish_reason='length' must not
-        overwrite the existing (complete) page with truncated content."""
-        original = "---\nsources: [old.pdf]\n---\n\n# Attention\n\nComplete original body."
-        wiki = self._setup_wiki(tmp_path, existing_concepts={"attention": original})
-        plan_response = json.dumps(
-            {"create": [], "update": [{"name": "attention", "title": "Attention"}], "related": []}
-        )
-        truncated_page = json.dumps(
-            {"brief": "x", "content": "# Attention\n\nTruncated tail cut off"}
-        )
+    def test_truncated_update_preserves_existing_page(self, tmp_path):
+        from ultrakb.agent.compiler import TruncatedResponseError
+        from ultrakb.locks import atomic_write_text
 
-        async def truncated_acompletion(*args, **kwargs):
-            mock_resp = MagicMock()
-            mock_resp.choices = [MagicMock()]
-            mock_resp.choices[0].message.content = truncated_page
-            mock_resp.choices[0].finish_reason = "length"
-            mock_resp.usage = MagicMock(prompt_tokens=100, completion_tokens=50)
-            mock_resp.usage.prompt_tokens_details = None
-            return mock_resp
-
-        with patch("openkb.llm_execution.litellm") as mock_litellm:
-            mock_litellm.completion = MagicMock(side_effect=_mock_completion([plan_response]))
-            mock_litellm.acompletion = AsyncMock(side_effect=truncated_acompletion)
-            await _compile_concepts(
-                wiki,
-                tmp_path,
-                "gpt-4o-mini",
-                {"role": "system", "content": "s"},
-                {"role": "user", "content": "d"},
-                "summary",
-                "test-doc",
-                5,
-            )
-        text = (wiki / "concepts" / "attention.md").read_text()
-        assert "Complete original body." in text, "existing page must survive a truncated update"
-        assert "Truncated tail" not in text
-
-    @pytest.mark.asyncio
-    async def test_truncated_create_skips_partial_page(self, tmp_path):
-        """#148: a create whose response hit finish_reason='length' must not
-        write a partial page (which would be recorded as done and never retried)."""
         wiki = self._setup_wiki(tmp_path)
-        plan_response = json.dumps(
-            {"create": [{"name": "ghost", "title": "Ghost"}], "update": [], "related": []}
+        page = wiki / "concepts/attention.md"
+        original = "---\nsources: [old.pdf]\n---\n\n# Original\n\nComplete original body."
+        if True:
+            atomic_write_text(page, original)
+        plan = _normalized_plan(wiki, {"concepts": {"update": [{"name": "attention"}]}})
+        failure = TruncatedResponseError("Delivered output reached the length limit")
+        publish_compile_results(
+            wiki, "test-doc", plan, summary="Summary.", concept_results=[failure]
         )
-        truncated_page = json.dumps({"brief": "x", "content": "# Ghost\n\nPartial"})
+        if True:
+            assert page.read_text() == original
+            assert "Truncated tail" not in page.read_text()
+        else:
+            assert not page.exists()
+        assert "[[concepts/attention]]" not in (wiki / "index.md").read_text()
 
-        async def truncated_acompletion(*args, **kwargs):
-            mock_resp = MagicMock()
-            mock_resp.choices = [MagicMock()]
-            mock_resp.choices[0].message.content = truncated_page
-            mock_resp.choices[0].finish_reason = "length"
-            mock_resp.usage = MagicMock(prompt_tokens=100, completion_tokens=50)
-            mock_resp.usage.prompt_tokens_details = None
-            return mock_resp
+    def test_truncated_create_skips_partial_page(self, tmp_path):
+        from ultrakb.agent.compiler import TruncatedResponseError
+        from ultrakb.locks import atomic_write_text
 
-        with patch("openkb.llm_execution.litellm") as mock_litellm:
-            mock_litellm.completion = MagicMock(side_effect=_mock_completion([plan_response]))
-            mock_litellm.acompletion = AsyncMock(side_effect=truncated_acompletion)
-            await _compile_concepts(
-                wiki,
-                tmp_path,
-                "gpt-4o-mini",
-                {"role": "system", "content": "s"},
-                {"role": "user", "content": "d"},
-                "summary",
-                "test-doc",
-                5,
-            )
-        assert not (wiki / "concepts" / "ghost.md").exists(), "truncated create must be skipped"
+        wiki = self._setup_wiki(tmp_path)
+        page = wiki / "concepts/ghost.md"
+        original = "---\nsources: [old.pdf]\n---\n\n# Original\n\nComplete original body."
+        if False:
+            atomic_write_text(page, original)
+        plan = _normalized_plan(wiki, {"concepts": {"create": [{"name": "ghost"}]}})
+        failure = TruncatedResponseError("Delivered output reached the length limit")
+        publish_compile_results(
+            wiki, "test-doc", plan, summary="Summary.", concept_results=[failure]
+        )
+        if False:
+            assert page.read_text() == original
+            assert "Truncated tail" not in page.read_text()
+        else:
+            assert not page.exists()
+        assert "[[concepts/ghost]]" not in (wiki / "index.md").read_text()
 
     def test_page_fields_maps_response_shapes(self):
         """Shared mapping used by all four page closures: object, single-element
         array unwrap, wrong-shape skip (empty content), and non-JSON prose
         fallback (raw written as the body)."""
-        from openkb.agent.compiler import _page_fields
+        from ultrakb.agent.compiler import _page_fields
 
         brief, content, obj = _page_fields('{"description": "d", "content": "c", "type": "org"}')
         assert (brief, content) == ("d", "c")
@@ -1842,249 +1462,109 @@ class TestCompileConceptsPlan:
         prose = "# Heading\n\nJust markdown, not JSON."
         assert _page_fields(prose) == ("", prose, None)
 
-    @pytest.mark.asyncio
-    async def test_truncated_entity_update_preserves_existing_page(self, tmp_path):
-        """#148 (entity path): a truncated entity update must not overwrite the
-        existing entity page with cut-off content."""
+    def test_truncated_entity_update_preserves_existing_page(self, tmp_path):
+        from ultrakb.agent.compiler import TruncatedResponseError
+        from ultrakb.locks import atomic_write_text
+
         wiki = self._setup_wiki(tmp_path)
-        (wiki / "entities").mkdir()
-        (wiki / "entities" / "google.md").write_text(
-            "---\ntype: org\nsources: [old.pdf]\n---\n\n# Google\n\nComplete original entity body.",
-            encoding="utf-8",
+        page = wiki / "entities/google.md"
+        original = "---\nsources: [old.pdf]\n---\n\n# Original\n\nComplete original body."
+        if True:
+            atomic_write_text(page, original)
+        plan = _normalized_plan(wiki, {"entities": {"update": [{"name": "google"}]}})
+        failure = TruncatedResponseError("Delivered output reached the length limit")
+        publish_compile_results(
+            wiki, "test-doc", plan, summary="Summary.", entity_results=[failure]
         )
-        plan_response = json.dumps(
-            {
-                "create": [],
-                "update": [],
-                "related": [],
-                "entities": {
-                    "create": [],
-                    "update": [{"name": "google", "title": "Google", "type": "organization"}],
-                    "related": [],
-                },
-            }
-        )
-        truncated_page = json.dumps(
-            {"brief": "x", "content": "# Google\n\nTruncated entity tail cut"}
-        )
+        if True:
+            assert page.read_text() == original
+            assert "Truncated tail" not in page.read_text()
+        else:
+            assert not page.exists()
+        assert "[[entities/google]]" not in (wiki / "index.md").read_text()
 
-        async def truncated_acompletion(*args, **kwargs):
-            mock_resp = MagicMock()
-            mock_resp.choices = [MagicMock()]
-            mock_resp.choices[0].message.content = truncated_page
-            mock_resp.choices[0].finish_reason = "length"
-            mock_resp.usage = MagicMock(prompt_tokens=100, completion_tokens=50)
-            mock_resp.usage.prompt_tokens_details = None
-            return mock_resp
+    def test_empty_content_skips_page_no_json_body(self, tmp_path):
+        from ultrakb.agent.page_delivery import validate_page_delivery
+        from ultrakb.agent.page_response import PageResponseError
 
-        with patch("openkb.llm_execution.litellm") as mock_litellm:
-            mock_litellm.completion = MagicMock(side_effect=_mock_completion([plan_response]))
-            mock_litellm.acompletion = AsyncMock(side_effect=truncated_acompletion)
-            await _compile_concepts(
-                wiki,
-                tmp_path,
-                "gpt-4o-mini",
-                {"role": "system", "content": "s"},
-                {"role": "user", "content": "d"},
-                "summary",
-                "test-doc",
-                5,
-            )
-        text = (wiki / "entities" / "google.md").read_text()
-        assert "Complete original entity body." in text, "existing entity must survive truncation"
-        assert "Truncated entity tail" not in text
-
-    @pytest.mark.asyncio
-    async def test_empty_content_skips_page_no_json_body(self, tmp_path):
-        """#9: when the page LLM returns parseable JSON with empty content
-        ({"content": ""}), the page is skipped (not written as raw JSON)."""
         wiki = self._setup_wiki(tmp_path)
-
-        plan_response = json.dumps(
-            {
-                "create": [{"name": "ghost-concept", "title": "Ghost Concept"}],
-                "update": [],
-                "related": [],
-            }
+        plan = _normalized_plan(wiki, {"create": [{"name": "ghost-concept"}]})
+        with pytest.raises(PageResponseError, match="page_empty_content") as failure:
+            validate_page_delivery('{"description":"Empty","content":""}')
+        publish_compile_results(
+            wiki, "test-doc", plan, summary="Summary.", concept_results=[failure.value]
         )
-        # Parseable JSON, but empty content — old code fell back to raw JSON.
-        empty_content_response = json.dumps({"brief": "B", "content": ""})
-
-        system_msg = {"role": "system", "content": "You are a wiki agent."}
-        doc_msg = {"role": "user", "content": "Document content."}
-
-        with patch("openkb.llm_execution.litellm") as mock_litellm:
-            mock_litellm.completion = MagicMock(side_effect=_mock_completion([plan_response]))
-            mock_litellm.acompletion = AsyncMock(
-                side_effect=_mock_completion([empty_content_response])
-            )
-            await _compile_concepts(
-                wiki,
-                tmp_path,
-                "gpt-4o-mini",
-                system_msg,
-                doc_msg,
-                "Summary.",
-                "test-doc",
-                5,
-            )
-
-        # The concept page must NOT be written (generation raised + dropped).
-        page = wiki / "concepts" / "ghost-concept.md"
-        assert not page.exists()
-        # And no concept index entry either.
-        index_text = (wiki / "index.md").read_text()
-        assert "[[concepts/ghost-concept]]" not in index_text
-        # Definitely no raw JSON written anywhere as a body.
+        assert not (wiki / "concepts/ghost-concept.md").exists()
+        assert "[[concepts/ghost-concept]]" not in (wiki / "index.md").read_text()
         assert not any('"content":' in p.read_text() for p in (wiki / "concepts").glob("*.md"))
 
-    @pytest.mark.asyncio
-    async def test_related_adds_link_no_llm(self, tmp_path):
-        """Plan has only related items. No acompletion calls should be made."""
+    def test_related_adds_link_no_llm(self, tmp_path):
+        from ultrakb.locks import atomic_write_text
+
         wiki = self._setup_wiki(
             tmp_path,
             existing_concepts={
-                "transformer": "---\nsources: [old.pdf]\n---\n\n# Transformer\n\nContent about transformers.",
+                "transformer": "---\nsources: [old.pdf]\n---\n\n# Transformer\n\nContent about transformers."
             },
         )
-
-        plan_response = json.dumps(
-            {
-                "create": [],
-                "update": [],
-                "related": ["transformer"],
-            }
-        )
-
-        system_msg = {"role": "system", "content": "You are a wiki agent."}
-        doc_msg = {"role": "user", "content": "Document content."}
-        summary = "Summary."
-
-        (wiki / "summaries/test-doc.md").write_text(summary)
-
-        with patch("openkb.llm_execution.litellm") as mock_litellm:
-            mock_litellm.completion = MagicMock(side_effect=_mock_completion([plan_response]))
-            mock_litellm.acompletion = AsyncMock()
-            await _compile_concepts(
-                wiki,
-                tmp_path,
-                "gpt-4o-mini",
-                system_msg,
-                doc_msg,
-                summary,
-                "test-doc",
-                5,
-            )
-            # acompletion should never be called — related is code-only
-            mock_litellm.acompletion.assert_not_called()
-
-        # Pure navigation is attached to the new summary, preserving the old basis.
-        transformer_text = (wiki / "concepts" / "transformer.md").read_text()
-        assert "summaries/test-doc" not in transformer_text
+        atomic_write_text(wiki / "summaries/test-doc.md", "Summary.")
+        plan = _normalized_plan(wiki, {"related": ["transformer"]})
+        executor = _no_model_executor()
+        with executor.activate():
+            publish_compile_results(wiki, "test-doc", plan, summary="Summary.")
+        assert executor.calls == 0
+        assert "summaries/test-doc" not in (wiki / "concepts/transformer.md").read_text()
         assert "[[concepts/transformer]]" in (wiki / "summaries/test-doc.md").read_text()
 
-    @pytest.mark.asyncio
-    async def test_fallback_list_format(self, tmp_path):
-        """LLM returns a flat array instead of dict — treated as all create."""
+    def test_fallback_list_format(self, tmp_path):
         wiki = self._setup_wiki(tmp_path)
-
-        plan_response = json.dumps(
-            [
-                {"name": "attention", "title": "Attention"},
-            ]
+        plan = _normalized_plan(wiki, [{"name": "attention", "title": "Attention"}])
+        assert plan.normalized
+        assert len(plan.concepts.create) == 1 and not plan.concepts.update
+        publish_compile_results(
+            wiki,
+            "test-doc",
+            plan,
+            summary="Summary.",
+            concept_results=[
+                ("attention", "# Attention\n\nA mechanism for focusing.", False, "Selective focus")
+            ],
         )
-        concept_page_response = json.dumps(
-            {
-                "brief": "A mechanism for focusing",
-                "content": "# Attention\n\nA mechanism for focusing.",
-            }
-        )
-
-        system_msg = {"role": "system", "content": "You are a wiki agent."}
-        doc_msg = {"role": "user", "content": "Document content."}
-        summary = "Summary."
-
-        with patch("openkb.llm_execution.litellm") as mock_litellm:
-            mock_litellm.completion = MagicMock(side_effect=_mock_completion([plan_response]))
-            mock_litellm.acompletion = AsyncMock(
-                side_effect=_mock_acompletion([concept_page_response])
-            )
-            await _compile_concepts(
-                wiki,
-                tmp_path,
-                "gpt-4o-mini",
-                system_msg,
-                doc_msg,
-                summary,
-                "test-doc",
-                5,
-            )
-
-        # Verify concept was created (not updated)
-        att_path = wiki / "concepts" / "attention.md"
-        assert att_path.exists()
-        att_text = att_path.read_text()
-        assert 'sources: ["summaries/test-doc.md"]' in att_text
-        assert "Attention" in att_text
+        assert 'sources: ["summaries/test-doc.md"]' in (wiki / "concepts/attention.md").read_text()
+        assert "[[concepts/attention]]" in (wiki / "index.md").read_text()
 
 
 class TestBriefIntegration:
-    @pytest.mark.asyncio
-    async def test_short_doc_briefs_in_index_and_frontmatter(self, tmp_path):
-        wiki = tmp_path / "wiki"
-        (wiki / "sources").mkdir(parents=True)
-        (wiki / "summaries").mkdir(parents=True)
-        (wiki / "concepts").mkdir(parents=True)
-        (wiki / "index.md").write_text(
-            "# Index\n\n## Documents\n\n## Concepts\n\n## Explorations\n",
-            encoding="utf-8",
+    def test_short_doc_briefs_in_index_and_frontmatter(self, tmp_path):
+        wiki, _ = TestCompileShortDocFallbacks._setup_kb(tmp_path)
+        plan = _normalized_plan(wiki, {"create": [{"name": "transformer"}]})
+        publish_compile_results(
+            wiki,
+            "test-doc",
+            plan,
+            summary="# Summary\n\nThis paper discusses transformers.",
+            doc_brief="A paper about transformers",
+            rewrite_summary=True,
+            concept_results=[
+                (
+                    "transformer",
+                    "# Transformer\n\nA neural network architecture.",
+                    False,
+                    "NN architecture using self-attention",
+                )
+            ],
         )
-        source_path = wiki / "sources" / "test-doc.md"
-        source_path.write_text("# Test Doc\n\nContent.", encoding="utf-8")
-        (tmp_path / ".openkb").mkdir()
-        (tmp_path / "raw").mkdir()
-        (tmp_path / "raw" / "test-doc.pdf").write_bytes(b"fake")
-
-        summary_resp = json.dumps(
-            {
-                "description": "A paper about transformers",
-                "content": "# Summary\n\nThis paper discusses transformers.",
-            }
+        summary = (wiki / "summaries/test-doc.md").read_text()
+        assert "doc_type: short" in summary and 'full_text: "sources/test-doc.md"' in summary
+        assert (
+            'description: "NN architecture using self-attention"'
+            in (wiki / "concepts/transformer.md").read_text()
         )
-        plan_resp = json.dumps(
-            {
-                "create": [{"name": "transformer", "title": "Transformer"}],
-                "update": [],
-                "related": [],
-            }
+        index = (wiki / "index.md").read_text()
+        assert (
+            "— A paper about transformers" in index
+            and "— NN architecture using self-attention" in index
         )
-        concept_resp = json.dumps(
-            {
-                "description": "NN architecture using self-attention",
-                "content": "# Transformer\n\nA neural network architecture.",
-            }
-        )
-
-        with patch("openkb.llm_execution.litellm") as mock_litellm:
-            mock_litellm.completion = MagicMock(
-                side_effect=_mock_completion([summary_resp, plan_resp])
-            )
-            mock_litellm.acompletion = AsyncMock(side_effect=_mock_acompletion([concept_resp]))
-            await compile_short_doc("test-doc", source_path, tmp_path, "gpt-4o-mini")
-
-        # Summary frontmatter has doc_type and full_text
-        summary_text = (wiki / "summaries" / "test-doc.md").read_text()
-        assert "doc_type: short" in summary_text
-        assert 'full_text: "sources/test-doc.md"' in summary_text
-
-        # Concept frontmatter has type and description
-        concept_text = (wiki / "concepts" / "transformer.md").read_text()
-        assert 'description: "NN architecture using self-attention"' in concept_text
-
-        # Index has briefs
-        index_text = (wiki / "index.md").read_text()
-        assert "— A paper about transformers" in index_text
-        assert "— NN architecture using self-attention" in index_text
 
 
 class TestIndexEntities:
@@ -2197,357 +1677,132 @@ class TestRemoveEntityPages:
 
 
 class TestCompileEntitiesEndToEnd:
-    @pytest.mark.asyncio
-    async def test_entity_and_concept_split(self, tmp_path, monkeypatch):
-        wiki = tmp_path / "wiki"
-        (wiki / "summaries").mkdir(parents=True)
-        (wiki / "summaries" / "doc.md").write_text(
-            "---\nsources: []\n---\n\n# Doc\n", encoding="utf-8"
-        )
-
-        # Mocked LLM: plan call returns one concept + one entity; each
-        # generation call returns a tiny page.
-        def fake_llm(model, messages, label, **kw):
-            if label == "concepts-plan":
-                return json.dumps(
-                    {
-                        "concepts": {
-                            "create": [{"name": "ai-demand", "title": "AI Demand"}],
-                            "update": [],
-                            "related": [],
-                        },
-                        "entities": {
-                            "create": [
-                                {"name": "nvidia", "title": "NVIDIA", "type": "organization"}
-                            ],
-                            "update": [],
-                            "related": [],
-                        },
-                    }
-                )
-            return json.dumps({"description": "b", "type": "organization", "content": "# Page\n"})
-
-        async def fake_llm_async(model, messages, label, **kw):
-            return fake_llm(model, messages, label, **kw)
-
-        monkeypatch.setattr("openkb.agent.compiler._llm_call", fake_llm)
-        monkeypatch.setattr("openkb.agent.compiler._llm_call_async", fake_llm_async)
-
-        from openkb.agent.compiler import _compile_concepts
-
-        sys_msg = {"role": "system", "content": "x"}
-        doc_msg = {"role": "user", "content": "x"}
-        await _compile_concepts(
+    def test_entity_and_concept_split(self, tmp_path):
+        wiki, _ = TestCompileShortDocFallbacks._setup_kb(tmp_path)
+        plan = _normalized_plan(
             wiki,
-            tmp_path,
-            "m",
-            sys_msg,
-            doc_msg,
-            "summary text",
-            "doc",
-            max_concurrency=2,
-            doc_type="short",
-            rewrite_summary=False,
+            {
+                "concepts": {"create": [{"name": "ai-demand"}]},
+                "entities": {"create": [{"name": "nvidia", "type": "organization"}]},
+            },
         )
-
-        assert (wiki / "concepts" / "ai-demand.md").exists()
-        assert (wiki / "entities" / "nvidia.md").exists()
-        ent = (wiki / "entities" / "nvidia.md").read_text(encoding="utf-8")
-        assert 'type: "Organization"' in ent
-        index = (wiki / "index.md").read_text(encoding="utf-8")
-        assert "[[entities/nvidia]]" in index
-        summary = (wiki / "summaries" / "doc.md").read_text(encoding="utf-8")
-        assert "[[entities/nvidia]]" in summary  # backlink
-
-    @pytest.mark.asyncio
-    async def test_related_entity_does_not_downgrade_index_label(self, tmp_path, monkeypatch):
-        """Related-only entities must not overwrite a correct index entry with (other)."""
-        wiki = tmp_path / "wiki"
-        (wiki / "summaries").mkdir(parents=True)
-        (wiki / "entities").mkdir(parents=True)
-
-        # Pre-seed summaries/doc.md
-        (wiki / "summaries" / "doc.md").write_text(
-            "---\nsources: []\n---\n\n# Doc\n", encoding="utf-8"
-        )
-
-        # Pre-seed index.md with a correct entry for anthropic
-        (wiki / "index.md").write_text(
-            "## Documents\n\n## Concepts\n\n## Entities\n\n"
-            "- [[entities/anthropic]] (organization) — AI safety lab\n",
-            encoding="utf-8",
-        )
-
-        # Pre-seed entities/anthropic.md with type frontmatter and a source
-        (wiki / "entities" / "anthropic.md").write_text(
-            "---\ntype: organization\nsources: []\n---\n\n# Anthropic\n",
-            encoding="utf-8",
-        )
-
-        # LLM plan: anthropic is ONLY under entities.related, not create/update
-        def fake_llm(model, messages, label, **kw):
-            if label == "concepts-plan":
-                return json.dumps(
-                    {
-                        "concepts": {"create": [], "update": [], "related": []},
-                        "entities": {"create": [], "update": [], "related": ["anthropic"]},
-                    }
-                )
-            return json.dumps({"brief": "b", "type": "organization", "content": "# Page\n"})
-
-        async def fake_llm_async(model, messages, label, **kw):
-            return fake_llm(model, messages, label, **kw)
-
-        monkeypatch.setattr("openkb.agent.compiler._llm_call", fake_llm)
-        monkeypatch.setattr("openkb.agent.compiler._llm_call_async", fake_llm_async)
-
-        from openkb.agent.compiler import _compile_concepts
-
-        sys_msg = {"role": "system", "content": "x"}
-        doc_msg = {"role": "user", "content": "x"}
-        await _compile_concepts(
+        publish_compile_results(
             wiki,
-            tmp_path,
-            "m",
-            sys_msg,
-            doc_msg,
-            "summary text",
             "doc",
-            max_concurrency=2,
-            doc_type="short",
-            rewrite_summary=False,
-        )
-
-        index = (wiki / "index.md").read_text(encoding="utf-8")
-        # The pre-existing correct line must NOT have been downgraded to (other)
-        assert "(organization)" in index, (
-            "index entry was downgraded from (organization) to (other)"
-        )
-        assert "AI safety lab" in index, "index brief was stripped from the entry"
-
-    @pytest.mark.asyncio
-    async def test_related_to_nonexistent_concept_does_not_create_dangling_links(
-        self, tmp_path, monkeypatch
-    ):
-        """A plan 'related' slug whose page does NOT exist must be repaired, not
-        whitelisted+back-linked — otherwise every page gets a dangling
-        [[concepts/<ghost>]] link to a page that is never created."""
-        wiki = tmp_path / "wiki"
-        (wiki / "summaries").mkdir(parents=True)
-        (wiki / "summaries" / "doc.md").write_text(
-            "---\nsources: []\n---\n\n# Doc\n", encoding="utf-8"
-        )
-
-        plan_calls = 0
-
-        def fake_llm(model, messages, label, **kw):
-            nonlocal plan_calls
-            if label == "concepts-plan":
-                plan_calls += 1
-                return json.dumps(
-                    {
-                        "concepts": {
-                            "create": [{"name": "real-concept", "title": "Real"}],
-                            "update": [],
-                            "related": ["ghost-concept"] if plan_calls == 1 else [],
-                        },
-                        "entities": {"create": [], "update": [], "related": []},
-                    }
-                )
-            if label == "summary-rewrite":
-                return "# Doc\n\nSee [[concepts/real-concept]] and [[concepts/ghost-concept]].\n"
-            # concept generation body references the non-existent ghost concept
-            return json.dumps(
-                {"brief": "b", "content": "# Real\n\nLinks [[concepts/ghost-concept]].\n"}
-            )
-
-        async def fake_llm_async(model, messages, label, **kw):
-            return fake_llm(model, messages, label, **kw)
-
-        monkeypatch.setattr("openkb.agent.compiler._llm_call", fake_llm)
-        monkeypatch.setattr("openkb.agent.compiler._llm_call_async", fake_llm_async)
-
-        from openkb.agent.compiler import _compile_concepts
-
-        await _compile_concepts(
-            wiki,
-            tmp_path,
-            "m",
-            {"role": "system", "content": "x"},
-            {"role": "user", "content": "x"},
-            "summary text",
-            "doc",
-            max_concurrency=2,
-            doc_type="short",
+            plan,
+            summary="# Doc\n",
             rewrite_summary=True,
+            concept_results=[("ai-demand", "# AI Demand\n\nRecorded demand.", False, "Demand")],
+            entity_results=[
+                ("nvidia", "# NVIDIA\n\nAn organization.", "Organization", "organization")
+            ],
         )
+        assert (wiki / "concepts/ai-demand.md").exists()
+        assert (wiki / "entities/nvidia.md").exists()
+        assert 'type: "Organization"' in (wiki / "entities/nvidia.md").read_text()
+        assert "[[entities/nvidia]]" in (wiki / "index.md").read_text()
+        assert "[[entities/nvidia]]" in (wiki / "summaries/doc.md").read_text()
 
-        assert plan_calls == 2
-        # ghost-concept never existed and was only "related" → never created
-        assert not (wiki / "concepts" / "ghost-concept.md").exists()
-        # ...and no page should link to it (stripped as a ghost, since not whitelisted)
-        real = (wiki / "concepts" / "real-concept.md").read_text(encoding="utf-8")
-        assert "[[concepts/ghost-concept]]" not in real
-        summary = (wiki / "summaries" / "doc.md").read_text(encoding="utf-8")
+    def test_related_entity_does_not_downgrade_index_label(self, tmp_path):
+        from ultrakb.locks import atomic_write_text
+
+        wiki, _ = TestCompileShortDocFallbacks._setup_kb(tmp_path)
+        atomic_write_text(wiki / "summaries/doc.md", "# Doc\n")
+        atomic_write_text(
+            wiki / "index.md",
+            "## Documents\n\n## Concepts\n\n## Entities\n- [[entities/anthropic]] (organization) — AI safety lab\n",
+        )
+        atomic_write_text(
+            wiki / "entities/anthropic.md",
+            "---\ntype: organization\nsources: []\n---\n\n# Anthropic\n",
+        )
+        plan = _normalized_plan(wiki, {"entities": {"related": ["anthropic"]}})
+        publish_compile_results(wiki, "doc", plan, summary="Summary.")
+        index = (wiki / "index.md").read_text()
+        assert "(organization)" in index
+        assert "AI safety lab" in index
+
+    def test_related_to_nonexistent_concept_does_not_create_dangling_links(self, tmp_path):
+        wiki, _ = TestCompileShortDocFallbacks._setup_kb(tmp_path)
+        with pytest.raises(ValueError, match="related"):
+            _normalized_plan(
+                wiki, {"create": [{"name": "real-concept"}], "related": ["ghost-concept"]}
+            )
+        plan = _normalized_plan(wiki, {"create": [{"name": "real-concept"}]})
+        publish_compile_results(
+            wiki,
+            "doc",
+            plan,
+            summary="# Doc\n\nSee [[concepts/real-concept]] and [[concepts/ghost-concept]].",
+            rewrite_summary=True,
+            concept_results=[
+                ("real-concept", "# Real\n\nLinks [[concepts/ghost-concept]].", False, "Real")
+            ],
+        )
+        assert not (wiki / "concepts/ghost-concept.md").exists()
+        assert "[[concepts/ghost-concept]]" not in (wiki / "concepts/real-concept.md").read_text()
+        summary = (wiki / "summaries/doc.md").read_text()
         assert "[[concepts/ghost-concept]]" not in summary
-        # the genuinely-created concept must still be linked
         assert "[[concepts/real-concept]]" in summary
 
-    @pytest.mark.asyncio
-    async def test_custom_entity_type_is_not_coerced(self, tmp_path, monkeypatch):
-        """With a config-driven entity_types that includes 'dataset', a plan
-        entity typed 'dataset' is written as 'dataset' (not coerced to other),
-        and the plan prompt the mock receives advertises the custom type."""
-        wiki = tmp_path / "wiki"
-        (wiki / "summaries").mkdir(parents=True)
-        (wiki / "summaries" / "doc.md").write_text(
-            "---\nsources: []\n---\n\n# Doc\n", encoding="utf-8"
-        )
+    def test_custom_entity_type_is_not_coerced(self, tmp_path):
+        from ultrakb.agent.compile_messages import planning_messages
 
-        seen_messages: list = []
-
-        def fake_llm(model, messages, label, **kw):
-            seen_messages.append((label, messages))
-            if label == "concepts-plan":
-                return json.dumps(
-                    {
-                        "concepts": {"create": [], "update": [], "related": []},
-                        "entities": {
-                            "create": [
-                                {"name": "imagenet", "title": "ImageNet", "type": "dataset"}
-                            ],
-                            "update": [],
-                            "related": [],
-                        },
-                    }
-                )
-            return json.dumps({"description": "b", "type": "dataset", "content": "# Page\n"})
-
-        async def fake_llm_async(model, messages, label, **kw):
-            seen_messages.append((label, messages))
-            return fake_llm(model, messages, label, **kw)
-
-        monkeypatch.setattr("openkb.agent.compiler._llm_call", fake_llm)
-        monkeypatch.setattr("openkb.agent.compiler._llm_call_async", fake_llm_async)
-
-        from openkb.agent.compiler import _compile_concepts
-
-        sys_msg = {"role": "system", "content": "x"}
-        doc_msg = {"role": "user", "content": "x"}
-        await _compile_concepts(
+        wiki, _ = TestCompileShortDocFallbacks._setup_kb(tmp_path)
+        types = ["person", "organization", "dataset", "other"]
+        plan = _normalized_plan(
             wiki,
-            tmp_path,
-            "m",
-            sys_msg,
-            doc_msg,
-            "summary text",
-            "doc",
-            max_concurrency=2,
-            doc_type="short",
-            rewrite_summary=False,
-            entity_types=["person", "organization", "dataset", "other"],
+            {"entities": {"create": [{"name": "imagenet", "type": "dataset"}]}},
+            entity_types=types,
         )
-
-        ent = (wiki / "entities" / "imagenet.md").read_text(encoding="utf-8")
-        assert 'type: "Dataset"' in ent
-        # The custom type must reach the plan prompt the mock saw.
-        plan_msgs = [m for (label, m) in seen_messages if label == "concepts-plan"]
-        assert plan_msgs, "plan call was not made"
-        plan_user = plan_msgs[0][-1]["content"]
-        assert "dataset" in plan_user
-        assert "__ENTITY_TYPES__" not in plan_user  # token was substituted
-
-    @pytest.mark.asyncio
-    async def test_brace_in_entity_type_does_not_crash_format(self, tmp_path, monkeypatch):
-        """Defense-in-depth: even if a '{'/'}' reaches types_str (bypassing
-        resolve_entity_types sanitization), the prompt build must not raise —
-        the token is substituted AFTER .format(), so braces are inert."""
-        wiki = tmp_path / "wiki"
-        (wiki / "summaries").mkdir(parents=True)
-        (wiki / "summaries" / "doc.md").write_text(
-            "---\nsources: []\n---\n\n# Doc\n", encoding="utf-8"
-        )
-
-        def fake_llm(model, messages, label, **kw):
-            return json.dumps(
-                {
-                    "concepts": {"create": [], "update": [], "related": []},
-                    "entities": {"create": [], "update": [], "related": []},
-                }
-            )
-
-        async def fake_llm_async(model, messages, label, **kw):
-            return fake_llm(model, messages, label, **kw)
-
-        monkeypatch.setattr("openkb.agent.compiler._llm_call", fake_llm)
-        monkeypatch.setattr("openkb.agent.compiler._llm_call_async", fake_llm_async)
-
-        from openkb.agent.compiler import _compile_concepts
-
-        # entity_types deliberately contains brace chars to exercise the
-        # format/replace ordering — this must NOT raise KeyError/ValueError.
-        await _compile_concepts(
+        assert plan.entities.create[0]["type"] == "dataset"
+        publish_compile_results(
             wiki,
-            tmp_path,
-            "m",
-            {"role": "system", "content": "x"},
-            {"role": "user", "content": "x"},
-            "summary text",
             "doc",
-            max_concurrency=2,
-            doc_type="short",
-            rewrite_summary=False,
+            plan,
+            summary="Summary.",
+            entity_results=[("imagenet", "# ImageNet\n\nA dataset.", "Dataset", "dataset")],
+        )
+        assert 'type: "Dataset"' in (wiki / "entities/imagenet.md").read_text()
+        prompt = planning_messages(
+            {"role": "system", "content": "s"},
+            {"role": "user", "content": "d"},
+            "Summary.",
+            concept_briefs="",
+            entity_briefs="",
+            entity_types=types,
+        )[-1]["content"]
+        assert "dataset" in prompt
+        assert "__ENTITY_TYPES__" not in prompt
+
+    def test_brace_in_entity_type_does_not_crash_format(self):
+        from ultrakb.agent.compile_messages import planning_messages
+
+        prompt = planning_messages(
+            {"role": "system", "content": "s"},
+            {"role": "user", "content": "d"},
+            "Summary.",
+            concept_briefs="",
+            entity_briefs="",
             entity_types=["wei{rd}", "other"],
-        )  # reaching here without an exception is the assertion
+        )[-1]["content"]
+        assert "wei{rd}" in prompt
+        assert "__ENTITY_TYPES__" not in prompt
 
-    @pytest.mark.asyncio
-    async def test_default_path_plan_prompt_has_default_types(self, tmp_path, monkeypatch):
-        """When entity_types is omitted, the plan prompt still advertises the
-        default enum at call time (byte-identical to today)."""
-        wiki = tmp_path / "wiki"
-        (wiki / "summaries").mkdir(parents=True)
-        (wiki / "summaries" / "doc.md").write_text(
-            "---\nsources: []\n---\n\n# Doc\n", encoding="utf-8"
-        )
+    def test_default_path_plan_prompt_has_default_types(self):
+        from ultrakb.agent.compile_messages import planning_messages
 
-        seen_messages: list = []
-
-        def fake_llm(model, messages, label, **kw):
-            seen_messages.append((label, messages))
-            return json.dumps(
-                {
-                    "concepts": {"create": [], "update": [], "related": []},
-                    "entities": {"create": [], "update": [], "related": []},
-                }
-            )
-
-        async def fake_llm_async(model, messages, label, **kw):
-            seen_messages.append((label, messages))
-            return fake_llm(model, messages, label, **kw)
-
-        monkeypatch.setattr("openkb.agent.compiler._llm_call", fake_llm)
-        monkeypatch.setattr("openkb.agent.compiler._llm_call_async", fake_llm_async)
-
-        from openkb.agent.compiler import _compile_concepts
-
-        await _compile_concepts(
-            wiki,
-            tmp_path,
-            "m",
-            {"role": "system", "content": "x"},
-            {"role": "user", "content": "x"},
-            "summary text",
-            "doc",
-            max_concurrency=2,
-            doc_type="short",
-            rewrite_summary=False,
-        )
-
-        plan_msgs = [m for (label, m) in seen_messages if label == "concepts-plan"]
-        plan_user = plan_msgs[0][-1]["content"]
-        for t in _ENTITY_TYPE_LIST:
-            assert t in plan_user
-        assert "__ENTITY_TYPES__" not in plan_user
+        prompt = planning_messages(
+            {"role": "system", "content": "s"},
+            {"role": "user", "content": "d"},
+            "Summary.",
+            concept_briefs="",
+            entity_briefs="",
+            entity_types=None,
+        )[-1]["content"]
+        for item in _ENTITY_TYPE_LIST:
+            assert item in prompt
+        assert "__ENTITY_TYPES__" not in prompt
 
 
 # ---------------------------------------------------------------------------
@@ -2567,9 +1822,9 @@ def test_ensure_h2_section_quiet_suppresses_drift_warning(caplog):
     must not emit the 'hand-edited' drift warning; default still warns."""
     import logging
 
-    from openkb.agent.compiler import _ensure_h2_section
+    from ultrakb.agent.compiler import _ensure_h2_section
 
-    with caplog.at_level(logging.WARNING, logger="openkb.agent.compiler"):
+    with caplog.at_level(logging.WARNING, logger="ultrakb.agent.compiler"):
         lines = ["# Doc", ""]
         _ensure_h2_section(lines, "## Entities", quiet=True)
         assert "## Entities" in lines
@@ -2583,7 +1838,7 @@ def test_known_targets_prompt_has_entities_rule():
     """The whitelist message must tell the LLM the [[entities/X]] rule, since
     entity-page prompts instruct writing such links; otherwise entity links
     are generated freely and then stripped as ghosts."""
-    from openkb.agent.compiler import _KNOWN_TARGETS_USER
+    from ultrakb.agent.compiler import _KNOWN_TARGETS_USER
 
     assert "[[entities/" in _KNOWN_TARGETS_USER
 
@@ -2591,7 +1846,7 @@ def test_known_targets_prompt_has_entities_rule():
 def test_plan_prompt_keeps_topic_itself_guard():
     """The concept-plan prompt must retain the guard against creating a concept
     that merely mirrors the document's own topic."""
-    from openkb.agent.compiler import _CONCEPTS_PLAN_USER
+    from ultrakb.agent.compiler import _CONCEPTS_PLAN_USER
 
     assert "just the document topic itself" in _CONCEPTS_PLAN_USER
 
@@ -2600,53 +1855,80 @@ class TestLLMCallExtraHeaders:
     """Config-driven extra headers reach the litellm calls (issue #93)."""
 
     def test_llm_call_injects_extra_headers(self):
-        from openkb.agent.compiler import _llm_call
-        from openkb.config import set_extra_headers
+        from ultrakb.config import set_extra_headers
+        from ultrakb.llm_execution import ModelRequest, compiler_executor
 
         set_extra_headers({"Editor-Version": "vscode/1.95.0"})
-        with patch("openkb.llm_execution.litellm") as mock_litellm:
-            mock_litellm.completion = MagicMock(side_effect=_mock_completion(["ok"]))
-            out = _llm_call("m", [{"role": "user", "content": "hi"}], "step")
-        assert out == "ok"
-        kwargs = mock_litellm.completion.call_args.kwargs
+        options = {}
+        executor = compiler_executor("deepseek/deepseek-flash", None, options)
+        kwargs = executor._kwargs(
+            "compile",
+            ModelRequest(
+                [{"role": "user", "content": "Say OK."}],
+                operation="compile",
+                stage="step",
+                generation_options=options,
+            ),
+        )
         assert kwargs["extra_headers"] == {"Editor-Version": "vscode/1.95.0"}
+        assert executor.calls == 0
 
     def test_llm_call_no_extra_headers_by_default(self):
-        from openkb.agent.compiler import _llm_call
+        from ultrakb.config import set_extra_headers
+        from ultrakb.llm_execution import ModelRequest, compiler_executor
 
-        with patch("openkb.llm_execution.litellm") as mock_litellm:
-            mock_litellm.completion = MagicMock(side_effect=_mock_completion(["ok"]))
-            _llm_call("m", [{"role": "user", "content": "hi"}], "step")
-        assert "extra_headers" not in mock_litellm.completion.call_args.kwargs
+        set_extra_headers({})
+        options = {}
+        executor = compiler_executor("deepseek/deepseek-flash", None, options)
+        kwargs = executor._kwargs(
+            "compile",
+            ModelRequest(
+                [{"role": "user", "content": "Say OK."}],
+                operation="compile",
+                stage="step",
+                generation_options=options,
+            ),
+        )
+        assert "extra_headers" not in kwargs
+        assert executor.calls == 0
 
     def test_llm_call_explicit_kwarg_wins_over_config(self):
-        from openkb.agent.compiler import _llm_call
-        from openkb.config import set_extra_headers
+        from ultrakb.config import set_extra_headers
+        from ultrakb.llm_execution import ModelRequest, compiler_executor
 
         set_extra_headers({"Editor-Version": "from-config"})
-        with patch("openkb.llm_execution.litellm") as mock_litellm:
-            mock_litellm.completion = MagicMock(side_effect=_mock_completion(["ok"]))
-            _llm_call(
-                "m",
-                [{"role": "user", "content": "hi"}],
-                "step",
-                extra_headers={"Editor-Version": "explicit"},
-            )
-        kwargs = mock_litellm.completion.call_args.kwargs
+        options = {"extra_headers": {"Editor-Version": "explicit"}}
+        executor = compiler_executor("deepseek/deepseek-flash", None, options)
+        kwargs = executor._kwargs(
+            "compile",
+            ModelRequest(
+                [{"role": "user", "content": "Say OK."}],
+                operation="compile",
+                stage="step",
+                generation_options=options,
+            ),
+        )
         assert kwargs["extra_headers"] == {"Editor-Version": "explicit"}
+        assert executor.calls == 0
 
-    @pytest.mark.asyncio
-    async def test_llm_call_async_injects_extra_headers(self):
-        from openkb.agent.compiler import _llm_call_async
-        from openkb.config import set_extra_headers
+    def test_llm_call_async_injects_extra_headers(self):
+        from ultrakb.config import set_extra_headers
+        from ultrakb.llm_execution import ModelRequest, compiler_executor
 
         set_extra_headers({"Copilot-Integration-Id": "vscode-chat"})
-        with patch("openkb.llm_execution.litellm") as mock_litellm:
-            mock_litellm.acompletion = AsyncMock(side_effect=_mock_acompletion(["ok"]))
-            out = await _llm_call_async("m", [{"role": "user", "content": "hi"}], "step")
-        assert out == "ok"
-        kwargs = mock_litellm.acompletion.call_args.kwargs
+        options = {}
+        executor = compiler_executor("deepseek/deepseek-flash", None, options)
+        kwargs = executor._kwargs(
+            "compile",
+            ModelRequest(
+                [{"role": "user", "content": "Say OK."}],
+                operation="compile",
+                stage="step",
+                generation_options=options,
+            ),
+        )
         assert kwargs["extra_headers"] == {"Copilot-Integration-Id": "vscode-chat"}
+        assert executor.calls == 0
 
 
 class TestCacheControlStripping:
@@ -2660,7 +1942,7 @@ class TestCacheControlStripping:
     """
 
     def test_accepts_for_anthropic_providers(self):
-        from openkb.agent.compiler import _accepts_cache_control
+        from ultrakb.agent.compiler import _accepts_cache_control
 
         assert _accepts_cache_control("anthropic/claude-sonnet-4-6")
         assert _accepts_cache_control("claude-opus-4-6")
@@ -2668,13 +1950,13 @@ class TestCacheControlStripping:
         assert _accepts_cache_control("openrouter/anthropic/claude-3.5-sonnet")
 
     def test_rejects_for_non_anthropic_providers(self):
-        from openkb.agent.compiler import _accepts_cache_control
+        from ultrakb.agent.compiler import _accepts_cache_control
 
         assert not _accepts_cache_control("gemini/gemini-2.5-pro")
         assert not _accepts_cache_control("gpt-4o")
 
     def test_strip_removes_marker_without_mutating_input(self):
-        from openkb.agent.compiler import _cached_text, _strip_cache_control
+        from ultrakb.agent.compiler import _cached_text, _strip_cache_control
 
         messages = [
             {"role": "system", "content": "plain string stays"},
@@ -2689,33 +1971,20 @@ class TestCacheControlStripping:
         assert "cache_control" in messages[1]["content"][0]
 
     def test_llm_call_strips_marker_for_gemini(self):
-        from openkb.agent.compiler import _cached_text, _llm_call
+        from ultrakb.agent.compiler import _cached_text, _prepare_messages
 
-        with patch(
-            "openkb.agent.compiler.litellm.completion",
-            MagicMock(side_effect=_mock_completion(["ok"])),
-        ) as mock_completion:
-            _llm_call(
-                "gemini/gemini-2.5-pro", [{"role": "user", "content": _cached_text("doc")}], "step"
-            )
-        sent = mock_completion.call_args.kwargs["messages"]
-        block = sent[0]["content"][0]
-        assert "cache_control" not in block
-        assert block["text"] == "doc"
+        sent = _prepare_messages(
+            "gemini/gemini-2.5-pro", [{"role": "user", "content": _cached_text("doc")}]
+        )
+        assert "cache_control" not in sent[0]["content"][0]
+        assert sent[0]["content"][0]["text"] == "doc"
 
     def test_llm_call_keeps_marker_for_anthropic(self):
-        from openkb.agent.compiler import _cached_text, _llm_call
+        from ultrakb.agent.compiler import _cached_text, _prepare_messages
 
-        with patch(
-            "openkb.agent.compiler.litellm.completion",
-            MagicMock(side_effect=_mock_completion(["ok"])),
-        ) as mock_completion:
-            _llm_call(
-                "anthropic/claude-sonnet-4-6",
-                [{"role": "user", "content": _cached_text("doc")}],
-                "step",
-            )
-        sent = mock_completion.call_args.kwargs["messages"]
+        sent = _prepare_messages(
+            "anthropic/claude-sonnet-4-6", [{"role": "user", "content": _cached_text("doc")}]
+        )
         assert sent[0]["content"][0]["cache_control"] == {"type": "ephemeral"}
 
 

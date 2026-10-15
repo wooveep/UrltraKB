@@ -3,7 +3,7 @@
 Old DOC objects are located from the frozen CFB original, including ObjectPool
 remnants and standard document storages without a live body reference. Complete
 Package/Ole10Native payloads are read directly. Standard DOC/XLS child storages
-use `openkb-cfb` to rebuild a standalone compound file, then enter the existing
+use `ultrakb-cfb` to rebuild a standalone compound file, then enter the existing
 ordinary Source pipeline. No embedded application is activated. The helper has
 no responsibility for identities, scheduling, Source metadata, budgets or commits.
 
@@ -28,7 +28,7 @@ freeze command:
 python scripts/prepare_cfb_helper.py
 ```
 
-This prepares `openkb/cfb_helper/assets/runtime` with the native executable, typed
+This prepares `ultrakb/cfb_helper/assets/runtime` with the native executable, typed
 manifest and `source.zip`. The existing desktop data collection includes that
 directory. Users do not need Rust; a missing or mismatched helper produces an
 explicit recovery diagnostic. On Windows, use the Rust MSVC toolchain and its

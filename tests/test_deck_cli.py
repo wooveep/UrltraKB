@@ -1,4 +1,4 @@
-"""Click CLI tests for `openkb deck new`. Mocks Generator.run; no LLM."""
+"""Click CLI tests for `ultrakb deck new`. Mocks Generator.run; no LLM."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 from click.testing import CliRunner
 
-from openkb.cli import cli
+from ultrakb.cli import cli
 
 
 def _init_kb(tmp_path: Path) -> Path:
@@ -16,8 +16,8 @@ def _init_kb(tmp_path: Path) -> Path:
     Includes a non-empty ``wiki/concepts/`` so the shared
     ``_preflight_skill_new`` wiki-content gate passes.
     """
-    (tmp_path / ".openkb").mkdir()
-    (tmp_path / ".openkb" / "config.yaml").write_text(
+    (tmp_path / ".ultrakb").mkdir()
+    (tmp_path / ".ultrakb" / "config.yaml").write_text(
         "model: openai/gpt-4o\nlanguage: en\n", encoding="utf-8"
     )
     from kb_fixtures import mark_current_kb
@@ -75,9 +75,9 @@ def test_deck_new_reports_the_custom_target_in_overwrite_errors(tmp_path, monkey
 
 
 def test_deck_new_rejects_no_kb(tmp_path: Path, monkeypatch):
-    monkeypatch.chdir(tmp_path)  # no .openkb here
+    monkeypatch.chdir(tmp_path)  # no .ultrakb here
     runner = CliRunner()
-    with patch("openkb.cli._find_kb_dir", return_value=None):
+    with patch("ultrakb.cli._find_kb_dir", return_value=None):
         result = runner.invoke(cli, ["deck", "new", "my-deck", "An intent."])
     assert result.exit_code != 0
     assert "knowledge base" in result.output.lower()
@@ -99,7 +99,7 @@ def test_deck_new_happy_path(tmp_path: Path, monkeypatch):
 
     fake_validation = type("V", (), {"errors": [], "warnings": [], "ok": True})()
 
-    with patch("openkb.skill.generator.Generator") as gen_cls:
+    with patch("ultrakb.skill.generator.Generator") as gen_cls:
         gen = gen_cls.return_value
         gen.run = AsyncMock(return_value=tmp_path / "output" / "decks" / "my-deck")
         gen.validation = fake_validation
@@ -124,7 +124,7 @@ def test_deck_new_passes_critique_flag(tmp_path: Path, monkeypatch):
 
     fake_validation = type("V", (), {"errors": [], "warnings": [], "ok": True})()
 
-    with patch("openkb.skill.generator.Generator") as gen_cls:
+    with patch("ultrakb.skill.generator.Generator") as gen_cls:
         gen = gen_cls.return_value
         gen.run = AsyncMock(return_value=tmp_path / "output" / "decks" / "my-deck")
         gen.validation = fake_validation
@@ -144,7 +144,7 @@ def test_deck_new_surfaces_validation_errors(tmp_path: Path, monkeypatch):
 
     fake_validation = type("V", (), {"errors": ["bad slide count"], "warnings": [], "ok": False})()
 
-    with patch("openkb.skill.generator.Generator") as gen_cls:
+    with patch("ultrakb.skill.generator.Generator") as gen_cls:
         gen = gen_cls.return_value
         gen.run = AsyncMock(return_value=tmp_path / "output" / "decks" / "my-deck")
         gen.validation = fake_validation
@@ -160,9 +160,9 @@ def test_deck_new_surfaces_validation_errors(tmp_path: Path, monkeypatch):
 
 def test_deck_new_rejects_empty_wiki(tmp_path: Path, monkeypatch):
     """CLI must refuse to compile when the KB exists but the wiki is empty
-    (parity with chat /deck new and CLI openkb skill new)."""
-    (tmp_path / ".openkb").mkdir()
-    (tmp_path / ".openkb" / "config.yaml").write_text(
+    (parity with chat /deck new and CLI ultrakb skill new)."""
+    (tmp_path / ".ultrakb").mkdir()
+    (tmp_path / ".ultrakb" / "config.yaml").write_text(
         "model: openai/gpt-4o\nlanguage: en\n", encoding="utf-8"
     )
     from kb_fixtures import mark_current_kb
@@ -177,7 +177,7 @@ def test_deck_new_rejects_empty_wiki(tmp_path: Path, monkeypatch):
     # Patch Generator so that, if preflight is missing, the test would still
     # exit 0 — making this test only pass once the wiki-content gate is wired.
     fake_validation = type("V", (), {"errors": [], "warnings": [], "ok": True})()
-    with patch("openkb.skill.generator.Generator") as gen_cls:
+    with patch("ultrakb.skill.generator.Generator") as gen_cls:
         gen = gen_cls.return_value
         gen.run = AsyncMock(return_value=tmp_path / "output" / "decks" / "my-deck")
         gen.validation = fake_validation

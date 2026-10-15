@@ -117,7 +117,7 @@ def assemble(plan: dict, root: Path, output: Path) -> dict:
     validate(plan, root)
     output.parent.mkdir(parents=True, exist_ok=True)
     manifest = {"schema": 1, **plan["identity"], "files": []}
-    with tempfile.TemporaryDirectory(prefix="openkb-materials-", dir=output.parent) as directory:
+    with tempfile.TemporaryDirectory(prefix="ultrakb-materials-", dir=output.parent) as directory:
         staging = Path(directory) / "distribution"
         staging.mkdir()
         for group in plan["groups"]:

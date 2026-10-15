@@ -6,10 +6,10 @@ import pytest
 
 
 def test_artifact_export_allows_a_profile_containing_global_lifecycle_state(kb_dir, tmp_path):
-    from openkb.application.artifacts import export_artifact
+    from ultrakb.application.artifacts import export_artifact
 
     profile = tmp_path.parent / f"{tmp_path.name}-profile"
-    (profile / ".openkb/kb-lifecycle").mkdir(parents=True)
+    (profile / ".ultrakb/kb-lifecycle").mkdir(parents=True)
     destination = profile / "Documents/exports"
     destination.mkdir(parents=True)
     source = kb_dir / "output/result.md"
@@ -21,8 +21,8 @@ def test_artifact_export_allows_a_profile_containing_global_lifecycle_state(kb_d
 
 
 def test_artifact_export_rejects_an_unfinished_initialization(kb_dir, tmp_path, monkeypatch):
-    from openkb.application.artifacts import export_artifact
-    from openkb.application.knowledge_bases import initialization_pending, initialize_kb
+    from ultrakb.application.artifacts import export_artifact
+    from ultrakb.application.knowledge_bases import initialization_pending, initialize_kb
 
     target = tmp_path.parent / f"{tmp_path.name}-incomplete"
     source = kb_dir / "output/result.md"
@@ -32,7 +32,7 @@ def test_artifact_export_rejects_an_unfinished_initialization(kb_dir, tmp_path, 
     def fail_transaction(*args, **kwargs):
         raise OSError("cannot prepare transaction")
 
-    monkeypatch.setattr("openkb.mutation.mutation_scope", fail_transaction)
+    monkeypatch.setattr("ultrakb.mutation.mutation_scope", fail_transaction)
     with pytest.raises(OSError, match="cannot prepare"):
         initialize_kb(target, seed_environment=False, require_empty=True)
     assert initialization_pending(target)
@@ -42,7 +42,7 @@ def test_artifact_export_rejects_an_unfinished_initialization(kb_dir, tmp_path, 
 
 
 def test_artifact_export_keeps_supporting_files_and_existing_exports(kb_dir, tmp_path):
-    from openkb.application.artifacts import export_artifact, list_artifacts
+    from ultrakb.application.artifacts import export_artifact, list_artifacts
 
     target = kb_dir / "output/skills/demo"
     target.mkdir(parents=True)
@@ -60,10 +60,10 @@ def test_artifact_export_keeps_supporting_files_and_existing_exports(kb_dir, tmp
         assert archive.read("demo/references/topic.md") == b"Supporting knowledge"
     assert first.read_bytes() == second.read_bytes()
     with pytest.raises(ValueError):
-        export_artifact(kb_dir, ".openkb/config.yaml", export_dir)
+        export_artifact(kb_dir, ".ultrakb/config.yaml", export_dir)
     other = export_dir / "other-kb"
-    (other / ".openkb").mkdir(parents=True)
-    (other / ".openkb/needs-repair.json").write_text("{}")
+    (other / ".ultrakb").mkdir(parents=True)
+    (other / ".ultrakb/needs-repair.json").write_text("{}")
     destination = other / "wiki/concepts"
     destination.mkdir(parents=True)
     with pytest.raises(ValueError):
@@ -72,7 +72,7 @@ def test_artifact_export_keeps_supporting_files_and_existing_exports(kb_dir, tmp
 
 
 def test_graph_generation_preserves_links_and_replaces_only_its_fixed_artifact(kb_dir):
-    from openkb.application.artifacts import generate_graph, read_graph
+    from ultrakb.application.artifacts import generate_graph, read_graph
 
     (kb_dir / "wiki/concepts/a.md").write_text("# A\n[[concepts/b]]")
     (kb_dir / "wiki/concepts/b.md").write_text("# B")
@@ -84,4 +84,4 @@ def test_graph_generation_preserves_links_and_replaces_only_its_fixed_artifact(k
     again = generate_graph(kb_dir)
     assert again.path == result.path
     assert "<canvas" in again.path.read_text(encoding="utf-8")
-    assert not list((kb_dir / ".openkb/journal").glob("*.json"))
+    assert not list((kb_dir / ".ultrakb/journal").glob("*.json"))

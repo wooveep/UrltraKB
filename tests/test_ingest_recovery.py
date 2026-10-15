@@ -8,8 +8,8 @@ pytest_plugins = ("test_pdf_readback",)
 def test_import_does_not_retry_compilation_after_recovery_is_required(
     kb_dir, tmp_path, monkeypatch
 ):
-    from openkb.application.documents import import_document
-    from openkb.mutation import RecoveryRequired
+    from ultrakb.application.documents import import_document
+    from ultrakb.mutation import RecoveryRequired
 
     source = tmp_path / "note.md"
     source.write_text("# New document\n")
@@ -19,7 +19,7 @@ def test_import_does_not_retry_compilation_after_recovery_is_required(
         calls.append(1)
         raise RecoveryRequired("Repair required during compilation")
 
-    monkeypatch.setattr("openkb.agent.compiler.compile_short_doc", fail)
+    monkeypatch.setattr("ultrakb.agent.compiler.compile_short_doc", fail)
     with pytest.raises(RecoveryRequired):
         import_document(kb_dir, source)
     assert len(calls) == 1
@@ -28,8 +28,8 @@ def test_import_does_not_retry_compilation_after_recovery_is_required(
 def test_rest_watch_stops_processing_on_required_repair(kb_dir, monkeypatch):
     import threading
 
-    from openkb.mutation import RecoveryRequired
-    from openkb.watch_service import WatchRegistry
+    from ultrakb.mutation import RecoveryRequired
+    from ultrakb.watch_service import WatchRegistry
 
     started = threading.Event()
     calls = []
@@ -39,7 +39,7 @@ def test_rest_watch_stops_processing_on_required_repair(kb_dir, monkeypatch):
         started.set()
         raise RecoveryRequired("Explicit repair required")
 
-    monkeypatch.setattr("openkb.agent.compiler.compile_short_doc", fail_compile)
+    monkeypatch.setattr("ultrakb.agent.compiler.compile_short_doc", fail_compile)
     registry = WatchRegistry()
     state = registry.start("test", kb_dir, debounce=0.1)
     try:
@@ -61,9 +61,9 @@ def test_rest_watch_keeps_raw_input_identity_when_a_file_becomes_a_symlink(
     import time
     from contextlib import contextmanager
 
-    import openkb.application.documents as documents
-    from openkb.state import HashRegistry
-    from openkb.watch_service import WatchRegistry
+    import ultrakb.application.documents as documents
+    from ultrakb.state import HashRegistry
+    from ultrakb.watch_service import WatchRegistry
 
     source = kb_dir / "raw/inbox/note.md"
     source.parent.mkdir()
@@ -74,11 +74,11 @@ def test_rest_watch_keeps_raw_input_identity_when_a_file_becomes_a_symlink(
     except OSError:
         pytest.skip("File symlinks unavailable")
     source.unlink()
-    HashRegistry(kb_dir / ".openkb/hashes.json").add(
+    HashRegistry(kb_dir / ".ultrakb/hashes.json").add(
         "0" * 64, {"name": "note.md", "doc_name": "note", "path": "raw/other/note.md"}
     )
     prepare = documents.prepared_input
-    import openkb.application.ingestion as ingestion
+    import ultrakb.application.ingestion as ingestion
 
     admit = ingestion.admit_source_revision
     compiled = []
@@ -105,7 +105,7 @@ def test_rest_watch_keeps_raw_input_identity_when_a_file_becomes_a_symlink(
     async def compile_document(name, path, *args, **kwargs):
         compiled.append(path.read_text())
 
-    monkeypatch.setattr("openkb.agent.compiler.compile_short_doc", compile_document)
+    monkeypatch.setattr("ultrakb.agent.compiler.compile_short_doc", compile_document)
     monkeypatch.setattr(
         documents if moment == "prepare" else ingestion,
         "prepared_input" if moment == "prepare" else "admit_source_revision",
@@ -125,7 +125,7 @@ def test_rest_watch_keeps_raw_input_identity_when_a_file_becomes_a_symlink(
         registry.stop_all()
     assert replaced
     assert compiled == (["# Original\n"] if moment == "admitted" else [])
-    entries = HashRegistry(kb_dir / ".openkb/hashes.json").all_entries()
+    entries = HashRegistry(kb_dir / ".ultrakb/hashes.json").all_entries()
     assert all(item.get("path") != outside.as_posix() for item in entries.values())
 
 
@@ -133,11 +133,11 @@ def test_rest_watch_keeps_raw_input_identity_when_a_file_becomes_a_symlink(
 def test_failed_import_rollback_stays_blocked_after_the_io_error_is_gone(
     kb_dir, tmp_path, monkeypatch, marker_failure, pdf_model
 ):
-    import openkb.mutation as mutation
-    from openkb.application.documents import import_document
-    from openkb.documents import read_document_source
-    from openkb.knowledge_scope import live_scope
-    from openkb.mutation import RecoveryRequired, repair_marker
+    import ultrakb.mutation as mutation
+    from ultrakb.application.documents import import_document
+    from ultrakb.documents import read_document_source
+    from ultrakb.knowledge_scope import live_scope
+    from ultrakb.mutation import RecoveryRequired, repair_marker
 
     source = tmp_path / "note.md"
     source.write_text("# Previously retained source\n")
@@ -174,7 +174,7 @@ def test_failed_import_rollback_stays_blocked_after_the_io_error_is_gone(
 
     with monkeypatch.context() as patch:
         patch.setattr(mutation.MutationSnapshot, "mark_committed", fail_publication)
-        patch.setattr("openkb.application.documents.time.sleep", lambda value: None)
+        patch.setattr("ultrakb.application.documents.time.sleep", lambda value: None)
         patch.setattr(mutation.shutil, "copytree", fail_restore)
         if marker_failure:
             patch.setattr(mutation, "atomic_write_json", fail_marker)
@@ -184,14 +184,14 @@ def test_failed_import_rollback_stays_blocked_after_the_io_error_is_gone(
                 source,
             )
     assert repair_marker(kb_dir).is_file() is not marker_failure
-    assert list((kb_dir / ".openkb/journal").glob("*.json"))
+    assert list((kb_dir / ".ultrakb/journal").glob("*.json"))
     # Recoverable I/O on the next call must not silently clear the explicit repair gate.
     with pytest.raises(RecoveryRequired):
         import_document(
             kb_dir,
             source,
         )
-    from openkb.application.repair import repair_knowledge_base
+    from ultrakb.application.repair import repair_knowledge_base
 
     assert repair_knowledge_base(kb_dir).repaired
     assert old.read_text() == previous_body
@@ -202,8 +202,8 @@ def test_native_watch_does_not_follow_a_replaced_knowledge_base(kb_dir):
     import shutil
     import time
 
-    from openkb.runtime.tasks import TaskManager
-    from openkb.runtime.watch import NativeWatch
+    from ultrakb.runtime.tasks import TaskManager
+    from ultrakb.runtime.watch import NativeWatch
 
     manager = TaskManager(history_dir=kb_dir.with_name(kb_dir.name + "-history"))
     watch = NativeWatch(kb_dir, manager, debounce=30, scan_interval=0.1)
@@ -230,8 +230,8 @@ def test_stopping_rest_watch_cancels_a_start_waiting_for_the_kb(kb_dir):
     import threading
     import time
 
-    from openkb.locks import LockCancelled, kb_ingest_lock
-    from openkb.watch_service import WatchRegistry
+    from ultrakb.locks import LockCancelled, kb_ingest_lock
+    from ultrakb.watch_service import WatchRegistry
 
     registry = WatchRegistry()
     results, errors = [], []
@@ -244,7 +244,7 @@ def test_stopping_rest_watch_cancels_a_start_waiting_for_the_kb(kb_dir):
 
     worker = threading.Thread(target=start)
     try:
-        with kb_ingest_lock(kb_dir / ".openkb"):
+        with kb_ingest_lock(kb_dir / ".ultrakb"):
             worker.start()
             deadline = time.monotonic() + 2
             stopped = registry.stop("pending")

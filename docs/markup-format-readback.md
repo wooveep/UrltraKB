@@ -20,7 +20,7 @@ HTML 使用已锁定的 Beautiful Soup `html.parser` 和 Markdownify，保留标
 `download_remote_assets` 默认为 false，优先级为单次 > 本库显式值 > 全局 > false。
 显式 false 不被上层 true 覆盖，配置 PATCH 中 null 清除该层覆盖。
 
-- CLI：`openkb add guide.html --download-remote-assets` 或 `--no-download-remote-assets`。
+- CLI：`ultrakb add guide.html --download-remote-assets` 或 `--no-download-remote-assets`。
 - API：`POST /api/v1/add` multipart 字段 `download_remote_assets=true/false`；普通及 SSE 导入一致。
 - 桌面：导入表单的「本次 HTML 远程图片」可继承、下载或仅保留链接；设置页支持本库与全局值。
 - 监听：采用执行时捕获的本库/全局配置。本地图片改变会形成新的来源修订。

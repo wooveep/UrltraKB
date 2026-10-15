@@ -1,8 +1,8 @@
 """Sanity tests for the built-in deck-neon skill.
 
-``openkb-deck-neon`` is the DEFAULT deck skill (``DEFAULT_DECK_SKILL`` in
-``openkb/deck/creator.py``), so a typo in its frontmatter or a broken ``od``
-contract would break the most-traveled ``openkb deck new`` path at runtime
+``ultrakb-deck-neon`` is the DEFAULT deck skill (``DEFAULT_DECK_SKILL`` in
+``ultrakb/deck/creator.py``), so a typo in its frontmatter or a broken ``od``
+contract would break the most-traveled ``ultrakb deck new`` path at runtime
 while every other test stayed green. These tests pin the structural anchors
 the validator and generator depend on — mirroring ``test_deck_prompt.py``
 which guards the sibling deck-editorial skill.
@@ -12,10 +12,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from openkb.agent.skills import _parse_frontmatter
-from openkb.deck.creator import DEFAULT_DECK_SKILL
+from ultrakb.agent.skills import _parse_frontmatter
+from ultrakb.deck.creator import DEFAULT_DECK_SKILL
 
-SKILL_MD = Path(__file__).resolve().parent.parent / "skills" / "openkb-deck-neon" / "SKILL.md"
+SKILL_MD = Path(__file__).resolve().parent.parent / "skills" / "ultrakb-deck-neon" / "SKILL.md"
 
 
 def _load() -> tuple[dict, str]:
@@ -24,9 +24,9 @@ def _load() -> tuple[dict, str]:
 
 def test_neon_is_the_default_deck_skill():
     # The skill dir name, the frontmatter name, and the routed default must agree.
-    assert DEFAULT_DECK_SKILL == "openkb-deck-neon"
+    assert DEFAULT_DECK_SKILL == "ultrakb-deck-neon"
     meta, _ = _load()
-    assert meta.get("name") == "openkb-deck-neon"
+    assert meta.get("name") == "ultrakb-deck-neon"
 
 
 def test_skill_file_present_and_substantive():

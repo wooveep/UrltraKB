@@ -1,28 +1,25 @@
 """URL acquisition is private preparation; the shared ingest owns publication."""
 
-import json
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+from application_llm_fixtures import real_application_model  # noqa: F401
 
-from openkb.application.urls import import_url
+from ultrakb.application.urls import import_url
 
 
 def test_url_compiles_records_provenance_and_deduplicates(kb_dir, monkeypatch):
-    import litellm
-
-    from openkb.application.execution import ExecutionContext
-    from openkb.locks import kb_ingest_lock_held
-    from openkb.source_catalog import list_sources
+    from ultrakb.application.execution import ExecutionContext
+    from ultrakb.locks import kb_ingest_lock_held
+    from ultrakb.source_catalog import list_sources
 
     context = ExecutionContext()
     private = []
 
     def fetch(url, root, **options):
         assert context.snapshot is None or len(private) == 1
-        assert not kb_ingest_lock_held(kb_dir / ".openkb")
+        assert not kb_ingest_lock_held(kb_dir / ".ultrakb")
         target = root / "raw/article.md"
         target.parent.mkdir()
         target.write_text("# Article\nOriginal content.")
@@ -30,22 +27,8 @@ def test_url_compiles_records_provenance_and_deduplicates(kb_dir, monkeypatch):
         options["on_quality"]("short_extraction")
         return target
 
-    values = iter(
-        [
-            {"description": "Article", "content": "# Article\nCompiled."},
-            {"create": [], "update": [], "related": []},
-        ]
-    )
-    monkeypatch.setattr(
-        litellm,
-        "completion",
-        lambda **kwargs: SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(next(values))))],
-            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
-        ),
-    )
     url = "https://example.com/article"
-    with patch("openkb.url_ingest.fetch_url_to_raw", side_effect=fetch):
+    with patch("ultrakb.url_ingest.fetch_url_to_raw", side_effect=fetch):
         result = import_url(kb_dir, url, context=context)
         duplicate = import_url(kb_dir, url, context=context)
     assert result.source == url and result.status == "added"
@@ -60,10 +43,10 @@ def test_url_compiles_records_provenance_and_deduplicates(kb_dir, monkeypatch):
 
 
 def test_failed_fetch_does_not_fix_snapshot_or_publish_raw(kb_dir):
-    from openkb.application.execution import ExecutionContext
+    from ultrakb.application.execution import ExecutionContext
 
     context = ExecutionContext()
-    with patch("openkb.url_ingest.fetch_url_to_raw", return_value=None):
+    with patch("ultrakb.url_ingest.fetch_url_to_raw", return_value=None):
         result = import_url(kb_dir, "https://example.com/missing", context=context)
     assert result.status == "failed" and result.unfinished == ("acquisition",)
     assert result.resources == () and context.snapshot is None
@@ -77,8 +60,8 @@ def test_url_boundary_rejects_non_http_inputs(kb_dir, url):
 
 
 def test_deferred_url_uses_the_same_complete_private_input(kb_dir, tmp_path):
-    from openkb.application.documents import DocumentResult
-    from openkb.runtime.worker import WaitingForLease
+    from ultrakb.application.documents import DocumentResult
+    from ultrakb.runtime.worker import WaitingForLease
 
     def fetch(url, root, **options):
         target = root / "raw/one-shot.md"
@@ -89,9 +72,9 @@ def test_deferred_url_uses_the_same_complete_private_input(kb_dir, tmp_path):
     preparation = tmp_path / "prepared"
     preparation.mkdir()
     with (
-        patch("openkb.url_ingest.fetch_url_to_raw", side_effect=fetch) as acquisition,
+        patch("ultrakb.url_ingest.fetch_url_to_raw", side_effect=fetch) as acquisition,
         patch(
-            "openkb.application.urls.import_document",
+            "ultrakb.application.urls.import_document",
             side_effect=[WaitingForLease(), DocumentResult("", "added", ())],
         ) as ingest,
     ):
@@ -105,7 +88,7 @@ def test_deferred_url_uses_the_same_complete_private_input(kb_dir, tmp_path):
 def test_pdf_declared_length_must_be_received(tmp_path):
     from io import BytesIO
 
-    from openkb.url_ingest import _download_pdf_chunked
+    from ultrakb.url_ingest import _download_pdf_chunked
 
     response = BytesIO(b"partial")
     response.headers = {"Content-Length": "10000"}
@@ -116,9 +99,9 @@ def test_pdf_declared_length_must_be_received(tmp_path):
 def test_spawn_failure_discards_prepared_input_for_that_task(kb_dir, tmp_path):
     from unittest.mock import MagicMock
 
-    from openkb.runtime.records import TaskView, UnitIdentity
-    from openkb.runtime.requests import ImportUrl
-    from openkb.runtime.tasks import TaskManager, _Task
+    from ultrakb.runtime.records import TaskView, UnitIdentity
+    from ultrakb.runtime.requests import ImportUrl
+    from ultrakb.runtime.tasks import TaskManager, _Task
 
     manager = TaskManager(history_dir=tmp_path / "history")
     request = ImportUrl("https://example.com/once")

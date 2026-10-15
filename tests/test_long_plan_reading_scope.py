@@ -1,14 +1,13 @@
-"""Multi-section plans confirm native reading scope before drafting a page."""
+"""Native plan validation and genuine page generation preserve parent reading scopes."""
 
 import json
-from types import SimpleNamespace
 
 import pytest
 
-from openkb.agent.compile_plan import CompilePlanError
-from openkb.agent.compiler import _compile_concepts
-from openkb.agent.source_windows import CompileSourceWindows
-from openkb.compilation_report import collect_compile_report
+from ultrakb.agent.compile_plan import normalize_plan
+from ultrakb.agent.compiler import _sanitize_concept_name
+from ultrakb.agent.source_windows import CompileSourceWindows
+from ultrakb.locks import atomic_write_text
 
 
 @pytest.fixture
@@ -25,10 +24,11 @@ def reading_scope(kb_dir):
         "Irrigation setup completion.",
         "Unrelated storage maintenance.",
     ]
-    (wiki / "sources/guide.json").write_text(
+    atomic_write_text(
+        wiki / "sources/guide.json",
         json.dumps(
             [{"page": i, "unit_kind": "page", "content": text} for i, text in enumerate(pages, 1)]
-        )
+        ),
     )
     navigation = [
         {"node_id": "preface", "title": "Preface", "start_index": 1, "end_index": 1},
@@ -48,34 +48,20 @@ def reading_scope(kb_dir):
     return CompileSourceWindows(wiki, "guide", navigation=navigation, kb_dir=kb_dir)
 
 
-async def compile_pages(kb_dir, windows):
-    with collect_compile_report() as report:
-        await _compile_concepts(
-            kb_dir / "wiki",
-            kb_dir,
-            "test-model",
-            {"role": "system", "content": "Compile from original text."},
-            {"role": "user", "content": "Document navigation is available."},
-            "Irrigation setup",
-            "guide",
-            1,
-            doc_type="pageindex",
-            source_windows=windows,
-        )
-        report.require_complete()
+def plan_for(kind, action, item):
+    return normalize_plan(
+        {kind: {action: [item]}},
+        existing={"concepts": set(), "entities": set()}
+        if action == "create"
+        else {"concepts": {"irrigation"}, "entities": {"irrigation"}},
+        entity_types=frozenset({"other"}),
+        sanitize=_sanitize_concept_name,
+    )
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ["concepts", "entities"])
 @pytest.mark.parametrize("action", ["create", "update"])
-async def test_repaired_parent_scope_reaches_actual_page_generation(
-    kb_dir, monkeypatch, reading_scope, kind, action
-):
-    from test_compile_windows import patch_page_response
-
-    from openkb.locks import atomic_write_text
-
-    plans, generation = [], []
+def test_repaired_parent_scope_reaches_actual_page_generation(kb_dir, reading_scope, kind, action):
     item = {"name": "irrigation", "title": "Irrigation procedure"}
     if kind == "entities":
         item["type"] = "other"
@@ -85,117 +71,99 @@ async def test_repaired_parent_scope_reaches_actual_page_generation(
             "---\ndescription: Irrigation notes\ntype: other\n"
             "sources: []\n---\n# Irrigation\n\nInitial notes.\n",
         )
-
-    def plan(model, messages, *args, **kwargs):
-        plans.append(messages)
-        proposal = dict(item)
-        if len(plans) == 2:
-            proposal["reading_locations"] = {"node_ids": ["procedure"]}
-        return json.dumps({kind: {action: [proposal]}})
-
-    async def generate(model, messages, *args, **kwargs):
-        generation.append(messages)
-        result = {"description": "Irrigation procedure", "content": "Check the supply."}
-        if kind == "entities":
-            result["type"] = "other"
-        return patch_page_response(messages, json.dumps(result))
-
-    monkeypatch.setattr("openkb.agent.compiler._llm_call", plan)
-    monkeypatch.setattr("openkb.agent.compiler._llm_call_async", generate)
-    await compile_pages(kb_dir, reading_scope)
-
-    assert len(plans) == 2
-    assert "reading_locations" in plans[-1][-1]["content"]
-    assert len(generation) == 1
-    sent = json.dumps(generation[0])
+    diagnostic = reading_scope.validate_updates(plan_for(kind, action, item), long=True)
+    assert "reading_locations" in diagnostic
+    repaired = {**item, "reading_locations": {"node_ids": ["procedure"]}}
+    assert reading_scope.validate_updates(plan_for(kind, action, repaired), long=True) is None
+    originals = reading_scope.prepare(
+        repaired, f"{kind}/irrigation.md" if action == "update" else None, long=True
+    )
+    assert originals.has_current_original
+    if action == "update":
+        originals.require_update(f"{kind}/irrigation.md")
+    sent = json.dumps(originals.message)
     assert "isolate the supply and obtain a supervisor's approval" in sent
     assert "Irrigation setup completion" in sent
     assert "Unrelated storage maintenance" not in sent
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("locations", [None, {}])
-async def test_missing_scope_exhausts_only_the_existing_plan_repair(
-    kb_dir, monkeypatch, reading_scope, locations
-):
-    plans = []
-
-    def plan(model, messages, *args, **kwargs):
-        plans.append(messages)
-        item = {"name": "irrigation", "title": "Irrigation procedure"}
-        if locations is not None:
-            item["reading_locations"] = locations
-        return json.dumps({"concepts": {"create": [item]}})
-
-    async def generate(*args, **kwargs):
-        pytest.fail("An unresolved multi-section plan must not generate a page")
-
-    monkeypatch.setattr("openkb.agent.compiler._llm_call", plan)
-    monkeypatch.setattr("openkb.agent.compiler._llm_call_async", generate)
-    with pytest.raises(CompilePlanError):
-        await compile_pages(kb_dir, reading_scope)
-    assert len(plans) == 2
+def test_missing_scope_exhausts_only_the_existing_plan_repair(kb_dir, reading_scope, locations):
+    item = {"name": "irrigation", "title": "Irrigation procedure"}
+    if locations is not None:
+        item["reading_locations"] = locations
+    plan = plan_for("concepts", "create", item)
+    first = reading_scope.validate_updates(plan, long=True)
+    second = reading_scope.validate_updates(plan, long=True)
+    assert first == second and "Select relevant native reading_locations" in second
     assert not (kb_dir / "wiki/concepts/irrigation.md").exists()
 
 
 @pytest.mark.asyncio
-async def test_real_long_document_planning_exposes_parent_scope(kb_dir, monkeypatch, reading_scope):
-    from openkb.agent.compiler import compile_long_doc
+async def test_real_long_document_planning_exposes_parent_scope(
+    kb_dir, monkeypatch, reading_scope, live_llm
+):
+    from ultrakb.agent.compile_messages import build_page_messages, planning_messages
+    from ultrakb.agent.compiler import _CONCEPT_PAGE_USER, _llm_call_page_async, _parse_page_json
+    from ultrakb.source_navigation import planning_navigation
 
-    plans, generation = [], []
+    live_llm.install(monkeypatch)
     topic_hint = "Generated locator: isolation, calibration, scheduling and flow verification."
     next(n for n in reading_scope.navigation if n["node_id"] == "procedure")["summary"] = topic_hint
-
-    async def summary(*args, **kwargs):
-        return SimpleNamespace(
-            markdown="# Guide\n\nIrrigation setup and maintenance.",
-            description="Irrigation guide",
-            planning_overview="Irrigation procedure",
-        )
-
-    def plan(model, messages, *args, **kwargs):
-        plans.append(messages)
-        navigation = json.loads(messages[1]["content"].split("\n", 1)[1])
-        prerequisite = next(n for n in navigation if n["node_id"] == "step-3")
-        parent_id = prerequisite["parent_node_id"]
-        parent = next(n for n in navigation if n["node_id"] == parent_id)
-        assert parent["start_index"] == parent["end_index"] == 2
-        assert parent["navigation_summary"] == topic_hint
-        assert len({n["node_id"] for n in navigation}) == len(navigation)
-        return json.dumps(
-            {
-                "concepts": {
-                    "create": [
-                        {"name": "irrigation", "reading_locations": {"node_ids": [parent_id]}}
-                    ]
-                }
-            }
-        )
-
-    async def generate(model, messages, *args, **kwargs):
-        generation.append(messages)
-        return json.dumps({"description": "Irrigation procedure", "content": "Check the supply."})
-
-    monkeypatch.setattr("openkb.agent.document_summary.build_document_summary", summary)
-    monkeypatch.setattr("openkb.agent.compiler._llm_call", plan)
-    monkeypatch.setattr("openkb.agent.compiler._llm_call_async", generate)
-    with collect_compile_report() as report:
-        await compile_long_doc(
-            "guide",
-            kb_dir / "wiki/summaries/guide.md",
-            "guide-index",
-            kb_dir,
-            "test-model",
-            navigation=[
-                n
-                for n in reading_scope.navigation
-                if n["node_id"] in {"preface", "procedure", "maintenance"}
-            ],
-        )
-        report.require_complete()
-    assert len(plans) == len(generation) == 1
-    sent = json.dumps(generation[0])
-    assert "isolate the supply and obtain a supervisor's approval" in sent
-    assert "Irrigation setup completion" in sent
-    assert "Unrelated storage maintenance" not in sent
-    assert topic_hint not in sent
+    navigation = planning_navigation(
+        [
+            n
+            for n in reading_scope.navigation
+            if n["node_id"] in {"preface", "procedure", "maintenance"}
+        ]
+    )
+    prerequisite = next(n for n in navigation if n["node_id"] == "step-3")
+    parent_id = prerequisite["parent_node_id"]
+    parent = next(n for n in navigation if n["node_id"] == parent_id)
+    assert parent["start_index"] == parent["end_index"] == 2
+    assert parent["navigation_summary"] == topic_hint
+    assert len({n["node_id"] for n in navigation}) == len(navigation)
+    planning = planning_messages(
+        {"role": "system", "content": "Use only the supplied original source."},
+        {"role": "user", "content": "Document navigation:\n" + json.dumps(navigation)},
+        "Irrigation procedure",
+        concept_briefs="",
+        entity_briefs="",
+        long=True,
+    )
+    assert "reading_locations" in planning[-1]["content"]
+    item = {"name": "irrigation", "reading_locations": {"node_ids": [parent_id]}}
+    originals = reading_scope.prepare(item, long=True)
+    messages = build_page_messages(
+        system_message={"role": "system", "content": "Use only the supplied original source."},
+        current_original=None,
+        original_context=originals.message,
+        known_targets_message={"role": "user", "content": "Known targets: summaries/guide"},
+        task_message={
+            "role": "user",
+            "content": _CONCEPT_PAGE_USER.format(
+                title="Irrigation procedure", doc_name="guide", update_instruction=""
+            ),
+        },
+    )
+    before = len(live_llm.calls)
+    raw = await _llm_call_page_async(
+        "deepseek/deepseek-flash",
+        messages,
+        "irrigation page",
+        bundle=live_llm.credentials,
+        response_format={"type": "json_object"},
+        max_tokens=768,
+        original_excerpts=reading_scope.original_excerpts(originals, long=True),
+    )
+    page = _parse_page_json(raw)
+    body = page["content"].lower()
+    assert "isolate" in body and "supervisor" in body and "completion" in body
+    assert page["description"]
+    assert len(live_llm.calls) > before
+    for call in live_llm.calls[before:]:
+        sent = json.dumps(call["messages"])
+        assert "isolate the supply and obtain a supervisor's approval" in sent
+        assert "Irrigation setup completion" in sent
+        assert "Unrelated storage maintenance" not in sent
+        assert topic_hint not in sent

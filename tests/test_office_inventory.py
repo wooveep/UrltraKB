@@ -9,15 +9,15 @@ import pytest
 
 @pytest.fixture
 def office_tree(tmp_path, monkeypatch):
-    from openkb.office import runtime
-    from openkb.office.inventory import inventory
-    from openkb.office.records import OfficeArtifact, OfficeManifest
+    from ultrakb.office import runtime
+    from ultrakb.office.inventory import inventory
+    from ultrakb.office.records import OfficeArtifact, OfficeManifest
 
     root = tmp_path / "office"
     contents = {
         "program/python.exe": b"private Python",
         "program/soffice.com": b"private Office",
-        "openkb-provenance/office-launcher.exe": b"owned-process launcher",
+        "ultrakb-provenance/office-launcher.exe": b"owned-process launcher",
         "share/fonts/font.ttf": b"private font",
         "LICENSE": b"runtime license",
     }
@@ -35,7 +35,7 @@ def office_tree(tmp_path, monkeypatch):
         python_version=lock["python_version"],
         python="program/python.exe",
         soffice="program/soffice.com",
-        launcher="openkb-provenance/office-launcher.exe",
+        launcher="ultrakb-provenance/office-launcher.exe",
         probe={},
         files=files,
         links=links,
@@ -43,7 +43,7 @@ def office_tree(tmp_path, monkeypatch):
         licenses={"LICENSE": files["LICENSE"]},
         application_fonts_manifest="a" * 64,
     )
-    (root / "openkb-office.json").write_text(manifest.model_dump_json(), encoding="utf-8")
+    (root / "ultrakb-office.json").write_text(manifest.model_dump_json(), encoding="utf-8")
     monkeypatch.setattr(runtime, "sys", SimpleNamespace(platform="win32"))
     monkeypatch.setattr(runtime, "platform", SimpleNamespace(machine=lambda: "AMD64"))
     assert runtime.validate_runtime(root) == manifest
@@ -53,7 +53,7 @@ def office_tree(tmp_path, monkeypatch):
 @pytest.mark.parametrize("difference", ["missing", "unexpected", "changed"])
 @pytest.mark.parametrize("crash_dump", [False, True])
 def test_inventory_failure_names_affected_files(office_tree, difference, crash_dump):
-    from openkb.office.runtime import validate_runtime
+    from ultrakb.office.runtime import validate_runtime
 
     if crash_dump:
         (office_tree / "program/c896e54d-5473-4840-880b-33c0755dca17.dmp").write_bytes(b"MDMP")
@@ -75,7 +75,7 @@ def test_inventory_failure_names_affected_files(office_tree, difference, crash_d
 
 
 def test_inventory_stays_valid_after_moving_installation(office_tree):
-    from openkb.office.runtime import validate_runtime
+    from ultrakb.office.runtime import validate_runtime
 
     moved = office_tree.with_name("安装目录 with spaces")
     office_tree.rename(moved)
@@ -83,7 +83,7 @@ def test_inventory_stays_valid_after_moving_installation(office_tree):
 
 
 def test_inventory_difference_limits_output_but_keeps_total_count(office_tree):
-    from openkb.office.runtime import validate_runtime
+    from ultrakb.office.runtime import validate_runtime
 
     for index in range(12):
         (office_tree / f"extra-{index:02}.tmp").write_bytes(b"unexpected file")
@@ -96,15 +96,15 @@ def test_inventory_difference_limits_output_but_keeps_total_count(office_tree):
 
 
 def test_inventory_detects_retargeted_links(office_tree):
-    from openkb.office.inventory import inventory
-    from openkb.office.runtime import validate_runtime
+    from ultrakb.office.inventory import inventory
+    from ultrakb.office.runtime import validate_runtime
 
     link = office_tree / "license-link"
     try:
         link.symlink_to("LICENSE")
     except OSError:
         pytest.skip("Host does not permit symbolic links")
-    path = office_tree / "openkb-office.json"
+    path = office_tree / "ultrakb-office.json"
     manifest = json.loads(path.read_text("utf-8"))
     manifest["files"], manifest["links"] = inventory(office_tree)
     path.write_text(json.dumps(manifest), encoding="utf-8")
@@ -117,18 +117,18 @@ def test_inventory_detects_retargeted_links(office_tree):
 
 @pytest.mark.parametrize("contents", [b"MDMP" + b"\x00" * 28, b""])
 def test_windows_crash_dump_does_not_block_next_conversion(office_tree, contents):
-    from openkb.office.inventory import inventory
-    from openkb.office.runtime import validate_runtime
+    from ultrakb.office.inventory import inventory
+    from ultrakb.office.runtime import validate_runtime
 
     name = "program/c896e54d-5473-4840-880b-33c0755dca17.dmp"
     dump = office_tree / name
     dump.write_bytes(contents)
-    manifest = (office_tree / "openkb-office.json").read_bytes()
+    manifest = (office_tree / "ultrakb-office.json").read_bytes()
     assert validate_runtime(office_tree).platform == "win32"
     # Keep crash evidence and the exact build inventory; only execution validation
     # recognizes the upstream diagnostic artifact. A dump can be incomplete.
     assert dump.read_bytes() == contents
-    assert (office_tree / "openkb-office.json").read_bytes() == manifest
+    assert (office_tree / "ultrakb-office.json").read_bytes() == manifest
     assert name in inventory(office_tree)[0]
 
 
@@ -141,7 +141,7 @@ def test_windows_crash_dump_does_not_block_next_conversion(office_tree, contents
     ],
 )
 def test_crash_dump_exception_does_not_accept_other_files(office_tree, name):
-    from openkb.office.runtime import validate_runtime
+    from ultrakb.office.runtime import validate_runtime
 
     (office_tree / name).write_bytes(b"unexpected")
     with pytest.raises(ValueError, match="unexpected"):
@@ -149,12 +149,12 @@ def test_crash_dump_exception_does_not_accept_other_files(office_tree, name):
 
 
 def test_crash_dump_exception_does_not_hide_changed_manifest_entry(office_tree):
-    from openkb.office.inventory import inventory
-    from openkb.office.runtime import validate_runtime
+    from ultrakb.office.inventory import inventory
+    from ultrakb.office.runtime import validate_runtime
 
     dump = office_tree / "program/c896e54d-5473-4840-880b-33c0755dca17.dmp"
     dump.write_bytes(b"pinned file")
-    path = office_tree / "openkb-office.json"
+    path = office_tree / "ultrakb-office.json"
     manifest = json.loads(path.read_text("utf-8"))
     manifest["files"], manifest["links"] = inventory(office_tree)
     path.write_text(json.dumps(manifest), encoding="utf-8")
@@ -164,7 +164,7 @@ def test_crash_dump_exception_does_not_hide_changed_manifest_entry(office_tree):
 
 
 def test_crash_dump_exception_does_not_accept_links(office_tree):
-    from openkb.office.runtime import validate_runtime
+    from ultrakb.office.runtime import validate_runtime
 
     dump = office_tree / "program/c896e54d-5473-4840-880b-33c0755dca17.dmp"
     try:

@@ -19,7 +19,7 @@ PACKAGING = ROOT / "packaging/desktop"
 def main() -> None:
     identity = verify_source(ROOT)
     verify_local_vendors(ROOT)
-    if version("openkb") != identity["version"]:
+    if version("ultrakb") != identity["version"]:
         raise ValueError("Install this exported source with its recorded version before freezing")
     cache = PACKAGING / "build/token-cache"
     cache.mkdir(parents=True, exist_ok=True)
@@ -68,7 +68,7 @@ def main() -> None:
     if verify_source(ROOT) != identity:
         raise ValueError("Source identity changed during the build")
     if sys.platform == "linux":
-        saved = deduplicate_entrypoints(PACKAGING / "dist/UrltraKB")
+        saved = deduplicate_entrypoints(PACKAGING / "dist/UltraKB")
         print(f"Shared identical Linux entry points: {saved / 1024**2:.1f} MiB saved")
 
 

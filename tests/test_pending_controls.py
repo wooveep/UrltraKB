@@ -13,14 +13,14 @@ def test_group_cancel_reaches_running_import_before_business_lease_is_released(
 ):
     import litellm
 
-    from openkb.application.documents import import_document
-    from openkb.application.pending import cancel_execution_group, pending_status, process_pending
-    from openkb.documents import read_document_source
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.pending import cancel_execution_group, pending_status, process_pending
+    from ultrakb.documents import read_document_source
 
     parent = import_document(kb_dir, embedded_docx)
     process_pending(kb_dir, max_jobs=1)
     group = pending_status(kb_dir)["groups"][0]
-    signal = kb_dir / ".openkb/pending-control" / ("group-" + group["root_import_id"] + ".json")
+    signal = kb_dir / ".ultrakb/pending-control" / ("group-" + group["root_import_id"] + ".json")
     completion = litellm.completion
     cancelled = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
@@ -58,8 +58,8 @@ def test_group_cancel_reaches_running_import_before_business_lease_is_released(
 def test_budget_wait_preserves_cursor_and_resumes_only_after_explicit_raise(
     kb_dir, embedded_docx, pdf_model, limit, value
 ):
-    from openkb.application.documents import import_document
-    from openkb.application.pending import pending_status, process_pending, update_execution_budget
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.pending import pending_status, process_pending, update_execution_budget
 
     import_document(kb_dir, embedded_docx)
     group = pending_status(kb_dir)["groups"][0]

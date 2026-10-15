@@ -5,10 +5,10 @@ import hashlib
 import pytest
 from test_native_table_projection import TABLE
 
-from openkb.agent.evidence_payload import project_evidence
-from openkb.source_qualification import MARKDOWN_POLICY
-from openkb.text_measurement import measure_markdown
-from openkb.text_source import FrozenText, TextOrigin, read_text_selection
+from ultrakb.agent.evidence_payload import project_evidence
+from ultrakb.source_qualification import MARKDOWN_POLICY
+from ultrakb.text_measurement import measure_markdown
+from ultrakb.text_source import FrozenText, TextOrigin, read_text_selection
 
 
 def source(body):

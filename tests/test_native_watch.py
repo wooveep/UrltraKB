@@ -4,14 +4,14 @@ import threading
 import time
 from types import SimpleNamespace
 
-from openkb.runtime.watch import NativeWatch
-from openkb.state import HashRegistry
+from ultrakb.runtime.watch import NativeWatch
+from ultrakb.state import HashRegistry
 
 pytest_plugins = ("test_pdf_readback",)
 
 
 def test_markdown_asset_change_is_a_new_watch_input(kb_dir, pdf_model):
-    from openkb.application.documents import import_document
+    from ultrakb.application.documents import import_document
 
     source = kb_dir / "raw/note.md"
     source.write_text("Recorded setup.\n![figure](figure.png)")
@@ -75,7 +75,7 @@ def test_startup_scan_admits_frozen_identities_and_observes_recursive_atomic_mov
     raw = kb_dir / "raw"
     known = raw / "known.txt"
     known.write_text("known")
-    registry = HashRegistry(kb_dir / ".openkb/hashes.json")
+    registry = HashRegistry(kb_dir / ".ultrakb/hashes.json")
     registry.add(registry.hash_file(known), {"name": known.name})
     folder = raw / "中文 目录"
     folder.mkdir()

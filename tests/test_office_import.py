@@ -12,7 +12,7 @@ pytest_plugins = ("test_pdf_readback",)
 
 @pytest.fixture(autouse=True)
 def isolated_global_settings(tmp_path_factory, monkeypatch):
-    from openkb import config
+    from ultrakb import config
 
     directory = tmp_path_factory.mktemp("global-settings")
     monkeypatch.setattr(config, "GLOBAL_CONFIG_DIR", directory)
@@ -22,12 +22,12 @@ def isolated_global_settings(tmp_path_factory, monkeypatch):
 
 @pytest.fixture
 def office_runtime(kb_dir):
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
+    from ultrakb.application.settings import apply_kb_config_patch
+    from ultrakb.application.settings_data import KbConfigPatchRequest
 
-    value = os.environ.get("OPENKB_TEST_OFFICE_RUNTIME")
+    value = os.environ.get("ULTRAKB_TEST_OFFICE_RUNTIME")
     if not value:
-        pytest.skip("Real Office integration needs a prepared OPENKB_TEST_OFFICE_RUNTIME")
+        pytest.skip("Real Office integration needs a prepared ULTRAKB_TEST_OFFICE_RUNTIME")
     root = Path(value).resolve()
     apply_kb_config_patch(
         kb_dir,
@@ -74,7 +74,7 @@ def writer_document(tmp_path):
             "<w:p><w:r><w:rPr><w:vanish/></w:rPr><w:t>HIDDEN_MARKER</w:t></w:r></w:p>"
             '<w:p><w:r><w:br w:type="page"/></w:r></w:p>'
             '<w:p><w:r><w:br w:type="page"/></w:r></w:p>'
-            '<w:p><w:r><w:rPr><w:rFonts w:ascii="Missing OpenKB Font"/></w:rPr>'
+            '<w:p><w:r><w:rPr><w:rFonts w:ascii="Missing UltraKB Font"/></w:rPr>'
             "<w:t>Last section with fallback font.</w:t></w:r></w:p>"
             '<w:p><w:r><w:rPr><w:rFonts w:eastAsia="Missing CJK Font"/></w:rPr>'
             "<w:t>中文缺失字体</w:t></w:r></w:p>"
@@ -91,10 +91,10 @@ def writer_document(tmp_path):
 def test_missing_office_runtime_keeps_raw_docx_and_pdf_still_imports(
     kb_dir, writer_document, physical_pdf, pdf_model
 ):
-    from openkb.application.documents import import_document
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
-    from openkb.documents import read_document_source
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.settings import apply_kb_config_patch
+    from ultrakb.application.settings_data import KbConfigPatchRequest
+    from ultrakb.documents import read_document_source
 
     apply_kb_config_patch(
         kb_dir,
@@ -118,11 +118,11 @@ def test_missing_office_runtime_keeps_raw_docx_and_pdf_still_imports(
 def test_failed_office_import_recovers_after_runtime_repair_or_upgrade(
     kb_dir, writer_document, office_runtime, pdf_model, monkeypatch, upgraded
 ):
-    from openkb.application.documents import import_document
-    from openkb.application.reprocessing import preview_reprocessing, reprocess_source
-    from openkb.application.source_retry import retry_source
-    from openkb.documents import read_document_source
-    from openkb.office import runtime
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.reprocessing import preview_reprocessing, reprocess_source
+    from ultrakb.application.source_retry import retry_source
+    from ultrakb.documents import read_document_source
+    from ultrakb.office import runtime
 
     def unavailable(_root):
         raise ValueError("Office runtime file inventory changed or is incomplete")
@@ -160,7 +160,7 @@ def test_office_font_fallback_keeps_symbols_and_cjk_readable(
 ):
     import pymupdf
 
-    from openkb.office.convert import convert_office
+    from ultrakb.office.convert import convert_office
 
     with zipfile.ZipFile(writer_document) as package:
         parts = {name: package.read(name) for name in package.namelist()}
@@ -197,10 +197,10 @@ def test_docx_freezes_final_visible_pages_and_exact_office_provenance(
 ):
     import pymupdf
 
-    from openkb.application.documents import import_document
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
-    from openkb.documents import read_document_source
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.settings import apply_kb_config_patch
+    from ultrakb.application.settings_data import KbConfigPatchRequest
+    from ultrakb.documents import read_document_source
 
     apply_kb_config_patch(
         kb_dir, KbConfigPatchRequest(kb=str(kb_dir), config={"pdf_short_max_pages": limit})
@@ -227,7 +227,7 @@ def test_docx_freezes_final_visible_pages_and_exact_office_provenance(
     assert office["build_id"] == "8221e31b3ac356a1623c672912a3d2b492f7e3d1"
     assert office["filter"] == "writer_pdf_Export"
     assert office["runtime_fingerprint"] and office["pdf_digest"]
-    assert any(item["requested"] == "Missing OpenKB Font" for item in office["font_substitutions"])
+    assert any(item["requested"] == "Missing UltraKB Font" for item in office["font_substitutions"])
     assert any(item["requested"] == "Missing CJK Font" for item in office["font_substitutions"])
     assert office["font_observations"]
 
@@ -237,13 +237,13 @@ def test_corrupt_office_pdf_reference_cannot_mislabel_the_original_as_a_pdf(
 ):
     import json
 
-    from openkb.application.documents import import_document
-    from openkb.documents import read_document_source
-    from openkb.locks import atomic_write_json
+    from ultrakb.application.documents import import_document
+    from ultrakb.documents import read_document_source
+    from ultrakb.locks import atomic_write_json
 
     result = import_document(kb_dir, writer_document)
     assert result.status == "added", result.message
-    path = next((kb_dir / ".openkb/catalog/normalizations").glob("*.json"))
+    path = next((kb_dir / ".ultrakb/catalog/normalizations").glob("*.json"))
     record = json.loads(path.read_text())
     record["pdf_path"] = record["raw_path"]
     atomic_write_json(path, record)
@@ -255,8 +255,8 @@ def test_corrupt_office_pdf_reference_cannot_mislabel_the_original_as_a_pdf(
 def test_deleted_substring_cannot_claim_the_visible_runs_font(
     kb_dir, writer_document, office_runtime, pdf_model, duplicate_deleted
 ):
-    from openkb.application.documents import import_document
-    from openkb.documents import read_document_source
+    from ultrakb.application.documents import import_document
+    from ultrakb.documents import read_document_source
 
     with zipfile.ZipFile(writer_document) as archive:
         parts = {name: archive.read(name) for name in archive.namelist()}
@@ -293,11 +293,11 @@ def test_docx_recompile_and_history_read_the_retained_pdf_without_office(
 ):
     import asyncio
 
-    from openkb.application.documents import import_document
-    from openkb.application.recompilation import recompile_document, select_recompilation
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
-    from openkb.documents import read_document_source
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.recompilation import recompile_document, select_recompilation
+    from ultrakb.application.settings import apply_kb_config_patch
+    from ultrakb.application.settings_data import KbConfigPatchRequest
+    from ultrakb.documents import read_document_source
 
     imported = import_document(kb_dir, writer_document)
     assert imported.status == "added", imported.message
@@ -338,9 +338,9 @@ def test_docx_api_and_cli_expose_original_pdf_and_conversion_diagnostics(
     from click.testing import CliRunner
     from fastapi.testclient import TestClient
 
-    from openkb.api import create_app
-    from openkb.cli import cli
-    from openkb.config import register_kb_alias
+    from ultrakb.api import create_app
+    from ultrakb.cli import cli
+    from ultrakb.config import register_kb_alias
 
     register_kb_alias("office", kb_dir)
     with TestClient(create_app()) as client:
@@ -370,8 +370,8 @@ def test_docx_api_and_cli_expose_original_pdf_and_conversion_diagnostics(
 def test_broken_office_update_retains_previous_body_and_new_original(
     kb_dir, writer_document, office_runtime, pdf_model
 ):
-    from openkb.application.documents import import_document
-    from openkb.documents import read_document_source
+    from ultrakb.application.documents import import_document
+    from ultrakb.documents import read_document_source
 
     first = import_document(kb_dir, writer_document)
     assert first.status == "added", first.message
@@ -437,13 +437,13 @@ def test_stopping_office_reaps_its_tree_and_keeps_original(
 ):
     import json
 
-    from openkb.application.documents import import_document
-    from openkb.application.execution import ExecutionContext
-    from openkb.application.settings import apply_kb_config_patch
-    from openkb.application.settings_data import KbConfigPatchRequest
-    from openkb.application.sources import source_inventory
-    from openkb.documents import read_document_source
-    from openkb.locks import LockCancelled
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.execution import ExecutionContext
+    from ultrakb.application.settings import apply_kb_config_patch
+    from ultrakb.application.settings_data import KbConfigPatchRequest
+    from ultrakb.application.sources import source_inventory
+    from ultrakb.documents import read_document_source
+    from ultrakb.locks import LockCancelled
 
     original = writer_document.read_bytes()
     if stop == "timeout":
@@ -482,9 +482,9 @@ def test_application_exit_reaps_probe_or_conversion_and_its_private_profile(
     code = """
 import json, subprocess, sys
 from pathlib import Path
-from openkb import config
-from openkb.application.documents import import_document
-from openkb.inputs import preparation_directory
+from ultrakb import config
+from ultrakb.application.documents import import_document
+from ultrakb.inputs import preparation_directory
 kb, source, executable, stage, owned = sys.argv[1:]
 config.GLOBAL_CONFIG_DIR = Path(owned) / "settings"
 config.GLOBAL_CONFIG_PATH = config.GLOBAL_CONFIG_DIR / "global.yaml"

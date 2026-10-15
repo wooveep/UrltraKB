@@ -1,7 +1,7 @@
-"""Cross-platform behaviour for openkb.locks / openkb.config.
+"""Cross-platform behaviour for ultrakb.locks / ultrakb.config.
 
 File locking is delegated to :mod:`portalocker` (fcntl on POSIX, msvcrt/Win32
-on Windows), so OpenKB no longer hard-imports the Unix-only ``fcntl``. The
+on Windows), so UltraKB no longer hard-imports the Unix-only ``fcntl``. The
 atomic-write path still special-cases the Unix-only ``os.fchmod`` and directory
 ``os.fsync``. These tests pin the platform-neutral behaviour verifiable on
 POSIX; portalocker carries its own Windows test coverage.
@@ -15,7 +15,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from openkb import locks
+from ultrakb import locks
 
 
 def _module_level_imports_fcntl(path: Path) -> bool:
@@ -29,9 +29,9 @@ def _module_level_imports_fcntl(path: Path) -> bool:
     return False
 
 
-def test_openkb_modules_do_not_hard_import_fcntl():
-    """Guards issue #93: OpenKB's own modules must import on Windows (no bare fcntl)."""
-    pkg_dir = Path(locks.__file__).parent  # locks.py lives in the openkb package
+def test_ultrakb_modules_do_not_hard_import_fcntl():
+    """Guards issue #93: UltraKB's own modules must import on Windows (no bare fcntl)."""
+    pkg_dir = Path(locks.__file__).parent  # locks.py lives in the ultrakb package
     offenders = [
         str(py.relative_to(pkg_dir))
         for py in pkg_dir.rglob("*.py")

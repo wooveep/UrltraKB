@@ -11,7 +11,7 @@ import pytest
 
 @pytest.fixture
 def windows_temp(tmp_path, monkeypatch):
-    from openkb.office import workspace
+    from ultrakb.office import workspace
 
     temporary = tmp_path / "temp"
     temporary.mkdir()
@@ -23,7 +23,7 @@ def windows_temp(tmp_path, monkeypatch):
 def test_windows_workspaces_are_independent_of_storage_depth_and_keep_live_owners(
     tmp_path, windows_temp
 ):
-    from openkb.office.workspace import office_directory
+    from ultrakb.office.workspace import office_directory
 
     deep = tmp_path.joinpath(*(["nested-storage"] * 15))
     with office_directory(deep, prefix="office-test-") as first:
@@ -39,12 +39,12 @@ def test_windows_workspaces_are_independent_of_storage_depth_and_keep_live_owner
 
 
 def test_windows_workspace_is_reaped_after_its_owner_crashes(tmp_path, windows_temp):
-    from openkb.office.workspace import office_directory
+    from ultrakb.office.workspace import office_directory
 
     receipt = tmp_path / "orphan.txt"
     code = (
         "import os,sys; from pathlib import Path; from types import SimpleNamespace; "
-        "from openkb.office import workspace; "
+        "from ultrakb.office import workspace; "
         "workspace.sys=SimpleNamespace(platform='win32'); "
         "workspace.tempfile.gettempdir=lambda:sys.argv[1]; "
         "context=workspace.office_directory(None,prefix='office-test-'); "
@@ -63,7 +63,7 @@ def test_windows_workspace_is_reaped_after_its_owner_crashes(tmp_path, windows_t
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows read-only folder attributes")
 def test_windows_workspace_cleans_readonly_office_folders(windows_temp):
-    from openkb.office.workspace import office_directory
+    from ultrakb.office.workspace import office_directory
 
     with office_directory(None, prefix="office-test-") as directory:
         folder = directory / "Documents"
@@ -76,7 +76,7 @@ def test_windows_workspace_cleans_readonly_office_folders(windows_temp):
 
 
 def test_posix_workspace_stays_in_the_owned_input_directory(tmp_path, monkeypatch):
-    from openkb.office import workspace
+    from ultrakb.office import workspace
 
     monkeypatch.setattr(workspace, "sys", SimpleNamespace(platform="linux"))
     with workspace.office_directory(tmp_path, prefix="office-test-") as directory:

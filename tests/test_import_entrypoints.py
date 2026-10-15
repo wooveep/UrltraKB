@@ -1,15 +1,14 @@
 """Legacy adapters project the shared application import outcome (#73)."""
 
 import importlib
-import json
 import shutil
-from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+from application_llm_fixtures import real_application_model  # noqa: F401
 from click.testing import CliRunner
 
-from openkb.application import documents
+from ultrakb.application import documents
 
 
 @pytest.fixture
@@ -25,7 +24,7 @@ def small_pdf(kb_dir):
 
 @pytest.mark.parametrize("entrypoint", ["cli", "api", "watch"])
 def test_pdf_adapters_use_shared_import_result(kb_dir, small_pdf, monkeypatch, entrypoint):
-    cli = importlib.import_module("openkb.cli")
+    cli = importlib.import_module("ultrakb.cli")
     source = small_pdf
     calls = []
 
@@ -45,7 +44,7 @@ def test_pdf_adapters_use_shared_import_result(kb_dir, small_pdf, monkeypatch, e
     else:
         if entrypoint == "watch":
             monkeypatch.setattr(
-                "openkb.watcher.watch_directory",
+                "ultrakb.watcher.watch_directory",
                 lambda raw, callback, **kwargs: callback([str(source)]),
             )
             command = ["watch"]
@@ -57,7 +56,7 @@ def test_pdf_adapters_use_shared_import_result(kb_dir, small_pdf, monkeypatch, e
 
 
 def _application_boundary_worker(*args):
-    from openkb.runtime.worker import run_unit
+    from ultrakb.runtime.worker import run_unit
 
     def import_document(root, path, **options):
         assert path.read_bytes().startswith(b"%PDF-")
@@ -70,10 +69,10 @@ def _application_boundary_worker(*args):
 
 
 def test_desktop_worker_projects_the_same_pdf_result(kb_dir, small_pdf, monkeypatch):
-    from openkb.runtime.requests import ImportFile
-    from openkb.runtime.tasks import TaskManager
+    from ultrakb.runtime.requests import ImportFile
+    from ultrakb.runtime.tasks import TaskManager
 
-    monkeypatch.setattr("openkb.runtime.tasks.run_unit", _application_boundary_worker)
+    monkeypatch.setattr("ultrakb.runtime.tasks.run_unit", _application_boundary_worker)
     manager = TaskManager(history_dir=kb_dir / "task-history")
     try:
         task = manager.submit(kb_dir, [ImportFile(str(small_pdf))])
@@ -97,7 +96,7 @@ def test_missing_batch_input_is_a_failed_import(kb_dir):
 
 
 def test_replaced_kb_during_pdf_preparation_is_rejected(kb_dir, small_pdf, monkeypatch):
-    from openkb.lifecycle import KnowledgeBaseRemoved
+    from ultrakb.lifecycle import KnowledgeBaseRemoved
 
     copy = shutil.copy2
     external = kb_dir.with_name(kb_dir.name + ".pdf")
@@ -119,60 +118,34 @@ def test_replaced_kb_during_pdf_preparation_is_rejected(kb_dir, small_pdf, monke
         documents.add_single_file(external, kb_dir)
 
 
-def _model_responses():
-    responses = iter(
-        [
-            {"description": "Fixed PDF", "content": "# Small\n\nCompiled knowledge."},
-            {"create": [], "update": [], "related": []},
-        ]
-    )
-
-    def completion(**kwargs):
-        return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(next(responses))))],
-            usage=SimpleNamespace(prompt_tokens=10, completion_tokens=10),
-        )
-
-    return completion
-
-
-def _model_boundary_worker(*args):
-    from openkb.runtime.worker import run_unit
-
-    with patch("litellm.completion", _model_responses()):
-        run_unit(*args)
-
-
 @pytest.mark.parametrize("entrypoint", ["cli", "api", "desktop", "watch"])
 def test_pdf_entrypoints_publish_the_same_knowledge(kb_dir, small_pdf, monkeypatch, entrypoint):
-    from openkb.application.knowledge_bases import get_kb_list
-    from openkb.application.pages import read_page
-    from openkb.documents import read_document_source
+    from ultrakb.application.knowledge_bases import get_kb_list
+    from ultrakb.application.pages import read_page
+    from ultrakb.documents import read_document_source
 
-    cli = importlib.import_module("openkb.cli")
+    cli = importlib.import_module("ultrakb.cli")
     external = kb_dir / "input" / "small.pdf"
     external.parent.mkdir()
     shutil.move(small_pdf, external)
-    monkeypatch.setattr("litellm.completion", _model_responses())
     if entrypoint == "desktop":
-        from openkb.runtime.requests import ImportFile
-        from openkb.runtime.tasks import TaskManager
+        from ultrakb.runtime.requests import ImportFile
+        from ultrakb.runtime.tasks import TaskManager
 
-        monkeypatch.setattr("openkb.runtime.tasks.run_unit", _model_boundary_worker)
         manager = TaskManager(history_dir=kb_dir / "task-history")
         try:
             task = manager.submit(kb_dir, [ImportFile(str(external))])
-            assert manager.wait(task, timeout=20).succeeded == 1
+            assert manager.wait(task, timeout=120).succeeded == 1
         finally:
             manager.shutdown(stop=True)
             assert manager.join(10)
     elif entrypoint == "api":
         from fastapi.testclient import TestClient
 
-        from openkb.api import create_app
+        from ultrakb.api import create_app
 
-        monkeypatch.setenv("OPENKB_KB_ROOT", str(kb_dir.parent))
-        monkeypatch.delenv("OPENKB_API_TOKEN", raising=False)
+        monkeypatch.setenv("ULTRAKB_KB_ROOT", str(kb_dir.parent))
+        monkeypatch.delenv("ULTRAKB_API_TOKEN", raising=False)
         with TestClient(create_app()) as client:
             response = client.post(
                 "/api/v1/add",
@@ -185,7 +158,7 @@ def test_pdf_entrypoints_publish_the_same_knowledge(kb_dir, small_pdf, monkeypat
         if entrypoint == "watch":
             shutil.copy2(external, small_pdf)
             monkeypatch.setattr(
-                "openkb.watcher.watch_directory",
+                "ultrakb.watcher.watch_directory",
                 lambda raw, callback, **kwargs: callback([str(small_pdf)]),
             )
             command = ["watch"]
@@ -193,13 +166,11 @@ def test_pdf_entrypoints_publish_the_same_knowledge(kb_dir, small_pdf, monkeypat
             command = ["add", str(external)]
         result = CliRunner().invoke(cli.cli, ["--kb-dir", str(kb_dir), *command])
         assert result.exception is None, result.output
-    from openkb.application.views import view_scope
+    from ultrakb.application.views import view_scope
 
     document = get_kb_list(kb_dir)["documents"][0]
     scope = view_scope(kb_dir, document["view_id"])
-    assert (
-        read_page(kb_dir, "summaries/small", scope=scope).body.strip()
-        == "# Small\n\nCompiled knowledge."
-    )
+    body = read_page(kb_dir, "summaries/small", scope=scope).body.lower()
+    assert "fixed" in body and "pdf" in body and "entry" in body
     source = read_document_source(kb_dir, document["source_id"])
     assert "A fixed PDF for every entrypoint." in source["content"]

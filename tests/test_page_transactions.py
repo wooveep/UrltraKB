@@ -2,12 +2,12 @@
 
 import pytest
 
-from openkb.application.pages import read_page, save_page
-from openkb.page_ops import delete_wiki_page
+from ultrakb.application.pages import read_page, save_page
+from ultrakb.page_ops import delete_wiki_page
 
 
 def test_page_delete_failure_restores_page_index_and_backlinks(kb_dir, monkeypatch):
-    from openkb.agent import compiler
+    from ultrakb.agent import compiler
 
     page = kb_dir / "wiki/concepts/a.md"
     index = kb_dir / "wiki/index.md"
@@ -25,11 +25,11 @@ def test_page_delete_failure_restores_page_index_and_backlinks(kb_dir, monkeypat
     with pytest.raises(OSError):
         delete_wiki_page(kb_dir, "concepts/a")
     assert {path: path.read_bytes() for path in before} == before
-    assert not list((kb_dir / ".openkb/journal").glob("*.json"))
+    assert not list((kb_dir / ".ultrakb/journal").glob("*.json"))
 
 
 def test_page_save_failure_restores_body_and_metadata(kb_dir, monkeypatch):
-    from openkb import page_ops
+    from ultrakb import page_ops
 
     page = kb_dir / "wiki/concepts/a.md"
     page.write_text("---\ntype: Concept\n---\nOriginal")

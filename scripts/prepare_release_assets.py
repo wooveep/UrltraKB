@@ -36,7 +36,7 @@ def collect(artifacts: Path, output: Path, tag: str, commit: str) -> None:
             raise ValueError("Unexpected or duplicate native build target")
         if receipt.get("version") != tag[1:] or receipt.get("commit") != commit:
             raise ValueError("Build identity does not match the release tag and commit")
-        stem = f"UrltraKB-{tag[1:]}-{target}"
+        stem = f"UltraKB-{tag[1:]}-{target}"
         if path.name != stem + "-build.json":
             raise ValueError("Unexpected build receipt name")
         for suffix, key in [

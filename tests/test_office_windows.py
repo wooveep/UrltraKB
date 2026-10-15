@@ -12,7 +12,7 @@ import pytest
 
 
 def test_office_environment_preserves_system_drive_without_model_credentials(tmp_path, monkeypatch):
-    from openkb.office.policy import office_environment
+    from ultrakb.office.policy import office_environment
 
     monkeypatch.setenv("SystemDrive", "C:")
     monkeypatch.setenv("OPENAI_API_KEY", "test-secret")
@@ -22,7 +22,7 @@ def test_office_environment_preserves_system_drive_without_model_credentials(tmp
 
 
 def test_windows_office_launcher_does_not_create_console(tmp_path, monkeypatch):
-    from openkb.office import processes
+    from ultrakb.office import processes
 
     no_window = 0x08000000
     monkeypatch.setattr(processes, "sys", SimpleNamespace(platform="win32"))
@@ -51,7 +51,7 @@ def test_windows_office_launcher_does_not_create_console(tmp_path, monkeypatch):
 
 
 def test_windows_supervisor_does_not_create_worker_console(tmp_path, monkeypatch):
-    from openkb.office import processes
+    from ultrakb.office import processes
 
     supervisor = runpy.run_path(str(Path(processes.__file__).with_name("supervisor.py.txt")))
     request = tmp_path / "request.json"
@@ -84,7 +84,7 @@ def test_windows_supervisor_does_not_create_worker_console(tmp_path, monkeypatch
 
 
 def test_windows_worker_does_not_create_office_console(tmp_path, monkeypatch):
-    from openkb.office import processes
+    from ultrakb.office import processes
 
     modules = {
         "uno": {},
@@ -125,13 +125,13 @@ def test_windows_worker_does_not_create_office_console(tmp_path, monkeypatch):
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Requires the native Windows console APIs")
 def test_private_windows_python_and_descendants_have_no_console_window(tmp_path):
-    from openkb.office.policy import office_environment
-    from openkb.office.processes import run_supervised
-    from openkb.office.runtime import validate_runtime
+    from ultrakb.office.policy import office_environment
+    from ultrakb.office.processes import run_supervised
+    from ultrakb.office.runtime import validate_runtime
 
-    value = os.environ.get("OPENKB_TEST_OFFICE_RUNTIME")
+    value = os.environ.get("ULTRAKB_TEST_OFFICE_RUNTIME")
     if not value:
-        pytest.skip("Real Office integration needs a prepared OPENKB_TEST_OFFICE_RUNTIME")
+        pytest.skip("Real Office integration needs a prepared ULTRAKB_TEST_OFFICE_RUNTIME")
     office_runtime = Path(value).resolve()
     manifest = validate_runtime(office_runtime)
     python = str(office_runtime / manifest.python)
@@ -165,12 +165,12 @@ def test_private_windows_python_and_descendants_have_no_console_window(tmp_path)
 def test_private_windows_office_starts_under_deep_storage_paths(tmp_path, monkeypatch):
     import pymupdf
 
-    from openkb.office import runtime
-    from openkb.office.convert import convert_office
+    from ultrakb.office import runtime
+    from ultrakb.office.convert import convert_office
 
-    value = os.environ.get("OPENKB_TEST_OFFICE_RUNTIME")
+    value = os.environ.get("ULTRAKB_TEST_OFFICE_RUNTIME")
     if not value:
-        pytest.skip("Real Office integration needs a prepared OPENKB_TEST_OFFICE_RUNTIME")
+        pytest.skip("Real Office integration needs a prepared ULTRAKB_TEST_OFFICE_RUNTIME")
     monkeypatch.setattr(runtime, "runtime_path", lambda _: Path(value).resolve())
     directory = tmp_path
     while len(str(directory)) < 180:

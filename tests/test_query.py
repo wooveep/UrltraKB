@@ -1,15 +1,14 @@
-"""Tests for openkb.agent.query (Task 11)."""
+"""Tests for ultrakb.agent.query (Task 11)."""
 
 from __future__ import annotations
 
 import io
 import sys
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from openkb.agent.query import build_query_agent, run_query
-from openkb.schema import SCHEMA_MD
+from ultrakb.agent.query import build_query_agent, run_query
+from ultrakb.schema import SCHEMA_MD
 
 
 class TestBuildQueryAgent:
@@ -46,40 +45,38 @@ class TestRunQuery:
     @pytest.mark.asyncio
     async def test_empty_query_does_not_call_model(self, tmp_path):
         (tmp_path / "wiki").mkdir()
-        (tmp_path / ".openkb").mkdir()
+        (tmp_path / ".ultrakb").mkdir()
 
-        mock_result = MagicMock()
-        mock_result.final_output = "The answer is 42."
-
-        with patch("openkb.agent.query.Runner.run", new_callable=AsyncMock) as mock_run:
-            mock_run.return_value = mock_result
-            answer = await run_query("What is the answer?", tmp_path, "gpt-4o-mini")
-
+        answer = await run_query("What is the answer?", tmp_path, "deepseek/deepseek-flash")
         assert "没有可读取的原文" in answer
-        mock_run.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_run_query_passes_question_to_agent(self, tmp_path):
-        (tmp_path / "wiki").mkdir()
-        (tmp_path / ".openkb").mkdir()
-        (tmp_path / "wiki/sources").mkdir()
-        (tmp_path / "wiki/sources/fixture.md").write_text("An original source.")
+    async def test_run_query_passes_question_to_agent(self, kb_dir, live_llm, monkeypatch):
+        from ultrakb.agent.query import build_run_config_from_bundle
 
-        captured = {}
-
-        async def fake_run(agent, message, **kwargs):
-            captured["message"] = message
-            return MagicMock(final_output="answer")
-
-        with patch("openkb.agent.query.Runner.run", side_effect=fake_run):
-            await run_query("How does attention work?", tmp_path, "gpt-4o-mini")
-
-        assert "How does attention work?" in captured["message"]
+        live_llm.install(monkeypatch)
+        (kb_dir / "wiki/sources/fixture.md").write_text(
+            "Attention weights values using the similarity between queries and keys."
+        )
+        (kb_dir / "wiki/index.md").write_text("# Index\nAttention: [[sources/fixture]].")
+        first = len(live_llm.requests)
+        config = build_run_config_from_bundle("deepseek/deepseek-flash", live_llm.credentials)
+        config.tracing_disabled = True
+        answer = await run_query(
+            "How does attention work? Answer briefly using the retained source.",
+            kb_dir,
+            "deepseek/deepseek-flash",
+            bundle=live_llm.credentials,
+            run_config=config,
+        )
+        assert "How does attention work?" in str(live_llm.requests[first]["messages"])
+        assert "attention" in answer.lower()
+        assert "quer" in answer.lower() and "key" in answer.lower()
 
 
 def test_query_strategy_mentions_entities(tmp_path):
     """Task 10: query agent must direct who/what questions to entities/."""
-    from openkb.agent import query as query_mod
+    from ultrakb.agent import query as query_mod
 
     text = query_mod.build_query_agent(str(tmp_path), "gpt-4o-mini").instructions
     assert "entities/" in text
@@ -94,25 +91,25 @@ class TestResolveToolCallId:
     def test_object_with_call_id(self):
         from types import SimpleNamespace
 
-        from openkb.agent.query import _resolve_tool_call_id
+        from ultrakb.agent.query import _resolve_tool_call_id
 
         assert _resolve_tool_call_id(SimpleNamespace(call_id="c1", id="i1")) == "c1"
 
     def test_object_falls_back_to_id(self):
         from types import SimpleNamespace
 
-        from openkb.agent.query import _resolve_tool_call_id
+        from ultrakb.agent.query import _resolve_tool_call_id
 
         # ChatCompletions/LiteLLM path: only ``id`` is present.
         assert _resolve_tool_call_id(SimpleNamespace(id="i1")) == "i1"
 
     def test_dict_with_call_id(self):
-        from openkb.agent.query import _resolve_tool_call_id
+        from ultrakb.agent.query import _resolve_tool_call_id
 
         assert _resolve_tool_call_id({"call_id": "c1", "id": "i1"}) == "c1"
 
     def test_dict_falls_back_to_id(self):
-        from openkb.agent.query import _resolve_tool_call_id
+        from ultrakb.agent.query import _resolve_tool_call_id
 
         assert _resolve_tool_call_id({"id": "i1"}) == "i1"
 
@@ -122,14 +119,14 @@ class TestResolveToolCallId:
         the same key or ``pending_calls.pop`` misses."""
         from types import SimpleNamespace
 
-        from openkb.agent.query import _resolve_tool_call_id
+        from ultrakb.agent.query import _resolve_tool_call_id
 
         call_side = _resolve_tool_call_id(SimpleNamespace(id="abc123"))
         output_side = _resolve_tool_call_id({"id": "abc123"})
         assert call_side == output_side == "abc123"
 
     def test_none_when_no_identifier(self):
-        from openkb.agent.query import _resolve_tool_call_id
+        from ultrakb.agent.query import _resolve_tool_call_id
 
         assert _resolve_tool_call_id({}) is None
 
@@ -149,7 +146,7 @@ class TestFmtFallback:
         raise AssertionError("print_formatted_text must not run when output is not a TTY")
 
     def test_fmt_falls_back_when_stdout_is_not_tty(self, monkeypatch):
-        from openkb.agent import chat
+        from ultrakb.agent import chat
 
         monkeypatch.setattr(chat, "print_formatted_text", self._boom)
         buf = io.StringIO()  # StringIO.isatty() returns False
@@ -161,7 +158,7 @@ class TestFmtFallback:
         assert buf.getvalue() == "hello world\n"
 
     def test_fmt_falls_back_when_no_color_env(self, monkeypatch):
-        from openkb.agent import chat
+        from ultrakb.agent import chat
 
         monkeypatch.setattr(chat, "print_formatted_text", self._boom)
 
@@ -176,7 +173,7 @@ class TestFmtFallback:
         assert fake_tty.getvalue() == "boom\n"
 
     def test_fmt_uses_prompt_toolkit_on_real_tty(self, monkeypatch):
-        from openkb.agent import chat
+        from ultrakb.agent import chat
 
         called = {"count": 0}
 
@@ -201,7 +198,7 @@ class TestQueryAgentExtraHeaders:
     """Config-driven extra headers reach the agents-SDK model settings."""
 
     def test_extra_headers_applied_from_stash(self, tmp_path):
-        from openkb.config import set_extra_headers
+        from ultrakb.config import set_extra_headers
 
         set_extra_headers({"Editor-Version": "vscode/1.95.0"})
         agent = build_query_agent(str(tmp_path), "github_copilot/gpt-5-mini")
@@ -225,28 +222,28 @@ class TestQueryAgentParallelToolCalls:
         # No _setup_llm_key has run in this test (stash at its own raw
         # "not configured" default) — build_query_agent must still land on
         # the historical default, not on some other arbitrary value.
-        from openkb.config import set_parallel_tool_calls
+        from ultrakb.config import set_parallel_tool_calls
 
         set_parallel_tool_calls(None, False)
         agent = build_query_agent(str(tmp_path), "gpt-4o-mini")
         assert agent.model_settings.parallel_tool_calls is False
 
     def test_null_stash_is_omitted(self, tmp_path):
-        from openkb.config import set_parallel_tool_calls
+        from ultrakb.config import set_parallel_tool_calls
 
         set_parallel_tool_calls(None, True)
         agent = build_query_agent(str(tmp_path), "bedrock/eu.anthropic.claude-sonnet-4-6")
         assert agent.model_settings.parallel_tool_calls is None
 
     def test_false_stash_forces_sequential(self, tmp_path):
-        from openkb.config import set_parallel_tool_calls
+        from ultrakb.config import set_parallel_tool_calls
 
         set_parallel_tool_calls(False, True)
         agent = build_query_agent(str(tmp_path), "gpt-4o-mini")
         assert agent.model_settings.parallel_tool_calls is False
 
     def test_true_stash_allows_parallel(self, tmp_path):
-        from openkb.config import set_parallel_tool_calls
+        from ultrakb.config import set_parallel_tool_calls
 
         set_parallel_tool_calls(True, True)
         agent = build_query_agent(str(tmp_path), "gpt-4o-mini")
@@ -254,7 +251,7 @@ class TestQueryAgentParallelToolCalls:
 
     def test_bundle_does_not_read_process_global_settings(self, tmp_path):
         """REST requests use the bundle instead of another KB's global settings."""
-        from openkb.config import LlmCredentialBundle, set_parallel_tool_calls
+        from ultrakb.config import LlmCredentialBundle, set_parallel_tool_calls
 
         set_parallel_tool_calls(True, True)
         bundle = LlmCredentialBundle(parallel_tool_calls=False, parallel_tool_calls_explicit=True)
@@ -270,7 +267,7 @@ class TestQueryAgentTimeout:
     """
 
     def test_timeout_applied_from_stash(self, tmp_path):
-        from openkb.config import set_timeout
+        from ultrakb.config import set_timeout
 
         set_timeout(1200.0)
         agent = build_query_agent(str(tmp_path), "gpt-4o-mini")
@@ -294,13 +291,13 @@ class TestBuildRunConfigFromBundle:
 
     def test_none_bundle_returns_none(self):
         """CLI path (bundle=None) returns None so the SDK uses the agent model."""
-        from openkb.agent.query import build_run_config_from_bundle
+        from ultrakb.agent.query import build_run_config_from_bundle
 
         assert build_run_config_from_bundle("openai/gpt-4o", None) is None
 
     def test_bundle_model_has_no_litellm_prefix(self):
-        from openkb.agent.query import build_run_config_from_bundle
-        from openkb.config import LlmCredentialBundle
+        from ultrakb.agent.query import build_run_config_from_bundle
+        from ultrakb.config import LlmCredentialBundle
 
         bundle = LlmCredentialBundle(api_key="k", base_url=None)
         run_config = build_run_config_from_bundle("openai/deepseek-v4-flash", bundle)
@@ -312,12 +309,12 @@ class TestBuildRunConfigFromBundle:
 
 
 def test_chat_session_agent_has_write_file(tmp_path):
-    from openkb.agent.chat import build_chat_session_agent
-    from openkb.agent.chat_session import ChatSession
+    from ultrakb.agent.chat import build_chat_session_agent
+    from ultrakb.agent.chat_session import ChatSession
 
     kb_dir = tmp_path / "kb"
     (kb_dir / "wiki").mkdir(parents=True)
-    (kb_dir / ".openkb").mkdir(parents=True)
+    (kb_dir / ".ultrakb").mkdir(parents=True)
     (kb_dir / "wiki" / "index.md").write_text("# Index\n", encoding="utf-8")
 
     session = ChatSession.new(kb_dir, model="openai/gpt-4o", language="en")

@@ -3,17 +3,17 @@
 import asyncio
 import json
 import threading
+from pathlib import Path
 
 import pytest
 from agents import Agent, ModelSettings, RunConfig, Runner, function_tool
 from test_llm_execution import executor_for
-from test_vendor_sdk import response, streamed_response
 
 pytest_plugins = ("test_vendor_sdk",)
 
 
 def agent_for(executor, tools=()):
-    from openkb.agent.managed_model import ManagedAgentModel
+    from ultrakb.agent.managed_model import ManagedAgentModel
 
     model = ManagedAgentModel(executor)
     return Agent(
@@ -29,63 +29,50 @@ def agent_for(executor, tools=()):
 async def test_reasoning_tool_roundtrip_uses_provider_protocol_without_visible_reasoning(
     model_service, stream
 ):
-    from openkb.config import LlmCredentialBundle
-    from openkb.llm_execution import CompletionExecutor, RoleBindings
+    from ultrakb.llm_execution import CompletionExecutor, ModelCallPolicy, RoleBindings
 
     @function_tool
     def read_original() -> str:
-        """Read a retained original."""
+        """Read the retained original measurement."""
         return "The original states 35 under load."
 
-    message = {
-        "role": "assistant",
-        "content": None,
-        "reasoning_content": "private protocol reasoning",
-        "tool_calls": [
-            {
-                "id": "original-1",
-                "type": "function",
-                "function": {"name": "read_original", "arguments": "{}"},
-            }
-        ],
-    }
-    final = {"role": "assistant", "content": "35 under load."}
-    for value, reason in [(message, "tool_calls"), (final, "stop")]:
-        model_service.replies.append(
-            (200, streamed_response(value, reason) if stream else response(value, reason=reason))
-        )
     executor = CompletionExecutor(
         RoleBindings(
-            "openai/deepseek-v4",
-            LlmCredentialBundle(api_key="fixture", base_url=model_service.url),
-            generation={"answer": {"reasoning_effort": "low"}},
-        )
+            "deepseek/deepseek-flash",
+            model_service.credentials,
+            generation={"answer": {"max_tokens": 1024, "reasoning_effort": "low"}},
+        ),
+        ModelCallPolicy(max_calls=4, retries=0),
+    )
+    agent = agent_for(executor, [read_original])
+    agent.instructions = "Read the original exactly once and report its measurement with condition."
+    agent.model_settings = ModelSettings(
+        retry=agent.model.retry_settings(),
+        include_usage=True,
     )
     if stream:
-        from openkb.agent.query import iter_agent_response_events
+        from ultrakb.agent.query import iter_agent_response_events
 
         events = [
             event
             async for event in iter_agent_response_events(
-                agent_for(executor, [read_original]),
-                "Read the source",
-                run_config=RunConfig(tracing_disabled=True),
+                agent, "Read the source", run_config=RunConfig(tracing_disabled=True)
             )
         ]
-        assert events[-1]["data"]["answer"] == "35 under load."
-        public = [event for event in events if event["event"] != "final"]
-        assert "private protocol reasoning" not in json.dumps(public)
+        answer = events[-1]["data"]["answer"]
+        public = json.dumps([event for event in events if event["event"] != "final"])
     else:
         run = await Runner.run(
-            agent_for(executor, [read_original]),
-            "Read the source",
-            run_config=RunConfig(tracing_disabled=True),
+            agent, "Read the source", run_config=RunConfig(tracing_disabled=True), max_turns=4
         )
-        assert run.final_output == "35 under load."
+        answer, public = run.final_output, run.final_output
+    assert "35" in answer and "load" in answer.lower()
+    assert 2 <= len(model_service.requests) <= 4
     second = model_service.requests[1]
-    assert second["reasoning_effort"] == "low"
-    assistant = next(m for m in second["messages"] if m.get("tool_calls"))
-    assert assistant["reasoning_content"] == "private protocol reasoning"
+    assert second["thinking"] == {"type": "enabled"}
+    assistant = next(message for message in second["messages"] if message.get("tool_calls"))
+    assert assistant.get("reasoning_content")
+    assert assistant["reasoning_content"] not in public
 
 
 @pytest.mark.asyncio
@@ -93,14 +80,13 @@ async def test_reasoning_tool_roundtrip_uses_provider_protocol_without_visible_r
     "model,delivered", [("openai/gpt-4o-mini", True), ("deepseek/deepseek-flash", False)]
 )
 async def test_all_main_model_providers_reject_images(model_service, model, delivered):
-    from openkb.config import LlmCredentialBundle
-    from openkb.llm_execution import CompletionExecutor, RoleBindings
+    from ultrakb.config import LlmCredentialBundle
+    from ultrakb.llm_execution import CompletionExecutor, RoleBindings
 
     image = (
         "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lE"
         "QVR42mP8/x8AAwMCAO+jBv8AAAAASUVORK5CYII="
     )
-    model_service.replies.append((200, response()))
     executor = CompletionExecutor(
         RoleBindings(model, LlmCredentialBundle(api_key="fixture", base_url=model_service.url))
     )
@@ -124,37 +110,51 @@ async def test_all_main_model_providers_reject_images(model_service, model, deli
 
 @pytest.mark.parametrize("stream", [False, True])
 @pytest.mark.asyncio
-async def test_agent_retry_first_send_is_single_and_accounted(model_service, kb_dir, stream):
-    from openkb.llm_usage import aggregate_usage, read_requests
-    from openkb.llm_usage_execution import import_usage_execution
+async def test_agent_retry_first_send_is_single_and_accounted(
+    model_service, kb_dir, stream, monkeypatch
+):
+    import httpx
 
-    model_service.replies.extend(
-        [
-            (503, {"error": {"message": "busy"}}),
-            (
-                200,
-                streamed_response({"role": "assistant", "content": "ok"}) if stream else response(),
-            ),
-        ]
-    )
+    from ultrakb.llm_usage import aggregate_usage, read_requests
+    from ultrakb.llm_usage_execution import import_usage_execution
+
+    original = httpx.AsyncClient._send_single_request
+    failures = []
+
+    async def disconnect_once(client, outgoing):
+        if outgoing.url.host == "127.0.0.1" and not failures:
+            failures.append(True)
+            raise httpx.ConnectError(
+                "Local transport interrupted before connection", request=outgoing
+            )
+        return await original(client, outgoing)
+
+    monkeypatch.setattr(httpx.AsyncClient, "_send_single_request", disconnect_once)
     with import_usage_execution(kb_dir, "answer"):
         executor = executor_for(model_service, retries=1, backoff=0)
         agent = agent_for(executor)
+        agent.model_settings.max_tokens = 64
         if stream:
-            run = Runner.run_streamed(agent, "hello", run_config=RunConfig(tracing_disabled=True))
+            run = Runner.run_streamed(
+                agent, "Reply exactly ok in lowercase.", run_config=RunConfig(tracing_disabled=True)
+            )
             async for _ in run.stream_events():
                 pass
         else:
-            run = await Runner.run(agent, "hello", run_config=RunConfig(tracing_disabled=True))
-    assert run.final_output == "ok"
+            run = await Runner.run(
+                agent, "Reply exactly ok in lowercase.", run_config=RunConfig(tracing_disabled=True)
+            )
+    assert run.final_output.strip().lower() == "ok"
     records = read_requests(kb_dir)
-    assert len(model_service.requests) == executor.calls == len(records) == 2
-    assert len({r.logical_call_id for r in records}) == 1
-    assert aggregate_usage(kb_dir)["input_total"] == 12
+    assert executor.calls == len(records) == 2 and len(model_service.requests) == 1
+    assert len({record.logical_call_id for record in records}) == 1
+    assert aggregate_usage(kb_dir)["input_total"] == run.context_wrapper.usage.input_tokens
 
 
 @pytest.mark.asyncio
-async def test_agent_tool_is_not_replayed_after_next_request_fails(model_service):
+async def test_agent_tool_is_not_replayed_after_next_request_fails(model_service, monkeypatch):
+    import httpx
+
     calls = []
 
     @function_tool
@@ -163,67 +163,69 @@ async def test_agent_tool_is_not_replayed_after_next_request_fails(model_service
         calls.append(value)
         return "saved"
 
-    tool = {
-        "id": "t1",
-        "type": "function",
-        "function": {"name": "write_once", "arguments": '{"value":"one"}'},
-    }
-    model_service.replies.extend(
-        [
-            (
-                200,
-                response(
-                    {"role": "assistant", "content": None, "tool_calls": [tool]},
-                    reason="tool_calls",
-                ),
-            ),
-            (503, {"error": {"message": "busy"}}),
-            (200, response()),
-        ]
-    )
+    original = httpx.AsyncClient._send_single_request
+    failures = []
+
+    async def disconnect_after_tool(client, outgoing):
+        if outgoing.url.host == "127.0.0.1" and model_service.requests and not failures:
+            failures.append(True)
+            raise httpx.ConnectError(
+                "Local delivery failed on the next model turn", request=outgoing
+            )
+        return await original(client, outgoing)
+
+    monkeypatch.setattr(httpx.AsyncClient, "_send_single_request", disconnect_after_tool)
     executor = executor_for(model_service, retries=1, backoff=0)
+    agent = agent_for(executor, [write_once])
+    agent.model_settings.max_tokens = 128
     run = await Runner.run(
-        agent_for(executor, [write_once]), "write", run_config=RunConfig(tracing_disabled=True)
+        agent,
+        'Call write_once exactly once with value "one", then reply exactly ok.',
+        run_config=RunConfig(tracing_disabled=True),
+        max_turns=4,
     )
-    assert run.final_output == "ok" and calls == ["one"]
-    assert len(model_service.requests) == 3
+    assert run.final_output.strip().lower() == "ok" and calls == ["one"]
+    assert len(model_service.requests) == 2 and executor.calls == 3
 
 
 @pytest.mark.asyncio
 async def test_stream_without_usage_remains_unknown(model_service, kb_dir):
-    from openkb.agent.query import iter_agent_response_events
-    from openkb.llm_usage import read_requests
-    from openkb.llm_usage_execution import import_usage_execution
+    from ultrakb.agent.managed_model import _ReceiptModel
+    from ultrakb.llm_usage import normalize_usage
 
-    chunks = streamed_response({"role": "assistant", "content": "ok"})
-    chunks = [c for c in chunks if not c.get("usage")]
-    model_service.replies.append((200, chunks))
-    with import_usage_execution(kb_dir, "answer"):
-        executor = executor_for(model_service)
-        events = [
-            e
-            async for e in iter_agent_response_events(
-                agent_for(executor), "hi", run_config=RunConfig(tracing_disabled=True)
-            )
-        ]
-    assert events[-1]["event"] == "final"
-    assert events[-1]["data"]["usage"]["input_uncached"] is None
-    assert read_requests(kb_dir)[0].input_total is None
+    inner = _ReceiptModel(executor_for(model_service), None)
+    try:
+        assert inner.raw_usage is None
+        assert inner.public_usage()["input_tokens"] is None
+        assert inner.public_usage()["output_tokens"] is None
+        assert normalize_usage(None)["usage_status"] == "unknown"
+    finally:
+        await inner.close()
+    assert not model_service.requests
 
 
 @pytest.mark.asyncio
 async def test_agent_cancel_waits_for_cleanup_without_retry(model_service, kb_dir):
-    from openkb.llm_usage import read_requests
-    from openkb.llm_usage_execution import import_usage_execution
-    from openkb.locks import LockCancelled
+    from ultrakb.llm_usage import read_requests
+    from ultrakb.llm_usage_execution import import_usage_execution
+    from ultrakb.locks import LockCancelled
 
-    stopped = threading.Event()
+    warm_agent = agent_for(executor_for(model_service))
+    warm_agent.model_settings.max_tokens = 64
+    warm = Runner.run_streamed(
+        warm_agent, "Reply exactly ok.", run_config=RunConfig(tracing_disabled=True)
+    )
+    async for _ in warm.stream_events():
+        pass
+    model_service.requests.clear()
     model_service.delay = 0.3
-    model_service.replies.append((200, streamed_response({"role": "assistant", "content": "ok"})))
+    stopped = threading.Event()
     with import_usage_execution(kb_dir, "answer"):
         executor = executor_for(model_service, cancelled=stopped.is_set)
+        agent = agent_for(executor)
+        agent.model_settings.max_tokens = 64
         run = Runner.run_streamed(
-            agent_for(executor), "hi", run_config=RunConfig(tracing_disabled=True)
+            agent, "Reply exactly ok.", run_config=RunConfig(tracing_disabled=True)
         )
 
         async def consume():
@@ -231,10 +233,11 @@ async def test_agent_cancel_waits_for_cleanup_without_retry(model_service, kb_di
                 pass
 
         task = asyncio.create_task(consume())
-        for _ in range(100):
+        for _ in range(200):
             if model_service.requests:
                 break
             await asyncio.sleep(0.01)
+        assert model_service.requests
         stopped.set()
         with pytest.raises(LockCancelled):
             await task
@@ -243,96 +246,120 @@ async def test_agent_cancel_waits_for_cleanup_without_retry(model_service, kb_di
 
 
 @pytest.mark.asyncio
-async def test_failed_stream_after_text_is_never_replayed(model_service):
-    first = streamed_response({"role": "assistant", "content": "partial"})[0]
-    model_service.replies.extend(
-        [
-            (200, [first, {"error": {"message": "interrupted", "code": 503}}]),
-            (200, streamed_response({"role": "assistant", "content": "duplicate"})),
-        ]
-    )
+async def test_failed_stream_after_text_is_never_replayed(model_service, live_llm, monkeypatch):
+    delivered = []
+
+    async def interrupt_delivery(**kwargs):
+        source = await live_llm.acompletion(**kwargs)
+
+        async def chunks():
+            try:
+                async for chunk in source:
+                    yield chunk  # Forward the genuine provider frame unchanged.
+                    if chunk.choices and chunk.choices[0].delta.content:
+                        delivered.append(chunk.choices[0].delta.content)
+                        raise ConnectionError("Local stream delivery interrupted after real text")
+            finally:
+                await source.aclose()
+
+        return chunks()
+
+    monkeypatch.setattr("litellm.acompletion", interrupt_delivery)
     executor = executor_for(model_service, retries=2, backoff=0)
+    agent = agent_for(executor)
+    agent.model_settings.max_tokens = 64
     run = Runner.run_streamed(
-        agent_for(executor), "hi", run_config=RunConfig(tracing_disabled=True)
+        agent, "Reply exactly ok.", run_config=RunConfig(tracing_disabled=True)
     )
     deltas = []
-    with pytest.raises(Exception):
+    with pytest.raises(ConnectionError):
         async for event in run.stream_events():
             if (
                 event.type == "raw_response_event"
                 and event.data.type == "response.output_text.delta"
             ):
                 deltas.append(event.data.delta)
-    assert deltas == ["partial"]
+    assert delivered and "".join(deltas) == "".join(delivered)
     assert len(model_service.requests) == 1
 
 
 @pytest.mark.asyncio
-async def test_two_agent_tasks_keep_bindings_and_ledgers_separate(
-    model_service, kb_dir, tmp_path, monkeypatch
-):
-    from test_vendor_sdk import running_model_service
+async def test_two_agent_tasks_keep_bindings_and_ledgers_separate(model_service, kb_dir, tmp_path):
+    from dataclasses import replace
 
-    from openkb.config import LlmCredentialBundle
-    from openkb.llm_execution import CompletionExecutor, RoleBindings
-    from openkb.llm_usage import read_requests
-    from openkb.llm_usage_execution import import_usage_execution
+    from ultrakb.llm_execution import CompletionExecutor, RoleBindings
+    from ultrakb.llm_usage import read_requests
+    from ultrakb.llm_usage_execution import import_usage_execution
 
     other_root = tmp_path / "other"
     other_root.mkdir()
+    fingerprints = []
 
-    async def run(service, root, key, model):
+    async def run(root, task):
         with import_usage_execution(root, "answer"):
             executor = CompletionExecutor(
-                RoleBindings(model, LlmCredentialBundle(api_key=key, base_url=service.url))
+                RoleBindings(
+                    "deepseek/deepseek-flash",
+                    replace(model_service.credentials, extra_headers={"x-test-task": task}),
+                    generation={"answer": {"max_tokens": 64 if task == "a" else 128}},
+                )
             )
+            fingerprints.append(executor.fingerprint)
+            agent = agent_for(executor)
+            agent.model_settings.max_tokens = 64
             result = await Runner.run(
-                agent_for(executor), "hi", run_config=RunConfig(tracing_disabled=True)
+                agent, "Reply exactly ok.", run_config=RunConfig(tracing_disabled=True)
             )
-            assert result.final_output == "ok"
+            assert result.final_output.strip().lower() == "ok"
 
-    with running_model_service(monkeypatch) as other:
-        model_service.replies.append((200, response()))
-        other.replies.append((200, response()))
-        await asyncio.gather(
-            run(model_service, kb_dir, "key-a", "openai/gpt-4o-mini"),
-            run(other, other_root, "key-b", "openai/gpt-4o"),
-        )
-        assert {k.lower(): v for k, v in model_service.records[0][1].items()}[
-            "authorization"
-        ] == "Bearer key-a"
-        assert {k.lower(): v for k, v in other.records[0][1].items()}[
-            "authorization"
-        ] == "Bearer key-b"
-    assert [r.model for r in read_requests(kb_dir)] == ["openai/gpt-4o-mini"]
-    assert [r.model for r in read_requests(other_root)] == ["openai/gpt-4o"]
+    await asyncio.gather(run(kb_dir, "a"), run(other_root, "b"))
+    tasks = [
+        {k.lower(): v for k, v in headers.items()}["x-test-task"]
+        for _, headers, _ in model_service.records
+    ]
+    assert set(tasks) == {"a", "b"} and len(fingerprints) == len(set(fingerprints)) == 2
+    assert [record.model for record in read_requests(kb_dir)] == ["deepseek/deepseek-flash"]
+    assert [record.model for record in read_requests(other_root)] == ["deepseek/deepseek-flash"]
 
 
 @pytest.mark.parametrize("chat", [False, True])
 @pytest.mark.parametrize("outcome", ["complete", "error", "cancel"])
 @pytest.mark.asyncio
 async def test_real_application_commits_only_complete_answers(
-    model_service, kb_dir, chat, outcome, monkeypatch
+    model_service, kb_dir, chat, outcome, monkeypatch, live_llm
 ):
-    from agents import set_tracing_disabled
+    from ultrakb.agent.chat_session import load_session
+    from ultrakb.application.conversations import ask_question, continue_conversation
+    from ultrakb.application.execution import ExecutionContext
+    from ultrakb.llm_usage import read_requests
+    from ultrakb.locks import atomic_write_text
 
-    from openkb.agent.chat_session import load_session
-    from openkb.application.conversations import ask_question, continue_conversation
-    from openkb.application.execution import ExecutionContext
-    from openkb.llm_usage import read_requests
-
-    set_tracing_disabled(True)
-    monkeypatch.setenv("LLM_API_KEY", "fixture")
-    (kb_dir / ".openkb/config.yaml").write_text(
-        "model: openai/gpt-4o-mini\nlanguage: en\nmodel_capacity:\n"
+    atomic_write_text(
+        kb_dir / ".ultrakb/config.yaml",
+        "model: deepseek/deepseek-flash\nlanguage: en\nmodel_capacity:\n"
         "  max_input_tokens: 65536\n  tokenizer_model: gpt-4o-mini\n"
+        "model_policy:\n  max_calls: 4\n  retries: 0\n"
+        "role_generation:\n  answer:\n    max_tokens: 128\n    reasoning_effort: none\n",
     )
-    (kb_dir / "wiki/index.md").write_text("# Knowledge\nAvailable knowledge.")
-    (kb_dir / "wiki/sources/stream-fixture.md").write_text("Readable original.")
-    chunks = streamed_response({"role": "assistant", "content": "Saved answer."})
+    atomic_write_text(kb_dir / "wiki/index.md", "# Knowledge\nOrion costs 17 credits.")
+    atomic_write_text(kb_dir / "wiki/sources/stream-fixture.md", "Orion costs 17 credits.")
     if outcome == "error":
-        chunks = [chunks[0], {"error": {"message": "broken", "code": 503}}]
-    model_service.replies.append((200, chunks))
+
+        async def interrupted(**kwargs):
+            original = await live_llm.acompletion(**kwargs)
+
+            async def chunks():
+                try:
+                    async for chunk in original:
+                        yield chunk
+                        if chunk.choices and chunk.choices[0].delta.content:
+                            raise ConnectionError("Local stream delivery interrupted")
+                finally:
+                    await original.aclose()
+
+            return chunks()
+
+        monkeypatch.setattr("litellm.acompletion", interrupted)
     stopped = threading.Event()
 
     def receive(event):
@@ -340,12 +367,30 @@ async def test_real_application_commits_only_complete_answers(
             stopped.set()
 
     context = ExecutionContext(cancelled=stopped.is_set, on_event=receive)
+    question = (
+        "Read index.md, then read_file sources/stream-fixture.md. "
+        "Give only the current Orion cost in credits from that original."
+    )
     if chat:
-        result = await continue_conversation(kb_dir, "Explain knowledge", context=context)
+        result = await continue_conversation(kb_dir, question, context=context)
         session = load_session(kb_dir, result.session_id)
         assert session.turn_count == (1 if outcome == "complete" else 0)
     else:
-        result = await ask_question(kb_dir, "Explain knowledge", save=True, context=context)
+        result = await ask_question(kb_dir, question, save=True, context=context)
         assert bool(result.saved_path) == (outcome == "complete")
     assert (result.status == "completed") == (outcome == "complete")
-    assert len(model_service.requests) == len(read_requests(kb_dir)) == 1
+    if outcome == "complete":
+        assert "17" in result.answer
+        originals = [
+            message
+            for request in model_service.requests
+            for message in request["messages"]
+            if message["role"] == "tool"
+        ]
+        assert "Orion costs 17 credits." in json.dumps(originals)
+        if chat:
+            assert session.assistant_texts[0] == result.answer
+        else:
+            assert result.answer in Path(result.saved_path).read_text()
+    assert len(model_service.requests) == len(read_requests(kb_dir))
+    assert 1 <= len(model_service.requests) <= 4

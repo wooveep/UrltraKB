@@ -2,11 +2,11 @@
 
 import json
 
-from openkb.agent.page_updates import PageUpdate
+from ultrakb.agent.page_updates import PageUpdate
 
 
 def test_disjoint_and_identical_proposals_merge_in_source_order():
-    from openkb.agent.update_proposals import UpdateProposal, merge_proposals
+    from ultrakb.agent.update_proposals import UpdateProposal, merge_proposals
 
     update = PageUpdate(
         "# Device\n\nWinter rule.\n\nSummer rule.\n", source_ranges=("winter", "summer")
@@ -37,7 +37,7 @@ def test_disjoint_and_identical_proposals_merge_in_source_order():
 
 
 def test_overlapping_replacements_and_page_metadata_need_explicit_resolution():
-    from openkb.agent.update_proposals import UpdateProposal, merge_proposals
+    from ultrakb.agent.update_proposals import UpdateProposal, merge_proposals
 
     update = PageUpdate("---\ndescription: Old\ntype: product\n---\n# Device\n\nRule.\n")
 
@@ -65,7 +65,7 @@ def test_overlapping_replacements_and_page_metadata_need_explicit_resolution():
 
 
 def test_one_local_metadata_candidate_still_needs_whole_page_context():
-    from openkb.agent.update_proposals import UpdateProposal, merge_proposals
+    from ultrakb.agent.update_proposals import UpdateProposal, merge_proposals
 
     update = PageUpdate("---\ndescription: Old scope\n---\n# Device\n\nRule.\n")
     response = {"base_sha256": update.digest, "description": "Only local scope", "edits": []}
@@ -75,7 +75,7 @@ def test_one_local_metadata_candidate_still_needs_whole_page_context():
 
 
 def test_equivalent_type_echo_does_not_create_a_page_metadata_conflict():
-    from openkb.agent.update_proposals import UpdateProposal, merge_proposals
+    from ultrakb.agent.update_proposals import UpdateProposal, merge_proposals
 
     update = PageUpdate(
         "---\ntype: Work\n---\n# Manual\n\nOld rule.\n",
@@ -96,7 +96,7 @@ def test_equivalent_type_echo_does_not_create_a_page_metadata_conflict():
 
 
 def test_same_type_change_in_different_case_merges_without_an_extra_request():
-    from openkb.agent.update_proposals import UpdateProposal, merge_proposals
+    from ultrakb.agent.update_proposals import UpdateProposal, merge_proposals
 
     update = PageUpdate(
         "---\ntype: Work\n---\n# Manual\n\nOld rule.\n",
@@ -117,7 +117,7 @@ def test_same_type_change_in_different_case_merges_without_an_extra_request():
 
 
 def test_conflict_resolves_all_edits_sharing_a_range_declaration():
-    from openkb.agent.update_proposals import UpdateProposal, merge_proposals
+    from ultrakb.agent.update_proposals import UpdateProposal, merge_proposals
 
     update = PageUpdate(
         "# Device\n\nInstall.\n\nMaintenance.\n", source_ranges=("install-a", "install-b", "care")
@@ -144,7 +144,7 @@ def test_conflict_resolves_all_edits_sharing_a_range_declaration():
 
 
 def test_unrelated_range_conflicts_keep_separate_bounded_resolution_requests():
-    from openkb.agent.update_proposals import UpdateProposal, merge_proposals
+    from ultrakb.agent.update_proposals import UpdateProposal, merge_proposals
 
     update = PageUpdate("# Device\n\nInstall.\n\nCare.\n", source_ranges=("r0", "r1", "r2", "r3"))
     proposals = [

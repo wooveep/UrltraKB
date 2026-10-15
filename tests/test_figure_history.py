@@ -7,11 +7,11 @@ import pytest
 from figure_fixtures import record_markdown
 from PIL import Image
 
-from openkb.agent.page_figures import PageFigures, split_gallery
-from openkb.agent.page_updates import PageUpdate
-from openkb.figure_assets import freeze_figures, relative_figure
-from openkb.figure_publication import preserve_page_figures
-from openkb.markdown_images import image_references
+from ultrakb.agent.page_figures import PageFigures, split_gallery
+from ultrakb.agent.page_updates import PageUpdate
+from ultrakb.figure_assets import freeze_figures, relative_figure
+from ultrakb.figure_publication import preserve_page_figures
+from ultrakb.markdown_images import image_references
 
 
 def original_figures(wiki):
@@ -88,7 +88,7 @@ def test_bare_figure_reference_is_repaired_in_candidate_only(tmp_path):
     text = "---\nsources: [sources/manual.md]\n---\n原图：`图 片.png`\n"
     page.write_text(text)
     # Two appearances of that filename are ambiguous, even with shared bytes.
-    from openkb.agent.page_response import PageResponseError
+    from ultrakb.agent.page_response import PageResponseError
 
     with pytest.raises(PageResponseError, match="Ambiguous"):
         preserve_page_figures(tmp_path, wiki, {})
@@ -107,7 +107,7 @@ def test_moved_wiki_figures_render_in_the_real_reader(tmp_path, monkeypatch):
     from PySide6.QtGui import QTextDocument
     from PySide6.QtWidgets import QApplication
 
-    from openkb.desktop.reader import MarkdownView
+    from ultrakb.desktop.reader import MarkdownView
 
     wiki = tmp_path / "wiki"
     figures = original_figures(wiki)
@@ -148,8 +148,8 @@ def test_moved_wiki_figures_render_in_the_real_reader(tmp_path, monkeypatch):
 
 
 def test_display_only_repair_does_not_claim_current_factual_inputs(tmp_path):
-    from openkb.ingest_records import KnowledgeHead, KnowledgeRevision
-    from openkb.knowledge_evidence import publication_dependencies
+    from ultrakb.ingest_records import KnowledgeHead, KnowledgeRevision
+    from ultrakb.knowledge_evidence import publication_dependencies
 
     wiki = tmp_path / "wiki"
     figures = original_figures(wiki)
@@ -158,7 +158,7 @@ def test_display_only_repair_does_not_claim_current_factual_inputs(tmp_path):
     )
     page = "concepts/guide.md"
     old_input, new_input, revision = "a" * 32, "b" * 32, "c" * 32
-    old = tmp_path / ".openkb/knowledge/legacy/revisions" / revision
+    old = tmp_path / ".ultrakb/knowledge/legacy/revisions" / revision
     (old / "wiki/concepts").mkdir(parents=True)
     body = "---\nsources: [sources/manual.md]\n---\nA recorded procedure."
     (old / "wiki" / page).write_text(body)

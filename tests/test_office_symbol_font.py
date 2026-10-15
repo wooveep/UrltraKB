@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pymupdf
 import pytest
 
-from openkb.office.fontconfig import FONT_FILES, require_font_supply
+from ultrakb.office.fontconfig import FONT_FILES, require_font_supply
 
 
 def test_plus_outline_has_two_orthogonal_bars():

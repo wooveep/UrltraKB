@@ -1,38 +1,38 @@
 """Ordinary documents share a KB without product/version admission requirements."""
 
 import json
-from types import SimpleNamespace
 
 import pytest
 
 
 @pytest.fixture
-def import_note(kb_dir, monkeypatch):
+def import_note(kb_dir, monkeypatch, live_llm):
     import pymupdf
+    from publication_fixtures import publish_document
 
-    from openkb.application.documents import import_document
+    from ultrakb.knowledge_scope import resolve_scope
+    from ultrakb.locks import atomic_write_text
 
-    count = 0
+    live_llm.install(monkeypatch)
+    atomic_write_text(
+        kb_dir / ".ultrakb/config.yaml",
+        "model: deepseek/deepseek-flash\nlanguage: en\n"
+        "role_generation:\n  compile:\n    max_tokens: 512\n    reasoning_effort: none\n"
+        "model_capacity:\n  max_input_tokens: 65536\n  tokenizer_model: gpt-4o-mini\n",
+    )
 
-    def completion(**kwargs):
-        nonlocal count
-        count += 1
-        reply = {"description": "Note", "content": "A retained source note."} if count % 2 else {}
-        return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(reply)))],
-            usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
-        )
+    before = len(live_llm.calls)
 
-    monkeypatch.setattr("litellm.completion", completion)
-
-    def run(name, text, **kwargs):
+    def run(name, text, *, scope=None):
+        resolve_scope(kb_dir, scope, writable=True)
         path = kb_dir / name
         with pymupdf.open() as pdf:
             pdf.new_page().insert_text((72, 72), text)
             pdf.save(path)
-        return import_document(kb_dir, path, **kwargs)
+        return publish_document(kb_dir, path, text, bundle=live_llm.credentials)
 
-    return run
+    yield run
+    assert len(live_llm.calls) == before
 
 
 def test_unrelated_documents_share_the_ordinary_wiki(kb_dir, import_note):
@@ -50,10 +50,10 @@ def test_unrelated_documents_share_the_ordinary_wiki(kb_dir, import_note):
 def test_titles_never_create_product_catalogs_or_gate_import(
     kb_dir, import_note, explicit_scope, title
 ):
-    from openkb.application.documents import import_document
-    from openkb.documents import read_document_source
-    from openkb.knowledge_scope import live_scope
-    from openkb.source_catalog import read_source
+    from ultrakb.application.documents import import_document
+    from ultrakb.documents import read_document_source
+    from ultrakb.knowledge_scope import live_scope
+    from ultrakb.source_catalog import read_source
 
     scope = live_scope(kb_dir) if explicit_scope else None
     first = import_note("notes.pdf", title + "\nA documented observation.", scope=scope)
@@ -72,7 +72,7 @@ def test_titles_never_create_product_catalogs_or_gate_import(
         "metadata-corrections",
         "family-defaults",
     ):
-        assert not (kb_dir / ".openkb/catalog" / collection).exists()
+        assert not (kb_dir / ".ultrakb/catalog" / collection).exists()
     retry = import_document(kb_dir, kb_dir / "notes.pdf", scope=scope)
     assert retry.status == "skipped"
     assert retry.source_revision_id == first.source_revision_id
@@ -80,7 +80,7 @@ def test_titles_never_create_product_catalogs_or_gate_import(
 
 
 def test_question_wording_does_not_gate_available_documents(kb_dir, import_note):
-    from openkb.application.query_views import resolve_query_views
+    from ultrakb.application.query_views import resolve_query_views
 
     result = import_note(
         "atlas.pdf",
@@ -93,62 +93,66 @@ def test_question_wording_does_not_gate_available_documents(kb_dir, import_note)
 
 
 @pytest.mark.asyncio
-async def test_query_keeps_generated_text_without_a_fact_registration_protocol(kb_dir, monkeypatch):
-    from openkb.agent.query import run_query
-    from openkb.locks import atomic_write_text
+async def test_query_keeps_generated_text_without_a_fact_registration_protocol(
+    kb_dir, monkeypatch, live_llm
+):
+    from ultrakb.agent.query import build_query_agent, build_run_config_from_bundle, run_query
+    from ultrakb.locks import atomic_write_text
 
+    live_llm.install(monkeypatch)
     atomic_write_text(kb_dir / "wiki/sources/note.md", "The supported command is export --all.")
-    answer = "Run:\n\n  ```sh\n  export --all\n  ```\n\nSource: [note](sources/note.md)"
-    calls = []
+    atomic_write_text(kb_dir / "wiki/index.md", "# Index\n\nCommand: [[sources/note]].")
+    agent = build_query_agent(
+        str(kb_dir / "wiki"), "deepseek/deepseek-flash", bundle=live_llm.credentials
+    )
+    assert "record_source_fact" not in {tool.name for tool in agent.tools}
+    actual = await run_query(
+        "How do I export everything? Quote the documented command in a fenced shell block "
+        "and cite note.md.",
+        kb_dir,
+        "deepseek/deepseek-flash",
+        bundle=live_llm.credentials,
+        run_config=build_run_config_from_bundle("deepseek/deepseek-flash", live_llm.credentials),
+    )
+    assert "export --all" in actual
+    assert "```" in actual
+    assert "note" in actual.lower()
 
-    async def generate(agent, question, **kwargs):
-        calls.append(agent)
-        return SimpleNamespace(final_output=answer)
 
-    monkeypatch.setattr("openkb.agent.query.Runner.run", generate)
-    actual = await run_query("How do I export everything?", kb_dir, "test-model")
-    assert actual == answer
-    assert len(calls) == 1
-    assert "record_source_fact" not in {tool.name for tool in calls[0].tools}
+def test_long_document_plan_does_not_require_added_evidence_fields(kb_dir):
+    from test_compile_windows import _plan
 
-
-@pytest.mark.asyncio
-async def test_long_document_plan_does_not_require_added_evidence_fields(kb_dir, monkeypatch):
-    from openkb.agent.compiler import _compile_concepts
-    from openkb.agent.source_windows import CompileSourceWindows
-    from openkb.compilation_report import collect_compile_report
+    from ultrakb.agent.compile_delivery import publish_compile_results
+    from ultrakb.agent.source_windows import CompileSourceWindows
+    from ultrakb.compilation_report import collect_compile_report
+    from ultrakb.locks import atomic_write_text
 
     wiki = kb_dir / "wiki"
-    (wiki / "sources/garden.json").write_text(
+    atomic_write_text(
+        wiki / "sources/garden.json",
         json.dumps(
             [{"page": 1, "unit_kind": "page", "content": "Seedlings require water twice per week."}]
-        )
+        ),
     )
-    plan = {"concepts": {"create": [{"name": "seedlings", "title": "Seedlings"}]}}
-    monkeypatch.setattr("openkb.agent.compiler._llm_call", lambda *a, **kw: json.dumps(plan))
-
-    async def generate(*args, **kwargs):
-        return json.dumps({"description": "Care", "content": "Water twice per week."})
-
-    monkeypatch.setattr("openkb.agent.compiler._llm_call_async", generate)
+    plan = _plan(wiki, {"concepts": {"create": [{"name": "seedlings", "title": "Seedlings"}]}})
+    assert "evidence_units" not in plan.concepts.create[0]
+    reader = CompileSourceWindows(
+        wiki,
+        "garden",
+        navigation=[{"title": "Seedlings", "node_id": "care", "start_index": 1, "end_index": 1}],
+    )
+    assert reader.validate_updates(plan, long=True) is None
+    original = reader.prepare(plan.concepts.create[0], long=True)
+    assert "twice per week" in str(original.message)
     with collect_compile_report() as report:
-        await _compile_concepts(
+        publish_compile_results(
             wiki,
-            kb_dir,
-            "test",
-            {},
-            {},
-            "Seedling care",
             "garden",
-            1,
+            plan,
+            summary="Seedling care",
+            concept_results=[("seedlings", "# Seedlings\n\nWater twice per week.", False, "Care")],
             doc_type="pageindex",
-            source_windows=CompileSourceWindows(
-                wiki,
-                "garden",
-                navigation=[
-                    {"title": "Seedlings", "node_id": "care", "start_index": 1, "end_index": 1}
-                ],
-            ),
+            original_path=reader.original_path,
         )
         report.require_complete()
     assert "Water twice per week" in (wiki / "concepts/seedlings.md").read_text()
@@ -164,7 +168,7 @@ async def test_long_document_plan_does_not_require_added_evidence_fields(kb_dir,
     ],
 )
 def test_question_never_filters_the_shared_sources(kb_dir, import_note, question):
-    from openkb.application.query_views import read_query_page, resolve_query_views
+    from ultrakb.application.query_views import read_query_page, resolve_query_views
 
     first = import_note("garden-v1.pdf", "Seedlings need two litres of water.")
     second = import_note("garden-v2.pdf", "Seedlings need three litres of water.")
@@ -174,13 +178,13 @@ def test_question_never_filters_the_shared_sources(kb_dir, import_note, question
     assert set(view.source_revision_ids) == {first.source_revision_id, second.source_revision_id}
     for name, amount in (("garden-v1", "two"), ("garden-v2", "three")):
         assert amount in read_query_page(selected, f"sources/{name}.md", view_id=view.view_id)
-    assert not list((kb_dir / ".openkb/catalog/views").glob("*.json"))
-    assert not list((kb_dir / ".openkb/catalog/version-reviews").glob("*.json"))
+    assert not list((kb_dir / ".ultrakb/catalog/views").glob("*.json"))
+    assert not list((kb_dir / ".ultrakb/catalog/version-reviews").glob("*.json"))
 
 
 def test_product_version_management_is_not_a_public_workflow():
-    from openkb.api import create_app
-    from openkb.cli import cli
+    from ultrakb.api import create_app
+    from ultrakb.cli import cli
 
     assert "versions" not in cli.commands and "views" not in cli.commands
     assert "view_id" not in {parameter.name for parameter in cli.params}

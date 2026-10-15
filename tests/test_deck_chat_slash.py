@@ -1,4 +1,4 @@
-"""Tests for the /deck new slash command inside openkb chat."""
+"""Tests for the /deck new slash command inside ultrakb chat."""
 
 from __future__ import annotations
 
@@ -7,17 +7,17 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from prompt_toolkit.styles import Style
 
-from openkb.agent.chat import _handle_slash
-from openkb.agent.chat_session import ChatSession
+from ultrakb.agent.chat import _handle_slash
+from ultrakb.agent.chat_session import ChatSession
 
 
 def _make_kb(tmp_path):
-    (tmp_path / ".openkb").mkdir()
-    (tmp_path / ".openkb" / "config.yaml").write_text("model: gpt-4o-mini\n")
+    (tmp_path / ".ultrakb").mkdir()
+    (tmp_path / ".ultrakb" / "config.yaml").write_text("model: gpt-4o-mini\n")
     from kb_fixtures import mark_current_kb
 
     mark_current_kb(tmp_path)
-    (tmp_path / ".openkb" / "chats").mkdir()
+    (tmp_path / ".ultrakb" / "chats").mkdir()
     (tmp_path / "wiki" / "concepts").mkdir(parents=True)
     (tmp_path / "wiki" / "summaries").mkdir(parents=True)
     (tmp_path / "wiki" / "index.md").write_text("# index\n")
@@ -35,7 +35,7 @@ async def test_slash_deck_new_invokes_generator(tmp_path):
 
     fake_validation = type("V", (), {"errors": [], "warnings": [], "ok": True})()
 
-    with patch("openkb.skill.generator.Generator") as gen_cls:
+    with patch("ultrakb.skill.generator.Generator") as gen_cls:
         gen = gen_cls.return_value
         gen.run = AsyncMock(return_value=kb / "output" / "decks" / "demo")
         gen.validation = fake_validation
@@ -61,7 +61,7 @@ async def test_slash_deck_new_with_critique_flag(tmp_path):
 
     fake_validation = type("V", (), {"errors": [], "warnings": [], "ok": True})()
 
-    with patch("openkb.skill.generator.Generator") as gen_cls:
+    with patch("ultrakb.skill.generator.Generator") as gen_cls:
         gen = gen_cls.return_value
         gen.run = AsyncMock(return_value=kb / "output" / "decks" / "demo")
         gen.validation = fake_validation
@@ -102,13 +102,13 @@ async def test_slash_deck_unknown_subcommand(tmp_path):
 async def test_slash_deck_new_rejects_empty_wiki(tmp_path):
     """Chat / slash command must catch freshly-init'd KBs (no compiled content)."""
     kb = tmp_path
-    (kb / ".openkb").mkdir()
-    (kb / ".openkb" / "config.yaml").write_text("model: gpt-4o-mini\n")
+    (kb / ".ultrakb").mkdir()
+    (kb / ".ultrakb" / "config.yaml").write_text("model: gpt-4o-mini\n")
     from kb_fixtures import mark_current_kb
 
     mark_current_kb(kb)
-    (kb / ".openkb" / "chats").mkdir()
-    # Empty wiki/ — exactly what `openkb init` creates
+    (kb / ".ultrakb" / "chats").mkdir()
+    # Empty wiki/ — exactly what `ultrakb init` creates
     (kb / "wiki" / "concepts").mkdir(parents=True)
     (kb / "wiki" / "summaries").mkdir(parents=True)
     (kb / "wiki" / "index.md").write_text("# index\n")

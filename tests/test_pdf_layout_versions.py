@@ -12,20 +12,20 @@ pytest_plugins = ("test_pdf_readback",)
 @pytest.mark.parametrize(
     "policy, field",
     [
-        ("openkb.pdf_layout.PDF_LAYOUT_POLICY", "pdf_layout_policy"),
-        ("openkb.images.PDF_IMAGE_POLICY", "pdf_image_policy"),
-        ("openkb.source_contract.NATIVE_PAGE_POLICY", "native_page_policy"),
+        ("ultrakb.pdf_layout.PDF_LAYOUT_POLICY", "pdf_layout_policy"),
+        ("ultrakb.images.PDF_IMAGE_POLICY", "pdf_image_policy"),
+        ("ultrakb.source_contract.NATIVE_PAGE_POLICY", "native_page_policy"),
     ],
 )
 def test_pdf_based_normalization_identity_includes_native_processing_policy(
     kb_dir, monkeypatch, source_format, policy, field
 ):
-    from openkb.normalization import normalization_fingerprint, normalization_id
+    from ultrakb.normalization import normalization_fingerprint, normalization_id
 
     monkeypatch.setattr(
-        "openkb.office.runtime.processing_identity", lambda *_: {"fixture": "office"}
+        "ultrakb.office.runtime.processing_identity", lambda *_: {"fixture": "office"}
     )
-    monkeypatch.setattr("openkb.cnki.runtime.processing_identity", lambda: {"fixture": "cnki"})
+    monkeypatch.setattr("ultrakb.cnki.runtime.processing_identity", lambda: {"fixture": "cnki"})
     revision = SimpleNamespace(source_format=source_format)
     current = normalization_fingerprint(kb_dir, source_revision=revision)
     monkeypatch.setattr(policy, "previous-native-processing")
@@ -38,13 +38,13 @@ def test_pdf_based_normalization_identity_includes_native_processing_policy(
 @pytest.mark.parametrize(
     "policy",
     [
-        "openkb.pdf_layout.PDF_LAYOUT_POLICY",
-        "openkb.images.PDF_IMAGE_POLICY",
-        "openkb.source_contract.NATIVE_PAGE_POLICY",
+        "ultrakb.pdf_layout.PDF_LAYOUT_POLICY",
+        "ultrakb.images.PDF_IMAGE_POLICY",
+        "ultrakb.source_contract.NATIVE_PAGE_POLICY",
     ],
 )
 def test_native_text_normalization_does_not_change_with_pdf_policy(kb_dir, monkeypatch, policy):
-    from openkb.normalization import normalization_fingerprint
+    from ultrakb.normalization import normalization_fingerprint
 
     revision = SimpleNamespace(source_format="md", digest="a" * 64, text_decoding=None, assets=[])
     current = normalization_fingerprint(kb_dir, source_revision=revision, doc_name="note")
@@ -53,32 +53,32 @@ def test_native_text_normalization_does_not_change_with_pdf_policy(kb_dir, monke
 
 
 def test_recompile_retains_old_projection_and_reprocess_creates_immutable_new_version(
-    kb_dir, tmp_path, pdf_model, monkeypatch
+    kb_dir, tmp_path, pdf_model, monkeypatch, live_llm
 ):
     import asyncio
 
+    from publication_fixtures import publish_document
     from test_pdf_tables import merged_table_pdf
 
-    from openkb.application.documents import import_document
-    from openkb.application.recompilation import recompile_document
-    from openkb.application.reprocessing import preview_reprocessing, reprocess_source
-    from openkb.documents import read_document_source
-    from openkb.source_catalog import read_source_revision
+    from ultrakb.application.recompilation import recompile_document
+    from ultrakb.application.reprocessing import preview_reprocessing, reprocess_source
+    from ultrakb.documents import read_document_source
+    from ultrakb.source_catalog import read_source_revision
 
     path = merged_table_pdf(tmp_path / "retained.pdf")
     with monkeypatch.context() as older_processor:
-        older_processor.setattr("openkb.pdf_layout.PDF_LAYOUT_POLICY", "previous-native-layout")
+        older_processor.setattr("ultrakb.pdf_layout.PDF_LAYOUT_POLICY", "previous-native-layout")
         # Model a retained package produced by the previous native PDF adapter.
         older_processor.setattr(
-            "openkb.images.native_pdf_blocks", lambda page: page.get_text("dict")["blocks"]
+            "ultrakb.images.native_pdf_blocks", lambda page: page.get_text("dict")["blocks"]
         )
-        first = import_document(kb_dir, path)
+        first = publish_document(kb_dir, path, None, bundle=live_llm.credentials)
     assert first.status == "added", first.message
     original = read_source_revision(kb_dir, first.source_revision_id).original
     before = read_document_source(kb_dir, first.source_id)
     assert "<table>" not in before["content"]
     retained = {
-        p: p.read_bytes() for p in (kb_dir / ".openkb/normalized").rglob("*") if p.is_file()
+        p: p.read_bytes() for p in (kb_dir / ".ultrakb/normalized").rglob("*") if p.is_file()
     }
     path.unlink()
 

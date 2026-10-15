@@ -7,8 +7,8 @@ import pytest
 
 
 def test_structural_check_repairs_links_and_saves_a_report(kb_dir):
-    from openkb.application.execution import ExecutionContext
-    from openkb.application.maintenance import LintOptions, check_knowledge
+    from ultrakb.application.execution import ExecutionContext
+    from ultrakb.application.maintenance import LintOptions, check_knowledge
 
     page = kb_dir / "wiki/concepts/topic.md"
     page.write_text("---\ntype: Concept\ndescription: Topic\n---\n# Topic\n[[concepts/missing]]")
@@ -32,11 +32,11 @@ def test_structural_check_repairs_links_and_saves_a_report(kb_dir):
 def test_repair_diagnostics_can_read_pages_without_replaying_journals(kb_dir):
     import json
 
-    from openkb.application.repair import inspect_knowledge_base, read_diagnostic_page
+    from ultrakb.application.repair import inspect_knowledge_base, read_diagnostic_page
 
-    marker = kb_dir / ".openkb/needs-repair.json"
+    marker = kb_dir / ".ultrakb/needs-repair.json"
     marker.write_text('{"error_type":"MissingBackup"}')
-    journal = kb_dir / ".openkb/journal/broken.json"
+    journal = kb_dir / ".ultrakb/journal/broken.json"
     journal.parent.mkdir(exist_ok=True)
     journal.write_text(json.dumps({"status": "active", "operation": "import", "entries": []}))
     page = kb_dir / "wiki/concepts/retained.md"
@@ -52,10 +52,10 @@ def test_repair_diagnostics_can_read_pages_without_replaying_journals(kb_dir):
 def test_semantic_failure_keeps_link_fixes_and_an_explicitly_incomplete_report(kb_dir, monkeypatch):
     from agents import Runner
 
-    from openkb.application.execution import ExecutionContext
-    from openkb.application.maintenance import LintOptions, check_knowledge
+    from ultrakb.application.execution import ExecutionContext
+    from ultrakb.application.maintenance import LintOptions, check_knowledge
 
-    (kb_dir / ".openkb/hashes.json").write_text('{"document": {}}')
+    (kb_dir / ".ultrakb/hashes.json").write_text('{"document": {}}')
     page = kb_dir / "wiki/concepts/topic.md"
     page.write_text("# Topic\n[[concepts/missing]]")
 
@@ -76,7 +76,7 @@ def test_semantic_failure_keeps_link_fixes_and_an_explicitly_incomplete_report(k
 
 
 def test_report_write_failure_preserves_already_committed_link_repairs(kb_dir):
-    from openkb.application.maintenance import LintOptions, check_knowledge
+    from ultrakb.application.maintenance import LintOptions, check_knowledge
 
     page = kb_dir / "wiki/concepts/topic.md"
     page.write_text("# Topic\n[[concepts/missing]]")
@@ -95,19 +95,19 @@ def test_report_write_failure_preserves_already_committed_link_repairs(kb_dir):
 
 @pytest.mark.parametrize("output", [None, "", " \n "])
 def test_empty_semantic_output_is_a_saved_but_incomplete_check(kb_dir, monkeypatch, output):
-    from types import SimpleNamespace
+    from ultrakb.application.execution import ExecutionContext
+    from ultrakb.application.maintenance import check_knowledge
 
-    from agents import Runner
+    (kb_dir / ".ultrakb/hashes.json").write_text('{"document": {}}')
 
-    from openkb.application.execution import ExecutionContext
-    from openkb.application.maintenance import check_knowledge
+    async def supplied_report(*args, **kwargs):
+        from ultrakb.agent.linter import semantic_report
 
-    (kb_dir / ".openkb/hashes.json").write_text('{"document": {}}')
+        return semantic_report(output, on_issue=kwargs.get("on_issue"))
 
-    async def no_report(*args, **kwargs):
-        return SimpleNamespace(final_output=output)
-
-    monkeypatch.setattr(Runner, "run", no_report)
+    # A supplied report exercises persistence and incomplete-check delivery;
+    # semantic_report's genuine model caller is covered by test_linter.
+    monkeypatch.setattr("ultrakb.agent.linter.run_knowledge_lint", supplied_report)
     result = asyncio.run(check_knowledge(kb_dir, context=ExecutionContext()))
     assert result.status == "completed"
     assert result.quality == ("semantic_report_missing",)

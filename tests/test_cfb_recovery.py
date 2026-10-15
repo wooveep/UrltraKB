@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-pytest_plugins = ("pending_fixtures",)
+pytest_plugins = ("pending_fixtures", "processing_fixtures")
 pytestmark = pytest.mark.usefixtures("prepared_cfb_helper")
 
 
@@ -16,35 +16,53 @@ pytestmark = pytest.mark.usefixtures("prepared_cfb_helper")
     ],
 )
 def test_doc_substorage_recovers_a_standard_file_then_ordinary_knowledge(
-    kb_dir, pdf_model, office_runtime, fixture, extension, marker
+    kb_dir,
+    pdf_model,
+    office_runtime,
+    fixture,
+    extension,
+    marker,
+    live_llm,
+    processing_only,
+    processing_context,
 ):
-    from openkb.application.documents import import_document
-    from openkb.application.pending import process_pending
-    from openkb.documents import read_document_source
-    from openkb.source_catalog import list_sources
+    from processing_fixtures import finish_recovered_sources
 
-    parent = import_document(kb_dir, Path(__file__).parent / "fixtures/office" / fixture)
-    assert parent.discovery_pending == 1
-    result = process_pending(kb_dir)
+    from ultrakb.application.pending import pending_status
+    from ultrakb.documents import read_document_source
+    from ultrakb.source_catalog import list_sources
+    from ultrakb.unit_publication import list_source_units
+
+    calls_before = len(live_llm.calls)
+    parent = processing_only(Path(__file__).parent / "fixtures/office" / fixture)
+    assert pending_status(kb_dir)["discovery_pending"] == 1
+    result = finish_recovered_sources(kb_dir, parent.source_id, processing_context)
     assert result["imports_pending"] == 0, result
     recovered = next(s for s in list_sources(kb_dir) if s.source_id != parent.source_id)
     assert recovered.name.endswith("." + extension)
     source = read_document_source(kb_dir, recovered.source_id)
     assert source["status"] == "completed" and marker in source["content"]
+    units = list_source_units(kb_dir, recovered.source_id)
+    assert units
+    published = "\n".join(
+        (kb_dir / f"wiki/summaries/{unit.doc_name}.md").read_text("utf-8") for unit in units
+    )
+    assert marker in published
+    assert len(live_llm.calls) == calls_before
 
 
-def test_reconstruction_preserves_nested_streams_metadata_and_zero_root_creation(kb_dir, pdf_model):
+def test_reconstruction_preserves_nested_streams_metadata_and_zero_root_creation(
+    kb_dir, pdf_model, processing_only, processing_context
+):
     import olefile
 
-    from openkb.application.documents import import_document
-    from openkb.application.pending import process_pending
-    from openkb.documents import read_document_source
-    from openkb.source_catalog import list_sources
+    from ultrakb.application.pending import process_pending
+    from ultrakb.documents import read_document_source
+    from ultrakb.source_catalog import list_sources
 
-    parent = import_document(
-        kb_dir, Path(__file__).parent / "fixtures/office/embedded-metadata.doc"
-    )
-    process_pending(kb_dir)
+    parent = processing_only(Path(__file__).parent / "fixtures/office/embedded-metadata.doc")
+    process_pending(kb_dir, context=processing_context)
+    assert processing_context.executor.calls == 0
     child = next(s for s in list_sources(kb_dir) if s.source_id != parent.source_id)
     result = read_document_source(kb_dir, child.source_id)
     assert "EMBEDDED_CALC_STANDARD_MARKER" in result["content"]
@@ -62,14 +80,16 @@ def test_reconstruction_preserves_nested_streams_metadata_and_zero_root_creation
         assert restored.direntries[restored._find(["Nested", "Small"])].dwUserFlags == 0x1357
 
 
-def test_nested_actual_object_is_imported_only_by_its_nearest_document(kb_dir, pdf_model):
-    from openkb.application.documents import import_document
-    from openkb.application.pending import process_pending
-    from openkb.documents import read_document_source
-    from openkb.source_catalog import list_sources
+def test_nested_actual_object_is_imported_only_by_its_nearest_document(
+    kb_dir, pdf_model, processing_only, processing_context
+):
+    from ultrakb.application.pending import process_pending
+    from ultrakb.documents import read_document_source
+    from ultrakb.source_catalog import list_sources
 
-    import_document(kb_dir, Path(__file__).parent / "fixtures/office/embedded-nested.doc")
-    result = process_pending(kb_dir)
+    processing_only(Path(__file__).parent / "fixtures/office/embedded-nested.doc")
+    result = process_pending(kb_dir, context=processing_context)
+    assert processing_context.executor.calls == 0
     children = [s for s in list_sources(kb_dir) if s.name.endswith(".xls")]
     assert len(children) == 1, result
     assert result["groups"][0]["sources"] == 3

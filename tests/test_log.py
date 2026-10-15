@@ -2,7 +2,7 @@
 
 from concurrent.futures import ThreadPoolExecutor
 
-from openkb.log import append_log
+from ultrakb.log import append_log
 
 
 def test_concurrent_log_writers_do_not_overwrite_entries(kb_dir):

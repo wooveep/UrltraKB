@@ -7,9 +7,9 @@ from types import SimpleNamespace
 import pytest
 from test_answer_evidence_regression import agent_for, invoke
 
-from openkb.content_blocks import BLOCK_POLICY, split_blocks
-from openkb.text_formats import text_normalization_policy
-from openkb.text_source import NORMALIZATION_POLICY, FrozenText, TextOrigin
+from ultrakb.content_blocks import BLOCK_POLICY, split_blocks
+from ultrakb.text_formats import text_normalization_policy
+from ultrakb.text_source import NORMALIZATION_POLICY, FrozenText, TextOrigin
 
 
 def frozen_text(kb_dir, text, *, policy=NORMALIZATION_POLICY, blocks=False):
@@ -144,7 +144,7 @@ async def test_html_container_cannot_supply_a_markdown_heading(kb_dir, tag):
 
 @pytest.mark.asyncio
 async def test_html_heading_requires_its_saved_native_tag(kb_dir, tmp_path):
-    from openkb.html_source import freeze_html
+    from ultrakb.html_source import freeze_html
 
     path = tmp_path / "manual.html"
     path.write_text(

@@ -4,19 +4,18 @@ import json
 
 import pymupdf
 import pytest
+from native_source_fixtures import LITERAL_TABLE
 from pageindex import IndexConfig
 from test_answer_evidence_regression import agent_for, invoke
-from test_index_pdf_layout import TableIndexModel
+from test_index_pdf_layout import RecordingPdfIndex
 
-from openkb.agent.evidence_payload import project_evidence, slice_evidence
-from openkb.agent.source_windows import CompileSourceWindows
-from openkb.images import convert_pdf_to_pages, convert_pdf_with_images
-from openkb.index_client import create_index_client
-from openkb.locks import atomic_write_json
-from openkb.source_contract import NATIVE_PAGE_POLICY
-from openkb.source_pages import read_page_selection
-
-LITERAL_TABLE = "<table><tr><td>Printed example</td><td>999</td></tr></table>"
+from ultrakb.agent.evidence_payload import project_evidence, slice_evidence
+from ultrakb.agent.source_windows import CompileSourceWindows
+from ultrakb.images import convert_pdf_to_pages, convert_pdf_with_images
+from ultrakb.index_client import create_index_client
+from ultrakb.locks import atomic_write_json
+from ultrakb.source_contract import NATIVE_PAGE_POLICY
+from ultrakb.source_pages import read_page_selection
 
 
 def table_pdf(path, *, literal, grid):
@@ -44,8 +43,9 @@ def table_pdf(path, *, literal, grid):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("literal,grid", [(True, False), (False, True), (True, True)])
 async def test_pdf_table_authority_agrees_in_short_index_compile_and_question(
-    kb_dir, tmp_path, literal, grid
+    kb_dir, tmp_path, literal, grid, live_llm, monkeypatch
 ):
+    live_llm.install(monkeypatch)
     pdf = table_pdf(tmp_path / "manual.pdf", literal=literal, grid=grid)
     original = pdf.read_bytes()
     with pymupdf.open(pdf) as document:
@@ -54,7 +54,9 @@ async def test_pdf_table_authority_agrees_in_short_index_compile_and_question(
     short_pages = []
     convert_pdf_with_images(pdf, "manual", tmp_path / "short-images", page_records=short_pages)
     options = IndexConfig(
-        llm_client=TableIndexModel(), if_add_node_summary=False, if_add_doc_description=False
+        llm_client=RecordingPdfIndex(live_llm=live_llm),
+        if_add_node_summary=False,
+        if_add_doc_description=False,
     )
     with create_index_client(storage_path=tmp_path / "index", index_config=options) as client:
         collection = client.collection()
@@ -164,7 +166,7 @@ def test_relocating_an_image_before_a_table_preserves_native_coordinates(tmp_pat
     from figure_fixtures import png_bytes
     from pageindex.backend.input_package import freeze_pages, materialize_pages
 
-    from openkb.index_pdf import NativePdfParser
+    from ultrakb.index_pdf import NativePdfParser
 
     pdf = table_pdf(tmp_path / "manual.pdf", literal=True, grid=True)
     with pymupdf.open(pdf) as document:

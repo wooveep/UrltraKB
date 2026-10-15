@@ -19,7 +19,7 @@ def test_shutdown_remains_observable_and_restart_never_replays(tmp_path, mode):
             [
                 sys.executable,
                 "-m",
-                "openkb.desktop.verification",
+                "ultrakb.desktop.verification",
                 "--output",
                 str(output),
                 "--lifecycle",

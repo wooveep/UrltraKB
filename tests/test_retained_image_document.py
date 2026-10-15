@@ -11,11 +11,11 @@ from PIL import Image
 def test_scan_only_pdf_is_retained_without_knowledge_or_model_sends(
     kb_dir, model_service, monkeypatch, entrypoint
 ):
-    from openkb.application.documents import import_document
-    from openkb.application.execution import ExecutionContext
-    from openkb.config import LlmCredentialBundle
-    from openkb.markdown_images import image_references
-    from openkb.source_catalog import read_source_revision
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.execution import ExecutionContext
+    from ultrakb.config import LlmCredentialBundle
+    from ultrakb.markdown_images import image_references
+    from ultrakb.source_catalog import read_source_revision
 
     data = io.BytesIO()
     Image.new("RGB", (100, 100), "green").save(data, format="PNG")
@@ -37,7 +37,7 @@ def test_scan_only_pdf_is_retained_without_knowledge_or_model_sends(
     elif entrypoint == "cli":
         from click.testing import CliRunner
 
-        from openkb.cli import cli
+        from ultrakb.cli import cli
 
         result = CliRunner().invoke(cli, ["--kb-dir", str(kb_dir), "add", str(source)])
         assert result.exception is None, result.output
@@ -45,10 +45,10 @@ def test_scan_only_pdf_is_retained_without_knowledge_or_model_sends(
     elif entrypoint == "http":
         from fastapi.testclient import TestClient
 
-        from openkb.api import create_app
+        from ultrakb.api import create_app
 
-        monkeypatch.setenv("OPENKB_KB_ROOT", str(kb_dir.parent))
-        monkeypatch.delenv("OPENKB_API_TOKEN", raising=False)
+        monkeypatch.setenv("ULTRAKB_KB_ROOT", str(kb_dir.parent))
+        monkeypatch.delenv("ULTRAKB_API_TOKEN", raising=False)
         with TestClient(create_app()) as client:
             response = client.post(
                 "/api/v1/add",
@@ -58,8 +58,8 @@ def test_scan_only_pdf_is_retained_without_knowledge_or_model_sends(
             assert response.status_code == 200, response.text
             assert "资料已保存，未生成知识" in response.text
     else:
-        from openkb.runtime.requests import ImportFile
-        from openkb.runtime.tasks import TaskManager
+        from ultrakb.runtime.requests import ImportFile
+        from ultrakb.runtime.tasks import TaskManager
 
         manager = TaskManager(history_dir=kb_dir / "task-history")
         try:
@@ -69,8 +69,8 @@ def test_scan_only_pdf_is_retained_without_knowledge_or_model_sends(
         finally:
             manager.shutdown(stop=True)
             assert manager.join(10)
-    from openkb.documents import read_document_source
-    from openkb.source_catalog import list_sources
+    from ultrakb.documents import read_document_source
+    from ultrakb.source_catalog import list_sources
 
     admitted = list_sources(kb_dir)[0]
     saved = read_source_revision(kb_dir, admitted.target_revision_id)
@@ -85,7 +85,7 @@ def test_scan_only_pdf_is_retained_without_knowledge_or_model_sends(
     assert not model_service.requests
 
 
-pytest_plugins = ("test_vendor_sdk",)
+pytest_plugins = ("test_vendor_sdk", "test_pdf_readback")
 
 
 def test_retained_processing_preserves_prior_assets_when_resource_policy_changes(
@@ -95,9 +95,9 @@ def test_retained_processing_preserves_prior_assets_when_resource_policy_changes
 
     from figure_fixtures import png_bytes
 
-    from openkb.application.documents import import_document
-    from openkb.documents import read_document_source
-    from openkb.markdown_images import image_references
+    from ultrakb.application.documents import import_document
+    from ultrakb.documents import read_document_source
+    from ultrakb.markdown_images import image_references
 
     fetched = []
 
@@ -138,10 +138,10 @@ def test_retained_processing_preserves_prior_assets_when_resource_policy_changes
 
 @pytest.mark.parametrize("suffix", [".md", ".html"])
 def test_image_only_markup_retains_pixels_without_model_work(kb_dir, model_service, suffix):
-    from openkb.application.documents import import_document
-    from openkb.config import LlmCredentialBundle
-    from openkb.documents import read_document_source
-    from openkb.markdown_images import image_references
+    from ultrakb.application.documents import import_document
+    from ultrakb.config import LlmCredentialBundle
+    from ultrakb.documents import read_document_source
+    from ultrakb.markdown_images import image_references
 
     source = kb_dir / f"diagram{suffix}"
     Image.new("RGB", (100, 100), "blue").save(kb_dir / "diagram.png")
@@ -164,9 +164,9 @@ def test_image_only_markup_retains_pixels_without_model_work(kb_dir, model_servi
 def test_retention_keeps_remote_asset_policy(kb_dir, model_service, monkeypatch):
     from figure_fixtures import png_bytes
 
-    from openkb.application.documents import import_document
-    from openkb.documents import read_document_source
-    from openkb.markdown_images import image_references
+    from ultrakb.application.documents import import_document
+    from ultrakb.documents import read_document_source
+    from ultrakb.markdown_images import image_references
 
     fetched = []
 
@@ -194,24 +194,22 @@ def test_retention_keeps_remote_asset_policy(kb_dir, model_service, monkeypatch)
 
 
 def test_image_only_replacement_keeps_previous_success_and_explicit_new_original(
-    kb_dir, monkeypatch
+    kb_dir, pdf_model, live_llm
 ):
-    from test_compile_windows import compile_boundary
+    from publication_fixtures import publish_document
 
-    from openkb.application.documents import import_document
-    from openkb.documents import read_document_source
-    from openkb.unit_publication import read_head
+    from ultrakb.application.documents import import_document
+    from ultrakb.documents import read_document_source
+    from ultrakb.unit_publication import read_head
 
     source = kb_dir / "guide.md"
     Image.new("RGB", (32, 32), "blue").save(kb_dir / "diagram.png")
     source.write_text("# Setup\nDisconnect before service.\n![Figure](diagram.png)")
-    calls = []
-    compile_boundary(monkeypatch, {}, calls)
-    first = import_document(kb_dir, source)
-    assert first.status == "added"
+    first = publish_document(kb_dir, source, None, bundle=live_llm.credentials)
+    assert first.status == "added", first.message
     head = read_head(kb_dir)
     previous = (kb_dir / "wiki/summaries/guide.md").read_bytes()
-    calls.clear()
+    before = len(live_llm.calls)
     source.write_text("![Figure](diagram.png)")
     replacement = import_document(kb_dir, source)
     assert replacement.status == "blocked"
@@ -224,4 +222,4 @@ def test_image_only_replacement_keeps_previous_success_and_explicit_new_original
         kb_dir, first.source_id, source_revision_id=replacement.source_revision_id
     )
     assert "未生成知识" in latest["content"] and "本节原图" in latest["content"]
-    assert not calls
+    assert len(live_llm.calls) == before

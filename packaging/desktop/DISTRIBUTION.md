@@ -1,20 +1,20 @@
-# UrltraKB source and distribution materials
+# UltraKB source and distribution materials
 
-Program archives are named `UrltraKB-VERSION-windows-x64.zip` and
-`UrltraKB-VERSION-debian13.6-x64.tar.gz`, containing `UrltraKB/` and the
-UrltraKB executable names. Full source/build materials are delivered separately
-as `UrltraKB-VERSION-materials.zip`; runtime archives retain full licenses,
+Program archives are named `UltraKB-VERSION-windows-x64.zip` and
+`UltraKB-VERSION-debian13.6-x64.tar.gz`, containing `UltraKB/` and the
+UltraKB executable names. Full source/build materials are delivered separately
+as `UltraKB-VERSION-materials.zip`; runtime archives retain full licenses,
 notices and the companion archive identity. This separation is the default.
 
 The program identity is the commit and version embedded in
-`openkb/_build_info.json`, not a later materials-only checkout. Follow the
+`ultrakb/_build_info.json`, not a later materials-only checkout. Follow the
 actual export identity and release manifests rather than historical examples.
 
 ## Contents and license scope
 
 The material directory contains `release.json` and five kinds of materials:
 
-- **source**: the exact exported OpenKB source, third-party source archives,
+- **source**: the exact exported UltraKB source, third-party source archives,
   original patches, and the source-package/build recipes identified by the
   component records. Original archives are retained with their hashes.
 - **licenses**: a ZIP of complete licenses, copyright and NOTICE files, plus
@@ -114,7 +114,7 @@ case-insensitive path collisions between ZIP assets. It copies only named inputs
 verify its hash, and creates `release.json` after all assets verify.
 
 For reassembly, extract the independent materials ZIP. Its
-`UrltraKB/distribution/` contains all named ZIP assets, the notice and
+`UltraKB/distribution/` contains all named ZIP assets, the notice and
 `materials-plan.json`. Extract the inner ZIP assets into one empty input
 directory, and copy the standalone notice to `NOTICE.distribution.txt` there.
 Run the included assembly tool with the extracted plan and inputs:
@@ -141,14 +141,14 @@ the component records explain those distinctions.
 
 The runtime package has a compact `distribution/` directory with licenses and
 a notice. For full local source access, extract the independent materials archive
-at the same location as the runtime archive, merging `UrltraKB/distribution/`.
+at the same location as the runtime archive, merging `UltraKB/distribution/`.
 The native **About / Source and licenses** dialog loads the matching version,
 source identity, notices and selectable full license texts. With the compact
 manifest it also identifies the separate archive and its checksum. The standalone
 REST service exposes only locally installed verified material files at
 `/api/v1/distribution`, including to users who lack KB credentials. For a
 source/wheel REST deployment, install the matching exported package and set
-`OPENKB_DISTRIBUTION_DIR` to the complete material directory.
+`ULTRAKB_DISTRIBUTION_DIR` to the complete material directory.
 
 ## Publication
 

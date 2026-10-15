@@ -1,428 +1,255 @@
 <div align="center">
-
-<a href="https://openkb.ai">
-  <img src="openkb/desktop/assets/brand/openkb-mark.svg" alt="UrltraKB" width="88" />
-</a>
-
-<br />
-<br />
-
-<p align="center">
-<a href="https://trendshift.io/repositories/26145" target="_blank"><img src="https://trendshift.io/api/badge/repositories/26145" alt="VectifyAI%2FOpenKB | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
-</p>
-
-# UrltraKB: Open LLM Knowledge Base
-
-<p align="center"><i>Scale to long documents  •  Reasoning-based retrieval  •  Native multi-modality  •  No Vector DB</i></p>
-
+  <img src="ultrakb/desktop/assets/brand/ultrakb-mark.svg" alt="UltraKB" width="88" />
+  <h1>UltraKB</h1>
+  <p>把原始资料编译为可阅读、可追溯、持续积累的本地知识库。</p>
+  <p>原生桌面工作台 · CLI · REST API · PageIndex 树检索</p>
 </div>
 
-<details open>
-<summary><h2>📢 Recent Updates</h2></summary>
+UltraKB 使用 LLM 将文档整理为相互关联的 Markdown Wiki，再通过问答、会话、
+幻灯片和 Agent 技能使用这些知识。长资料采用 PageIndex 层级索引和基于推理的检索，
+无需向量数据库。
 
-- *Google Open Knowledge Format (OKF)*: Wiki pages follow the [Google OKF](https://cloud.google.com/blog/products/data-analytics/how-the-open-knowledge-format-can-improve-data-sharing) specification for knowledge sharing.
-- *Entity Pages*: People, orgs, places, and products as dedicated wiki pages, auto-extracted and kept in sync.
+原始文件、处理结果、来源位置和知识修订在本地保留。索引与存储在本地运行，
+模型推理使用你配置的 LLM 服务；云端模型和可选 OCR 服务会接收对应的资料内容。
 
-</details>
+## 能做什么
 
----
+- **归集多种资料**：PDF、Word（DOC/DOCX）、PowerPoint（PPT/PPTX）、
+  Excel（XLS/XLSX）、Markdown、HTML、XML、CSV、纯文本和网页 URL。
+- **积累 Wiki 知识**：生成摘要、概念、实体和交叉链接，跨文档整理同一主题。
+- **回看原始依据**：按物理页、幻灯片正文与备注、内容块或工作表单元格读取来源，
+  区分原文、生成的说明及尚未识别的内容。
+- **维护变化**：保留来源与知识历史，重试未完成的导入，重编译已有处理结果，
+  或按新策略重新处理原件；来源变化后可审阅并刷新受影响的知识。
+- **生成输出**：带来源引用的问答、多轮会话、可分发的 Agent 技能、HTML 幻灯片和知识图谱。
+- **选择入口**：桌面、CLI 和 API 使用相同的应用与存储逻辑。
 
-# 📑 What is UrltraKB
+Wiki 是普通 Markdown 文件，可以直接阅读，也可以把 `wiki/` 作为 Obsidian Vault 打开。
 
-**UrltraKB** compiles raw documents into a structured, interlinked wiki using LLMs, powered by [**PageIndex**](https://github.com/VectifyAI/PageIndex)'s vectorless retrieval for long documents. This fork provides a native desktop workbench alongside the CLI and independent REST API, using the existing knowledge-base format. The desktop provides Overview, Documents, Knowledge, Conversations, Artifacts and Tasks pages, collapsible navigation, and persistent Light, Dark and Follow System themes. See the [desktop guide](docs/desktop.md).
+## 从源码开始
 
-The idea is based on a [concept](https://x.com/karpathy/status/2039805659525644595) described by Andrej Karpathy: LLMs generate summaries, concept pages, and cross-references, all maintained automatically. Knowledge compounds over time instead of being re-derived on every query.
-
-### Why not traditional RAG?
-
-Traditional RAG rediscovers knowledge from scratch on every query. Nothing accumulates. UrltraKB compiles knowledge once into a persistent wiki, then keeps it current. Cross-references already exist, contradictions are flagged, and synthesis reflects everything consumed.
-
-UrltraKB has two layers: a **wiki foundation** that compiles and maintains your knowledge, and **generators** (query / chat / Skill Factory) that turn it into useful output. See [Usage](#️-usage) for the full command list.
-
-### Features
-
-- **Broad format support:** PDF, Word, Markdown, PowerPoint, HTML, XML, Excel, CSV, text, URLs, and more. [HTML/XML source retention and resource settings](docs/markup-format-readback.md).
-- **Scales to long documents:** Long and complex documents are handled via [PageIndex](https://github.com/VectifyAI/PageIndex) tree indexing, enabling accurate, vectorless, context-aware retrieval.
-- **Native multi-modality:** Retrieves and understands figures, tables, and images, not just text.
-- **Compiled wiki:** The LLM compiles your documents into summaries, concept pages, entity pages, and cross-links, all kept in sync.
-- **Query & chat:** One-off questions or multi-turn conversations over your wiki, with persisted sessions to resume.
-- **Skill Factory:** Distills redistributable agent skills from your wiki.
-- **OKF-ready:** Wiki pages follow the [Google OKF](https://cloud.google.com/blog/products/data-analytics/how-the-open-knowledge-format-can-improve-data-sharing) specification for knowledge sharing.
-- **Obsidian-compatible:** The wiki is plain `.md` files with cross-links. Opens in Obsidian for graph view.
-- **Native desktop workbench:** Browse and edit pages, import documents, stream queries and conversations, manage tasks and settings, and generate outputs in Qt Widgets.
-
-# 🚀 Getting Started
-
-### Install
+需要 Python **3.10–3.13** 和 [uv](https://docs.astral.sh/uv/)。
+仓库包含 PageIndex、ChatIndex、ConDB 和 LiteLLM 的本地源码；请使用锁文件安装，
+让它们与主程序一起加载。
 
 ```bash
-pip install openkb
+git clone https://github.com/wooveep/UrltraKB.git UltraKB
+cd UltraKB
+uv sync --frozen --extra dev --extra desktop --extra api
+
+# Linux / macOS：激活环境后，可在任意知识库目录使用命令
+source .venv/bin/activate
 ```
 
-<details>
-<summary><b><i>Other install options:</i></b></summary>
+Windows PowerShell 使用 `.\.venv\Scripts\Activate.ps1` 激活环境。
+只使用 CLI 时，可以省略 `--extra desktop --extra api`。
+使用 pip 或独立 wheel 的安装方法见[本地 SDK 指南](docs/vendor-sdk.md)。
+当前 GitHub 仓库地址仍为 `wooveep/UrltraKB`，程序和 Python 包统一使用 `UltraKB` / `ultrakb`。
 
-- **Latest from GitHub:**
-
-  ```bash
-  pip install git+https://github.com/VectifyAI/OpenKB.git
-  ```
-
-- **Install from source** (editable, for development):
-
-  ```bash
-  git clone https://github.com/VectifyAI/OpenKB.git
-  cd OpenKB
-  uv sync --frozen --extra dev
-  ```
-
-</details>
-
-### Quick Start
+### 创建第一个知识库
 
 ```bash
-# 1. Create a directory for your knowledge base
-mkdir my-kb && cd my-kb
-
-# 2. Initialize the knowledge base
-openkb init
-
-# 3. Add documents
-openkb add paper.pdf
-openkb add ~/papers/                            # Add a whole directory
-openkb add https://arxiv.org/pdf/2509.11420     # Or fetch from a URL
-
-# 4. Ask a question
-openkb query "What are the main findings?"
-
-# 5. Or chat interactively
-openkb chat
-
-# (Optional) Turn the wiki into other outputs
-openkb skill new my-expert "Reason like an expert on <your-topic>"   # a portable agent skill
-openkb visualize                                                     # an interactive knowledge graph
-openkb deck new my-deck "An intro deck on <your-topic>"              # slides — a single-file HTML deck
+mkdir -p ~/ultrakb-notes
+cd ~/ultrakb-notes
+ultrakb init --model gpt-5.4 --language zh
 ```
 
-### Set up your LLM
+在知识库根目录创建 `.env`，填写模型服务凭据：
 
-UrltraKB supports [multiple LLM providers](https://docs.litellm.ai/docs/providers) (OpenAI, Claude, Gemini, etc.) via [LiteLLM](https://github.com/BerriAI/litellm) (pinned to a [safe version](https://docs.litellm.ai/blog/security-update-march-2026)).
+```dotenv
+LLM_API_KEY=your-api-key
+# 使用兼容端点时按需设置：
+# OPENAI_API_BASE=https://your-gateway.example/v1
+```
 
-Set your model during `openkb init` or in [`.openkb/config.yaml`](#configuration) using the `provider/model` LiteLLM format (e.g. `anthropic/claude-sonnet-4-6`). OpenAI models can omit the prefix (e.g. `gpt-5.4`).
-
-Create a `.env` file with your LLM API key:
+模型名采用 LiteLLM 的 `provider/model` 格式；OpenAI 模型可以省略前缀。
+订阅或设备登录等认证方式按对应 provider 的要求配置，
+详见[配置示例](examples/configuration/README.md)。
 
 ```bash
-LLM_API_KEY=your_llm_api_key
+ultrakb add /path/to/paper.pdf
+ultrakb add /path/to/documents/
+ultrakb add https://example.com/article
+
+ultrakb list
+ultrakb query "这些资料的共同结论是什么？请给出来源。"
+ultrakb chat
 ```
 
-Subscription-based providers that authenticate via OAuth device flow (e.g. `chatgpt/*`, `github_copilot/*`) need no API key; UrltraKB skips the missing-key warning for them.
+Word 和 PowerPoint 的版式转换需要项目固定的私有 LibreOffice 运行时。
+源码环境的准备步骤见 [Office 导入指南](docs/office-ingest.md)；完整发行包应包含该运行时。
+缺少转换资源时，按导入结果处理失败原因并重试。
 
-### Native desktop workbench
+## 桌面工作台
 
-`dev-1.2.0` combines the original `0cec254` document and conversation workflows
-with the native desktop workbench. Ordinary documents compile from Markdown;
-long PDFs use PageIndex at the configured page threshold. The Documents page
-shows that distinction and opens retained source text, while Conversations keeps
-the original Wiki-based multi-turn history. See the
-[branch scope and verification notes](docs/dev-1.2.0.md).
+桌面使用 PySide6 / Qt Widgets，包含概览、资料、知识、会话、产物和任务页面，
+支持知识库管理、来源阅读、流式回答、任务停止以及浅色、深色和跟随系统主题。
 
-PageIndex, ChatIndex, ConDB and LiteLLM are maintained as project-owned source
-in `vendor/`. `uv sync --frozen` installs these local packages in editable mode.
-See the [local SDK guide](docs/vendor-sdk.md) for provenance, pip installation
-and wheel delivery. ChatIndex and ConDB are packaged foundations; their new
-retrieval and conversation-memory workflows are not enabled by this baseline.
+在仓库根目录准备本地渲染资源并启动：
 
-The desktop targets Windows 11 x86_64 and Debian 13.6 x86_64 with GNOME/X11. Open the `OpenKB` program from the complete portable program directory. Knowledge bases and settings remain in their user-selected locations when program files are replaced.
-
-For development in this checkout:
-
-```sh
-uv sync --frozen --python 3.12.13 --extra desktop --extra api --extra dev
+```bash
 uv run python scripts/prepare_desktop_assets.py
-uv run openkb-desktop
+uv run ultrakb-desktop
 ```
 
-Asset preparation needs Rust 1.95.0 and network access; it installs the pinned local renderers and fonts. The packaged application includes these resources. Formula and diagram display runs locally without a browser engine or rendering service.
+资源准备需要 Rust **1.95.0** 和网络连接。Office 转换、嵌入附件恢复等资源
+有各自的准备步骤，见[桌面指南](docs/desktop.md)和[构建指南](packaging/desktop/README.md)。
+完整便携目录中的桌面入口名为 `UltraKB`，并附带 `UltraKBCLI`、`UltraKBAPI` 和
+`UltraKBVerify`。支持的平台、构建条件及验收记录以构建指南为准。
+Debian 安装包提供与 Python 安装相同的 `ultrakb`、`ultrakb-desktop` 和 `ultrakb-api` 命令。
 
-See the [desktop guide](docs/desktop.md) for daily workflows, configuration, watching and safe exit, and the [build guide](packaging/desktop/README.md) for distribution and validation status. The old React interface, `openkb-web` command and `web` extra have been removed. HTTP clients use `openkb-api` and the `api` extra.
+## 常用命令
 
-# 🧩 How UrltraKB Works
+通过 `ultrakb --help` 或 `ultrakb <command> --help` 查看参数。
 
-### Architecture
+| 任务 | 命令 |
+| --- | --- |
+| 创建知识库 / 设置默认库 | `ultrakb init` / `ultrakb use /path/to/kb` |
+| 查看状态 / 资料清单 | `ultrakb status` / `ultrakb list` |
+| 导入文件、目录或 URL | `ultrakb add <path-or-url>` |
+| 问答 / 多轮会话 | `ultrakb query "问题"` / `ultrakb chat` |
+| 读取来源 | `ultrakb source SOURCE_ID` |
+| 重试未完成的来源 | `ultrakb retry-source SOURCE_ID` |
+| 查看 / 处理待办 | `ultrakb pending` / `ultrakb process-pending` |
+| 重编译已有处理结果 | `ultrakb recompile DOC_NAME` |
+| 预览重新处理原件 | `ultrakb reprocess SOURCE_ID` |
+| 查看 / 刷新受影响知识 | `ultrakb refresh status` / `ultrakb refresh run` |
+| 检查 Wiki 结构与语义 | `ultrakb lint` |
+| 监控新资料 / 导出知识图谱 | `ultrakb watch` / `ultrakb visualize` |
+| 从知识库生成 Agent 技能 | `ultrakb skill new NAME "技能目标"` |
+| 生成 HTML 幻灯片 | `ultrakb deck new NAME "演示目标"` |
+| 查看有效配置 | `ultrakb settings` / `ultrakb settings --global` |
 
-<div align="center">
-  <img src="assets/openkb-architecture.webp" alt="OpenKB Architecture: from raw documents (markitdown / PageIndex) through LLM wiki compilation to the wiki/ foundation, powering query/chat, the Skill Factory, and future generators" width="900" />
-</div>
+可以在任意目录使用 `ultrakb --kb-dir /path/to/kb <command>` 指定知识库，
+或通过 `ULTRAKB_DIR` 设置 CLI 使用的目录。
+在会话中输入 `/help` 查看 `/add`、`/save`、`/skill`、`/deck` 等命令。
 
-### Short vs Long Document Handling
+## 处理与存储
 
-|               | Short documents            | Long documents (PDF ≥ 20 pages)    |
-| ------------- | -------------------------- | ---------------------------------- |
-| **Convert**   | markitdown → Markdown      | PageIndex → tree index + summaries |
-| **Images**    | Extracted inline (pymupdf) | Extracted by PageIndex             |
-| **LLM reads** | Full text                  | Document trees                     |
-| **Result**    | summary + concepts         | summary + concepts                 |
+资料先被保留和规范化，再依据资料类型、长短规则和模型容量选择完整读取或分段索引。
+默认 **10 个物理页及以内的 PDF 为短文档**；页数阈值可以配置。
+短文档在已知模型容量不足时也会转为分段执行，资料长短与执行方式分别记录。
+工作簿按工作表处理，幻灯片正文与备注分别定位。
 
-Short documents are read in full by the LLM. Long PDFs are processed by [PageIndex](https://github.com/VectifyAI/PageIndex) into a hierarchical tree index. The LLM reads the tree instead of the full text, enabling accurate and scalable retrieval for long documents.
+编译结果发布到 Wiki。来源更新或移除后，相关页面会记录待刷新状态；
+刷新使用当前有效的保留输入，并为需要审阅的人工修改保存差异。
+历史知识继续关联当时实际使用的来源。
 
-### Knowledge Compilation
+```text
+my-kb/
+├── .env                    # 本库模型凭据
+├── .ultrakb/               # 配置、任务、来源修订、索引与知识历史
+│   ├── config.yaml
+│   └── format.json
+├── raw/                    # 接入的原始资料
+└── wiki/
+    ├── AGENTS.md            # Wiki 结构与维护约定
+    ├── index.md
+    ├── log.md
+    ├── sources/
+    ├── summaries/
+    ├── concepts/
+    ├── entities/
+    └── explorations/
+```
 
-When you add a document, the LLM:
-
-1. Generates a **summary** page
-2. Reads existing **concept** and **entity** pages
-3. Creates or updates concepts with cross-document synthesis
-4. Creates or updates **entity** pages (people, orgs, places, products)
-5. Updates the **index** and **log**
-
-A single source might touch 10--15 wiki pages. Knowledge accumulates: each document enriches the existing wiki rather than sitting in isolation.
-
-# ⚙️ Usage
-
-UrltraKB commands fall into two layers: the **wiki foundation** (compile + manage your knowledge) and **generators** (turn that wiki into useful output). Each links to a concrete walkthrough — a real artifact UrltraKB generated from one sample paper (browse them all in [`examples/`](examples/)).
-
-## Layer 1: 🧱 Wiki Foundation — compile and maintain
-
-| Command                                                      | Description                                                                             |
-| ------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
-| `openkb init`                                                | Initialize a new knowledge base (interactive)                                           |
-| <code>openkb&nbsp;add&nbsp;&lt;file_or_dir_or_URL&gt;</code> | Add files, directories, or URLs and compile to wiki (URL content type is auto-detected) |
-| `openkb list`                                                | List indexed documents and concepts                                                     |
-| `openkb status`                                              | Show knowledge base stats                                                               |
-| `openkb watch`                                               | Watch `raw/` and auto-compile new files                                                 |
-| `openkb lint`                                                | Run structural and knowledge health checks                                              |
-
-<details>
-<summary><i>More wiki commands:</i></summary>
-<br>
-
-| Command                                                            | Description                                                                                                                                                                                                                          |
-| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| <code>openkb&nbsp;remove&nbsp;&lt;doc&gt;</code>                   | Remove a document and clean up its wiki pages, images, registry, and PageIndex state (`--dry-run` to preview, `--keep-raw` / `--keep-empty` to retain artifacts)                                                                     |
-| <code>openkb&nbsp;recompile&nbsp;[&lt;doc&gt;]&nbsp;[--all]</code> | Re-run the compile pipeline on already-indexed docs without re-indexing. Regenerates summaries and rewrites concept pages; manual edits are preserved as durable proposals for explicit review (`--dry-run` to preview, `--refresh-schema` to also update `wiki/AGENTS.md`) |
-| `openkb proposals list` / `show <id>` / `accept <id> --version <hash>` | Review saved knowledge differences and accept the exact reviewed candidate after current pages and inputs are checked again |
-| <code>openkb&nbsp;feedback&nbsp;["msg"]</code>                     | File feedback by opening a prefilled GitHub issue (`--type bug/feature/question` to tag it)                                                                                                                                          |
-
-</details>
-
-→ **Example:** the everyday loop walked through end to end — [`examples/commands/`](examples/commands/).
-
-## Layer 2: 💡 Generators — turn the wiki into output
-
-A "generator" reads from the compiled wiki and produces something usable: an answer, a conversation, a skill folder. The wiki is the substrate; generators are the surfaces.
-
-| Command                                                                               | Output                                                                                                         | Example                            |
-| ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
-| <code>openkb&nbsp;query&nbsp;"question"</code>                                        | A grounded answer with citations (`--save` to persist to `wiki/explorations/`)                                 | [query & save](examples/commands/) |
-| <code>openkb&nbsp;chat</code>                                                         | Interactive multi-turn session over the wiki (`--resume`, `--list`, `--delete` to manage sessions)             | [chat](examples/chat/)             |
-| <code>openkb&nbsp;visualize</code>                                                    | A self-contained interactive knowledge graph at `output/visualize/graph.html` — 3D, mind-map, and radial views | [visualize](examples/visualize/)   |
-| <code>openkb&nbsp;skill&nbsp;new&nbsp;&lt;skill-name&gt;&nbsp;"&lt;intent&gt;"</code> | Distill a redistributable agent skill from your wiki (see [Skill Factory](#skill-factory) below)               | [skills](examples/skills/)         |
-| <code>openkb&nbsp;deck&nbsp;new&nbsp;&lt;name&gt;&nbsp;"&lt;intent&gt;"</code>        | Generate a single-file HTML slide deck (`--skill` picks a theme, `--critique` runs a quality pass)             | [slides](examples/slides/)         |
-
-### (i) 💬 Query & Chat — *ask the wiki*
-
-`openkb query "..."` answers a single question with a grounded, cited answer from your wiki. `openkb chat` is interactive, an ongoing multi-turn session over the same wiki (`--resume`, `--list`, `--delete` to manage sessions). → Walked through with real saved output in **[`examples/commands/`](examples/commands/)** (query) and **[`examples/chat/`](examples/chat/)** (chat).
-
-Ordinary imports share the knowledge base. Documents do not need a product, version or manual category, and titles do not automatically split them into separate collections. Questions search the available documents without requiring product aliases or version confirmation first. Answers are generated from the wiki and original sources, with citations; there is no mandatory fact-registration or second-model approval step.
-
-Product/version collections, metadata confirmation and the `--view` selector have been removed. Original snapshots, source revisions and atomic knowledge publication remain available for provenance. The shared catalog has a new writer schema; rebuild older catalogs from their originals rather than opening them with an incompatible writer. See [shared knowledge and retained history](docs/knowledge-views.md).
-
-Compilation validates and, if necessary, repairs a malformed concept/entity plan once before publication. An incomplete worksheet is recorded as failed and can be resumed with `openkb retry-worksheet SOURCE_ID --unit UNIT_ID`; successful sibling sheets and previous successful knowledge remain available. A previously misclassified completed worksheet requires explicit `openkb recompile SOURCE_ID --unit UNIT_ID`. These operations require a supported knowledge-base format; older formats that the current application rejects must be retained as historical data and their originals imported into a new knowledge base.
-
-Inside a chat, type `/` to access slash commands (Tab to complete).
-
-<details>
-<summary><i>More slash commands:</i></summary>
-<br>
-
-- `/help`: list available commands
-- `/status`: show knowledge base status
-- `/list`: list all documents
-- `/add <path>`: add a document or directory without leaving the chat
-- `/skill new <skill-name> "<intent>"`: compile a skill from this chat (see below)
-- `/deck new <name> "<intent>"`: generate an HTML slide deck from the wiki
-- `/critique <path>`: run the HTML critic over an existing deck
-- `/save [name]`: export the transcript to `wiki/explorations/`
-- `/clear`: start a fresh session (the current one stays on disk)
-- `/lint`: run knowledge base lint
-- `/exit`: exit (Ctrl-D also works)
-
-</details>
-
-<a id="skill-factory"></a>
-
-### (ii) 🛠 Skill Factory — *drop in a book; out comes a digital expert.*
-
-`openkb skill new` distills a portable [agent skill](https://docs.claude.com/en/docs/build-with-claude/skills) from your wiki that Claude Code, Codex, and Gemini can install and load natively. Drop in a book's worth of papers; out comes a specialist other agents can call on. → A real generated skill, plus install / share / `eval` / rollback, is walked through in **[`examples/skills/`](examples/skills/)**.
-
-<details>
-<summary><i>More skill commands:</i></summary>
-<br>
-
-| Command                                                                                                                        | Output                                                 |
-| ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------ |
-| <code>openkb&nbsp;skill&nbsp;validate&nbsp;[name]</code>                                                                       | Validate compiled skills (auto-runs after `skill new`) |
-| <code>openkb&nbsp;skill&nbsp;eval&nbsp;&lt;name&gt;</code>                                                                     | Check the skill triggers on the right prompts          |
-| <code>openkb&nbsp;skill&nbsp;history&nbsp;&lt;name&gt;</code> / <code>openkb&nbsp;skill&nbsp;rollback&nbsp;&lt;name&gt;</code> | Version history + rollback for skills                  |
-
-</details>
-
-# 🔧 Configuration
-
-### Settings
-
-UrltraKB settings are initialized by `openkb init` and stored in `.openkb/config.yaml`:
+全局配置位于 `~/.config/ultrakb/global.yaml`。
+本库配置可覆盖全局设置；模型凭据按本库 `.env`、进程环境、全局 `.env` 的顺序解析。
 
 ```yaml
-model: gpt-5.4                   # LLM model (any LiteLLM-supported provider)
-language: en                     # Wiki output language
-pageindex_threshold: 20          # PDF pages threshold for PageIndex
+# .ultrakb/config.yaml
+model: gpt-5.4
+language: zh
+pdf_short_max_pages: 10
+concurrency: 5
 ```
 
-The full settings reference — `entity_types`, OAuth providers (`chatgpt/*`, `github_copilot/*`), and LiteLLM tuning (timeouts for slow local runtimes like Ollama / LM Studio, `drop_params`, GitHub Copilot headers, install notes) — is in **[`examples/configuration/`](examples/configuration/)**.
+可选配置包括角色模型、模型容量、调用预算、重试、超时、图片处理和 OCR 连接。
+详见[配置示例](examples/configuration/README.md)、
+[文档处理规则](docs/document-processing.md)及[来源阅读](docs/source-reading.md)。
 
-### PageIndex Setup
+## REST API
 
-Long-document retrieval is a [known challenge](https://x.com/karpathy/status/2039823314982744522) for LLMs. [PageIndex](https://github.com/VectifyAI/PageIndex) solves this with vectorless, reasoning-based retrieval, by building a hierarchical tree index that lets LLMs reason over the index for context-aware retrieval.
-
-PageIndex runs from the project-owned source in [`vendor/PageIndex`](vendor/PageIndex).
-PDF parsing, tree indexes, document storage and retrieval run locally. Model inference
-uses your configured LLM provider and may contact that provider.
-
-The managed PageIndex service, remote document-ID import, hosted OCR and legacy
-remote SDK have been removed. Existing service keys do not enable remote indexing.
-Import files, directories or URLs with `openkb add <path-or-url>`.
-
-See the [local PageIndex guide](vendor/PageIndex/README.urltrakb.md) for installation
-and build details. Historical imported documents keep their local wiki artifacts;
-removing them only removes those local artifacts.
-
-### AGENTS.md
-
-The `wiki/AGENTS.md` file defines wiki structure and conventions. It's the LLM's instruction manual for maintaining the wiki. Customize it to change how your wiki is organized.
-
-The LLM reads `AGENTS.md` from disk at runtime, so your edits take effect immediately.
-
-# 🔌 Integrations
-
-### Using with Obsidian
-
-The wiki is a directory of Markdown files with `[[wikilinks]]`. Obsidian renders it natively.
-
-1. Open `wiki/` as an Obsidian vault
-2. Browse summaries, concepts, and explorations
-3. Use graph view to see knowledge connections
-4. Use Obsidian Web Clipper to add web articles to `raw/`
-
-### Using with Claude Code / Codex / Gemini CLI
-
-UrltraKB ships a `SKILL.md` so any agent can read your compiled wiki. No extra runtime, no MCP setup, just install the skill once.
-
-<details>
-<summary><i>Claude Code:</i></summary>
-<br>
-
-```
-/plugin marketplace add VectifyAI/OpenKB
-/plugin install openkb@vectify
-```
-
-</details>
-
-<details>
-<summary><i>OpenAI Codex CLI:</i></summary>
-<br>
-
-*(no marketplace command yet; manual symlink)*
+安装 `api` extra 后启动独立 HTTP 服务：
 
 ```bash
-git clone https://github.com/VectifyAI/OpenKB.git ~/openkb-src
-mkdir -p ~/.agents/skills
-ln -s ~/openkb-src/skills/openkb ~/.agents/skills/openkb
+ultrakb-api --host 127.0.0.1 --port 7566
+# 等价入口：python -m ultrakb.api
 ```
 
-</details>
+交互式接口文档位于 [http://127.0.0.1:7566/docs](http://127.0.0.1:7566/docs)。
+服务提供知识库、导入、问答、会话、来源与产物接口，支持 SSE。
 
-<details>
-<summary><i>Gemini CLI:</i></summary>
-<br>
+| 环境变量 | 用途 |
+| --- | --- |
+| `ULTRAKB_API_TOKEN` | 启用 Bearer Token 认证 |
+| `ULTRAKB_KB_ROOT` | API 新建知识库的默认根目录 |
+| `ULTRAKB_CORS_ORIGINS` | 配置允许的跨域来源 |
+| `ULTRAKB_DISTRIBUTION_DIR` | 指定完整发行资料目录 |
+
+未设置 Token 时允许本地无认证访问；对外提供服务前应设置认证。
+请求示例和接口说明见 [REST API 指南](examples/rest-api/README.md)。
+
+## 名称切换与旧数据
+
+Python 包及 CLI 已从 `openkb` 切换为 `ultrakb`，桌面和 API 的命令分别为
+`ultrakb-desktop` 与 `ultrakb-api`，环境变量前缀统一为 `ULTRAKB_`。
+知识库状态目录改为 `.ultrakb/`，格式标识为 `ultrakb.context-kb`，
+全局设置目录改为 `~/.config/ultrakb/`。
+
+此次切换不会自动改写旧知识库。保留原库、原始资料和历史输出，在新目录使用
+`ultrakb init`，然后重新导入原件；仅重命名 `.openkb/` 目录不能完成格式与内部引用迁移。
+已有启动脚本、环境变量和 Agent 技能安装路径也需要同步。
+固定 SDK 版本中的 `+urltrakb.*` 是依赖来源身份，继续按锁文件保留。
+
+## 开发与更多文档
 
 ```bash
-gemini skills install https://github.com/VectifyAI/OpenKB.git --path skills/openkb --consent
+uv sync --frozen --extra dev --extra desktop --extra api
+uv run pytest
+uv run ruff check .
+uv run mypy ultrakb
 ```
 
-</details>
+依赖 LLM 返回的测试直接调用真实 `deepseek-flash`，凭据读取仓库根目录的 `.env`，
+不使用自定义模型成功回复 mock。真实模型验证覆盖编译、文档与会话索引、检索、
+提示词和请求参数、响应解析、流式问答、多轮会话、工具调用、技能及产物生成交付。
+容量、原文坐标、协议异常、纯 DTO 路由、持久化记录和故障用例直接验证本地业务边界；
+这些用例不作为真实模型生成覆盖。真实生成链只发送必要的原文和上下文。
+单次请求的 UTF-8 payload 上限为 64 KiB，输出默认 1024、最高 2048 token；上下文超限时明确失败并要求缩小夹具，不静默截断提示词。
 
-The skill is read-only. It won't run `openkb add`, `remove`, or `lint --fix` without you asking. See [`skills/openkb/SKILL.md`](skills/openkb/SKILL.md) for the full instruction set.
+每次 `pytest` 默认创建新的费用账本，按全部高峰价格准入的硬上限为 **2 元**，
+空闲时段折扣不会增加可发送的额度；报告同时列出按实际时段核算的费用与高峰预留。
+报告保存在
+`.scratch/llm-test-runs/`。同一次回归及其重试应通过 `--llm-cost-report` 复用同一账本：
 
-# REST API
+```bash
+uv run pytest --llm-cost-report=.scratch/llm-test-runs/regression-01/cost.json
+```
 
-UrltraKB ships an independent FastAPI service for HTTP clients. From this checkout,
-install with `uv sync --frozen --extra api`, then start with
-`openkb-api` (or `python -m openkb.api`). The interactive API reference is at
-[`/docs`](http://127.0.0.1:7566/docs) (importable into Postman). `/` does not serve
-an application. Authentication, SSE, CORS and generated HTML artifact endpoints
-remain available.
+相同请求仅复用该次运行从真实模型取得的原始响应。费用按 API 回执中的实际 `usage`
+和请求时段价格计算；缺少回执时保留费用预留。用例失败或预算不足会报告失败，
+不通过跳过测试掩盖。开始下一次完整验证时使用默认新账本或新的报告路径。
+早期按请求时段准入的旧账本仅用于费用回顾，不能继续付费验证。
 
-See the [full REST API reference](examples/rest-api/README.md#rest-api) for endpoints, auth, and SSE streaming.
+仓库约定见 [AGENTS.md](AGENTS.md) 和[工程原则](docs/golden-principles.md)。
+依赖使用固定版本，知识库写入由统一的锁和 mutation 层保护。
 
-# 🧭 Learn More
+- [桌面使用](docs/desktop.md) · [构建与发行](packaging/desktop/README.md)
+- [本地 SDK 与来源校验](docs/vendor-sdk.md)
+- [Office 导入](docs/office-ingest.md) · [工作簿导入](docs/workbook-ingest.md)
+- [连续文本与来源回读](docs/content-block-readback.md)
+- [重编译与重新处理](docs/reprocessing.md) · [知识刷新](docs/knowledge-refresh.md)
+- [待办导入与附件发现](docs/pending-imports.md)
+- [命令示例](examples/commands/README.md) · [会话示例](examples/chat/README.md)
+- [Agent 技能](skills/ultrakb/SKILL.md) · [幻灯片示例](examples/slides/README.md)
 
-### Compared to Karpathy's Approach
+## 来源与许可
 
-|                   | Karpathy's workflow         | UrltraKB                                          |
-| ----------------- | --------------------------- | ------------------------------------------------- |
-| Short documents   | LLM reads directly          | markitdown → LLM reads                            |
-| Long documents    | Context limits, context rot | PageIndex tree index                              |
-| Input sources     | Web clipper → .md           | PDF, Word, PPT, Excel, HTML, text, CSV, .md, URLs |
-| Wiki compilation  | LLM agent                   | LLM agent (same)                                  |
-| Entity extraction | Manual                      | Automatic (people, orgs, places, products)        |
-| Q&A               | Query over wiki             | Wiki + PageIndex retrieval                        |
-| Output            | Wiki only                   | Wiki + Skill Factory + agent CLI integration      |
+UltraKB 基于 [VectifyAI 的 OpenKB](https://github.com/VectifyAI/OpenKB) 开发，
+并使用 PageIndex、ChatIndex、ConDB、LiteLLM 等项目。
+原始源码的 Apache-2.0 许可和版权声明见 [LICENSE](LICENSE)。
 
-### The Stack
-
-- [PageIndex](https://github.com/VectifyAI/PageIndex) — Vectorless, reasoning-based document indexing and retrieval
-- [markitdown](https://github.com/microsoft/markitdown) — Universal file-to-markdown conversion
-- [OpenAI Agents SDK](https://github.com/openai/openai-agents-python) — Agent framework (supports non-OpenAI models via LiteLLM)
-- [LiteLLM](https://github.com/BerriAI/litellm) — Multi-provider LLM gateway
-- [Click](https://click.palletsprojects.com/) — CLI framework
-- [watchdog](https://github.com/gorakhargosh/watchdog) — Filesystem monitoring
-
-### Roadmap
-
-- [ ] Extend long document handling to non-PDF formats
-- [ ] Scale to large document collections with nested folder support
-- [ ] Hierarchical concept (topic) indexing for massive knowledge bases
-- [ ] Database-backed storage engine
-- [x] Native desktop workbench for browsing and managing knowledge bases
-
-### Contributing
-
-Contributions are welcome! Submit a pull request or open an [issue](https://github.com/VectifyAI/OpenKB/issues) for bugs and feature requests. For larger changes, consider opening an issue first to discuss the approach.
-
-### License
-
-OpenKB's original source is Apache 2.0; its copyright and [LICENSE](LICENSE) remain in place. Portable distributions include separately licensed components, including PyMuPDF/MuPDF. The combined distribution follows the accepted AGPLv3 route and must include matching corresponding source, build information and third-party license notices; it is not an Apache-only binary distribution. See the [distribution guide](packaging/desktop/README.md).
-
-### 🌐 Open-Source Ecosystem
-
-Other [open-source projects](https://docs.pageindex.ai/open-source) from the PageIndex ecosystem:
-
-- [PageIndex](https://github.com/VectifyAI/PageIndex): Vectorless, reasoning-based RAG framework for long documents
-- [ChatIndex](https://github.com/VectifyAI/ChatIndex): Tree indexing and retrieval for long conversational histories and memory
-- [ConDB](https://github.com/VectifyAI/ConDB): A KV-cache native context database for tree-based retrieval at scale
-- [PageIndex MCP](https://github.com/VectifyAI/pageindex-mcp): MCP server for PageIndex
-
-### Support Us
-
-If you find UrltraKB useful, please give us a star 🌟 — and check out [**PageIndex**](https://github.com/VectifyAI/PageIndex) too!  
-
-<div>
-
-[![Twitter](https://img.shields.io/badge/Twitter-000000?style=for-the-badge&logo=x&logoColor=white)](https://x.com/PageIndexAI)&ensp;
-[![LinkedIn](https://img.shields.io/badge/LinkedIn-0077B5?style=for-the-badge&logo=linkedin&logoColor=white)](https://www.linkedin.com/company/vectify-ai/)&ensp;
-[![Contact Us](https://img.shields.io/badge/Contact_Us-3B82F6?style=for-the-badge&logo=envelope&logoColor=white)](https://ii2abc2jejf.typeform.com/to/tK3AXl8T)
-
-</div>
+便携发行包含分别许可的第三方组件，包括 PyMuPDF / MuPDF；当前组合发行采用
+AGPLv3 路线，并配套提供对应源码、构建资料和第三方声明。
+分发要求与资料清单见[发行说明](packaging/desktop/DISTRIBUTION.md)。

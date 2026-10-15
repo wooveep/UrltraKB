@@ -4,22 +4,22 @@ import pytest
 
 
 def test_initialization_distinguishes_owned_creation_lock_from_existing_kb(tmp_path, monkeypatch):
-    from openkb import config
-    from openkb.application.knowledge_bases import initialize_kb
-    from openkb.lifecycle import creation_lifecycle
-    from openkb.locks import kb_ingest_lock
+    from ultrakb import config
+    from ultrakb.application.knowledge_bases import initialize_kb
+    from ultrakb.lifecycle import creation_lifecycle
+    from ultrakb.locks import kb_ingest_lock
 
     monkeypatch.setattr(config, "GLOBAL_CONFIG_DIR", tmp_path / "settings")
     monkeypatch.setattr(config, "GLOBAL_CONFIG_PATH", tmp_path / "settings/global.yaml")
     kb = tmp_path / "created"
     # An adapter's creation lease must precede the KB and global leases.
-    with creation_lifecycle(kb), kb_ingest_lock(kb / ".openkb"):
+    with creation_lifecycle(kb), kb_ingest_lock(kb / ".ultrakb"):
         with config._with_global_config_lock():
             assert initialize_kb(kb, seed_environment=False)["created"]
         with pytest.raises(FileExistsError):
             initialize_kb(kb, seed_environment=False)
-    assert (kb / ".openkb/config.yaml").is_file()
-    incomplete = tmp_path / "incomplete/.openkb"
+    assert (kb / ".ultrakb/config.yaml").is_file()
+    incomplete = tmp_path / "incomplete/.ultrakb"
     incomplete.mkdir(parents=True)
     (incomplete / "unexpected").write_text("keep")
     with creation_lifecycle(incomplete.parent), kb_ingest_lock(incomplete):
@@ -29,9 +29,9 @@ def test_initialization_distinguishes_owned_creation_lock_from_existing_kb(tmp_p
 
 
 def test_global_settings_restore_both_files_after_write_failure(tmp_path, monkeypatch):
-    from openkb import config
-    from openkb.application import settings
-    from openkb.application.settings_data import GlobalConfigPatchRequest
+    from ultrakb import config
+    from ultrakb.application import settings
+    from ultrakb.application.settings_data import GlobalConfigPatchRequest
 
     monkeypatch.setattr(config, "GLOBAL_CONFIG_DIR", tmp_path)
     monkeypatch.setattr(config, "GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
@@ -54,11 +54,11 @@ def test_global_settings_restore_both_files_after_write_failure(tmp_path, monkey
 
 
 def test_global_settings_read_recovers_an_interrupted_pair(tmp_path, monkeypatch):
-    from openkb import config
-    from openkb.application import settings
-    from openkb.application.settings_data import GlobalConfigPatchRequest
-    from openkb.locks import atomic_write_text
-    from openkb.mutation import snapshot_paths
+    from ultrakb import config
+    from ultrakb.application import settings
+    from ultrakb.application.settings_data import GlobalConfigPatchRequest
+    from ultrakb.locks import atomic_write_text
+    from ultrakb.mutation import snapshot_paths
 
     monkeypatch.setattr(config, "GLOBAL_CONFIG_DIR", tmp_path)
     monkeypatch.setattr(config, "GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
@@ -74,14 +74,14 @@ def test_global_settings_read_recovers_an_interrupted_pair(tmp_path, monkeypatch
         atomic_write_text(tmp_path / "global.yaml", "model: interrupted\n")
     result = settings.read_global_config()
     assert result.model == "before" and result.has_api_key
-    assert not list((tmp_path / ".openkb/journal").glob("*.json"))
+    assert not list((tmp_path / ".ultrakb/journal").glob("*.json"))
 
 
 def test_credential_snapshot_and_recovery_preserve_private_permissions(tmp_path):
     import os
     import stat
 
-    from openkb.mutation import snapshot_paths
+    from ultrakb.mutation import snapshot_paths
 
     if os.name == "nt":
         pytest.skip("POSIX permission bits; Windows inherits the profile's ACL")
@@ -100,11 +100,11 @@ def test_credential_snapshot_and_recovery_preserve_private_permissions(tmp_path)
 
 
 def test_global_repair_retains_bad_evidence_then_allows_controlled_retry(tmp_path, monkeypatch):
-    from openkb import config
-    from openkb.application.repair import repair_global_settings
-    from openkb.application.settings import read_global_config
-    from openkb.locks import atomic_write_text
-    from openkb.mutation import RecoveryRequired, repair_marker, snapshot_paths
+    from ultrakb import config
+    from ultrakb.application.repair import repair_global_settings
+    from ultrakb.application.settings import read_global_config
+    from ultrakb.locks import atomic_write_text
+    from ultrakb.mutation import RecoveryRequired, repair_marker, snapshot_paths
 
     monkeypatch.setattr(config, "GLOBAL_CONFIG_DIR", tmp_path)
     monkeypatch.setattr(config, "GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
@@ -133,8 +133,8 @@ def test_rest_config_read_does_not_block_event_loop_on_global_lock(tmp_path, mon
     import threading
     import time
 
-    from openkb import config
-    from openkb.api_config_router import global_config_get
+    from ultrakb import config
+    from ultrakb.api_config_router import global_config_get
 
     monkeypatch.setattr(config, "GLOBAL_CONFIG_DIR", tmp_path)
     monkeypatch.setattr(config, "GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
@@ -163,23 +163,23 @@ def test_rest_config_read_does_not_block_event_loop_on_global_lock(tmp_path, mon
 
 
 def test_invalid_credential_patch_does_not_partially_save_model(kb_dir):
-    from openkb.application.settings import apply_kb_config_patch, read_kb_config
-    from openkb.application.settings_data import KbConfigPatchRequest
+    from ultrakb.application.settings import apply_kb_config_patch, read_kb_config
+    from ultrakb.application.settings_data import KbConfigPatchRequest
 
     previous = read_kb_config(kb_dir)
-    before = (kb_dir / ".openkb/config.yaml").read_text()
+    before = (kb_dir / ".ultrakb/config.yaml").read_text()
     patch = KbConfigPatchRequest(kb=str(kb_dir), config={"model": "new"}, api_key="bad\nkey")
     with pytest.raises(ValueError, match="newline"):
         apply_kb_config_patch(kb_dir, patch)
     assert read_kb_config(kb_dir) == previous
-    assert (kb_dir / ".openkb/config.yaml").read_text() == before
+    assert (kb_dir / ".ultrakb/config.yaml").read_text() == before
     assert not (kb_dir / ".env").exists()
 
 
 def test_settings_patch_preserves_three_states_and_hides_secret(kb_dir, tmp_path, monkeypatch):
-    from openkb import config
-    from openkb.application.settings import apply_kb_config_patch, read_kb_config
-    from openkb.application.settings_data import KbConfigPatchRequest
+    from ultrakb import config
+    from ultrakb.application.settings import apply_kb_config_patch, read_kb_config
+    from ultrakb.application.settings_data import KbConfigPatchRequest
 
     monkeypatch.setattr(config, "GLOBAL_CONFIG_DIR", tmp_path / "settings")
     monkeypatch.setattr(config, "GLOBAL_CONFIG_PATH", tmp_path / "settings/global.yaml")

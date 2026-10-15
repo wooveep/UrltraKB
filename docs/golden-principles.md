@@ -7,13 +7,13 @@ promote it into a lint (see `tests/test_file_size.py` for the pattern).
 
 ## Boundaries
 - **Validate data shapes at boundaries.** Parse/validate inputs (frontmatter via
-  `openkb/frontmatter.py`, config via `openkb/config.py`) at the edge. Never build
+  `ultrakb/frontmatter.py`, config via `ultrakb/config.py`) at the edge. Never build
   on guessed shapes.
 
 ## Reuse
 - **Prefer shared utilities over hand-rolled helpers** so invariants stay
-  centralized. Check `openkb/` for an existing helper before writing a new one.
-- **CLI, desktop and HTTP adapters call the same `openkb/application/` use cases.**
+  centralized. Check `ultrakb/` for an existing helper before writing a new one.
+- **CLI, desktop and HTTP adapters call the same `ultrakb/application/` use cases.**
   The desktop is the behavior baseline. Adapters validate requests, schedule work
   and present results; model selection, final-answer handling, persistence,
   archive policy and KB leases belong to the shared use case. Application code
@@ -30,9 +30,9 @@ promote it into a lint (see `tests/test_file_size.py` for the pattern).
   waits for model cleanup before releasing leases (`tests/test_answer_streams.py`).
 
 ## I/O and state
-- **All wiki file writes go through `openkb/locks.py` / `openkb/mutation.py`**
+- **All wiki file writes go through `ultrakb/locks.py` / `ultrakb/mutation.py`**
   (atomic, crash-safe). No ad-hoc writes to the wiki tree.
-- **Log through `openkb/log.py`**, not bare `print`, for anything diagnostic.
+- **Log through `ultrakb/log.py`**, not bare `print`, for anything diagnostic.
 
 ## Size and shape
 <a id="file-size"></a>
