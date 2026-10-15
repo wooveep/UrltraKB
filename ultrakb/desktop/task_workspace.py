@@ -2,8 +2,8 @@
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QDesktopServices, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
@@ -73,6 +73,7 @@ class TaskWorkspace(QWidget):
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setSortingEnabled(True)
+        self.table.setWordWrap(False)
         self.table.itemSelectionChanged.connect(window._select_task)
         self.table.itemChanged.connect(self.item_changed)
         self.table.itemDoubleClicked.connect(lambda item: self.details(self.identity(item.row())))
@@ -106,6 +107,9 @@ class TaskWorkspace(QWidget):
         body.addWidget(self.owner)
         self.artifacts = window.artifacts = QListWidget()
         self.artifacts.setMaximumHeight(120)
+        self.artifacts.itemActivated.connect(
+            lambda item: QDesktopServices.openUrl(QUrl.fromLocalFile(item.text()))
+        )
         self.artifacts.hide()
         body.addWidget(self.artifacts)
         for signal in (
@@ -161,6 +165,7 @@ class TaskWorkspace(QWidget):
         ]
         old = [self.identity(row) for row in range(self.table.rowCount())]
         new = {task.id for task in visible}
+        self.checked.intersection_update(new)
         rebuild = set(old) != new
         focused = self.identity(self.table.currentRow())
         blocked = self.table.blockSignals(True)
@@ -172,11 +177,22 @@ class TaskWorkspace(QWidget):
         for index, task in enumerate(visible):
             row = index if rebuild else rows[task.id]
             source = current_source(task)
+            owner = Path(task.kb_dir).name
+            if self.table.isColumnHidden(1):
+                owner += "\n" + OPERATIONS.get(task.operation, task.operation)
+                if source:
+                    owner += "\n" + source
+            progress = (
+                f"已处理 {len(task.results)} / {task.total}\n"
+                f"成功 {task.succeeded} 失败 {task.failed}"
+            )
+            if self.table.isColumnHidden(4):
+                progress += "\n" + task_progress(task)
             values = [
-                Path(task.kb_dir).name,
+                owner,
                 OPERATIONS.get(task.operation, task.operation) + (f"\n{source}" if source else ""),
                 STATES[task.state],
-                task_counts(task) + "\n" + task_progress(task),
+                progress,
                 task_progress(task),
             ]
             for column, value in enumerate(values):
@@ -186,7 +202,13 @@ class TaskWorkspace(QWidget):
                     self.table.setItem(row, column, item)
                 item.setText(value)
                 item.setData(Qt.ItemDataRole.UserRole, task.id)
-                item.setToolTip(task.kb_dir + "\n" + task.id if column == 0 else value)
+                item.setToolTip(
+                    task.kb_dir + "\n" + task.id
+                    if column == 0
+                    else task_counts(task) + "\n" + task_progress(task)
+                    if column == 3
+                    else value
+                )
                 if column == 0:
                     item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
                     item.setCheckState(
@@ -199,10 +221,18 @@ class TaskWorkspace(QWidget):
                 controls = self.row_controls(task.id)
                 self.table.setCellWidget(row, 5, controls)
             controls.findChild(QPushButton, "stopTask").setEnabled(
-                task.state not in TERMINAL and not task.stop_requested and not self.window._quitting
+                task.state not in TERMINAL and not task.stop_requested
             )
             controls.ensurePolished()
-            self.table.setRowHeight(row, max(72, controls.minimumSizeHint().height() + 16))
+            self.table.setColumnWidth(5, max(176, controls.minimumSizeHint().width() + 4))
+            self.table.setRowHeight(
+                row,
+                max(
+                    88,
+                    self.table.fontMetrics().lineSpacing() * 3 + 16,
+                    controls.minimumSizeHint().height() + 16,
+                ),
+            )
         self.table.setSortingEnabled(True)
         self.table.blockSignals(blocked)
         self.visible = tuple(task.id for task in visible)
@@ -247,8 +277,11 @@ class TaskWorkspace(QWidget):
         menu = QMenu(button)
         heading = menu.addAction(f"仅此任务：{identity[:8]}")
         heading.setEnabled(False)
-        menu.addAction("核对并重试未完成项…", lambda: self.retry_ids((identity,)))
-        menu.addAction("清理任务摘要…", lambda: self.clear_ids((identity,)))
+        retry = menu.addAction("核对并重试未完成项…", lambda: self.retry_ids((identity,)))
+        clear = menu.addAction("清理任务摘要…", lambda: self.clear_ids((identity,)))
+        task = self.tasks.get(identity)
+        for action in (retry, clear):
+            action.setEnabled(bool(task and task.state in TERMINAL and not self.window._quitting))
         menu.popup(button.mapToGlobal(button.rect().bottomLeft()))
         self._row_menu = menu
 
@@ -324,5 +357,10 @@ class TaskWorkspace(QWidget):
         clear_selected_history(self.window, identities)
 
     def resizeEvent(self, event):
-        self.table.setColumnHidden(4, self.width() < 1000)
+        hidden = self.width() < 1000
+        if self.table.isColumnHidden(4) != hidden:
+            self.table.setColumnHidden(4, hidden)
+            self.table.setColumnHidden(1, hidden)
+            self.table.horizontalHeaderItem(0).setText("任务 / 知识库" if hidden else "知识库")
+            self.refresh(tuple(self.tasks.values()), force=True)
         super().resizeEvent(event)

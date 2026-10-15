@@ -3,8 +3,8 @@
 from PySide6.QtWidgets import QMessageBox, QToolButton
 
 from ultrakb.application.document_actions import document_inventory
-from ultrakb.application.document_batches import preview_document_batch, validate_document_batch
-from ultrakb.runtime.requests import RecompileDocument
+from ultrakb.application.document_batches import preview_document_batch
+from ultrakb.desktop.document_batch_actions import submit_reviewed_batch
 
 
 def recompile_all(window):
@@ -39,27 +39,15 @@ def recompile_all(window):
         if question.exec() == QMessageBox.StandardButton.Yes:
 
             def submit_reviewed():
-                def validated(current, error):
-                    if error:
-                        window._error(error)
-                        return
-                    assert current.version is not None
-                    window.manager.submit(
-                        root,
-                        tuple(
-                            RecompileDocument(
-                                target.file_hash, current.version, view_id=scope.view_id
-                            )
-                            for target in current.targets
-                        ),
-                        require_verified_connection=True,
-                    )
-
-                window.io.submit(
-                    lambda: validate_document_batch(preview, scope=scope),
-                    validated,
-                    kb=root,
-                    obsolete=lambda: window._quitting or window.kb != root,
+                submit_reviewed_batch(
+                    window,
+                    preview,
+                    scope,
+                    lambda task_id, count: window.statusBar().showMessage(
+                        f"已提交 {count} 项全库资料重新生成任务。"
+                    ),
+                    window._error,
+                    obsolete=lambda: window.kb != root,
                 )
 
             window.onboarding.ensure(root, "全库适用资料重新生成知识", submit_reviewed)

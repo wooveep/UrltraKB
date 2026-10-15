@@ -48,6 +48,11 @@ STAGES = {
 
 
 def task_progress(task, stage_label: str | None = None) -> str:
+    from ultrakb.runtime.records import TERMINAL
+
+    label = stage_label or STAGES.get(task.stage, "正在处理")
+    if task.state not in TERMINAL:
+        return label
     units = [unit for result in task.results for unit in result.import_units]
     incomplete = [unit for unit in units if unit.status not in {"completed", "empty", "retired"}]
     parts = []
@@ -66,11 +71,7 @@ def task_progress(task, stage_label: str | None = None) -> str:
             parts.append(reason)
     if parts:
         return "；".join(parts)
-    return (
-        "执行未完成，可查看详情并重试"
-        if task.error
-        else stage_label or STAGES.get(task.stage, "正在处理")
-    )
+    return "执行未完成，可查看详情并重试" if task.error else label
 
 
 def task_counts(task):

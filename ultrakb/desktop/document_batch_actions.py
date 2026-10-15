@@ -65,33 +65,24 @@ def execute(panel, identities, *, action):
             # execution authorization. Workers also recheck the version under lease.
             panel._batch_preparing = True
 
-            def validated(current, error):
+            def submitted(task_id, count):
                 panel._batch_preparing = False
-                if error:
-                    panel.status.setText(str(error))
-                    return
-                assert current.version is not None
-                requests = requests_for(current, panel.view_id)
-                panel._task = panel.window.manager.submit(
-                    current.kb_dir,
-                    requests,
-                    require_verified_connection=True,
-                    not_applicable=tuple(
-                        TaskExclusion(
-                            skip.identity.kind, skip.identity.value, skip.name, skip.reason
-                        )
-                        for skip in current.skipped
-                    ),
-                )
-                panel.status.setText(f"已提交 {len(requests)} 项；可在任务页查看逐项结果与停止。")
+                panel._task = task_id
+                panel.status.setText(f"已提交 {count} 项；可在任务页查看逐项结果与停止。")
                 from ultrakb.desktop.document_selection import update
 
                 update(panel)
 
-            panel.window.io.submit(
-                lambda: validate_document_batch(preview, scope=panel.scope),
-                validated,
-                kb=panel.kb,
+            def failed(error):
+                panel._batch_preparing = False
+                panel.status.setText(str(error))
+
+            submit_reviewed_batch(
+                panel.window,
+                preview,
+                panel.scope,
+                submitted,
+                failed,
                 obsolete=lambda: panel._closed or panel.window.kb != preview.kb_dir,
             )
 
@@ -133,4 +124,35 @@ def requests_for(preview, view_id):
     return tuple(
         RecompileDocument(target.file_hash, preview.version, view_id=view_id)
         for target in preview.targets
+    )
+
+
+def submit_reviewed_batch(window, preview, scope, submitted, failed, *, obsolete):
+    """Both whole-KB and selected batches retain the same fresh targets and exclusions."""
+
+    def validated(current, error):
+        if error:
+            failed(error)
+            return
+        requests = requests_for(current, scope.view_id if scope else None)
+        try:
+            task_id = window.manager.submit(
+                current.kb_dir,
+                requests,
+                require_verified_connection=True,
+                not_applicable=tuple(
+                    TaskExclusion(skip.identity.kind, skip.identity.value, skip.name, skip.reason)
+                    for skip in current.skipped
+                ),
+            )
+        except Exception as error:
+            failed(error)
+            return
+        submitted(task_id, len(requests))
+
+    window.io.submit(
+        lambda: validate_document_batch(preview, scope=scope),
+        validated,
+        kb=preview.kb_dir,
+        obsolete=lambda: window._quitting or obsolete(),
     )

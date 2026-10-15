@@ -11,7 +11,9 @@ from pathlib import Path
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("scenario", choices=("navigation", "documents", "progress", "tasks"))
+    parser.add_argument(
+        "scenario", choices=("navigation", "documents", "progress", "tasks", "task_batches")
+    )
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     root = args.output.resolve()
@@ -103,9 +105,45 @@ def main():
             wait(lambda: not window.io._callbacks)
             assert window.shell.title.text() == "资料", "Late page read stole navigation"
             window.shell.navigate("知识")
+            wait(lambda: "第一知识正文" in window.reader.toPlainText())
+            assert "正在读取" not in window.reader.toPlainText()
+            assert (
+                window.pages.currentItem().data(0, Qt.ItemDataRole.UserRole)
+                == "concepts/第一知识.md"
+            )
+            assert window.workspaces.ask_page.isEnabled()
             target = node()
             click(window.pages.viewport(), window.pages.visualItemRect(target).center())
             wait(lambda: window.page.path == "concepts/第二知识")
+            # A failed reread of the already selected title must be retryable too.
+            from PySide6.QtWidgets import QApplication, QMessageBox
+
+            from ultrakb.desktop import window as window_module
+
+            original_read = window_module.read_page_context
+            calls, dismissed = [], []
+
+            def fail_once(*args, **kwargs):
+                calls.append(args[1])
+                if len(calls) == 1:
+                    raise OSError("fixture local read failure")
+                return original_read(*args, **kwargs)
+
+            def dismiss():
+                box = QApplication.activeModalWidget()
+                if isinstance(box, QMessageBox):
+                    dismissed.append(True)
+                    box.accept()
+                else:
+                    QTimer.singleShot(10, dismiss)
+
+            patch(window_module, "read_page_context", fail_once)
+            QTimer.singleShot(10, dismiss)
+            window.open_page("concepts/第二知识")
+            wait(lambda: bool(dismissed) and not window.io._callbacks)
+            target = node()
+            click(window.pages.viewport(), window.pages.visualItemRect(target).center())
+            wait(lambda: len(calls) == 2 and "第二知识正文" in window.reader.toPlainText())
             window.grab().save(str(root / "knowledge.png"))
         elif args.scenario == "documents":
             window.shell.navigate("资料")
@@ -189,7 +227,7 @@ def main():
                 progress.show_details()
                 assert "编译" in observed[0] and "转换" not in observed[0]
                 window.grab().save(str(root / "progress.png"))
-            else:
+            elif args.scenario == "tasks":
                 current.extend(
                     [
                         replace(
@@ -256,6 +294,8 @@ def main():
                             for control in controls.findChildren(QAbstractButton):
                                 assert control.visibleRegion().contains(control.rect())
                         window.grab().save(str(root / f"tasks-{theme}-{width}.png"))
+            else:
+                task_batches(window, kb, root, current, patch, pump, wait)
     finally:
         for obj, attr, original in reversed(restorations):
             setattr(obj, attr, original)
@@ -263,6 +303,117 @@ def main():
         window.request_quit()
         wait(window.shutdown_complete)
     print(json.dumps({"scenario": args.scenario, "passed": True, "model_sends": 0}))
+
+
+def task_batches(window, kb, root, current, patch, pump, wait):
+    """Exercise reviewed UI batches at the scheduler boundary; core retry has worker tests."""
+    from PySide6.QtCore import QTimer
+    from PySide6.QtWidgets import QApplication, QMessageBox
+
+    from ultrakb.application.knowledge_bases import initialize_kb
+    from ultrakb.desktop import task_actions
+    from ultrakb.runtime.records import UnitResult
+    from ultrakb.runtime.requests import ImportFile, SavePage
+    from ultrakb.runtime.task_actions import RetryPreview
+
+    other = root / "另一知识库"
+    initialize_kb(other, seed_environment=False)
+    current.extend(
+        [
+            replace(
+                current[0],
+                id="e" * 32,
+                state="completed",
+                stage="committed",
+                total=1,
+                results=(UnitResult("completed"),),
+                processes_reaped=True,
+            ),
+            replace(
+                current[0],
+                id="d" * 32,
+                kb_dir=str(other),
+                state="partial",
+                stage="failed",
+                total=2,
+                results=(UnitResult("completed"), UnitResult("failed")),
+                processes_reaped=True,
+            ),
+        ]
+    )
+    retried, connections, cleared, confirmations = [], [], [], []
+
+    def inputs(identity):
+        view = next(task for task in current if task.id == identity)
+        if view.state == "running":
+            raise ValueError("请等待任务结束并完成进程回收")
+        return view, (SavePage("index", "body", "version"), ImportFile(str(root / "input.md"))), ()
+
+    def preview(_manager, identity):
+        view, _requests, _identities = inputs(identity)
+        return RetryPreview(
+            identity,
+            view.kb_dir,
+            view.operation,
+            "reviewed",
+            (1,),
+            (),
+            (),
+            "所有单元已完成" if identity == "e" * 32 else None,
+        )
+
+    def retry(_manager, reviewed):
+        retried.append((reviewed.task_id, reviewed.indices))
+        return "c" * 32
+
+    original_ensure = window.onboarding.ensure
+    window.onboarding.ready[other] = True
+
+    def ensure(target, description, continuation, *, valid, background=False):
+        connections.append(target)
+        assert valid() and background
+        original_ensure(target, description, continuation, valid=valid, background=background)
+
+    def clear(identities):
+        cleared.append(tuple(identities))
+        current[:] = [task for task in current if task.id not in identities]
+
+    patch(window.manager, "retry_inputs", inputs)
+    patch(window.manager, "clear_history", clear)
+    patch(window.onboarding, "ensure", ensure)
+    patch(task_actions, "preview_retry", preview)
+    patch(task_actions, "retry_task", retry)
+    window.shell.navigate("任务")
+    pump(200)
+    dialog = task_actions.RetryDialog(window, tuple(task.id for task in current))
+    dialog.show()
+    wait(lambda: dialog.check_button.isEnabled())
+    assert set(dialog.previews) == {"d" * 32}
+    assert set(dialog.reasons) == {"e" * 32, "f" * 32}
+    assert "选中 3 项" in dialog.details.toPlainText()
+    dialog.retry_button.click()
+    dialog.retry_button.click()
+    wait(lambda: len(retried) == 1 and dialog.check_button.isEnabled())
+    assert retried == [("d" * 32, (1,))], retried
+    assert connections == [other]
+    dialog.grab().save(str(root / "batch-retry.png"))
+    dialog.reject()
+
+    def confirm():
+        box = QApplication.activeModalWidget()
+        if isinstance(box, QMessageBox):
+            confirmations.append(box.text())
+            box.done(QMessageBox.StandardButton.Yes)
+        else:
+            QTimer.singleShot(20, confirm)
+
+    QTimer.singleShot(20, confirm)
+    task_actions.clear_selected_history(window, tuple(task.id for task in current))
+    wait(lambda: bool(cleared))
+    assert set(cleared[0]) == {"e" * 32, "d" * 32}
+    assert len(confirmations) == 1 and "仅清理 2 项" in confirmations[0]
+    wait(lambda: window.task_table.rowCount() == 1)
+    assert window.manager.get("f" * 32).state == "running"
 
 
 if __name__ == "__main__":

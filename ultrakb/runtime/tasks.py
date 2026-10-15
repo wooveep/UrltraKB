@@ -141,6 +141,16 @@ class TaskManager:
                 )
         self._condition.notify_all()
 
+    @staticmethod
+    def _request_source(request: UnitRequest) -> str | None:
+        from ultrakb.runtime.requests import ImportFile, ImportUrl
+
+        if isinstance(request, ImportFile):
+            return request.source
+        if isinstance(request, ImportUrl):
+            return request.url
+        return None
+
     def submit(
         self,
         kb_dir: Path,
@@ -175,6 +185,7 @@ class TaskManager:
                 True,
                 retry_of=retry_of,
                 not_applicable=tuple(not_applicable),
+                current_source=self._request_source(units[0]),
             )
             task = _Task(
                 view,
@@ -383,7 +394,7 @@ class TaskManager:
             state="running",
             stage="preparing",
             processes_reaped=False,
-            current_source=getattr(request, "path", None) or getattr(request, "url", None),
+            current_source=self._request_source(request),
         )
 
     def _control(self, task: _Task, attempt: _Attempt) -> None:

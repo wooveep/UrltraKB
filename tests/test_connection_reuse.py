@@ -4,6 +4,8 @@ import pytest
 
 from ultrakb import config
 from ultrakb.application import model_connections as connections
+from ultrakb.application.connection_capacity import template_capacity
+from ultrakb.application.connection_templates import CONNECTION_TEMPLATES
 from ultrakb.application.knowledge_bases import initialize_kb
 from ultrakb.application.settings import apply_global_config_patch, apply_kb_config_patch
 from ultrakb.application.settings_data import GlobalConfigPatchRequest, KbConfigPatchRequest
@@ -26,7 +28,13 @@ def test_verified_connection_reused_by_identical_kb_settings(
     }
     apply_global_config_patch(
         GlobalConfigPatchRequest(
-            config={"model": values["model"]},
+            config={
+                "model": values["model"],
+                "model_capacity": {
+                    **template_capacity(CONNECTION_TEMPLATES[2]),
+                    "applies_to_model": values["model"],
+                },
+            },
             api_key=values["api_key"],
             openai_api_base=values["openai_api_base"],
         )

@@ -98,3 +98,29 @@ def test_repair_block_stops_batch_before_starting_more_units(kb_dir, tmp_path):
     finally:
         manager.shutdown(stop=True)
         assert manager.join(30)
+
+
+def test_import_source_is_visible_before_and_during_the_kb_wait(kb_dir, tmp_path):
+    import time
+
+    from ultrakb.locks import kb_ingest_lock
+    from ultrakb.runtime.requests import ImportFile
+    from ultrakb.runtime.tasks import TaskManager
+
+    source = tmp_path / "waiting-source.md"
+    source.write_text("# Retained local input\n")
+    manager = TaskManager(history_dir=tmp_path / "history", max_workers=1)
+    try:
+        with kb_ingest_lock(kb_dir / ".ultrakb"):
+            task_id = manager.submit(kb_dir, [ImportFile(str(source))])
+            assert manager.get(task_id).current_source == str(source)
+            deadline = time.monotonic() + 15
+            while manager.get(task_id).state != "waiting":
+                time.sleep(0.01)
+                assert time.monotonic() < deadline
+            assert manager.get(task_id).current_source == str(source)
+            manager.stop(task_id)
+        manager.wait(task_id, timeout=15)
+    finally:
+        manager.shutdown(stop=True)
+        assert manager.join(15)

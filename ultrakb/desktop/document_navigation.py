@@ -23,6 +23,7 @@ def load_document(panel, identity, label, operation, callback):
 
     def loaded(value, error):
         panel._navigation_notice = None
+        panel.status.setText(f"已完成{label}。")
         callback(value, error)
 
     panel._navigation_identity = identity

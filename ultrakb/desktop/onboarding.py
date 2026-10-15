@@ -18,6 +18,7 @@ class PendingAction:
     description: str
     continue_action: Callable = field(repr=False)
     valid: Callable = field(default=lambda: True, repr=False)
+    background: bool = False
 
 
 class ConnectionGuide(SetupWizard):
@@ -104,7 +105,7 @@ class Onboarding:
         w.workspaces.setup_continue.setVisible(bool(pending) or not self.ready.get(w.kb))
         w.workspaces.setup_continue.setText("继续原操作" if pending else "连接模型服务")
 
-    def ensure(self, root, description, continue_action, *, valid=lambda: True):
+    def ensure(self, root, description, continue_action, *, valid=lambda: True, background=False):
         root = root.expanduser().resolve()
         if self.window._quitting:
             return
@@ -113,8 +114,10 @@ class Onboarding:
                 self.dialog.raise_()
             self.window.statusBar().showMessage("已有待继续操作；请完成设置或选择稍后继续。")
             return
-        action = PendingAction(root, current_generation(root), description, continue_action, valid)
-        if root != self.window.kb:
+        action = PendingAction(
+            root, current_generation(root), description, continue_action, valid, background
+        )
+        if root != self.window.kb and not background:
             self.pending, self._paused = action, True
             self.window.statusBar().showMessage("已切换知识库；原输入保留，请回原知识库继续操作。")
             self.update_overview()
@@ -197,7 +200,7 @@ class Onboarding:
     def _execute(self, action):
         if (
             self.window._quitting
-            or self.window.kb != action.root
+            or (self.window.kb != action.root and not action.background)
             or action.root in self.window._deleting_kbs
             or not action.valid()
         ):

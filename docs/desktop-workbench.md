@@ -206,3 +206,35 @@ rows wrap as space narrows. The layout capture matrix now includes 720 × 600
 logical pixels. Native chat acceptance covers saved multi-turn history, tagged
 reasoning exclusion, duplicate Enter prevention and a background result arriving
 after the user starts a different conversation.
+
+
+## 导航、导入进度与任务批量操作复核（2026-10-15）
+
+本轮修复知识库写锁占用时的静默等待：知识标题、原文阅读和关注资料提问立即显示
+读取或等待状态；切换工作区后撤销过期跳转。取消读取恢复旧正文和目录选中项；
+同一标题重读失败后可以直接再次点击重试。读写一致性仍由原有知识库锁保护。
+
+顶部说明采用实际内容尺寸分配宽度；导入资料与导入选项共用可换行操作区。
+资料与任务行以操作控件的最小尺寸分配行高，验收断言完整可见区域和窗口坐标命中，
+不只检查 isVisible 或直接向按钮中心发送事件。
+
+导入区显示已处理/总数、当前文件和中文阶段，任务来源在排队和等待锁时也保留。
+确认单项结果后请求刷新资料列表；列表等待写入完成时保留旧行并说明原因。
+任务详情每 250ms 更新，保留阅读位置。运行中的阶段优先显示当前操作，历史失败
+另保留在逐项结果中，不覆盖下一份资料的实时状态；不推测单份资料的编译百分比。
+
+任务页增加搜索、状态/知识库范围筛选、独立勾选和全选当前结果。焦点与批量范围分离，
+刷新/排序保持任务身份，筛选变化清空勾选。行操作仅作用于该任务；批量停止、重试和
+清理先核对适用集合并显示跳过原因。重试共用原有凭据/版本校验，跨库操作绑定明确
+选中的原任务知识库；清理仍保护目录监听引用并保留知识库文件和产物。
+
+```bash
+QT_QPA_PLATFORM=offscreen .venv/bin/pytest -q tests/test_gui_delivery.py \
+  tests/test_gui_task_progress.py tests/test_desktop_tasks.py tests/test_task_actions.py
+QT_SCALE_FACTOR=1.5 QT_QPA_PLATFORM=offscreen .venv/bin/pytest -q tests/test_gui_delivery.py
+QT_QPA_PLATFORM=xcb .venv/bin/python tests/gui_delivery_probe.py documents --output /tmp/gui-documents
+```
+
+上述原生交互脚本使用隔离设置和知识库；进度与混合任务批量界面使用明确标注的任务状态/
+调度边界注入，既有真实零模型 worker 用例验证锁等待、只重试失败单元和历史清理。
+它们不声称执行了真实模型导入，也不代替发行包或其他桌面平台验收。

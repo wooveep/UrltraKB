@@ -568,9 +568,13 @@ class Workspaces:
 
     def activate(self, name):
         if name != "知识" and getattr(self.window, "_page_loading", False):
-            self.window._page_request_id += 1
-            self.window._page_loading = False
-            self.window._requested_page = None
+            self.window._cancel_page_read()
+        if name != "资料" and "资料" in self.panels:
+            panel = self.panels["资料"][0]
+            if getattr(panel, "_navigation_notice", None):
+                panel._navigation_generation += 1
+                panel._navigation_notice = None
+                panel.status.setText("已取消等待中的资料操作，可以重新选择。")
         if name != "对话":
             self.history_drawer.set_open(False, immediate=True)
         if name != "知识":

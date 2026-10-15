@@ -139,8 +139,8 @@ def verify_lifecycle(app, root: Path, mode: str, previous: Path | None) -> int:
                 window.task_table.selectRow(0)
                 details = next(
                     button
-                    for button in window.findChildren(QPushButton)
-                    if button.text() == "查看所选任务结果"
+                    for button in window.task_table.cellWidget(0, 5).findChildren(QPushButton)
+                    if button.text() == "详情"
                 )
                 assert details.isEnabled() and window.task_table.isEnabled()
                 observed = []

@@ -323,7 +323,7 @@ class Workbench(QMainWindow):
                 self.workspaces.select_page(self.page.path)
             self.conversations.catalog_loaded(sessions)
             self.statusBar().showMessage(f"{root.name} · {info.get('document_count', 0)} 份资料")
-            if self.page is None:
+            if self.page is None and not getattr(self, "_page_loading", False):
                 if pages:
                     self.open_page(pages[0].path, activate=False)
                 else:
@@ -353,7 +353,10 @@ class Workbench(QMainWindow):
         self._page_request_id += 1
         request_id = self._page_request_id
         self._keep_draft()
+        if not getattr(self, "_page_loading", False):
+            self._page_restore_location = self.location.text()
         self._page_loading = activate
+        self._page_loading_root = root
         target = self._requested_page
         if activate:
             self.shell.navigate("知识")
@@ -368,6 +371,9 @@ class Workbench(QMainWindow):
                 return
             self._page_loading = False
             if error:
+                self._requested_page = None
+                self.save_button.setEnabled(False)
+                self.workspaces.ask_page.setEnabled(False)
                 self.location.setText(f"「{Path(target).name}」读取失败，点击标题可重试。")
                 self.reader.show_temporary("读取失败。请点击知识目录中的标题重试。")
                 self._error(error)
@@ -405,6 +411,23 @@ class Workbench(QMainWindow):
             if activate
             else None,
         )
+
+    def _cancel_page_read(self):
+        self._page_request_id += 1
+        self._page_loading = False
+        self._requested_page = None
+        if self.page and self.kb == self._page_loading_root:
+            self.workspaces.select_page(self.page.path)
+            self.location.setText(self._page_restore_location)
+            self.reader.show_markdown(
+                self.page.body,
+                ((self.scope.wiki_dir if self.scope else self.kb / "wiki") / self.page.path).parent,
+            )
+            self.save_button.setEnabled(self.page.path.split("/")[0] in EDITABLE_SECTIONS)
+            self.workspaces.ask_page.setEnabled(True)
+        else:
+            self.location.setText("尚未选择知识页面")
+            self.reader.show_temporary("请从知识目录选择一个页面。")
 
     def _keep_draft(self):
         if self.kb and self.page:
@@ -560,8 +583,14 @@ class Workbench(QMainWindow):
             except KeyError:
                 return
             self.workspaces.task_owner.setText(
-                f"所选任务：{task.id}\n所属知识库：{task.kb_dir}\n保留产物（不代表任务全部成功）"
+                f"所属知识库：{task.kb_dir}"
+                if any(result.resources for result in task.results)
+                else (
+                    f"当前任务所属知识库：{Path(task.kb_dir).name}。"
+                    "详情中可查看完整位置与逐项结果。"
+                )
             )
+            self.workspaces.task_owner.setToolTip(f"任务：{task.id}\n所属知识库：{task.kb_dir}")
             for result in task.results:
                 self.artifacts.addItems(list(result.resources))
         self.artifacts.setVisible(self.artifacts.count() > 0)

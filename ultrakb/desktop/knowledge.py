@@ -50,6 +50,8 @@ class KnowledgeDirectory(QWidget):
     def populate(self):
         tree = self.tree
         selected = self.window.page.path + ".md" if self.window.page else None
+        if getattr(self.window, "_page_loading", False):
+            selected = self.window._requested_page + ".md"
         blocked = tree.blockSignals(True)
         tree.clear()
         entries = (

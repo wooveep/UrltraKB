@@ -24,6 +24,7 @@ class RetryDialog(QDialog):
         self.previews, self.reasons = {}, {}
         self._closed = False
         self._refresh_id = 0
+        self._run_id = 0
         self.setWindowTitle("核对成果并重试")
         from ultrakb.desktop.dialog_geometry import resize_to_screen
 
@@ -48,6 +49,7 @@ class RetryDialog(QDialog):
 
     def refresh(self):
         self._refresh_id += 1
+        self._run_id += 1
         generation = self._refresh_id
         self.retry_button.setEnabled(False)
         self.check_button.setEnabled(False)
@@ -92,6 +94,7 @@ class RetryDialog(QDialog):
             f"不执行 {len(self.reasons)} 项 · 正在核对 {len(self._remaining)} 项。",
             "每项创建独立的新任务，仅重试未完成单元；成功和跳过项不会重复执行。",
             "实际配置、覆盖确认和版本条件会再次检查；关闭窗口不会发起后续重试。",
+            "重新检查会取消尚未提交的后续重试，已提交任务在任务列表中保留。",
         ]
         for identity in self.task_ids:
             if identity in self.previews:
@@ -114,11 +117,12 @@ class RetryDialog(QDialog):
         previews = tuple(
             self.previews[identity] for identity in self.task_ids if identity in self.previews
         )
+        run_id = self._run_id
         self.retry_button.setEnabled(False)
         self.check_button.setEnabled(False)
 
         def next_item(index):
-            if self._closed or self.window._quitting:
+            if self._closed or self.window._quitting or run_id != self._run_id:
                 return
             if index == len(previews):
                 self.check_button.setEnabled(True)
@@ -135,11 +139,16 @@ class RetryDialog(QDialog):
                 next_item(index + 1)
 
             def create_retry():
+                if self._closed or run_id != self._run_id:
+                    return
+                self.check_button.setEnabled(False)
                 self.window.io.submit(
                     lambda: retry_task(self.window.manager, preview),
                     submitted,
                     kb=Path(preview.kb_dir),
-                    obsolete=lambda: self._closed or self.window._quitting,
+                    obsolete=lambda: self._closed
+                    or self.window._quitting
+                    or run_id != self._run_id,
                     on_wait=lambda: self.details.appendPlainText(
                         "正在等待知识库，随后再次校验并提交…"
                     ),
@@ -154,11 +163,13 @@ class RetryDialog(QDialog):
                 submitted(None, error)
                 return
             if model_required:
+                self.check_button.setEnabled(True)
                 self.window.onboarding.ensure(
                     Path(preview.kb_dir),
                     "重试未完成任务",
                     create_retry,
-                    valid=lambda: not self._closed,
+                    valid=lambda: not self._closed and run_id == self._run_id,
+                    background=True,
                 )
             else:
                 create_retry()

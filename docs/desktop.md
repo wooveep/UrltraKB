@@ -95,6 +95,11 @@ the KB lease, so a changed connection cannot reuse an earlier verification.
 ## Import and maintain knowledge
 
 The import area keeps the submitted KB path, progress and **查看导入任务详情** visible.
+It shows completed/total items, the current file and its readable processing stage.
+The item counter advances for confirmed outcomes; it does not invent a percentage
+for an individual conversion or model call. Committed items trigger a list refresh
+between files. If a writer still owns the KB, existing rows stay visible with a
+waiting notice. Open task details continue updating without losing your scroll position.
 After usable content is available, **开始提问** opens the chat. If you switched KBs,
 **切回导入目标并提问** explicitly returns to the original target. Completion updates
 the notice without changing your page or current KB. A partial result can use
@@ -173,6 +178,10 @@ reported rather than linked to an arbitrary page. Code blocks, tables, images,
 Chinese text, mathematics and the supported Mermaid families display natively.
 Single-click a directory entry to read it. Images resize with the reading pane;
 switching themes preserves the reading position and unsaved drafts.
+Reading and focused questions immediately show their target or a waiting notice
+when import/compilation owns the KB. Leaving that workspace cancels the pending
+jump. Returning restores the previous page and its directory selection; a failed
+read can be retried by clicking the same title.
 
 **我的知识** groups pages as **资料摘要、主题与概念、人物与事物、探索笔记**.
 Search titles and descriptions or sort by recent updates and title. Page headings
@@ -317,6 +326,28 @@ or unconfirmed, not inferred to be a success.
 Manual retry previews what remains and creates a new task. Failed work is not
 automatically replayed. Clearing task history removes summaries, not generated
 artifacts or conversation records.
+
+The **任务** page searches by task, file or KB and filters by status or the current
+KB. Row focus opens that task's details and retained outputs; checkboxes define a
+separate batch. **全选当前结果** and table Ctrl+A select the filtered set. Filtering
+clears checks with a notice, while polling and sorting preserve stable task IDs.
+Each row's **详情 / 停止 / 更多** operates only on that task.
+
+The batch bar supports **安全停止所选任务**, **重试所选未完成任务** and
+**清理所选任务摘要**. Mixed selections show applicable counts and per-task skip
+reasons. Retry first reviews receipts and retained outputs, then creates an
+independent task for each approved original's unfinished units. It rechecks
+versions and the target KB's actual connection, including explicitly selected
+KBs other than the one currently open. Canceling configuration preserves the
+review; checking again cancels unsubmitted continuations. Closing the review
+prevents later tasks from being submitted.
+
+Summary cleanup confirms the exact ended subset, retains all KB content and
+artifacts, and refuses tasks whose results a watcher still references. Running
+or already-removed tasks are skipped with reasons. Stop preserves committed
+results and waits for cooperative worker cleanup. The task table, import area
+and open details use the same current-stage presentation; earlier item failures
+remain in outcomes rather than replacing the stage of the next active item.
 
 ## Watching and exit
 

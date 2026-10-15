@@ -42,8 +42,9 @@ from ultrakb.desktop import instance
 root = Path(sys.argv.pop(1))
 instance.instance_directory = lambda: root
 class Workbench(QWidget):
-    def __init__(self):
+    def __init__(self, *, first_use=False):
         super().__init__()
+        assert first_use
         with (root / 'owners').open('a') as stream:
             stream.write(str(os.getpid()) + '\n')
         self.timer = QTimer(self)

@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-QtCore = pytest.importorskip("PySide6.QtCore")
+QtWidgets = pytest.importorskip("PySide6.QtWidgets")
 
 
 def test_local_io_retry_does_not_rebind_to_a_recreated_kb(kb_dir, monkeypatch):
@@ -17,7 +17,7 @@ def test_local_io_retry_does_not_rebind_to_a_recreated_kb(kb_dir, monkeypatch):
         "ultrakb.config.GLOBAL_CONFIG_PATH", kb_dir.with_name(kb_dir.name + "-global.yaml")
     )
 
-    app = QtCore.QCoreApplication.instance() or QtCore.QCoreApplication([])
+    app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     io = LocalIO()
     attempts, results, writes = [], [], []
     io.completed.connect(lambda _sequence, _value, error: attempts.append(error))

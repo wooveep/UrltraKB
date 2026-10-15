@@ -2201,6 +2201,8 @@ def test_skill_archive_endpoint_returns_zip(monkeypatch, kb_dir):
 
 
 def test_kb_config_get_returns_fields_and_key_presence(monkeypatch, kb_dir):
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", kb_dir / "global.yaml")
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", kb_dir / "global-profile")
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
     (kb_dir / ".env").write_text("LLM_API_KEY=secret123\n", encoding="utf-8")
