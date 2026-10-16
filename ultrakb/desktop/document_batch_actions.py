@@ -1,6 +1,6 @@
 """Confirm fresh applicability, then continue exactly the reviewed regeneration selection."""
 
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QCheckBox, QMessageBox
 
 from ultrakb.application.document_batches import preview_document_batch, validate_document_batch
 from ultrakb.runtime.records import TaskExclusion
@@ -54,11 +54,25 @@ def execute(panel, identities, *, action):
             )
             + "每项完成后保留结果，停止不会撤销已完成项。"
         )
+        summary_retry = None
+        if action == "retry" and any(target.failed_summary for target in targets):
+            summary_retry = QCheckBox("重试失败摘要（额外调用模型，计入原任务预算）")
+            summary_retry.setToolTip(
+                "复用已有索引和通过校验的摘要批次；仅为失败摘要开放一次恢复机会。"
+                "默认不勾选；再次失败会保留诊断，不会自动重跑整份资料。"
+            )
+            question.setCheckBox(summary_retry)
+            question.setInformativeText(
+                question.informativeText()
+                + "已发现失败摘要。勾选下方选项可复用索引和已通过的摘要批次，"
+                "仅对失败摘要额外尝试一次，调用计入原任务预算。"
+            )
         question.setDetailedText("\n".join(lines))
         question.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         question.setDefaultButton(QMessageBox.StandardButton.No)
         if question.exec() != QMessageBox.StandardButton.Yes:
             return
+        retry_failed_response = bool(summary_retry and summary_retry.isChecked())
 
         def submit_reviewed():
             # The wizard may have been open for hours; UI eligibility is never
@@ -84,6 +98,7 @@ def execute(panel, identities, *, action):
                 submitted,
                 failed,
                 obsolete=lambda: panel._closed or panel.window.kb != preview.kb_dir,
+                retry_failed_response=retry_failed_response,
             )
 
         panel.window.onboarding.ensure(
@@ -101,7 +116,7 @@ def execute(panel, identities, *, action):
     )
 
 
-def requests_for(preview, view_id):
+def requests_for(preview, view_id, *, retry_failed_response=False):
     if preview.action == "retry":
         return tuple(
             RetryWorksheet(
@@ -110,6 +125,7 @@ def requests_for(preview, view_id):
                 source_revision_id=target.source_revision_id,
                 unit_revision_id=target.unit_revision_id,
                 view_id=view_id,
+                retry_failed_response=retry_failed_response and target.failed_summary,
             )
             if target.worksheet
             else RetrySource(
@@ -117,6 +133,7 @@ def requests_for(preview, view_id):
                 source_revision_id=target.source_revision_id,
                 unit_revision_id=target.unit_revision_id,
                 view_id=view_id,
+                retry_failed_response=retry_failed_response and target.failed_summary,
             )
             for target in preview.retry_targets
         )
@@ -127,14 +144,18 @@ def requests_for(preview, view_id):
     )
 
 
-def submit_reviewed_batch(window, preview, scope, submitted, failed, *, obsolete):
+def submit_reviewed_batch(
+    window, preview, scope, submitted, failed, *, obsolete, retry_failed_response=False
+):
     """Both whole-KB and selected batches retain the same fresh targets and exclusions."""
 
     def validated(current, error):
         if error:
             failed(error)
             return
-        requests = requests_for(current, scope.view_id if scope else None)
+        requests = requests_for(
+            current, scope.view_id if scope else None, retry_failed_response=retry_failed_response
+        )
         try:
             task_id = window.manager.submit(
                 current.kb_dir,

@@ -42,14 +42,35 @@ class ProcessingDecision(Record):
 
 
 class ModelCapacity(Record):
+    max_input_bytes: int | None = Field(default=None, gt=0, strict=True)
+    max_request_bytes: int | None = Field(default=None, gt=0, strict=True)
     max_input_tokens: int | None = Field(default=None, gt=0, strict=True)
     context_window_tokens: int | None = Field(default=None, gt=0, strict=True)
     output_reserve_tokens: int | None = Field(default=None, ge=0, strict=True)
+    max_output_tokens: int | None = Field(default=None, gt=0, strict=True)
+    measurement: Literal["tokenizer", "utf8_token_upper_bound"] = "tokenizer"
+    provenance: str | None = None
     tokenizer_model: str | None = None
     applies_to_model: str | None = None
 
     @model_validator(mode="after")
     def require_consistent_context(self):
+        if self.max_input_bytes is not None:
+            if self.max_input_tokens is not None or self.tokenizer_model is not None:
+                raise ValueError(
+                    "Use max_input_bytes for a byte guard or token limits with a tokenizer"
+                )
+            if self.context_window_tokens is not None or self.output_reserve_tokens is not None:
+                raise ValueError("Byte guards and model token capacity use separate capacity modes")
+            return self
+        if self.measurement == "utf8_token_upper_bound" and self.tokenizer_model is not None:
+            raise ValueError("Choose a tokenizer or the explicit UTF-8 token upper bound")
+        if (
+            self.max_output_tokens is not None
+            and self.output_reserve_tokens is not None
+            and self.output_reserve_tokens > self.max_output_tokens
+        ):
+            raise ValueError("Output reserve exceeds the service output capacity")
         if self.context_window_tokens is None:
             return self
         reserve = self.output_reserve_tokens or 0

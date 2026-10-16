@@ -51,9 +51,9 @@ def test_stale_page_takes_priority_over_an_unproven_original_path():
 @pytest.mark.parametrize(
     ("content", "description", "proof_error"),
     [
-        ("Read `/systen/config/state`.\n", None, "page_literal_conflict"),
+        ("Read `/systen/config/state`.\n", None, None),
         ("[[original:x9.9]]\n", None, "page_excerpt_invalid"),
-        ("Read `/system/config/state`.\n", "Read `/missing/state`.", "page_literal_conflict"),
+        ("Read `/system/config/state`.\n", "Read `/missing/state`.", None),
     ],
     ids=["unproven-path", "unknown-excerpt", "unproven-metadata"],
 )
@@ -68,14 +68,20 @@ def test_stale_classification_is_stable_across_original_proof_errors(
         current_reads.append(True)
         return original + "Human addition.\n" if stale else original
 
-    with pytest.raises(PageResponseError) as caught:
-        validate_page_delivery(
+    def deliver():
+        return validate_page_delivery(
             update_response(patch, content, description=description),
             page_update=patch,
             read_current=read_current,
             original_excerpts=SourceExcerpts(["Read /system/config/state.\n"]),
         )
-    assert caught.value.code == ("page_update_stale" if stale else proof_error)
+
+    if stale or proof_error:
+        with pytest.raises(PageResponseError) as caught:
+            deliver()
+        assert caught.value.code == ("page_update_stale" if stale else proof_error)
+    else:
+        assert content in json.loads(deliver())["content"]
     assert len(current_reads) == 1
 
 
@@ -97,10 +103,10 @@ def test_human_edit_during_original_validation_is_terminal(monkeypatch, valid_pr
             current[0] += "Human addition during original validation.\n"
 
     monkeypatch.setattr(excerpts, "response", receive_original_proof)
-    path = "/system/config/state" if valid_proof else "/systen/config/state"
+    content = "[[original:x1.1]]" if valid_proof else "[[original:x9.9]]"
     with pytest.raises(PageResponseError) as caught:
         validate_page_delivery(
-            update_response(patch, f"Read `{path}`.\n"),
+            update_response(patch, content),
             page_update=patch,
             read_current=lambda: current[0],
             original_excerpts=excerpts,

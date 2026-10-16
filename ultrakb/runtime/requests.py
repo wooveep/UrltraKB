@@ -258,9 +258,12 @@ class RetryWorksheet(ViewSelection):
     unit_id: str
     source_revision_id: str | None = field(default=None, kw_only=True)
     unit_revision_id: str | None = field(default=None, kw_only=True)
+    retry_failed_response: bool = field(default=False, kw_only=True)
 
     def __post_init__(self) -> None:
         super().__post_init__()
+        if type(self.retry_failed_response) is not bool:
+            raise ValueError("Failed summary retry requires an explicit boolean")
         if any(not isinstance(value, str) or not value for value in (self.source_id, self.unit_id)):
             raise ValueError("Worksheet retry requires source and unit identities")
         for value in (self.source_revision_id, self.unit_revision_id):
@@ -287,9 +290,12 @@ class RetrySource(ViewSelection):
     source_id: str
     source_revision_id: str | None = field(default=None, kw_only=True)
     unit_revision_id: str | None = field(default=None, kw_only=True)
+    retry_failed_response: bool = field(default=False, kw_only=True)
 
     def __post_init__(self):
         super().__post_init__()
+        if type(self.retry_failed_response) is not bool:
+            raise ValueError("Failed summary retry requires an explicit boolean")
         from pydantic import TypeAdapter
 
         from ultrakb.source_records import RecordId

@@ -30,6 +30,7 @@ def capacity_scope(tmp_path, monkeypatch, request):
     with ErrorTransport(status=401) as service:
         capacity = {
             **template_capacity(CONNECTION_TEMPLATES[2]),
+            "max_input_tokens": 65536,
             "context_window_tokens": 81920,
             "output_reserve_tokens": 16384,
         }

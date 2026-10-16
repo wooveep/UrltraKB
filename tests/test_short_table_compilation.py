@@ -105,7 +105,7 @@ async def test_real_short_table_summary_keeps_the_header_value_relationship(
         response_protocol="summary-page-json",
         response_format={"type": "json_object"},
         max_tokens=256,
-        numeric_sources=[original],
+        original_sources=[original],
     )
     content = parse_page(received, strict=True)["content"].lower()
     assert "orion" in content and "17" in content and "credit" in content

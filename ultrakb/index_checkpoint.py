@@ -89,6 +89,13 @@ def _identities(normalized, index_input, executor):
             key: value for key, value in connection.items() if key != "role_generation"
         }
         identities.append(hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest())
+    # .14 changes request admission/recovery, not the frozen index content
+    # contract. Existing .13 packages keep their paid, validated trees.
+    if payload["sdk"]["pageindex"] == "0.3.0.dev3+urltrakb.14":
+        payload["sdk"]["pageindex"] = "0.3.0.dev3+urltrakb.13"
+        identities.append(hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest())
+        payload["connection"] = connection
+        identities.append(hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest())
     return tuple(identities)
 
 

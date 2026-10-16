@@ -8,8 +8,9 @@ from json_repair import repair_json
 
 
 class PageResponseError(ValueError):
-    def __init__(self, code: str, detail: str):
+    def __init__(self, code: str, detail: str, *, field_errors: tuple[dict, ...] = ()):
         self.code = code
+        self.field_errors = field_errors
         super().__init__(f"{code}: {detail}")
 
 
@@ -78,21 +79,51 @@ _SUMMARY_REPAIR_DETAILS = {
         "The previous summary was truncated; complete every required section"
     ),
     "summary_invalid_json": "Return one complete JSON object without fences or trailing text",
-    "summary_invalid_shape": "Use exactly description and sections, with nonempty string content",
+    "summary_invalid_shape": "",  # Rendered from the same model as validation and wire schema.
     "summary_invalid_sections": "Section IDs must be complete, unique and exactly as requested",
     "page_excerpt_invalid": "Use only supplied original excerpt IDs, each on its own line",
-    "page_literal_conflict": "Code or table syntax must match a complete supplied original excerpt",
-    "page_numeric_conflict": "Remove numbers unsupported by the supplied original sections",
+}
+
+_UPDATE_REPAIR_DETAILS = {
+    "page_update_invalid": "Use the declared update fields, result type and editing targets",
+    "page_update_conflict": "Return at most one consistent set of edits for each target",
+    "page_manual_content_removed": "Retain every supplied human addition verbatim",
+    "page_assembly_invalid": "Keep complete Markdown blocks and their required separators",
+    "page_invalid_source_ranges": "Select only the supplied figure source range IDs",
+    "page_excerpt_invalid": "Use only supplied excerpt IDs in visible top-level paragraphs",
+    "page_empty_content": "Keep a nonempty page body",
+    "page_truncated_response": "Complete the required JSON and every necessary edit",
 }
 
 
-def summary_repair_messages(expected_sections: tuple[str, ...]) -> tuple[dict, ...]:
+def update_repair_messages() -> tuple[dict, ...]:
+    """The finite update corrections are shared by admission and actual delivery."""
+    return tuple(page_repair_message(code, "", page_update=True) for code in _UPDATE_REPAIR_DETAILS)
+
+
+def summary_repair_messages(
+    expected_sections: tuple[str, ...], *, protocol="summary-json"
+) -> tuple[dict, ...]:
     """All possible summary corrections, shared by window admission and delivery."""
-    return tuple(
+    from ultrakb.agent.summary_protocol import FIELD_REPAIR_HINTS, REFERENCE_REPAIR_HINTS
+
+    generic = tuple(
         page_repair_message(
-            code, "", response_protocol="summary-json", expected_sections=expected_sections
+            code, "", response_protocol=protocol, expected_sections=expected_sections
         )
         for code in _SUMMARY_REPAIR_DETAILS
+    )
+    return generic + tuple(
+        page_repair_message(
+            "summary_invalid_shape",
+            "",
+            response_protocol=protocol,
+            expected_sections=expected_sections,
+            field_errors=({"rule": rule},),
+        )
+        for rule in (
+            REFERENCE_REPAIR_HINTS if protocol == "summary-parts-json" else FIELD_REPAIR_HINTS
+        )
     )
 
 
@@ -103,12 +134,31 @@ def page_repair_message(
     page_update: bool = False,
     response_protocol: str = "page-json",
     expected_sections: tuple[str, ...] = (),
+    field_errors: tuple[dict, ...] = (),
 ) -> dict:
     """Summary corrections have finite shapes; raw diagnostics are not model input."""
-    if response_protocol == "summary-json" and not page_update:
+    from ultrakb.agent.summary_protocol import (
+        REFERENCE_REPAIR_HINTS,
+        summary_protocol,
+        summary_repair_hint,
+    )
+
+    if page_update:
+        code = code if code in _UPDATE_REPAIR_DETAILS else "page_update_invalid"
+        detail = _UPDATE_REPAIR_DETAILS[code]
+
+    if (
+        response_protocol in {"summary-json", "summary-page-json", "summary-parts-json"}
+        and not page_update
+    ):
         if code not in _SUMMARY_REPAIR_DETAILS:
             code = "summary_invalid_shape"
         detail = _SUMMARY_REPAIR_DETAILS[code]
+        detail = (
+            summary_repair_hint(field_errors, protocol=response_protocol)
+            or detail
+            or summary_protocol(response_protocol).structure_hint()
+        )
     return {
         "role": "user",
         "content": (
@@ -122,71 +172,54 @@ def page_repair_message(
                 "unchanged blocks instead of rewriting the entire page. "
                 if page_update
                 else (
-                    "Return exactly one JSON object with description and sections. "
-                    f"Include these ids once each: {expected_sections}. "
-                    if response_protocol == "summary-json"
-                    else "Return exactly one JSON object with only the two keys "
-                    '"description" and "content", '
-                    "both strings, with nonempty content. Do not add type or other fields. "
-                    if response_protocol == "summary-page-json"
+                    summary_protocol(response_protocol).repair_instruction(expected_sections)
+                    if response_protocol
+                    in {"summary-json", "summary-page-json", "summary-parts-json"}
                     else "Return exactly one JSON object with string description "
                     "and nonempty content, retaining the other required fields from the "
                     "original request (including type and source_ranges when requested). "
                 )
             )
-            + (
-                "Keep standalone paths from prose or qualified complete native cells in inline "
-                "code with their exact original spelling. Do not put a path or decoded table "
-                "cell value in a new fenced code block, even when also including an original "
-                "excerpt reference. For code or table syntax, use the complete original excerpt "
-                "catalog ID instead of rewriting it. Original HTML table excerpts must retain "
-                "all tags and entity encoding; qualified complete cell values support exact "
-                "inline paths, not new fenced excerpts. "
-                if code == "page_literal_conflict"
-                else ""
-            )
             + "If using an original excerpt catalog reference, put each [[original:ID]] "
             "alone on its own line, without prose or a bullet marker. "
+            + (
+                REFERENCE_REPAIR_HINTS["reference_part"] + " "
+                if response_protocol == "summary-parts-json"
+                else ""
+            )
             + "Do not append a second object or note. Keep supported source facts only. "
             "If truncated, retain all necessary new information in complete edits or statements."
         ),
     }
 
 
-def parse_summary(text: str, expected_sections: tuple[str, ...]) -> dict:
+def parse_summary(
+    text: str, expected_sections: tuple[str, ...], *, protocol: str | None = None
+) -> dict:
     """Accept only the declared, complete JSON protocol; never invent missing bytes."""
     try:
         value = load_protocol_json(text)
     except ValueError as error:
         raise PageResponseError("summary_invalid_json", str(error)) from error
-    if (
-        not isinstance(value, dict)
-        or set(value) != {"description", "sections"}
-        or not isinstance(value["description"], str)
-        or not value["description"].strip()
-        or not isinstance(value["sections"], list)
-    ):
-        raise PageResponseError("summary_invalid_shape", "Expected description and sections")
-    sections = {}
-    for section in value["sections"]:
-        if (
-            not isinstance(section, dict)
-            or set(section) != {"id", "content"}
-            or not isinstance(section["id"], str)
-            or section["id"] not in expected_sections
-            or section["id"] in sections
-            or not isinstance(section["content"], str)
-            or not section["content"].strip()
-        ):
-            raise PageResponseError(
-                "summary_invalid_sections", "Unknown, duplicate or empty section"
+    if protocol is None:
+        referenced = (
+            isinstance(value, dict)
+            and isinstance(value.get("sections"), list)
+            and any(
+                isinstance(section, dict) and "parts" in section for section in value["sections"]
             )
-        sections[section["id"]] = section
-    if not expected_sections or set(sections) != set(expected_sections):
-        raise PageResponseError(
-            "summary_invalid_sections", "Expected original sections are missing"
         )
-    return {**value, "sections": [sections[key] for key in expected_sections]}
+        protocol = "summary-parts-json" if referenced else "summary-json"
+    return _validate_summary(value, protocol, expected_sections)
+
+
+def _validate_summary(value, protocol: str, expected_sections: tuple[str, ...] = ()) -> dict:
+    from ultrakb.agent.summary_protocol import SummaryViolation, summary_protocol
+
+    try:
+        return summary_protocol(protocol).validate(value, expected_sections)
+    except SummaryViolation as error:
+        raise PageResponseError(error.code, str(error), field_errors=error.fields) from error
 
 
 def parse_page(text: str, *, strict: bool = False) -> dict:
@@ -212,12 +245,8 @@ def parse_page(text: str, *, strict: bool = False) -> dict:
         except DuplicateJSONField as duplicate:
             raise PageResponseError("page_duplicate_field", str(duplicate)) from duplicate
         parsed = repair_json(cleaned, return_objects=True)
-    if strict and (
-        not isinstance(parsed, dict)
-        or set(parsed) != {"description", "content"}
-        or not isinstance(parsed.get("description"), str)
-    ):
-        raise PageResponseError("summary_invalid_shape", "Expected description and content")
+    if strict:
+        return _validate_summary(parsed, "summary-page-json")
     if isinstance(parsed, list):
         if len(parsed) > 1:
             raise PageResponseError(

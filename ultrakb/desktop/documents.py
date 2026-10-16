@@ -161,24 +161,19 @@ class DocumentsDialog(ManagementPanel):
         execute(self, tuple(self.selection.checked))
 
     def retry_source(self):
-        from ultrakb.runtime.requests import RetrySource
+        from ultrakb.desktop.document_batch_actions import retry
 
         rows = self.table.selectionModel().selectedRows()
         if len(rows) != 1 or self._task:
             self.status.setText("请选择一份资料重试未完成项。")
             return
-        source_id = self.table.item(rows[0].row(), 0).data(Qt.ItemDataRole.UserRole)
         from ultrakb.desktop.document_rows import focused
 
         target = focused(self)
         if target is None or target.identity.kind != "source":
             self.status.setText("旧资料请先预览重新处理；不会自动转换旧正文。")
             return
-        from ultrakb.desktop.model_actions import submit_panel
-
-        submit_panel(
-            self, [RetrySource(source_id, view_id=self.view_id)], description="重试未完成资料"
-        )
+        retry(self, (target.identity,))
 
     def reprocess(self):
         from ultrakb.desktop.reprocessing import ReprocessingDialog

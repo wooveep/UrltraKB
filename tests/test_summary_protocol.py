@@ -114,7 +114,7 @@ async def test_compiler_repairs_only_the_invalid_summary_and_keeps_protocol_off_
         expected_sections=sections,
         response_format={"type": "json_object"},
         max_tokens=512,
-        numeric_sources=[original],
+        original_sources=[original],
     )
     received = parse_summary(raw, sections)
     assert len(live_llm.calls) - before == 1
@@ -163,7 +163,7 @@ async def test_short_summary_length_signal_consumes_one_repair_before_planning(
         response_protocol="summary-page-json",
         response_format={"type": "json_object"},
         max_tokens=256,
-        numeric_sources=[original],
+        original_sources=[original],
     )
     assert len(live_llm.calls) - before == 1
     assert "page_truncated_response" in str(live_llm.calls[-1]["messages"])

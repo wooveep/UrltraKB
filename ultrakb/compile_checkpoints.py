@@ -13,7 +13,7 @@ from contextvars import ContextVar
 from pathlib import Path
 
 from ultrakb.agent.page_response import PageResponseError
-from ultrakb.locks import atomic_record_lock, atomic_write_json
+from ultrakb.locks import atomic_record_lock, atomic_write_json, atomic_write_text
 
 _FIGURE_BASES: ContextVar[dict[Path, tuple[str, str]]] = ContextVar("figure_bases", default={})
 
@@ -51,8 +51,12 @@ class CompileCheckpoints:
         self.identity = object_id
         self.conditions = conditions
         self.task_id = task.task_id
+        self.request_version = getattr(task, "compiler_request_version", 1)
         self.object_key = digest(object_id)
         self.directory = root / ".ultrakb/compile-checkpoints" / task.task_id / self.object_key
+        self.failure_directory = (
+            root / ".ultrakb/compile-responses" / task.task_id / self.object_key
+        )
         self.path = self.directory / "manifest.json"
         self.ancestors = []
         seen = {task.task_id}
@@ -99,6 +103,67 @@ class CompileCheckpoints:
                     return path, entry
                 break
         return self.path, {}
+
+    def require_request(self, key: str, request_digest: str) -> None:
+        """An old frozen request cannot silently become fresh work after an upgrade."""
+        if self.request_version != 1:
+            return
+        for path in (self.path, *self.ancestors):
+            entry = self._read(path).get("entries", {}).get(key)
+            if entry is not None:
+                if not isinstance(entry, dict):
+                    raise PageResponseError("compile_checkpoint_invalid", "Invalid result entry")
+                if entry.get("request_digest") != request_digest:
+                    raise PageResponseError(
+                        "compile_request_changed",
+                        f"Cannot reconstruct historical request {key}; saved digest "
+                        f"{entry.get('request_digest')} differs from {request_digest}. "
+                        "Original responses and allowances are retained.",
+                    )
+                return
+
+    @property
+    def legacy_summary_format(self) -> bool:
+        """Retained pre-contract windows keep their original JSON-mode admission."""
+        for path in (self.path, *self.ancestors):
+            entries = self._read(path).get("entries", {})
+            if entries.get("protocol:summary", {}).get("version") in {1, 2}:
+                return False
+            if any(
+                key == "short-summary" or key.startswith(("summary:", "summary-split:"))
+                for key in entries
+            ):
+                return True
+        return False
+
+    @property
+    def structured_summary(self) -> bool:
+        """Old request bytes and accepted results are never migrated implicitly."""
+        for path in (self.path, *self.ancestors):
+            entries = self._read(path).get("entries", {})
+            version = entries.get("protocol:summary", {}).get("version")
+            if version is not None:
+                return version == 2
+            if any(
+                key == "short-summary" or key.startswith(("summary:", "summary-split:"))
+                for key in entries
+            ):
+                return False
+        return True
+
+    def prepare_summary_delivery(self) -> bool:
+        from ultrakb.llm_execution import check_model_stop
+
+        with atomic_record_lock(self.directory / "checkpoint.lock"):
+            check_model_stop()
+            if self.legacy_summary_format:
+                return True
+            entries = self._read(self.path).get("entries", {})
+            if "protocol:summary" not in entries:
+                self._write_entry(
+                    "protocol:summary", {"version": 2 if self.structured_summary else 1}
+                )
+        return False
 
     def load(self, key: str, request_digest: str):
         from ultrakb.llm_execution import check_model_stop
@@ -153,7 +218,16 @@ class CompileCheckpoints:
                     raise PageResponseError("page_update_stale", "Retained update base changed")
             self._write_entry(key, {"state": "base", "base_sha256": base_sha256})
 
-    def save(self, key: str, request_digest: str, result, *, metadata: dict | None = None):
+    def save(
+        self,
+        key: str,
+        request_digest: str,
+        result,
+        *,
+        metadata: dict | None = None,
+        reused_response: dict | None = None,
+    ):
+        from ultrakb.agent.compile_contract import ACCEPTANCE_VERSION
         from ultrakb.llm_execution import check_model_stop
 
         with atomic_record_lock(self.directory / "checkpoint.lock"):
@@ -168,8 +242,10 @@ class CompileCheckpoints:
                     **previous,
                     "request_digest": request_digest,
                     "state": "accepted",
+                    "acceptance_version": ACCEPTANCE_VERSION,
                     "payload_digest": digest(payload),
                     "metadata": metadata or {},
+                    **({"reused_response": reused_response} if reused_response else {}),
                 },
             )
         from ultrakb.compilation_report import report_compile_checkpoint
@@ -238,6 +314,179 @@ class CompileCheckpoints:
     def failure_code(self, key: str, request_digest: str) -> str | None:
         _, entry = self._entry(key, request_digest)
         return entry.get("failure_code")
+
+    def retained_response(
+        self, key: str, request_digest: str, *, protocol: str, sections: tuple[str, ...], stage: str
+    ) -> tuple[str, dict] | None:
+        """Read only the latest captured response for these exact frozen inputs."""
+        path, entry = self._entry(key, request_digest)
+        failures = entry.get("response_failures", ())
+        candidate = entry.get("latest_response") or (failures[-1] if failures else None)
+        if candidate is None:
+            return None
+        try:
+            owner = path.parent.parent.name
+            directory = (
+                self.root / ".ultrakb/compile-responses" / owner / self.object_key
+            ).resolve()
+            if not directory.is_relative_to(self.root.resolve()):
+                raise ValueError("Saved response directory escapes the knowledge base")
+            record_path = (self.root / candidate).resolve()
+            if record_path.parent != directory or record_path.suffix != ".json":
+                raise ValueError("Saved response path differs")
+            record = json.loads(record_path.read_text("utf-8"))
+            if not isinstance(record, dict) or any(
+                record.get(name) != expected
+                for name, expected in {
+                    "version": 1,
+                    "task_id": owner,
+                    "checkpoint_key": key,
+                    "request_digest": request_digest,
+                    "stage": stage,
+                    "response_protocol": protocol,
+                    "expected_sections": list(sections),
+                }.items()
+            ):
+                raise ValueError("Saved response identity differs")
+            if record.get("error_code") == "page_truncated_response":
+                return None
+            response_path = (self.root / record["response_file"]).resolve()
+            if response_path != record_path.with_suffix(".txt"):
+                raise ValueError("Saved response body path differs")
+            content = response_path.read_bytes()
+            if hashlib.sha256(content).hexdigest() != record["response_sha256"]:
+                raise ValueError("Saved response checksum differs")
+            return content.decode("utf-8"), {
+                "record_file": str(record_path.relative_to(self.root)),
+                "response_file": str(response_path.relative_to(self.root)),
+                "response_sha256": record["response_sha256"],
+                "execution_id": record.get("execution_id"),
+                "awaiting_validation": record.get("error_code") == "response_received",
+            }
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            raise PageResponseError("compile_checkpoint_invalid", str(error)) from error
+
+    def record_invalid_response(
+        self,
+        key: str,
+        request_digest: str,
+        response: str,
+        *,
+        stage: str,
+        response_protocol: str,
+        expected_sections: tuple[str, ...],
+        code: str,
+        detail: str,
+        attempt: int,
+        field_errors: tuple[dict, ...] = (),
+        response_format: dict | None = None,
+        received: bool = False,
+    ) -> str:
+        """Retain untrusted delivery bytes without granting acceptance or another repair."""
+        from datetime import datetime, timezone
+        from uuid import uuid4
+
+        from ultrakb.llm_usage import active_scope
+
+        scope = active_scope()
+        filename = self.failure_directory / uuid4().hex
+        response_file = filename.with_suffix(".txt")
+        diagnostic_file = filename.with_suffix(".json")
+        record = {
+            "version": 1,
+            "task_id": self.task_id,
+            "execution_id": scope.execution_id if scope else None,
+            "checkpoint_key": key,
+            "request_digest": request_digest,
+            "stage": stage,
+            "response_protocol": response_protocol,
+            "expected_sections": list(expected_sections),
+            "error_code": code,
+            "error_detail": detail,
+            "field_errors": list(field_errors),
+            "response_format": response_format,
+            "attempt": attempt,
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+            "response_file": str(response_file.relative_to(self.root)),
+            "response_sha256": hashlib.sha256(response.encode("utf-8")).hexdigest(),
+        }
+        with atomic_record_lock(self.directory / "checkpoint.lock"):
+            _, previous = self._entry(key, request_digest)
+            # Classify the already persisted response in place after validation;
+            # one provider response owns one immutable body file.
+            if not received and previous.get("latest_response"):
+                saved = self.root / previous["latest_response"]
+                if saved.parent == self.failure_directory:
+                    captured = json.loads(saved.read_text())
+                    if (
+                        captured.get("error_code") == "response_received"
+                        and captured.get("response_sha256") == record["response_sha256"]
+                        and captured.get("request_digest") == request_digest
+                        and captured.get("attempt") == attempt
+                    ):
+                        diagnostic_file, response_file = saved, saved.with_suffix(".txt")
+                        record["response_file"] = str(response_file.relative_to(self.root))
+            atomic_write_text(response_file, response)
+            atomic_write_json(diagnostic_file, record)
+            self._write_entry(
+                key,
+                {
+                    **previous,
+                    "request_digest": request_digest,
+                    "latest_response": str(diagnostic_file.relative_to(self.root)),
+                    ("received_responses" if received else "response_failures"): [
+                        *previous.get(
+                            "received_responses" if received else "response_failures", ()
+                        ),
+                        str(diagnostic_file.relative_to(self.root)),
+                    ],
+                },
+            )
+        return str(response_file.relative_to(self.root))
+
+    def record_received_response(self, key, request_digest, response, **metadata):
+        """Persist received bytes before validation, without accepting them or renewing repair."""
+        return self.record_invalid_response(
+            key,
+            request_digest,
+            response,
+            received=True,
+            detail="Received; awaiting source validation",
+            **metadata,
+        )
+
+    def record_delivery_resolution(self, key, request_digest, raw, delivered, resolutions):
+        """Keep a receipt for deterministic copies without consuming a model send."""
+        from datetime import datetime, timezone
+        from uuid import uuid4
+
+        filename = self.failure_directory / f"resolved-{uuid4().hex}.json"
+        record = {
+            "version": 1,
+            "task_id": self.task_id,
+            "checkpoint_key": key,
+            "request_digest": request_digest,
+            "policy": "source-resolution-v1",
+            "response_sha256": hashlib.sha256(raw.encode()).hexdigest(),
+            "delivered_sha256": hashlib.sha256(delivered.encode()).hexdigest(),
+            "resolutions": resolutions,
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+        }
+        with atomic_record_lock(self.directory / "checkpoint.lock"):
+            _, previous = self._entry(key, request_digest)
+            atomic_write_json(filename, record)
+            self._write_entry(
+                key,
+                {
+                    **previous,
+                    "request_digest": request_digest,
+                    "delivery_resolutions": [
+                        *previous.get("delivery_resolutions", ()),
+                        str(filename.relative_to(self.root)),
+                    ],
+                },
+            )
+        return str(filename.relative_to(self.root))
 
     def record_failure(self, key: str, request_digest: str, code: str):
         """Persist an observed response outcome even when cancellation is pending.

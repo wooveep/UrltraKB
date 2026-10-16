@@ -172,9 +172,15 @@ def llm_completion(model, prompt, chat_history=None, return_finish_reason=False,
     from ..llm import current_client
     from ..default_llm import DefaultIndexLLM
     messages = list(chat_history or []) + [{"role": "user", "content": prompt}]
+    from .request_budget import fits
+    from ..errors import IndexCapacityError, IndexOutputLimitError
+    if not fits(prompt, usage_stage, chat_history):
+        raise IndexCapacityError("Complete document_index request exceeds the injected request budget")
     client = current_client() or DefaultIndexLLM(model)
     with _sync_llm_semaphore():
         response = client.complete(messages, stage=usage_stage)
+    if not return_finish_reason and response.finish_reason != "finished":
+        raise IndexOutputLimitError("Index response did not finish: " + response.finish_reason)
     return (response.text, response.finish_reason) if return_finish_reason else response.text
 
 
@@ -182,8 +188,16 @@ async def llm_acompletion(model, prompt, *, usage_stage="structure"):
     from ..llm import current_client
     from ..default_llm import DefaultIndexLLM
     messages = [{"role": "user", "content": prompt}]
+    from .request_budget import fits
+    from ..errors import IndexCapacityError
+    if not fits(prompt, usage_stage):
+        raise IndexCapacityError("Complete document_index request exceeds the injected request budget")
     async with _llm_semaphore():
-        return (await (current_client() or DefaultIndexLLM(model)).acomplete(messages, stage=usage_stage)).text
+        response = await (current_client() or DefaultIndexLLM(model)).acomplete(messages, stage=usage_stage)
+        if response.finish_reason != "finished":
+            from ..errors import IndexOutputLimitError
+            raise IndexOutputLimitError("Index response did not finish: " + response.finish_reason)
+        return response.text
 
 
 def extract_json(content):
@@ -311,14 +325,27 @@ def get_leaf_nodes(structure):
 
 
 async def generate_node_summary(node, model=None):
-    prompt = f"""You are given a part of a document, your task is to generate a description of the partial document about what are main points covered in the partial document.
-
-    Partial Document Text: {node['text']}
-
-    Directly return the description, do not include any other text.
-    """
-    response = await llm_acompletion(model, prompt, usage_stage="summary")
-    return response
+    from .request_budget import navigation_summary
+    from ..errors import IndexCapacityError
+    from ..llm import current_client
+    import hashlib
+    key = "node-summary:" + hashlib.sha256(
+        json.dumps({"title": node.get("title"), "text": node["text"]}, ensure_ascii=False).encode()
+    ).hexdigest()
+    retained = getattr(current_client(), "stage_result", None)
+    previous = retained(key) if retained else None
+    if previous is not None:
+        if previous.get("status"):
+            node["summary_status"] = previous["status"]
+        return previous["summary"]
+    try:
+        summary = await navigation_summary(node['text'], model)
+    except IndexCapacityError:
+        node['summary_status'] = 'unavailable'
+        summary = node.get('title', '')
+    if retained:
+        retained(key, {"summary": summary, "status": node.get("summary_status")})
+    return summary
 
 
 async def generate_summaries_for_structure(structure, model=None):
@@ -336,15 +363,8 @@ async def generate_summaries_for_structure(structure, model=None):
 
 
 def generate_doc_description(structure, model=None):
-    prompt = f"""Your are an expert in generating descriptions for a document.
-    You are given a structure of a document. Your task is to generate a one-sentence description for the document, which makes it easy to distinguish the document from other documents.
-
-    Document Structure: {structure}
-
-    Directly return the description, do not include any other text.
-    """
-    response = llm_completion(model, prompt, usage_stage="description")
-    return response
+    from .request_budget import describe
+    return describe(structure, model)
 
 
 def list_to_tree(data):

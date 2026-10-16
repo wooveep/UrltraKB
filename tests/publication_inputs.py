@@ -21,13 +21,12 @@ def update_inputs(
         f"concepts/{name}.md",
         long=True,
     )
-    patch = PageUpdate(original, originals=[source])
+    patch = PageUpdate(original)
 
     def scoped(blocks, *, metadata=True, ranges=None):
         return PageUpdate(
             patch.original,
             known_targets=patch.known_targets,
-            originals=patch.originals,
             allowed_types=patch.allowed_types,
             preserved_fragments=patch.preserved_fragments,
             allowed_blocks=(

@@ -17,12 +17,19 @@ def validate_page_delivery(
     read_current: Callable[[], str] | None = None,
     proposal_only: bool = False,
     figure_context=None,
-    numeric_sources=None,
-    evidence=None,
+    expected_coverage: tuple[str, ...] = (),
 ) -> str | UnchangedPage:
     """Use originals to validate one response; no model calls or writes occur here."""
-    if response_protocol not in {"page-json", "markdown", "summary-json", "summary-page-json"}:
+    if response_protocol not in {
+        "page-json",
+        "markdown",
+        "summary-json",
+        "summary-page-json",
+        "summary-parts-json",
+    }:
         raise ValueError("Unknown page response protocol")
+    if response_protocol == "summary-parts-json" and original_excerpts is None:
+        raise ValueError("Structured summaries require original source windows")
     if page_update is not None and read_current is None:
         raise ValueError("A page update requires its current page reader")
     try:
@@ -50,7 +57,7 @@ def validate_page_delivery(
         if proposal_only:
             return raw
         raw = json.dumps(result, ensure_ascii=False)
-    if response_protocol == "summary-json":
+    if response_protocol in {"summary-json", "summary-parts-json"}:
         decoded = parse_summary(raw, expected_sections)
         content = "\n\n".join(section["content"] for section in decoded["sections"])
         obj = None
@@ -65,19 +72,23 @@ def validate_page_delivery(
         from ultrakb.agent.page_figures import validate_ranges
 
         validate_ranges(obj, figure_context.ids)
+    if expected_coverage:
+        covered = obj.get("covered_ranges") if obj else None
+        if (
+            not isinstance(covered, list)
+            or any(not isinstance(v, str) for v in covered)
+            or len(covered) != len(set(covered))
+            or set(covered) != set(expected_coverage)
+        ):
+            raise PageResponseError(
+                "page_incomplete_coverage",
+                "covered_ranges must acknowledge every supplied batch range exactly once",
+            )
     if page_update is None and obj and obj.get("status") == "unchanged":
         raise PageResponseError(
             "page_unchanged_not_allowed",
             "New pages and summaries require knowledge content",
         )
-    if numeric_sources is not None and page_update is None:
-        from ultrakb.agent.page_updates import check_numeric_subset
-
-        numeric = check_numeric_subset(content, numeric_sources)
-        if numeric["status"] == "conflict":
-            raise PageResponseError("page_numeric_conflict", json.dumps(numeric["conflicts"]))
-    if evidence is not None:
-        evidence.validate(content)
     return raw
 
 

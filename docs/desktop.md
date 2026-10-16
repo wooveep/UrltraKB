@@ -6,6 +6,14 @@ The CLI and independent REST API use the same application operations and data.
 The desktop defines the common business behavior; terminal output, HTTP responses
 and desktop task presentation adapt the results to each interface.
 
+Task details keep confirmed item progress separate from the model-call budget.
+The current item shows running, waiting for the KB, or stopping as appropriate;
+later items remain queued unless stopping has been requested. A model budget
+shows sends used, its limit and remaining capacity without a completion ratio.
+The processed-item bar includes confirmed failures and skips and does not estimate
+the percentage of compilation within one item. See
+[default capacities and execution limits](default-limits.md) for their scopes.
+
 For this branch's baseline, selected desktop changes and verification results,
 see [dev-1.2.0](dev-1.2.0.md). Historical package acceptance below belongs to its
 recorded source revisions; this branch has separate source-level validation.
@@ -68,10 +76,15 @@ API keys are never read back. Ordinary CLI and HTTP creation also inherit defaul
 
 The connection section offers a few documented service examples and keeps manual
 model/address entry. **高级参数** reveals capacity, recovery, PDF and Office controls.
-Selecting the OpenAI or DeepSeek example also fills a conservative capacity preset,
-so the first import and question can proceed without editing advanced parameters.
-The preset belongs to that exact model; a different manually entered model needs
-its own capacity declaration. Custom and local services retain explicit limits.
+Selecting the OpenAI or DeepSeek example fills a sourced model capacity profile
+for its exact model and official endpoint. Model context and output limits are
+separate from an optional application byte guard. Full requests share one input
+measurement and admission path; the actual requested output is reserved from the
+context. A different manually entered model or private endpoint needs its own
+capacity declaration. The retired 64 KiB factory preset migrates under settings
+locks with a before/after receipt when a new operation captures its configuration;
+explicit user limits and historical snapshots remain intact. See
+[capacity and recovery rules](default-limits.md#模型上下文与输出).
 **保存设置** saves independently of testing. **测试并继续** first saves pending choices,
 then uses small synthetic input to check text and one function-call round trip,
 with a request limit, a 20-second deadline and **取消测试**. It sends no KB content.
@@ -132,6 +145,93 @@ faults stop that batch's remaining work. Stopping waits for active cleanup and
 preserves commits. Task details distinguish exclusions, attempted failures,
 unconfirmed outcomes and unstarted items. A batch retains its first captured
 settings; later changes affect new operations.
+
+When a Source or worksheet has an unfinished failed summary, the row and batch
+**重试未完成项** confirmation offers **重试失败摘要** (unchecked by default).
+Selecting it permits the existing one-time recovery of that failed response;
+the operation reuses its retained index and accepted summary batches, then continues
+unfinished compilation. Source revisions and the latest failed publication are
+checked again before execution. Recovery retains the original model-task budget
+and does not replenish automatic repair attempts.
+
+On summary continuation, a captured response for the exact retained request is
+checked locally before any new send. Its owner, stage, protocol, section IDs and
+body checksum must agree, and it must pass the current source, section and numeric
+validators. A passing response becomes an accepted checkpoint with its origin and
+source-copy receipt retained; existing repair flags and model-call usage remain.
+Truncated output is never recovered this way, and an invalid saved response does
+not grant another repair attempt. Only still-missing batches need model sends.
+
+Invalid compiler responses are saved verbatim as `.txt` files under
+`.ultrakb/compile-responses/<model-task>/<document-key>/`, with JSON sidecars
+containing the stage, protocol, expected section IDs, request digest and validation
+error. The terminal failure includes the response path, relative to the KB.
+These diagnostics survive successful publication and compile-checkpoint cleanup.
+Responses lost before this capture was introduced cannot be recovered retroactively.
+
+Summary prompt examples, local validation and response schemas share
+`ultrakb/agent/summary_protocol.py`. Known hosted models use strict JSON Schema when
+the pinned model catalog declares support; unknown models and custom endpoints
+retain JSON mode plus strict local validation. Official `deepseek/deepseek-flash`
+summary requests use the pinned SDK's Responses bridge with `text.format` JSON
+Schema, as documented by the [DeepSeek Responses API](https://api-docs.deepseek.com/zh-cn/api/create-response/).
+DeepSeek Chat Completions only supports `json_object`; its model-table schema flag
+does not enable an unsupported Chat Completions wire format. Other compilation and
+indexing requests retain their existing transport. Capability selection makes no
+probe request and does not retry with another format after a provider rejection.
+Pre-contract checkpoints retain their JSON-mode layout admission and original
+prompt identity so accepted batches and consumed repair opportunities remain
+reusable. Remaining sends use the available strict schema after the normal final
+capacity check; an oversized upgraded request stops without discarding old results
+or spending a model send.
+Native Responses terminal status is retained at the HTTP boundary: incomplete
+output follows the existing truncation repair, while failed or cancelled output
+cannot become a successful summary even if the SDK bridge labels it `stop`.
+New checkpoints record the delivery-contract generation; strict-schema overhead is
+included in short-summary preparation and long-summary input admission. Neither
+path replenishes the task budget. Schema construction follows the supported subset
+in the [OpenAI Structured Outputs guide](https://developers.openai.com/api/docs/guides/structured-outputs?api-mode=chat).
+
+Validation diagnostics include field paths, expected shapes and actual types.
+Repair requests use a finite set of program-owned field hints, without echoing
+model-controlled field names, values or raw exception text. Their admission reserves
+all possible hints before generation. A schema-valid response must still pass the
+existing section coverage, original excerpt and numeric checks.
+
+New long-document summary checkpoints use structured `parts`: `prose` explains
+facts and conditions, `excerpt` selects supplied reference IDs, and
+`derived_template` declares a path inference with its concrete source references.
+The program copies excerpt characters from the frozen source windows. IDs retain
+the selected occurrence, including repeated examples, across checkpoint recovery.
+Earlier checkpoints keep their original prompt, window layout and accepted payloads;
+recovery does not silently migrate them to the new reference protocol.
+
+For retained free-text responses, excerpt validation tries exact matching first,
+then uses the same Unicode whitespace rule on both sides to locate a continuous
+source range and copy the original characters back. It still protects quoted
+values, token boundaries, line structure, control-flow indentation and complete
+tables/examples. Native PDF/DOCX NBSP transcription and JSON member indentation
+can be restored from their original positions; ambiguous occurrences require an
+explicit reference. Physical pages, printed page labels, copyright text and
+surrounding context ranges remain separate source metadata. Trimming recognized
+page furniture never removes the retained original.
+
+A derived path is labelled as a template and must preserve every fixed path byte.
+The current validator supports UUID placeholders such as `{domainId}` and needs
+two distinct concrete paths from the selected original excerpts. Unsupported
+inferences fail with a diagnostic rather than being accepted on their label alone.
+Failure sidecars include the response field and line, source window/range and
+Unicode codepoint differences where a candidate can be located. Successful
+source-copy receipts retain source hashes, positions and applied differences in
+the same diagnostic directory. Approximate candidates are labelled as candidates;
+an unrelated paragraph is not reported as the quotation's source. Structured
+summary requests without their original windows are rejected before any send.
+
+`scripts/verify_retained_summary.py` replays a selected saved response with the
+shared delivery validator, reuses accepted batches by their exact request digests
+and blocks network connections. Its candidate and verification report must be
+written outside every KB. Replay does not accept checkpoints, publish knowledge,
+start an import or spend the model-task allowance.
 
 **移除所选资料** reviews the aggregate effect of withdrawing new Sources, including
 pages that will lose all effective sources. Originals, images and historical
@@ -386,6 +486,24 @@ program files while background work is still running.
 | Directory watching | 任务 → 目录监听 |
 | Model connection and advanced defaults | 设置 → global or current KB tab |
 | Answer copy, characters and evidence | Below that answer → 复制 / 字符 / 出处 |
+
+New concept and entity pages plan complete requests before concurrent generation.
+Large original selections are partitioned with exact contiguous coverage checks;
+duplicate machine metadata is projected out while original text, table facts,
+captions and partial-coverage warnings remain. Each accepted contribution is
+checkpointed independently. Retrying reuses accepted contributions, document
+summaries, the accepted page plan and the original model-task call budget.
+Contributions are assembled locally; a final oversized rewrite is not required.
+
+Settings distinguish a local UTF-8 byte guard from a model token input limit and
+output reserve. Legacy `utf8-bound` settings keep their saved values and processing
+identities. New byte-only profiles use `max_input_bytes`. The full limit reference
+is [default-limits.md](default-limits.md).
+
+`scripts/verify_create_capacity.py` replays a retained document on scratch copies
+with network and real model calls denied. Synthetic protocol responses verify
+capacity, interruption and continuation; they do not certify knowledge quality or
+publish results to the original KB.
 
 The source acceptance matrix for this update is
 [A01–A24](validation/desktop-ux-A01-A24-2026-10-15.md). It distinguishes native

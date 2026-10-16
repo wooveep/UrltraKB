@@ -374,7 +374,31 @@ def merge_usage_receipts(kb_dir: Path, receipts) -> dict | None:
     }
 
 
-def describe_model_usage(receipt: dict | None) -> tuple[str, ...]:
+_BUDGET_NOTICE = "模型调用预算按逻辑任务累计，不代表资料完成进度。"
+
+
+def is_model_budget_description(line: str) -> bool:
+    """Recognize current and legacy app-generated budget snapshots in receipts."""
+    return line == _BUDGET_NOTICE or line.startswith(
+        ("模型调用预算：已发送 ", "模型任务累计发送：")
+    )
+
+
+def describe_model_budget(receipt: dict | None) -> tuple[str, ...]:
+    tasks = receipt.get("model_tasks", []) if receipt else []
+    if not tasks:
+        return ()
+    return (
+        _BUDGET_NOTICE,
+        *(
+            f"模型调用预算：已发送 {task['actual_sends']} 次 · 上限 {task['limit']} 次 · "
+            f"剩余 {max(0, task['limit'] - task['actual_sends'])} 次；任务：{task['task_id']}"
+            for task in tasks
+        ),
+    )
+
+
+def describe_model_usage(receipt: dict | None, *, include_budget: bool = True) -> tuple[str, ...]:
     if receipt is None:
         return ("模型用量：历史未记录",)
     lines = []
@@ -392,10 +416,8 @@ def describe_model_usage(receipt: dict | None) -> tuple[str, ...]:
                 f"发送状态未知：{value.get('send_unknown', 0)}；"
                 + ("计量已确认" if value["usage_complete"] else "计量未完整确认")
             )
-    for task in receipt.get("model_tasks", []):
-        lines.append(
-            f"模型任务累计发送：{task['actual_sends']} / {task['limit']}；任务：{task['task_id']}"
-        )
+    if include_budget:
+        lines.extend(describe_model_budget(receipt))
     if receipt["history_status"] == "execution_only":
         lines.append("累计范围：本次执行尚未关联来源")
     elif receipt["history_status"] != "recorded":

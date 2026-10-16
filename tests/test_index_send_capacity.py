@@ -97,6 +97,7 @@ def test_direct_index_factory_enforces_capacity_without_an_active_execution(
 async def test_complete_vendor_index_request_respects_exact_capacity_and_one_unit_overflow(
     index_connection, operation
 ):
+    from pageindex.errors import IndexCapacityError
     from pageindex.index import page_index
     from pageindex.index.utils import llm_completion
     from pageindex.llm import llm_client_scope
@@ -154,7 +155,7 @@ async def test_complete_vendor_index_request_respects_exact_capacity_and_one_uni
             runtime = _build_index_config(values, bundle=bundle).llm_client
             with pytest.raises(error):
                 await request(runtime)
-            sent = 0 if error is ContextCapacityError else 1
+            sent = 1 if error is litellm.AuthenticationError else 0
             assert context.executor.calls == sent
             assert context.executor.budget.snapshot()["pending"] == 0
         assert len(service.requests) == count + sent
@@ -182,5 +183,13 @@ async def test_complete_vendor_index_request_respects_exact_capacity_and_one_uni
     required = len(json.dumps(expected, ensure_ascii=False).encode("utf-8"))
     assert len(original.encode("utf-8")) < required < 5000
     await attempt(required, litellm.AuthenticationError)
-    await attempt(required - 1, ContextCapacityError)
+    if operation in {"continuation", "correction"}:
+        # The stage now partitions its source and sends a smaller valid request.
+        await attempt(required - 1, litellm.AuthenticationError)
+        smaller = service.requests[-1]["json"]
+        assert smaller["messages"] != wire["messages"]
+        smaller_input = {k: smaller[k] for k in expected}
+        assert len(json.dumps(smaller_input, ensure_ascii=False).encode()) <= required - 1
+    else:
+        await attempt(required - 1, IndexCapacityError)
     assert (navigation, pages, historical_messages) == before

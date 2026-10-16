@@ -33,6 +33,9 @@ class _FakeIndexConfigWithConcurrency:
     def __init__(self, **kwargs):
         self.__dict__.update(kwargs)
 
+    def model_dump(self, **kwargs):
+        return {k: v for k, v in self.__dict__.items() if k in self.model_fields}
+
 
 class _FakeIndexConfigWithoutConcurrency:
     """Stand-in for a PageIndex ``IndexConfig`` predating ``max_concurrency``."""
@@ -142,6 +145,8 @@ class TestIndexLongDocument:
         client = MagicMock()
         client.collection.return_value = collection
         monkeypatch.setattr("ultrakb.indexer.LocalClient", lambda **kwargs: client)
+        (kb_dir / "retained.okpi").write_bytes(b"contract-wiring fixture")
+        monkeypatch.setattr("ultrakb.index_originals.retained_pdf_pages", lambda *a, **k: None)
         with pytest.raises(PagePartsContractError, match="No content"):
             index_long_document(kb_dir / "retained.okpi", kb_dir)
         assert collection.add.call_count == 1
@@ -208,7 +213,10 @@ class TestIndexLongDocument:
         pdf_path = tmp_path / "sample.pdf"
         pdf_path.write_bytes(b"%PDF-1.4 fake")
 
-        with patch("ultrakb.indexer.LocalClient", return_value=fake_client):
+        with (
+            patch("ultrakb.indexer.LocalClient", return_value=fake_client),
+            patch("ultrakb.images.convert_pdf_to_pages", return_value=self._fake_pages()),
+        ):
             with pytest.raises(RuntimeError, match="get_document blew up"):
                 index_long_document(pdf_path, kb_dir)
 
@@ -402,7 +410,11 @@ def test_index_long_document_uses_explicit_doc_name(kb_dir, monkeypatch):
     assert not (kb_dir / "wiki" / "summaries" / "original.md").exists()
     # the page extractor receives the explicit doc_name and its images dir
     expected_images = kb_dir / "wiki" / "sources" / "images" / "original-abc12345"
-    mock_convert.assert_called_once_with(pdf, "original-abc12345", expected_images)
+    mock_convert.assert_called_once()
+    assert mock_convert.call_args.args[:2] == (pdf, "original-abc12345")
+    retained_images = mock_convert.call_args.args[2]
+    assert retained_images.is_relative_to(kb_dir / ".ultrakb/index-stages")
+    assert not (expected_images.parent / "original").exists()
     # summary frontmatter points full_text at the doc_name artifact
     summary_text = (kb_dir / "wiki" / "summaries" / "original-abc12345.md").read_text(
         encoding="utf-8"

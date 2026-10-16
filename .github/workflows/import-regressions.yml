@@ -1,0 +1,57 @@
+name: Import regression safeguards
+
+on:
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline:
+    name: Offline import regression safeguards
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHON_DOTENV_DISABLED: '1'
+      OPENAI_AGENTS_DISABLE_TRACING: '1'
+      LITELLM_LOCAL_MODEL_COST_MAP: 'true'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
+        with:
+          version: '0.11.13'
+          enable-cache: false
+      - name: Install pinned test dependencies
+        run: uv sync --frozen --python 3.12.13 --extra dev --extra desktop
+      - name: Verify saved responses, provenance, recovery and published scopes offline
+        run: |
+          uv run --offline --no-sync pytest --test-layer=offline -q -ra \
+            tests/test_summary_contract.py tests/test_summary_protocol.py \
+            tests/test_document_summary.py tests/test_failed_response_capture.py \
+            tests/test_deepseek_summary_delivery.py tests/test_excerpt_resolution.py \
+            tests/test_excerpt_source_contract.py tests/test_compiler_literal_excerpts.py \
+            tests/test_summary_reference_delivery.py tests/test_retained_summary_reuse.py \
+            tests/test_saved_summary_replay.py tests/test_failed_summary_retry.py \
+            tests/test_summary_retry_delivery.py tests/test_gui_summary_recovery.py \
+            tests/test_gui_task_progress.py tests/test_import_progress_race.py \
+            tests/test_create_assembly.py tests/test_published_scope_acceptance.py \
+            tests/test_vendor_packages.py tests/test_import_usage.py \
+            tests/test_usage_lifecycle.py tests/test_cancelled_usage_receipts.py \
+            tests/test_task_actions.py tests/test_file_size.py \
+            -k 'not capacity and not schema_overhead and not short_summary_classification' \
+            --junitxml=build/import-regressions/junit.xml \
+            --test-layer-report=build/import-regressions/layers.json
+      - name: Retain offline test evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: import-regression-evidence
+          path: build/import-regressions/
+          if-no-files-found: warn
+          retention-days: 14

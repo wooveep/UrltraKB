@@ -3,7 +3,7 @@
   "tag": "v0.3.0.dev3",
   "commit": "9ad54122bbd519cec8913198e2d63cff92781c1e",
   "retrieved": "2026-09-28",
-  "local_version": "0.3.0.dev3+urltrakb.13",
+  "local_version": "0.3.0.dev3+urltrakb.14",
   "license": "MIT",
   "upstream_files": {
     ".claude/commands/dedupe.md": "38436c9a5f05fa548aa4b18eaa559a33e564e2c1ac5419c0f56602fb35ab539d",
@@ -131,16 +131,18 @@
     "Physical subtree recovery (#139): reliable native heading anchors, source/parent node identities, immutable continuation prefixes, parent boundary checks, bounded local repair, frozen generic navigation limits; content policy v2.",
     "Physical ordering keeps unlocated model-verified headings at unknown offsets instead of fabricating page-start offsets (#143).",
     "Source contract: relocate only recorded generated image paths and rebase opaque Unicode content spans plus canonical slide body coordinates; exclude generated media syntax from original navigation anchors; preserve legacy inputs and saved parser policies.",
-    "Content-block navigation v3: resolve only unique verbatim quotes within the declared original block, retain strict heading/generated-evidence validation and bounded correction."
+    "Content-block navigation v3: resolve only unique verbatim quotes within the declared original block, retain strict heading/generated-evidence validation and bounded correction.",
+    "Provenance reconciliation (2026-10-16): record the final physical-page sources already committed in 8b85bcb7, including pure heading/correction/parent-root helpers and empty-root document-range navigation. Reviewed against the preceding audited snapshot; no SDK source, version, parser or content-policy change in this reconciliation.",
+    "Request capacity and recovery (.14): budget-aware original-source partitions and hierarchical navigation descriptions; injected stage checkpoints and deferred optional metadata; unchanged content policy and compatibility with validated .13 packages."
   ],
   "local_patch": {
-    "date": "2026-10-14",
+    "date": "2026-10-16",
     "purpose": "Audited local SDK source and packaging baseline (#107); injected IndexLLM, terminal propagation, single network retry owner, content-compatible SDK identity Explicit managed-input root, client close lifecycle, and sealed read-only guards before file or storage mutations. 本地 `.8` 将同步与异步并发门移到共享模型调用入口，使注入执行器和默认客户端都遵守 IndexConfig.max_concurrency；任务政策仍独立限流。成功树的内容策略继续兼容 `.5`。 Blocking stages run off-loop with cancellation drainage; saturated event-loop sync calls fail without bypassing the cap. Dedicated workers avoid starvation of the async SDK default executor. Physical subtree recovery and conservative local heading proof (#139), content policy v2. Preserve native physical subtree bounds and disambiguate same-title numbered headings without changing original offsets. Physical slide navigation v4 resolves only unique, verbatim original excerpts within the declared unit/part; ambiguous, misattributed and generated-media anchors stay invalid. Correction requests explicitly require a one-entry JSON array. Verified with real deepseek-flash Office notes/cache regression and local rejection cases. Block correction parsing is exposed as a pure validator so rejection regressions do not fabricate model returns. Physical subtree correction selection is exposed as a pure domain boundary; identical selection behavior is validated without scripted model responses. Uncorrected navigation shares a pure rejection boundary while preserving physical, block, and slide error classes.",
     "modified": {
       "README.md": "d7fbdd7adf28b03a6b678bacefe84a81157e22b0f914850a23771906251a89d4",
-      "pyproject.toml": "b327f439760e0c8ca13435125b9676bfa8ac8f85429e5f8ec90df71cbe1f4679",
+      "pyproject.toml": "fbaa2c64bf225b68c0b10f9712667161607f74d02eadf713c9f8c194a822bc65",
       "pageindex/config.py": "75e073ac0dbbd98ad48a4719491ed997209c5a02c918f66a643e89aec80e90a9",
-      "pageindex/errors.py": "21a519e8c8e6bb28c59ce6e8bb5675b21b63ac131edb1beb7abed93a95c1679f",
+      "pageindex/errors.py": "34b0023b5725ba90870acda9951ea538002d89d16a95d70758d40c4279efa747",
       "pageindex/types.py": "d4522438f97c6cc7301f34f8891ba98307efb39b0e4ab5996f40345158e76eac",
       "pageindex/__init__.py": "2f5ddea295637ea9668ab6e3c9d4a0f15d85ec8fdebc69f30b4f6be9831be034",
       "pageindex/client.py": "408e2b167cdc2cef54942cfe793adfe5de54a883810196e5938ff77e6f743cf3",
@@ -153,11 +155,11 @@
       "tests/test_review_fixes.py": "8885cbac97d50da7f24dbe7e767742e60ea681ab5ee679bd6f4403001cddaf7e",
       "tests/test_review_fixes_2.py": "881fc1627e461126f708ced652266b03be279816f1ec1ae60b7be8790939f1e8",
       "tests/test_types.py": "ce1de2351e4e4231fb889e43b6f255e70257d312efa876ad9c23998d6b9686e8",
-      "pageindex/backend/local.py": "c8778b2a3448cadfcfd0138cd666f41b978bb0fc6fca88e08b01ab6b84a33916",
+      "pageindex/backend/local.py": "b436b47a33e1cdc335e590299f6d01038214dc5b6b4eb27162ed1fe2cd213fe2",
       "pageindex/backend/protocol.py": "e91f0a47dc16af3bf9a3f5c71d61ca51db0abe5e0354f6fc2d578da9323323bf",
-      "pageindex/index/page_index.py": "160681afb8ef3cccada058f92cc53ccf834501b3c66a1558f80779033f27661a",
-      "pageindex/index/pipeline.py": "e01cd5dce1c3f55b542b45d677c86aec59b3cf25a680620609f8eef7ab22dbfa",
-      "pageindex/index/utils.py": "67d1cfbdc3e4b649eff1d5e26277321a3c860d2aa35060bf5c7d62db3504e034",
+      "pageindex/index/page_index.py": "3a5c95ee8778c6650a949f5f85ea2eb6c028e5a4160c3ae61ba4c30c53e3bf8e",
+      "pageindex/index/pipeline.py": "02a67ad90c192f4a5a837ebc07df394d232236a9da3588e262e789d195dfe429",
+      "pageindex/index/utils.py": "f22bc705ae2089bad08ef7d266bb96e02ca3b9ebda46d37f90c58208b367f5d7",
       "pageindex/index/page_index_md.py": "ba4a3cfbfb3f8cb55d6d10b56a24a853fd89f920cac69f0d1317cf3240194ccb",
       "pageindex/parser/markdown.py": "226370fca1ce4aaccb5609cb6ec22bdc1a406c9e16ce2f68a0d98faa589f1bb6",
       "pageindex/parser/pdf.py": "a0d4fca17c2b842c9776e2044d44f6982dcf7a3723ec3e349e1453f5893f4874",
@@ -166,7 +168,7 @@
     },
     "added": {
       "README.urltrakb.md": "d43bfe9e265c52a78cb5a57d70abb42771d5d8c47f5fd58ce205b527b0ab397e",
-      "pageindex/_urltrakb_source.json": "8738bf11a42f16393fbb2b9ad6fa19426df8decf87b93c2838b478d85640198d",
+      "pageindex/_urltrakb_source.json": "de36d0007c542df81254c0dfeeed1f01d0dca272578e2efcca011205351b5e1c",
       "pageindex/llm.py": "54d5b095a4467dbaab9ce16ab76edb803faf21045ad7fbf46defbc0ffaba3c22",
       "pageindex/default_llm.py": "f95550d10ffc1b05bacdcb990ab267b6a4c0cf5f329cf8f99879406105965d24",
       "tests/test_toc_body_titles.py": "e8ee446afb0b4ac305871246a481f2e3a7acb5420aec3ea8a738611ba1e808f4",
@@ -174,7 +176,8 @@
       "pageindex/index/toc_titles.py": "1dd28046aebc1ceb89935807c31d6d005ee86d383c7239f24ac6e7bb7d9c871c",
       "pageindex/index/block_policy.py": "4fd15c86a540ad1bce4e23c6b2346e8e066a605f9f5ebea98baf7f590c3330ea",
       "pageindex/index/page_parts_policy.py": "aa5d0bf174456a4250a2f9b5d9af936675dc25eefdb0354a67a4f0ee96b44715",
-      "pageindex/index/physical_sections.py": "ea1a782b47fe5842cbc202c5824ed124e6c7511a4132913562ffe0f1d2154635"
+      "pageindex/index/physical_sections.py": "2c6c4c6e427f672d42896a1dbbf159d7c294151bdd0c395c7960f04cc4883b58",
+      "pageindex/index/request_budget.py": "1c8399689f072e78daf5e08902b4a40fee22b018f1f19eae949f0dd43cf4caa3"
     },
     "deleted": [
       "cookbook/README.md",
@@ -188,12 +191,13 @@
       "pageindex/cloud_api.py",
       "tests/test_cloud_backend.py",
       "tests/test_legacy_sdk_contract.py"
-    ]
+    ],
+    "summary": " Complete injected request budgets govern source partitions, navigation reduction and metadata deferral; validated trees and per-node progress can be retained by the injected runtime."
   },
   "schema_version": 2,
   "distribution": "pageindex",
   "module": "pageindex",
-  "version": "0.3.0.dev3+urltrakb.13",
+  "version": "0.3.0.dev3+urltrakb.14",
   "included_files": [
     ".claude/commands/dedupe.md",
     ".gitattributes",
@@ -258,6 +262,7 @@
     "pageindex/index/page_parts_policy.py",
     "pageindex/index/physical_sections.py",
     "pageindex/index/pipeline.py",
+    "pageindex/index/request_budget.py",
     "pageindex/index/toc_titles.py",
     "pageindex/index/utils.py",
     "pageindex/llm.py",

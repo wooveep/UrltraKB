@@ -116,7 +116,7 @@ def test_failed_plan_is_persisted_and_public_retry_preserves_exhausted_repair(
                 response_format={"type": "json_object"},
                 max_tokens=384,
                 original_excerpts=SourceExcerpts([evidence]),
-                numeric_sources=[source],
+                original_sources=[source],
             )
             delivered = parse_page(raw, strict=True)
             healthy_deliveries[doc_name] = (len(live_llm.calls) - admitted, delivered["content"])

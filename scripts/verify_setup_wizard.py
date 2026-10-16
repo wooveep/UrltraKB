@@ -128,7 +128,22 @@ def main():
         # A distinct connection identity starts the historical-readiness scenario.
         # Keep the real authentication failure; never relabel its result as passed.
         retained_key = "retained-private-key"
-        apply_global_config_patch(GlobalConfigPatchRequest(api_key=retained_key))
+        # The loopback fixture is a private endpoint. Its capacity is an
+        # explicit test declaration, never inferred from the provider example.
+        assert read_settings_view().values.model_capacity is None
+        apply_global_config_patch(
+            GlobalConfigPatchRequest(
+                api_key=retained_key,
+                config={
+                    "model_capacity": {
+                        "context_window_tokens": 128000,
+                        "output_reserve_tokens": 8192,
+                        "measurement": "utf8_token_upper_bound",
+                        "applies_to_model": "deepseek/deepseek-flash",
+                    }
+                },
+            )
+        )
         assert read_connection_state().state == "unverified"
         assert not capture_connection().missing
         retained_connection_proof()

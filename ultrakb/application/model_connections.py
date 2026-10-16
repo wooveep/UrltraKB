@@ -45,6 +45,7 @@ class Connection:
     missing: tuple[str, ...] = ()
     state_dir: Path = field(default_factory=lambda: config.GLOBAL_CONFIG_DIR, repr=False)
     legacy_identity: str | None = field(default=None, repr=False)
+    capacity_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -56,6 +57,7 @@ class ConnectionState:
     tested_at: str | None = None
     capabilities: tuple[str, ...] = ()
     code: str | None = None
+    capacity_ready: bool | None = None
 
 
 class ConnectionCapabilityError(ValueError):
@@ -126,6 +128,7 @@ def _from_values(values: dict) -> Connection:
         parsed = urlsplit(bundle.base_url)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
             missing.append("填写有效的 http/https 服务地址")
+    capacity_reason = None
     if not missing:
         from ultrakb.execution_capacity import capacity_policy
         from ultrakb.model_tokenizer import TokenMeasure
@@ -136,12 +139,11 @@ def _from_values(values: dict) -> Connection:
                     effective,
                     custom_endpoint=bool(bundle.base_url),
                     tokenizer_snapshot=values.get("tokenizer_asset"),
+                    base_url=bundle.base_url,
                 )
             )
         except (ValueError, OSError):
-            missing.append(
-                "配置模型输入容量和可用的 tokenizer；可重新选择对应服务商示例，或在高级设置中配置。"
-            )
+            capacity_reason = "模型容量未确认；AI 处理开始前需要配置当前服务的容量。"
     sources = {"model": values["sources"].get("model", "default"), **origins}
     generation = effective.get("role_generation") or {}
     # SDK/workload credentials are part of the actual connection as well. The
@@ -166,7 +168,15 @@ def _from_values(values: dict) -> Connection:
     identity = _identity(material, state_dir)
     legacy_identity = _identity({**material, "sources": sources}, state_dir)
     return Connection(
-        model, bundle, generation, sources, identity, tuple(missing), state_dir, legacy_identity
+        model,
+        bundle,
+        generation,
+        sources,
+        identity,
+        tuple(missing),
+        state_dir,
+        legacy_identity,
+        capacity_reason=capacity_reason,
     )
 
 
@@ -244,10 +254,11 @@ def connection_state(connection: Connection) -> ConnectionState:
         return ConnectionState(
             state,
             connection.model,
-            "连接测试通过。",
+            "连接测试通过。" + (connection.capacity_reason or ""),
             connection.sources,
             record.get("tested_at"),
             CAPABILITIES,
+            capacity_ready=connection.capacity_reason is None,
         )
     if state == "passed":
         state = "unverified"
@@ -267,6 +278,7 @@ def connection_state(connection: Connection) -> ConnectionState:
         else "已保存，尚未验证。请主动测试连接。",
         connection.sources,
         code=record.get("code"),
+        capacity_ready=connection.capacity_reason is None,
     )
 
 

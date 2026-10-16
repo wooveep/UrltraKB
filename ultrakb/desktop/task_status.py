@@ -77,8 +77,42 @@ def task_progress(task, stage_label: str | None = None) -> str:
 def task_counts(task):
     return (
         f"已处理 {len(task.results)} / {task.total} · 成功 {task.succeeded} · "
-        f"跳过 {task.skipped} · 失败 {task.failed} · 未处理 {task.unfinished}"
+        f"跳过 {task.skipped} · 失败 {task.failed} · 未完成 {task.unfinished}"
     )
+
+
+def processing_progress_title(task):
+    documents = {
+        "ImportFile",
+        "ImportUrl",
+        "RecompileDocument",
+        "ReprocessDocument",
+        "RetrySource",
+        "RetryWorksheet",
+    }
+    return "资料处理进度" if task.operation in documents else "任务处理进度"
+
+
+def pending_item_status(task, index):
+    """Only the first unconfirmed unit can be active in a sequential batch."""
+    from ultrakb.runtime.records import TERMINAL
+
+    current = index == len(task.results)
+    if task.state == "interrupted" and current:
+        return "结果未确认；请核对保留成果，不能当作未执行。"
+    if task.state in TERMINAL:
+        return "未执行；本批已停止，不会自动续跑。"
+    stopping = task.state == "stopping" or task.stop_requested
+    if current:
+        if stopping:
+            return "正在安全停止，等待资源清理与结果确认。"
+        if task.state == "waiting":
+            return "等待知识库可用，随后继续处理。"
+        if task.state == "running":
+            return f"正在执行 · {task_progress(task)}；结果尚未确认。"
+    if stopping:
+        return "尚未执行；已请求停止，不会自动开始。"
+    return "等待执行。"
 
 
 def current_source(task):

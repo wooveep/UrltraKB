@@ -177,6 +177,9 @@ def _capacity_worker(*args):
         messages = summary_messages(
             {"role": "system", "content": SYSTEM_TEMPLATE.format(language="en")}, doc_name, window
         )
+        # Capacity rejection must not depend on how verbose the current prompt is.
+        measure = active_executor().request_measure("compile")
+        messages.append({"role": "user", "content": "capacity-check " * (measure.input_limit + 1)})
         await active_executor().acomplete(
             "compile",
             ModelRequest(
@@ -230,7 +233,7 @@ def test_capacity_failure_survives_worker_receipt_and_restart(
         assert outcome.recovery_point == state.recovery_point
         assert outcome.error_type == "ContextCapacityError"
         assert result.resources and outcome.model_usage
-        assert result.model_usage["current"]["requests"] == (1 if boundary == "wire" else 0)
+        assert result.model_usage["current"]["requests"] == 0
         assert result.model_usage["current"]["actual_sends"] == 0
         assert result.model_usage["cumulative"]["input_total"] == 41
         assert result.model_usage["cumulative"]["output_total"] == 13

@@ -31,9 +31,10 @@ from typing import Callable, overload
 import litellm
 
 from ultrakb import frontmatter
-from ultrakb.agent.compile_messages import build_page_messages
+from ultrakb.agent.compile_messages import build_page_messages as build_page_messages
 from ultrakb.agent.page_delivery import validate_page_delivery as validate_page_delivery
 from ultrakb.agent.page_updates import PageUpdate, UnchangedPage
+from ultrakb.agent.summary_protocol import SHORT_SUMMARY_INSTRUCTIONS, summary_response_format
 from ultrakb.compilation_report import report_compile_issue
 from ultrakb.config import (
     DEFAULT_ENTITY_TYPES,
@@ -72,7 +73,8 @@ as inline code or escaped text, never promote them to a linked image.
     + COMPILATION_FACT_RULES
 )
 
-_SUMMARY_USER = """\
+_SUMMARY_USER = (
+    """\
 New document: {doc_name}
 
 Full text:
@@ -80,13 +82,9 @@ Full text:
 
 Write a summary page for this document in Markdown.
 
-Return a JSON object with two keys:
-- "description": A single sentence (under 100 chars) describing the document's main contribution
-- "content": The full summary in Markdown. Include key concepts, findings, ideas, \
-and [[wikilinks]] to concepts that could become cross-document concept pages
-
-Return ONLY valid JSON, no fences.
 """
+    + SHORT_SUMMARY_INSTRUCTIONS
+)
 
 
 # Default entity-type enum lives in the config layer (so config validation is
@@ -174,8 +172,8 @@ Return one JSON object containing these page fields and any required source_rang
   Organize by operation or object: keep prerequisites and applicable variants with
   their steps, parameter values, exceptions and results. Include the conditions
   needed to use each operation, even when mentioned only once or on an adjacent
-  page. Quote technical syntax verbatim in fenced excerpts; preserve prefixes,
-  comment markers and the difference between a template and an executable command.
+  page. Explain technical syntax and examples using normal Markdown; use explicit
+  original excerpt references for exact quotations, retaining source conditions.
   Explain supported relationships and derivations with their premises. Keep sparse
   sources concise. Links provide navigation; the application appends source and
   related-page links. Use the whitelist for supported relationships in prose.
@@ -313,6 +311,9 @@ def _strip_cache_control(messages: list[dict]) -> list[dict]:
 
 def _prepare_messages(model: str, messages: list[dict]) -> list[dict]:
     """Drop cache_control markers when ``model`` would reject them."""
+    from ultrakb.agent.summary_protocol import prepare_summary_contract
+
+    messages = prepare_summary_contract(messages)
     if _accepts_cache_control(model):
         return messages
     return _strip_cache_control(messages)
@@ -470,6 +471,37 @@ async def _llm_call_async(
     return content.strip()
 
 
+def _summary_format(
+    protocol,
+    sections,
+    model,
+    bundle,
+    checkpoints,
+    requested=None,
+    *,
+    request_options=None,
+    excerpt_ids=(),
+):
+    from ultrakb.llm_execution import active_executor
+
+    executor = active_executor()
+    credentials = executor.bindings.credentials() if executor else bundle
+    model = executor.bindings.model("compile") if executor else model
+    base_url = credentials.base_url if credentials else None
+    if executor is None and request_options and "base_url" in request_options:
+        base_url = request_options["base_url"]
+    if checkpoints:
+        checkpoints.prepare_summary_delivery()
+    return summary_response_format(
+        protocol,
+        sections,
+        model=model,
+        base_url=base_url,
+        requested=requested,
+        excerpt_ids=excerpt_ids,
+    )
+
+
 @overload
 async def _llm_call_page_async(
     model: str,
@@ -498,10 +530,9 @@ async def _llm_call_page_async(
     step_name: str,
     *,
     bundle=None,
-    evidence=None,
     page_update: PageUpdate | None = None,
     read_current: Callable[[], str] | None = None,
-    numeric_sources=None,
+    original_sources=None,
     initial_response: str | None = None,
     initial_error: TruncatedResponseError | None = None,
     response_protocol: str = "page-json",
@@ -511,6 +542,7 @@ async def _llm_call_page_async(
     proposal_only: bool = False,
     figure_context=None,
     original_excerpts=None,
+    create_delivery: tuple[str, ...] | None = None,
     **kwargs,
 ) -> str | UnchangedPage:
     """Validate each page and repair only that response, at most once."""
@@ -519,27 +551,80 @@ async def _llm_call_page_async(
         page_repair_message,
     )
 
-    if response_protocol not in {"page-json", "markdown", "summary-json", "summary-page-json"}:
+    if response_protocol not in {
+        "page-json",
+        "markdown",
+        "summary-json",
+        "summary-page-json",
+        "summary-parts-json",
+    }:
         raise ValueError("Unknown page response protocol")
 
-    if figure_context is not None:
-        messages = [*messages, figure_context.message()]
-    if original_excerpts is None and numeric_sources is not None:
+    if original_excerpts is None and original_sources is not None:
         from ultrakb.agent.source_excerpts import SourceExcerpts
 
-        original_excerpts = SourceExcerpts(numeric_sources)
+        original_excerpts = SourceExcerpts(original_sources)
     if original_excerpts is not None:
-        messages = original_excerpts.messages(messages)
+        from ultrakb.agent.compile_contract import request_version
+
+        original_excerpts.request_version = request_version(checkpoints)
+    if response_protocol == "summary-parts-json" and original_excerpts is None:
+        raise ValueError("Structured summaries require original source windows")
+    from ultrakb.agent.page_input import page_input
+
+    messages = page_input(
+        messages,
+        figures=figure_context,
+        excerpts=original_excerpts,
+        structured=response_protocol == "summary-parts-json",
+        compact=create_delivery is not None,
+    )
+    if response_protocol in {"summary-json", "summary-page-json", "summary-parts-json"}:
+        kwargs["response_format"] = _summary_format(
+            response_protocol,
+            expected_sections,
+            model,
+            bundle,
+            checkpoints,
+            kwargs.get("response_format"),
+            request_options=kwargs,
+            excerpt_ids=tuple(original_excerpts.references)
+            if original_excerpts and response_protocol == "summary-parts-json"
+            else (),
+        )
 
     correction = []
 
-    def observe_repair_response(response):
-        if checkpoints and getattr(response.choices[0], "finish_reason", None) == "length":
+    def observe_response(response):
+        nonlocal received_raw
+        received_raw = response.choices[0].message.content or ""
+        if checkpoints:
+            from ultrakb.compile_checkpoints import digest
+
+            checkpoints.record_received_response(
+                checkpoint_key,
+                digest(messages),
+                received_raw,
+                stage=step_name,
+                response_protocol=response_protocol,
+                expected_sections=expected_sections,
+                code="page_truncated_response"
+                if response.choices[0].finish_reason == "length"
+                else "response_received",
+                attempt=attempt + 1,
+                response_format=kwargs.get("response_format"),
+            )
+        if (
+            attempt
+            and checkpoints
+            and getattr(response.choices[0], "finish_reason", None) == "length"
+        ):
             from ultrakb.compile_checkpoints import digest
 
             checkpoints.record_failure(checkpoint_key, digest(messages), "page_truncated_response")
 
     for attempt in range(2):
+        raw = received_raw = None
         try:
             if attempt == 0 and initial_error is not None:
                 raise initial_error
@@ -552,7 +637,7 @@ async def _llm_call_page_async(
                     step_name,
                     raise_on_truncation=True,
                     bundle=bundle,
-                    on_response=observe_repair_response if attempt else None,
+                    on_response=observe_response,
                     **kwargs,
                 )
             )
@@ -565,32 +650,80 @@ async def _llm_call_page_async(
                 read_current=read_current,
                 proposal_only=proposal_only,
                 figure_context=figure_context,
-                numeric_sources=numeric_sources,
-                evidence=evidence,
+                expected_coverage=create_delivery or (),
             )
             if attempt:
                 report_compile_issue("page_response_repaired")
-            return result
+            if checkpoints and original_excerpts and original_excerpts.resolutions:
+                recorder = getattr(checkpoints, "record_delivery_resolution", None)
+                if recorder:
+                    from ultrakb.compile_checkpoints import digest
+
+                    recorder(
+                        checkpoint_key,
+                        digest(messages),
+                        raw,
+                        str(result),
+                        original_excerpts.resolutions,
+                    )
+            # Keep reference IDs in accepted checkpoints, so identical original
+            # occurrences still have a precise selection after a restart. The
+            # summary assembler renders this validated protocol deterministically.
+            return raw if response_protocol == "summary-parts-json" else result
         except (PageResponseError, TruncatedResponseError) as error:
             code = getattr(error, "code", "page_truncated_response")
             if code == "page_update_stale":
                 raise
+            diagnostic = None
+            failed_response = received_raw if received_raw is not None else raw
+            if checkpoints and failed_response is not None:
+                from ultrakb.compile_checkpoints import digest
+
+                diagnostic = checkpoints.record_invalid_response(
+                    checkpoint_key,
+                    digest(messages),
+                    failed_response,
+                    stage=step_name,
+                    response_protocol=response_protocol,
+                    expected_sections=expected_sections,
+                    code=code,
+                    detail=str(error),
+                    attempt=attempt + 1,
+                    field_errors=getattr(error, "field_errors", ()),
+                    response_format=kwargs.get("response_format"),
+                )
             if attempt:
                 if checkpoints:
                     from ultrakb.compile_checkpoints import digest
 
                     checkpoints.record_failure(checkpoint_key, digest(messages), code)
                 report_compile_issue(code)
-                raise PageResponseError(code, f"{step_name}: {error}") from error
+                detail = f"{step_name}: {error}"
+                if diagnostic:
+                    detail += f"; failed response: {diagnostic}"
+                raise PageResponseError(
+                    code, detail, field_errors=getattr(error, "field_errors", ())
+                ) from error
             if checkpoints:
                 from ultrakb.compile_checkpoints import digest
 
                 try:
                     checkpoints.claim_repair(checkpoint_key, digest(messages))
-                except PageResponseError:
+                except PageResponseError as repair_error:
                     checkpoints.record_failure(checkpoint_key, digest(messages), code)
                     report_compile_issue(code)
+                    if diagnostic:
+                        raise PageResponseError(
+                            repair_error.code,
+                            f"{repair_error}; {step_name}: {error}; failed response: {diagnostic}",
+                            field_errors=getattr(error, "field_errors", ()),
+                        ) from repair_error
                     raise
+            if create_delivery is not None:
+                from ultrakb.agent.create_delivery import create_repair_message
+
+                correction = [create_repair_message(code, create_delivery)]
+                continue
             correction = [
                 page_repair_message(
                     code,
@@ -598,6 +731,7 @@ async def _llm_call_page_async(
                     page_update=page_update is not None,
                     response_protocol=response_protocol,
                     expected_sections=expected_sections,
+                    field_errors=getattr(error, "field_errors", ()),
                 )
             ]
     raise AssertionError("Unreachable page retry state")
@@ -1768,7 +1902,6 @@ async def _compile_concepts(
     )
     from ultrakb.execution_budget import admit_compile_plan
 
-    admit_compile_plan(plan, rewrite_summary=rewrite_summary)
     create_items, update_items, related_items = (
         plan.concepts.create,
         plan.concepts.update,
@@ -1838,49 +1971,63 @@ async def _compile_concepts(
         ),
     }
 
-    # --- Step 3: Generate/update concept pages concurrently (A cached) ---
+    # Prepare every new page before starting concurrent model calls. Existing
+    # summaries and the accepted concepts plan retain their request identities.
+    from ultrakb.agent.create_generation import prepare_page_creation
+
+    creations = {}
+    from ultrakb.agent.compile_contract import legacy_prompts, request_version
+
+    concept_template = (
+        legacy_prompts()["concept_page"] if request_version() == 1 else _CONCEPT_PAGE_USER
+    )
+    for kind, items, template in (
+        ("concepts", create_items, concept_template),
+        ("entities", entity_create, _ENTITY_PAGE_USER),
+    ):
+        for item in items:
+            originals = source_windows.prepare(item, long=doc_type == "pageindex")
+            if doc_type == "pageindex" and not originals.has_original:
+                creations[(kind, item["name"])] = originals.navigation_page(
+                    item.get("title", item["name"]), doc_name
+                )
+                continue
+            creations[(kind, item["name"])] = prepare_page_creation(
+                windows=source_windows,
+                originals=originals,
+                model=model,
+                bundle=bundle,
+                system_message=system_msg,
+                current_original=current_original,
+                known_targets_message=known_targets_msg,
+                task_message={
+                    "role": "user",
+                    "content": template.format(
+                        title=item.get("title", item["name"]),
+                        doc_name=doc_name,
+                        update_instruction="",
+                        type=item.get("type", "other"),
+                    ).replace("__ENTITY_TYPES__", types_str),
+                },
+                page=f"{kind}/{_sanitize_concept_name(item['name'])}.md",
+                checkpoints=checkpoints,
+            )
+    admit_compile_plan(
+        plan,
+        rewrite_summary=rewrite_summary,
+        missing_creates=sum(c.missing for c in creations.values() if not isinstance(c, tuple)),
+    )
     semaphore = asyncio.Semaphore(max_concurrency)
 
     async def _gen_create(concept: dict) -> tuple[str, str, bool, str]:
         name = concept["name"]
-        title = concept.get("title", name)
-        originals = source_windows.prepare(concept, long=doc_type == "pageindex")
-        figures = source_windows.page_figures(originals.windows, long=doc_type == "pageindex")
-        if doc_type == "pageindex" and not originals.has_original:
-            brief, content = originals.navigation_page(title, doc_name)
-            return name, content, False, brief
-        async with semaphore:
-            raw = await _llm_call_page_async(
-                model,
-                build_page_messages(
-                    system_message=system_msg,
-                    current_original=current_original,
-                    original_context=originals.message,
-                    known_targets_message=known_targets_msg,
-                    task_message={
-                        "role": "user",
-                        "content": _CONCEPT_PAGE_USER.format(
-                            title=title,
-                            doc_name=doc_name,
-                            update_instruction="",
-                        ),
-                    },
-                ),
-                f"concept: {name}",
-                figure_context=figures if figures.figures else None,
-                response_format=_JSON_RESPONSE_FORMAT,
-                bundle=bundle,
-                prompt_version="compiler-page-originals-v4",
-                numeric_sources=source_windows.numeric_sources(
-                    originals, long=doc_type == "pageindex"
-                ),
-                original_excerpts=source_windows.original_excerpts(
-                    originals, long=doc_type == "pageindex"
-                ),
-            )
-        obj = _parse_page_json(raw)
-        obj = figures.decorate(f"concepts/{_sanitize_concept_name(name)}.md", obj)
-        brief, content = obj.get("description", ""), obj["content"]
+        creation = creations[("concepts", name)]
+        if isinstance(creation, tuple):
+            brief, content = creation
+        else:
+            async with semaphore:
+                obj = await creation.generate()
+            brief, content = obj.get("description", ""), obj["content"]
         _require_nonempty_content(content, name)
         return name, content, False, brief
 
@@ -1899,7 +2046,6 @@ async def _compile_concepts(
         patch = PageUpdate(
             original,
             known_targets=known_targets,
-            originals=source_windows.numeric_sources(originals, long=doc_type == "pageindex"),
             allowed_types=valid_types if kind == "entities" else None,
             source_ranges=figures.ids if figures.figures or START in original else None,
         )
@@ -1934,46 +2080,13 @@ async def _compile_concepts(
 
     async def _gen_entity_create(ent: dict) -> tuple[str, str, str, str]:
         name = ent["name"]
-        title = ent.get("title", name)
-        etype = ent.get("type", "other")
-        originals = source_windows.prepare(ent, long=doc_type == "pageindex")
-        figures = source_windows.page_figures(originals.windows, long=doc_type == "pageindex")
-        if doc_type == "pageindex" and not originals.has_original:
-            brief, content = originals.navigation_page(title, doc_name)
+        creation = creations[("entities", name)]
+        if isinstance(creation, tuple):
+            brief, content = creation
             return name, content, brief, "other"
         async with semaphore:
-            raw = await _llm_call_page_async(
-                model,
-                build_page_messages(
-                    system_message=system_msg,
-                    current_original=current_original,
-                    original_context=originals.message,
-                    known_targets_message=known_targets_msg,
-                    task_message={
-                        "role": "user",
-                        "content": _ENTITY_PAGE_USER.format(
-                            title=title,
-                            type=etype,
-                            doc_name=doc_name,
-                        ).replace("__ENTITY_TYPES__", types_str),
-                    },
-                ),
-                f"entity: {name}",
-                figure_context=figures if figures.figures else None,
-                response_format=_JSON_RESPONSE_FORMAT,
-                bundle=bundle,
-                prompt_version="compiler-page-originals-v4",
-                numeric_sources=source_windows.numeric_sources(
-                    originals, long=doc_type == "pageindex"
-                ),
-                original_excerpts=source_windows.original_excerpts(
-                    originals, long=doc_type == "pageindex"
-                ),
-            )
-        brief, content, obj = _page_fields(raw)
-        obj = figures.decorate(f"entities/{_sanitize_concept_name(name)}.md", obj or {})
-        assert obj is not None
-        content = obj["content"]
+            obj = await creation.generate()
+        brief, content = obj.get("description", ""), obj["content"]
         from ultrakb.agent.page_delivery import confirmed_entity_type
 
         etype_out = confirmed_entity_type(obj, valid_types)
@@ -2047,6 +2160,7 @@ def short_document_messages(
     language: str,
     *,
     original_evidence: dict | None = None,
+    request_format: int | None = None,
 ) -> list:
     """The same first request is used for capacity estimation and compilation."""
     from ultrakb.agent.evidence_payload import project_evidence
@@ -2071,7 +2185,9 @@ def short_document_messages(
     document += "\nOriginal structure (native-tables-v1):\n" + json.dumps(
         structure, ensure_ascii=False
     )
-    return SourceExcerpts([{**projected, "content": content}]).messages(
+    return SourceExcerpts(
+        [{**projected, "content": content}], request_format=request_format
+    ).messages(
         [
             {
                 "role": "system",
@@ -2142,10 +2258,32 @@ async def compile_short_doc(
     signature = digest(summary_messages)
     try:
         try:
+            from ultrakb.agent.compile_contract import require_frozen_request
+
+            require_frozen_request(checkpoints, "short-summary", signature)
             summary_raw = checkpoints.load("short-summary", signature) if checkpoints else None
             if summary_raw is not None:
                 summary_raw = summary_excerpts.response(summary_raw, "summary-page-json")
             else:
+                if checkpoints:
+                    from ultrakb.agent.retained_delivery import reuse_saved_response
+
+                    summary_raw = reuse_saved_response(
+                        checkpoints,
+                        "short-summary",
+                        signature,
+                        protocol="summary-page-json",
+                        stage="summary",
+                        excerpts=summary_excerpts,
+                        metadata={},
+                        validate=lambda raw: validate_page_delivery(
+                            raw,
+                            response_protocol="summary-page-json",
+                            original_excerpts=summary_excerpts,
+                        ),
+                        decode=lambda raw, delivered: delivered,
+                    )
+            if summary_raw is None:
                 if checkpoints:
                     checkpoints.claim_generation(
                         "short-summary", signature, stage="compile.summary"
@@ -2156,7 +2294,9 @@ async def compile_short_doc(
                         model,
                         summary_messages,
                         "summary",
-                        response_format=_JSON_RESPONSE_FORMAT,
+                        response_format=_summary_format(
+                            "summary-page-json", (), model, bundle, checkpoints
+                        ),
                         raise_on_truncation=True,
                         bundle=bundle,
                     )
@@ -2231,6 +2371,7 @@ async def compile_long_doc(
     """Build document knowledge from every original range, then organize topic pages."""
     from ultrakb.agent.document_summary import (
         PROMPT_VERSION,
+        REFERENCE_PROMPT_VERSION,
         SYSTEM_TEMPLATE,
         build_document_summary,
         planning_overview,
@@ -2269,6 +2410,9 @@ async def compile_long_doc(
         windows = CompileSourceWindows(
             wiki_dir, doc_name, navigation=navigation, kb_dir=kb_dir, view_id=selected_scope.view_id
         )
+        from ultrakb.compile_checkpoints import document_checkpoints
+
+        checkpoints = document_checkpoints(kb_dir, selected_scope.view_id, doc_name)
         credentials = executor.bindings.credentials() if executor else bundle
         fits = summary_capacity(
             {**config, "model": executor.bindings.model("compile") if executor else model},
@@ -2277,28 +2421,30 @@ async def compile_long_doc(
             generation_options=executor.bindings.generation_options("compile")
             if executor
             else None,
+            legacy_format=checkpoints.legacy_summary_format if checkpoints else False,
+            base_url=credentials.base_url if credentials else None,
         )
-
-        from ultrakb.compile_checkpoints import document_checkpoints
-
-        checkpoints = document_checkpoints(kb_dir, selected_scope.view_id, doc_name)
 
         async def generate(
             messages: list[dict], stage: str, originals: list[dict], sections: tuple[str, ...]
         ) -> dict:
+            from ultrakb.agent.document_summary import summary_request_protocol
             from ultrakb.agent.page_response import parse_summary
             from ultrakb.agent.source_excerpts import SourceExcerpts
 
+            protocol = summary_request_protocol(messages)
             raw = await _llm_call_page_async(
                 model,
                 messages,
                 stage,
                 response_format=_JSON_RESPONSE_FORMAT,
                 bundle=bundle,
-                numeric_sources=[original["content"] for original in originals],
+                original_sources=[original["content"] for original in originals],
                 original_excerpts=SourceExcerpts(originals),
-                prompt_version=PROMPT_VERSION,
-                response_protocol="summary-json",
+                prompt_version=REFERENCE_PROMPT_VERSION
+                if protocol == "summary-parts-json"
+                else PROMPT_VERSION,
+                response_protocol=protocol,
                 expected_sections=sections,
                 checkpoints=checkpoints,
                 checkpoint_key=stage.replace("document-summary:", "summary:"),

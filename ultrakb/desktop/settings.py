@@ -39,7 +39,7 @@ _FIELDS = {
     "language": "内容语言",
     "pdf_short_max_pages": "短 PDF 页数上限（含）",
     "pageindex_threshold": "兼容旧 PDF 阈值（≤0 强制分段）",
-    "model_capacity": "模型容量（JSON，可清除以自动判断）",
+    "model_capacity": "输入容量与本地护栏（JSON）",
     "extraction_budget": "自动文件恢复预算（JSON，仅影响新执行组）",
     "download_remote_assets": "下载 HTML 远程图片（true/false）",
     "office_runtime_path": "私有 Office 目录（清除后使用随包目录）",
@@ -261,16 +261,18 @@ class SettingsDialog(ManagementPanel):
         classification = (
             "全部分段" if limit.legacy_force_index else f"≤{limit.short_max_pages} 页为短文"
         )
-        boundary = capacity.get("input_limit") if not capacity.get("unknown_reason") else "未知"
+        from ultrakb.capacity_display import capacity_description
+
         self.policy.setText(
             f"当前 PDF：{classification}"
             f"；来源：{_SOURCES[limit.source]} / {limit.key}。\n"
             "同层新上限优先于兼容旧阈值；清除新上限后，已有旧阈值仍会生效。\n"
-            f"模型输入上限：{boundary}"
+            f"{capacity_description(capacity)}"
             f"；来源：{capacity.get('source')}。"
             "容量未知会尝试全文；已知不足的短文使用分段编译。\n"
-            "容量 JSON 可指定 max_input_tokens，或 context_window_tokens 与 output_reserve_tokens；"
-            "自定义端点还需 tokenizer_model。"
+            "token 模式使用 max_input_tokens，或 context_window_tokens 与 output_reserve_tokens，"
+            "并配置可靠 tokenizer_model；字节护栏模式单独使用 max_input_bytes。"
+            "旧 utf8-bound 配置仍按字节解释，保留原任务和检查点身份。"
         )
         self._updating = True
         try:

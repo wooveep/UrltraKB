@@ -164,7 +164,10 @@ def _read_kb_config(kb_dir: Path) -> KbConfigResponse:
         office_timeout_seconds=effective["office_timeout_seconds"],
         download_remote_assets=effective["download_remote_assets"],
         capacity=capacity_policy(
-            effective, custom_endpoint=bool(bundle.base_url), origin=sources["model_capacity"]
+            effective,
+            custom_endpoint=bool(bundle.base_url),
+            origin=sources["model_capacity"],
+            base_url=bundle.base_url,
         ),
         model=effective["model"],
         language=effective["language"],
@@ -297,6 +300,7 @@ def _read_global_config() -> GlobalConfigResponse:
             {**DEFAULT_CONFIG, **gc},
             custom_endpoint=bool(env_values.get("OPENAI_API_BASE")),
             origin="global",
+            base_url=env_values.get("OPENAI_API_BASE"),
         ),
         model=gc.get("model", DEFAULT_CONFIG["model"]),
         language=gc.get("language", DEFAULT_CONFIG["language"]),
@@ -473,6 +477,7 @@ def read_settings_view(kb_dir: Path | None = None) -> SettingsView:
                         {**DEFAULT_CONFIG, **global_config},
                         custom_endpoint=bool(credentials.base_url),
                         origin=sources["model_capacity"],
+                        base_url=credentials.base_url,
                     ),
                 }
             )

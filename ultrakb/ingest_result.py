@@ -76,7 +76,9 @@ def describe_ingest(result: IngestResult) -> tuple[str, ...]:
     return tuple(lines) + describe_model_usage(result.model_usage) + describe_units(result.units)
 
 
-def describe_units(units: tuple[ImportUnitOutcome, ...]) -> tuple[str, ...]:
+def describe_units(
+    units: tuple[ImportUnitOutcome, ...], *, include_model_budget: bool = True
+) -> tuple[str, ...]:
     lines = []
     for unit in units:
         lines.append(
@@ -93,7 +95,14 @@ def describe_units(units: tuple[ImportUnitOutcome, ...]) -> tuple[str, ...]:
         if unit.proposal_id:
             lines.append(f"Pending proposal: {unit.proposal_id}")
         if unit.recovery_point and unit.status not in {"completed", "empty", "retired"}:
-            lines.append("Index complete; compilation incomplete. Retry this source to continue.")
+            if "indexing" in unit.completed_stages:
+                lines.append(
+                    "Index complete; compilation incomplete. Retry this source to continue."
+                )
+            else:
+                lines.append(
+                    "Conversion retained; indexing incomplete. Retry this source to continue."
+                )
             lines.append(f"Recovery point: {unit.recovery_point}")
         if unit.block_count is not None:
             lines.append(f"Content blocks: {unit.block_count}")
@@ -117,5 +126,5 @@ def describe_units(units: tuple[ImportUnitOutcome, ...]) -> tuple[str, ...]:
             )
         from ultrakb.llm_usage import describe_model_usage
 
-        lines.extend(describe_model_usage(unit.model_usage))
+        lines.extend(describe_model_usage(unit.model_usage, include_budget=include_model_budget))
     return tuple(lines)

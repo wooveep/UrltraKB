@@ -65,7 +65,7 @@ def test_fresh_kb_blocks_model_work_without_capacity(
         )
         assert config.load_config(kb / ".ultrakb/config.yaml").get("model_capacity") is None
         state = read_connection_state(kb)
-        assert state.state == "missing" and "容量" in state.message
+        assert state.state == "unverified"
         request = (
             ImportFile(str(room_document))
             if operation == "import"
@@ -153,7 +153,17 @@ def test_retesting_unchanged_deepseek_prepares_capacity_for_the_actual_question(
             wait_until(app, lambda: not panel.busy and panel.state is not None)
             assert panel.state.code == "authentication"
             assert len(service.requests) == 1
-            assert panel.view.values.model_capacity.max_input_tokens == (existing_limit or 65536)
+            if existing_limit is None:
+                # A private endpoint cannot acquire official limits by model name.
+                from ultrakb.model_tokenizer import ContextCapacityError
+
+                assert panel.view.values.model_capacity is None
+                with kb_ingest_lock(kb / ".ultrakb"):
+                    with pytest.raises(ContextCapacityError):
+                        question_measure(capture_config(kb))
+                assert len(service.requests) == 1
+                return
+            assert panel.view.values.model_capacity.max_input_tokens == existing_limit
             with kb_ingest_lock(kb / ".ultrakb"):
                 measure = question_measure(capture_config(kb))
             measure.require_current("Read the original measurement.")
@@ -199,6 +209,11 @@ def test_fresh_kb_imports_native_pages_and_answers_in_spawn_workers(
     settings = config.load_config(kb / ".ultrakb/config.yaml")
     assert settings.get("model_capacity") is None
     settings.update(timeout=30, language="en")
+    # This known test gateway forwards to the declared model service.
+    from ultrakb.application.connection_capacity import template_capacity
+    from ultrakb.application.connection_templates import CONNECTION_TEMPLATES
+
+    settings["model_capacity"] = template_capacity(CONNECTION_TEMPLATES[2])
     settings["model_policy"] = {"max_calls": 8, "retries": 0, "deadline_seconds": 90}
     settings["role_generation"] = {
         "compile": {"max_tokens": 1024, "reasoning_effort": "none"},
@@ -220,7 +235,7 @@ def test_fresh_kb_imports_native_pages_and_answers_in_spawn_workers(
         wait_until(app, lambda: not panel.busy and panel.state is not None)
         assert panel.state.state == "passed", panel.state.message
         assert panel.view.values.model_capacity.applies_to_model == "deepseek/deepseek-flash"
-        assert panel.view.values.model_capacity.max_input_tokens == 65536
+        assert panel.view.values.model_capacity.context_window_tokens > 65536
         with kb_ingest_lock(kb / ".ultrakb"):
             question_measure(capture_config(kb)).require_current(
                 "Which room permits quiet reading?"

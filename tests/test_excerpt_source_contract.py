@@ -1,4 +1,4 @@
-"""Response transcription uses the same qualified originals as public readers."""
+"""Readers preserve source qualification while generated prose has no copy contract."""
 
 import asyncio
 import json
@@ -10,7 +10,6 @@ from test_source_qualification import freeze_source
 
 from ultrakb.agent.document_summary import build_document_summary
 from ultrakb.agent.evidence_payload import project_evidence, slice_evidence
-from ultrakb.agent.page_response import PageResponseError
 from ultrakb.agent.source_excerpts import SourceExcerpts
 from ultrakb.agent.source_windows import CompileSourceWindows
 from ultrakb.locks import atomic_write_text
@@ -112,7 +111,9 @@ def test_response_contract_agrees_in_segmented_compile_and_question(
         ("<p>/var/&lt;tar</p><p>get&gt;/state</p>", False, False),
     ],
 )
-def test_response_requires_a_complete_resolved_cell(kb_dir, tmp_path, body, partial, accepted):
+def test_generated_paths_do_not_require_a_complete_resolved_cell(
+    kb_dir, tmp_path, body, partial, accepted
+):
     text = f"<table><tr><td>{body}</td></tr></table>"
     _, frozen = freeze_source(kb_dir, tmp_path, "md", text)
     selected = read_text_selection(frozen.model_dump(mode="json"))
@@ -123,17 +124,12 @@ def test_response_requires_a_complete_resolved_cell(kb_dir, tmp_path, body, part
     )
     excerpts = SourceExcerpts([evidence])
     response = f"Inspect `{VISIBLE_PATH}`."
-    if accepted:
-        assert excerpts.render(response) == response
-    else:
-        with pytest.raises(PageResponseError, match="does not occur verbatim"):
-            excerpts.render(response)
+    assert excerpts.render(response) == response
 
 
 def test_unqualified_legacy_text_keeps_exact_excerpt_without_decoding():
     excerpts = SourceExcerpts([TABLE])
-    with pytest.raises(PageResponseError, match="does not occur verbatim"):
-        excerpts.render(f"Inspect `{VISIBLE_PATH}`.")
+    assert VISIBLE_PATH in excerpts.render(f"Inspect `{VISIBLE_PATH}`.")
     assert TABLE in excerpts.render("[[original:x1.1]]")
     assert excerpts.render(f"Inspect `{LITERAL_PATH}`.") == f"Inspect `{LITERAL_PATH}`."
 
@@ -155,9 +151,7 @@ def test_new_pages_consume_the_same_response_proof(kb_dir, qualified, segmented,
     reader = CompileSourceWindows(wiki, "manual")
     originals = reader.prepare({"reading_locations": {"pages": "1"}}, long=True)
     excerpts = reader.original_excerpts(originals, long=True)
-    if not qualified:
-        with pytest.raises(PageResponseError, match="does not occur verbatim"):
-            validated_page_input(excerpts, VISIBLE_PATH)
+    assert VISIBLE_PATH in validated_page_input(excerpts, VISIBLE_PATH)["content"]
     expected_path = VISIBLE_PATH if qualified else LITERAL_PATH
     delivered = json.loads(
         validate_page_delivery(
@@ -216,7 +210,7 @@ def test_saved_summary_response_uses_current_source_proof_without_regeneration(k
     window = next(reader.iter_document_windows(fits=lambda _: True))
     checkpoints = CompileCheckpoints(
         kb_dir,
-        SimpleNamespace(task_id="a" * 32, parent_task_id=None),
+        SimpleNamespace(task_id="a" * 32, parent_task_id=None, compiler_request_version=2),
         {"document": "manual"},
         {"protocol": "summary-json"},
     )
@@ -235,11 +229,7 @@ def test_saved_summary_response_uses_current_source_proof_without_regeneration(k
             checkpoints=checkpoints,
         )
 
-    if qualified:
-        assert VISIBLE_PATH in asyncio.run(compile_saved()).markdown
-    else:
-        with pytest.raises(PageResponseError, match="does not occur verbatim"):
-            asyncio.run(compile_saved())
+    assert VISIBLE_PATH in asyncio.run(compile_saved()).markdown
     assert json.dumps(saved) == original_value and source.read_bytes() == before
     assert checkpoints.path.read_bytes() == retained
 
@@ -263,30 +253,21 @@ def test_saved_short_summary_uses_the_same_proof_without_regeneration(kb_dir, qu
     saved = json.dumps({"description": "Saved", "content": f"Inspect `{VISIBLE_PATH}`."})
     checkpoints = CompileCheckpoints(
         kb_dir,
-        SimpleNamespace(task_id="a" * 32, parent_task_id=None),
+        SimpleNamespace(task_id="a" * 32, parent_task_id=None, compiler_request_version=2),
         {"document": "manual"},
         {"protocol": "summary-page-json"},
     )
     checkpoints.save("short-summary", "same-request", saved)
     retained = checkpoints.path.read_bytes()
-    if qualified:
-        received = json.loads(
-            validate_page_delivery(
-                checkpoints.load("short-summary", "same-request"),
-                response_protocol="summary-page-json",
-                original_excerpts=reader.original_excerpts(originals, long=True),
-            )
+    received = json.loads(
+        validate_page_delivery(
+            checkpoints.load("short-summary", "same-request"),
+            response_protocol="summary-page-json",
+            original_excerpts=reader.original_excerpts(originals, long=True),
         )
-        _write_summary(wiki, "manual", received["content"], description=received["description"])
-        assert VISIBLE_PATH in (wiki / "summaries/manual.md").read_text()
-    else:
-        with pytest.raises(PageResponseError, match="does not occur verbatim"):
-            validate_page_delivery(
-                checkpoints.load("short-summary", "same-request"),
-                response_protocol="summary-page-json",
-                original_excerpts=reader.original_excerpts(originals, long=True),
-            )
-        assert not (wiki / "summaries/manual.md").exists()
+    )
+    _write_summary(wiki, "manual", received["content"], description=received["description"])
+    assert VISIBLE_PATH in (wiki / "summaries/manual.md").read_text()
     assert source.read_text() == TABLE and checkpoints.path.read_bytes() == retained
 
 
@@ -309,7 +290,7 @@ def test_page_update_response_uses_the_same_cell_proof(kb_dir, qualified, cached
     atomic_write_text(target, old)
     reader = CompileSourceWindows(wiki, "manual")
     originals = reader.prepare({"reading_locations": {"pages": "1"}}, long=True)
-    patch = PageUpdate(old, originals=reader.numeric_sources(originals, long=True))
+    patch = PageUpdate(old)
     excerpts = reader.original_excerpts(originals, long=True)
     value = {
         "base_sha256": patch.digest,
@@ -320,7 +301,7 @@ def test_page_update_response_uses_the_same_cell_proof(kb_dir, qualified, cached
     before = json.dumps(value)
     checkpoints = CompileCheckpoints(
         kb_dir,
-        SimpleNamespace(task_id="a" * 32, parent_task_id=None),
+        SimpleNamespace(task_id="a" * 32, parent_task_id=None, compiler_request_version=2),
         {"document": "manual"},
         {"protocol": "page-edits"},
     )
@@ -329,21 +310,6 @@ def test_page_update_response_uses_the_same_cell_proof(kb_dir, qualified, cached
         delivered = checkpoints.load("page:batch:0", "same-request")
     else:
         delivered = value
-    if not qualified:
-        with pytest.raises(PageResponseError, match="does not occur verbatim"):
-            validate_page_delivery(
-                json.dumps(delivered),
-                page_update=patch,
-                read_current=target.read_text,
-                original_excerpts=excerpts,
-            )
-        if cached:
-            assert target.read_text() == old and json.dumps(value) == before
-            return
-        delivered = {
-            **value,
-            "edits": [{**value["edits"][0], "content": f"Read `{LITERAL_PATH}`."}],
-        }
     result = json.loads(
         validate_page_delivery(
             json.dumps(delivered),
@@ -352,5 +318,5 @@ def test_page_update_response_uses_the_same_cell_proof(kb_dir, qualified, cached
             original_excerpts=excerpts,
         )
     )
-    assert (VISIBLE_PATH if qualified else LITERAL_PATH) in result["content"]
+    assert VISIBLE_PATH in result["content"]
     assert target.read_text() == old and json.dumps(value) == before

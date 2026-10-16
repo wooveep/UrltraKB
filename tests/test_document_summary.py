@@ -18,7 +18,7 @@ async def generate_summary(messages, stage, originals, sections, live_llm):
         bundle=live_llm.credentials,
         response_format={"type": "json_object"},
         max_tokens=512,
-        numeric_sources=[item["content"] for item in originals],
+        original_sources=[item["content"] for item in originals],
         original_excerpts=SourceExcerpts(originals),
         prompt_version=PROMPT_VERSION,
         response_protocol="summary-json",

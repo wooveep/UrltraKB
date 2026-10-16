@@ -26,7 +26,7 @@ def page_inputs(kb_dir):
     source = "During recovery inspect /system/config/state.\n"
     path = kb_dir / "wiki/concepts/recovery.md"
     atomic_write_text(path, original)
-    patch = PageUpdate(original, originals=[source], preserved_fragments=(annotation,))
+    patch = PageUpdate(original, preserved_fragments=(annotation,))
     excerpts = SourceExcerpts([source])
     messages = [
         {"role": "system", "content": "Compile only the supplied original facts. Return JSON."},
@@ -45,14 +45,14 @@ def page_inputs(kb_dir):
                 {
                     "block_id": patch.request()["blocks"][-1]["id"],
                     "operation": "replace",
-                    "content": "During recovery inspect `/systen/config/state`.\n",
+                    "content": "[[original:x9.9]]\n",
                 }
             ],
         }
     )
     checkpoints = CompileCheckpoints(
         kb_dir,
-        SimpleNamespace(task_id="b" * 32, parent_task_id=None),
+        SimpleNamespace(task_id="b" * 32, parent_task_id=None, compiler_request_version=2),
         {"document": "manual"},
         {"protocol": "stale-page-originals"},
     )
@@ -154,7 +154,7 @@ async def test_failed_repair_keeps_human_content_and_cannot_reopen_its_send_allo
         request.node.user_properties.append(("http_sends", len(service.requests)))
     assert path.read_bytes() == before
     entry = json.loads(checkpoints.path.read_text())["entries"][key]
-    assert entry["repair_used"] and entry["failure_code"] == "page_literal_conflict"
+    assert entry["repair_used"] and entry["failure_code"] == "page_excerpt_invalid"
     assert checkpoints.load(key, digest(excerpts.messages(messages))) is None
     [failed] = read_requests(kb_dir)
     assert failed.state == "failed" and failed.send_status == "sent"
@@ -164,7 +164,7 @@ async def test_failed_repair_keeps_human_content_and_cannot_reopen_its_send_allo
 
 @pytest.mark.live
 @pytest.mark.asyncio
-async def test_current_page_repairs_only_the_unproven_path_with_real_flash(
+async def test_current_page_repairs_only_the_unknown_reference_with_real_flash(
     kb_dir, monkeypatch, live_llm
 ):
     from ultrakb.agent.compiler import _llm_call_page_async
@@ -205,7 +205,7 @@ async def test_current_page_repairs_only_the_unproven_path_with_real_flash(
     wire = live_llm.requests[-1]
     assert wire["model"] == "deepseek-flash" and wire["max_tokens"] == 512
     assert wire["reasoning_effort"] == "none" and wire["thinking"] == {"type": "disabled"}
-    assert "page_literal_conflict" in str(sent["messages"])
+    assert "page_excerpt_invalid" in str(sent["messages"])
     assert "`/system/config/state`" in delivered["content"]
     assert "/systen/config/state" not in delivered["content"]
     assert patch.preserved_fragments[0] in delivered["content"]
@@ -218,4 +218,4 @@ async def test_current_page_repairs_only_the_unproven_path_with_real_flash(
     assert path.read_bytes() == patch.original.encode()
     entry = json.loads(checkpoints.path.read_text())["entries"][key]
     assert entry["request_digest"] == signature and entry["repair_used"]
-    assert entry["failure_code"] == "page_literal_conflict"
+    assert entry["failure_code"] == "page_excerpt_invalid"

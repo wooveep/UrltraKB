@@ -118,14 +118,32 @@ class PageFigures:
     def ids(self) -> tuple[str, ...]:
         return tuple(r["id"] for r in self.ranges)
 
-    def message(self) -> dict:
+    def message(self, *, compact: bool = False) -> dict:
+        ranges = self.ranges
+        sources = {}
+        if compact:
+            projected = []
+            for value in ranges:
+                source = {
+                    k: v
+                    for k, v in value.items()
+                    if k not in {"id", "location", "label", "figures"}
+                }
+                identity = digest(source)
+                sources[identity] = source
+                projected.append(
+                    {k: value[k] for k in ("id", "location", "label", "figures")}
+                    | {"source": identity}
+                )
+            ranges = tuple(projected)
         return {
             "role": "user",
             "content": "Figure source ranges:\n"
             + json.dumps(
                 {
                     "protocol": "page-source-ranges-v2",
-                    "ranges": self.ranges,
+                    "ranges": ranges,
+                    **({"sources": sources} if compact else {}),
                     "source_ranges_schema": {
                         "type": "array",
                         "minItems": 1,

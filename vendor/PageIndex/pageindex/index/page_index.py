@@ -77,8 +77,28 @@ async def check_title_appearance(item, page_list, start_index=1, model=None, pol
                    'the offsets refer to the original, unchanged pages. Also return '
                    '"belongs_to_parent": true ONLY if source context places this heading '
                    'inside that parent section, not a neighboring operation or chapter.')
-    response = await llm_acompletion(model=model, prompt=prompt, usage_stage="verification")
-    response = extract_json(response)
+    from ..errors import IndexCapacityError
+    from .request_budget import partition_async
+    try:
+        response = extract_json(await llm_acompletion(
+            model=model, prompt=prompt, usage_stage="verification"))
+    except IndexCapacityError:
+        async def check_fragment(fragment):
+            parent = {'title': boundary.title, 'start': boundary.start, 'end': boundary.end} if boundary else None
+            question = (
+                f'Check section heading {title!r} on physical page {page_number}. '
+                'Only that physical page can support answer yes; adjacent pages provide '
+                'conditions only. Repeated headers, TOC references and ordinary words '
+                'are not section headings. Source fragments retain native physical tags. '
+                'Return JSON with answer yes/no, thinking, and belongs_to_parent boolean. '
+                f'Confirmed parent boundary: {parent}.\nOriginal pages:\n{fragment}'
+            )
+            return extract_json(await llm_acompletion(
+                model=model, prompt=question, usage_stage="verification"))
+        response = await partition_async(
+            adjacent, check_fragment,
+            lambda left, right: left if left.get('answer') == 'yes' else right,
+        )
     return finish_title_verification(item, response, page_list, start_index, boundary)
 
 async def check_title_appearance_in_start(title, page_text, model=None, logger=None):    
@@ -100,8 +120,24 @@ async def check_title_appearance_in_start(title, page_text, model=None, logger=N
     }}
     Directly return the final JSON structure. Do not output anything else."""
 
-    response = await llm_acompletion(model=model, prompt=prompt, usage_stage="verification")
-    response = extract_json(response)
+    from ..errors import IndexCapacityError
+    from .request_budget import partition_async
+    try:
+        response = extract_json(await llm_acompletion(
+            model=model, prompt=prompt, usage_stage="verification"))
+    except IndexCapacityError:
+        # Only the initial source fragment can prove a page-start heading.
+        async def check_fragment(fragment):
+            question = (
+                f'Check whether {title!r} is the first heading, with no earlier content, '
+                'at the beginning of this page fragment. Return JSON with start_begin '
+                f'yes/no and thinking.\nOriginal fragment:\n{fragment}'
+            )
+            return extract_json(await llm_acompletion(
+                model=model, prompt=question, usage_stage="verification"))
+        response = await partition_async(
+            page_text, check_fragment, lambda left, right: left,
+        )
     if logger:
         logger.info(f"Response: {response}")
     return response.get("start_begin", "no")
@@ -206,7 +242,7 @@ def check_if_toc_transformation_is_complete(content, toc, model=None):
     json_content = extract_json(response)
     return json_content.get('completed', 'no')
 
-def extract_toc_content(content, model=None):
+def _extract_toc_content_once(content, model=None):
     prompt = f"""
     Your job is to extract the full table of contents from the given text, replace ... with :
 
@@ -281,7 +317,7 @@ def toc_extractor(page_list, toc_page_list, model):
 
 
 
-def toc_index_extractor(toc, content, model=None):
+def _toc_index_extractor_once(toc, content, model=None):
     print('start toc_index_extractor')
     toc_extractor_prompt = """
     You are given a table of contents in a json format and several pages of a document, your job is to add the physical_index to the table of contents in the json format.
@@ -311,7 +347,7 @@ def toc_index_extractor(toc, content, model=None):
 
 
 
-def toc_transformer(toc_content, model=None):
+def _toc_transformer_once(toc_content, model=None):
     print('start toc_transformer')
     init_prompt = """
     You are given a table of contents, You job is to transform the whole table of content into a JSON format included table_of_contents.
@@ -497,7 +533,7 @@ def page_list_to_group_text(page_contents, token_lengths, max_tokens=20000, over
     print('divide page_list to groups', len(subsets))
     return subsets
 
-def add_page_number_to_toc(part, structure, model=None):
+def _add_page_number_to_toc_once(part, structure, model=None):
     fill_prompt_seq = """
     You are given an JSON structure of a document and a partial part of the document. Your task is to check if the title that is described in the structure is started in the partial given document.
 
@@ -543,7 +579,7 @@ def remove_first_physical_index_section(text):
     return text
 
 ### add verify completeness
-def generate_toc_continue(toc_content, part, model=None, policy=None):
+def _generate_toc_continue_once(toc_content, part, model=None, policy=None):
     print('start generate_toc_continue')
     prompt = """
     You are an expert in extracting hierarchical tree structure.
@@ -589,10 +625,10 @@ def generate_toc_continue(toc_content, part, model=None, policy=None):
     response, finish_reason = llm_completion(model=model, prompt=prompt, return_finish_reason=True)
     if finish_reason == 'finished':
         return extract_json(response)
-    raise Exception(f'finish reason: {finish_reason}')
+    raise IndexOutputLimitError(f'finish reason: {finish_reason}')
 
 ### add verify completeness
-def generate_toc_init(part, model=None, policy=None):
+def _generate_toc_init_once(part, model=None, policy=None):
     print('start generate_toc_init')
     prompt = """
     You are an expert in extracting hierarchical tree structure, your task is to generate the tree structure of the document.
@@ -624,7 +660,7 @@ def generate_toc_init(part, model=None, policy=None):
     if finish_reason == 'finished':
          return extract_json(response)
     else:
-        raise Exception(f'finish reason: {finish_reason}')
+        raise IndexOutputLimitError(f'finish reason: {finish_reason}')
 
 def process_no_toc(page_list, start_index=1, model=None, logger=None, policy=None, boundary=None):
     page_contents=[]
@@ -813,12 +849,15 @@ async def single_toc_item_index_fixer(section_title, content, model=None):
     Directly return the final JSON structure. Do not output anything else."""
 
     prompt = toc_extractor_prompt + '\nSection Title:\n' + str(section_title) + '\nDocument pages:\n' + content
-    response = await llm_acompletion(model=model, prompt=prompt, usage_stage="correction")
-    json_content = extract_json(response)
-    physical_index = json_content.get('physical_index')
-    if physical_index is None:
-        return None
-    return convert_physical_index_to_int(physical_index)
+    from .request_budget import partition_async
+    async def locate(fragment):
+        request = toc_extractor_prompt + '\nSection Title:\n' + str(section_title) + '\nDocument pages:\n' + fragment
+        response = await llm_acompletion(model=model, prompt=request, usage_stage="correction")
+        physical_index = extract_json(response).get('physical_index')
+        return convert_physical_index_to_int(physical_index) if physical_index is not None else None
+    return await partition_async(
+        content, locate, lambda left, right: left if left is not None else right,
+    )
 
 
 
@@ -1338,3 +1377,42 @@ def validate_and_truncate_physical_indices(toc_with_page_number, page_list_lengt
         print(f"Truncated {len(truncated_items)} TOC items that exceeded document length")
      
     return toc_with_page_number
+
+
+# These are explicit stage-specific partitions, not opaque prompt truncation.
+from .request_budget import (
+    bounded_targets, merge_entries, navigation_context, partition_call,
+)
+from ..errors import IndexOutputLimitError
+
+
+def extract_toc_content(content, model=None):
+    return partition_call(content, lambda part: _extract_toc_content_once(part, model),
+                          lambda first, second: first + "\n" + second)
+
+
+def toc_transformer(toc_content, model=None):
+    return partition_call(toc_content, lambda part: _toc_transformer_once(part, model), merge_entries)
+
+
+def generate_toc_init(part, model=None, policy=None):
+    return partition_call(part, lambda text: _generate_toc_init_once(text, model, policy), merge_entries)
+
+
+def generate_toc_continue(toc_content, part, model=None, policy=None):
+    previous = list(toc_content)
+    def run(text):
+        incoming = _generate_toc_continue_once(navigation_context(previous), text, model, policy)
+        previous.extend(incoming)
+        return incoming
+    return partition_call(part, run, merge_entries)
+
+
+def add_page_number_to_toc(part, structure, model=None):
+    return bounded_targets(structure, part,
+                           lambda entries, text: _add_page_number_to_toc_once(text, entries, model))
+
+
+def toc_index_extractor(toc, content, model=None):
+    return bounded_targets(toc, content,
+                           lambda entries, text: _toc_index_extractor_once(entries, text, model))

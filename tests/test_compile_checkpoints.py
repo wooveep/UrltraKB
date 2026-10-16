@@ -333,7 +333,6 @@ def test_application_retry_restores_plan_and_summary_with_one_send_left(kb_dir):
                         "content": "# Winter operation\n\nSupervision required.",
                     }
                 ),
-                numeric_sources=[original],
             )
         )
         publish_compile_results(

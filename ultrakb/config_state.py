@@ -105,6 +105,17 @@ def capture_config(kb_dir: Path, **wait_options) -> ConfigSnapshot:
     kb_dir = kb_dir.resolve()
     if not kb_ingest_lock_held(kb_dir / ".ultrakb"):
         raise RuntimeError("Configuration is fixed only after acquiring execution permission")
+    from ultrakb.capacity_migration import migrate_settings
+
+    credentials = config.resolve_credential_bundle(kb_dir)
+    effective_before, sources_before = config.resolve_effective_config(kb_dir)
+    if sources_before.get("model_capacity") == "global":
+        global_credentials, _ = config.resolve_connection_credentials(
+            model=effective_before["model"]
+        )
+        if global_credentials.base_url == credentials.base_url:
+            migrate_settings(None, base_url=global_credentials.base_url)
+    migrate_settings(kb_dir, base_url=credentials.base_url)
     paths = (
         kb_dir / ".ultrakb/config.yaml",
         kb_dir / ".env",

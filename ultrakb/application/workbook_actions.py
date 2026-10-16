@@ -16,6 +16,7 @@ def retry_worksheet(
     scope: KnowledgeScope | None = None,
     source_revision_id: str | None = None,
     unit_revision_id: str | None = None,
+    retry_failed_response: bool = False,
 ) -> IngestResult:
     from ultrakb.application.source_retry import retry_source
 
@@ -27,4 +28,5 @@ def retry_worksheet(
         scope=scope,
         source_revision_id=source_revision_id,
         unit_revision_id=unit_revision_id,
+        retry_failed_response=retry_failed_response,
     )

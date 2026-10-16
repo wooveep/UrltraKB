@@ -17,6 +17,7 @@ class ImportProgress(QWidget):
         self._checked = self._terminal = None
         self._available = None
         self._generation = 0
+        self._question_request = None
         self._observed = {}
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -46,6 +47,7 @@ class ImportProgress(QWidget):
         self._checked = self._terminal = None
         self._available = None
         self._generation += 1
+        self._question_request = None
         self.ask.setEnabled(False)
         self.show()
         self.poll()
@@ -107,6 +109,9 @@ class ImportProgress(QWidget):
         generation = self._generation
         request = self.window._open_request_id
         root, view_id = self.root, self.view_id
+        if continue_action:
+            self._question_request = (request, object())
+        question_request = self._question_request
         self.ask.setEnabled(False)
 
         def loaded(rows, error):
@@ -114,12 +119,18 @@ class ImportProgress(QWidget):
             self._available = bool(available)
             self.ask.setEnabled(bool(available))
             if not available:
+                if question_request == self._question_request:
+                    self._question_request = None
                 self.status.setText(
                     f"{root.name}：尚无可用于提问的内容。请查看导入任务详情，"
                     "在资料行“更多”中恢复未完成项。"
                 )
-            elif continue_action:
-                self.open_target(root, view_id)
+            elif question_request is not None and question_request == self._question_request:
+                # A refresh replaces the read, not the user's still-current
+                # click. Older reads cannot consume a newer click's intent.
+                self._question_request = None
+                if question_request[0] == self.window._open_request_id:
+                    self.open_target(root, view_id)
 
         self.window.io.submit(
             lambda: document_inventory(root, scope=live_scope(root, view_id)),

@@ -384,6 +384,7 @@ class CompletionExecutor:
         self.question_capacity: TokenMeasure | None = None
         self.compile_capacity: TokenMeasure | None = None
         self.index_capacity_policy: dict | None = None
+        self.request_measures: dict = {}
         self._answer_input_tokens = 0
         self._tool_output_tokens = 0
         self._retrieval_slots = threading.BoundedSemaphore(1)
@@ -422,11 +423,12 @@ class CompletionExecutor:
             self.image_deliveries = ImageDeliveries()
             self.question_capacity = None
             self._answer_input_tokens = self._tool_output_tokens = 0
+            self._answer_input_limit = None
 
     def cancel(self) -> None:
         self._stop_requested.set()
 
-    def check_capacity_input(self, payload, *, role="answer") -> None:
+    def check_capacity_input(self, payload, *, role="answer", limit=None) -> None:
         from ultrakb.llm_images import require_text_input
 
         require_text_input(payload)
@@ -435,7 +437,8 @@ class CompletionExecutor:
         if role == "answer":
             with self._guard:
                 self._answer_input_tokens, self._tool_output_tokens = tokens, 0
-        if measure is not None and tokens > measure.input_limit:
+                self._answer_input_limit = limit
+        if measure is not None and tokens > (measure.input_limit if limit is None else limit):
             message = (
                 "Prepared model input exceeds the captured capacity; current input is retained"
             )
@@ -450,7 +453,8 @@ class CompletionExecutor:
             return True
         tokens = max(minimum_tokens, measure.payload_tokens(payload) + 512)
         with self._guard:
-            if self._answer_input_tokens + self._tool_output_tokens + tokens > measure.input_limit:
+            limit = getattr(self, "_answer_input_limit", None) or measure.input_limit
+            if self._answer_input_tokens + self._tool_output_tokens + tokens > limit:
                 return False
             self._tool_output_tokens += tokens
         return True
@@ -507,54 +511,40 @@ class CompletionExecutor:
         finally:
             _ACTIVE.reset(token)
 
-    def _kwargs(self, role: str, request: ModelRequest) -> dict:
-        from ultrakb.llm_request_options import generation_kwargs
-        from ultrakb.llm_runtime import audit_step_headers
+    def prepare_request(self, role: str, request: ModelRequest) -> dict:
+        """Assemble the complete SDK input without admitting or sending a call.
 
-        self.policy.check()
-        bundle = self.bindings.credentials()
-        payload = request.payload()
-        messages = payload["messages"]
-        from ultrakb.llm_images import require_text_input
+        Capacity planners use this same seam as transport. Credentials stay in
+        memory; only the credential-free input projection may be persisted.
+        """
+        from ultrakb.llm_request_options import prepare_request
 
-        require_text_input(messages)
-        model = self.bindings.model(role)
-        captured_options = self.bindings.generation_options(role)
-        # Cache segments are provider hints, never application cache hits.
-        if "anthropic" in model or "claude" in model:
-            for i in payload["cache_segments"]:
-                content = messages[i].get("content")
-                if isinstance(content, str):
-                    messages[i]["content"] = [
-                        {"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}
-                    ]
-        kwargs = {
-            "model": model,
-            "messages": messages,
-            "api_key": bundle.api_key,
-            "base_url": bundle.base_url,
-            "num_retries": 0,
-            "max_retries": 0,
-            **generation_kwargs(model, bundle.base_url, captured_options, payload["options"]),
-        }
-        if payload["tools"] is not None:
-            kwargs["tools"] = payload["tools"]
-        headers = audit_step_headers(bundle.extra_headers, request.stage)
-        if headers:
-            kwargs["extra_headers"] = headers
-        timeout = bundle.timeout
-        if self.policy.deadline is not None:
-            remaining = self.policy.deadline - time.monotonic()
-            timeout = min(timeout, remaining) if timeout is not None else remaining
-        if timeout is not None:
-            kwargs["timeout"] = timeout
-        measure = self.compile_capacity
+        kwargs = prepare_request(self.bindings, self.policy, role, request)
+        measure = self.request_measure(role)
+        if measure and measure.policy.get("context_window_tokens"):
+            if not any(k in kwargs for k in ("max_tokens", "max_completion_tokens")):
+                reserve = measure.policy.get("output_reserve_tokens")
+                if reserve:
+                    kwargs["max_tokens"] = reserve
+        return kwargs
+
+    def request_measure(self, role):
         if role == "document_index" and self.index_capacity_policy is not None:
-            measure = TokenMeasure(self.index_capacity_policy)
-        if role in {"compile", "document_index"} and measure is not None:
-            from ultrakb.execution_capacity import require_request_capacity
+            return TokenMeasure(self.index_capacity_policy)
+        if role == "compile":
+            return self.compile_capacity
+        return self.request_measures.get(role) or self.question_capacity
+
+    def _kwargs(self, role: str, request: ModelRequest) -> dict:
+        kwargs = self.prepare_request(role, request)
+        measure = self.request_measure(role)
+        if measure is not None:
+            from ultrakb.execution_capacity import request_input, require_request_capacity
+            from ultrakb.request_budget import input_limit
 
             require_request_capacity(measure, kwargs, operation=role)
+            if role == "answer":
+                self.check_capacity_input(request_input(kwargs), limit=input_limit(measure, kwargs))
         return kwargs
 
     @contextmanager
@@ -595,8 +585,11 @@ class CompletionExecutor:
             yield observed
 
     def _result(self, response, observed, logical_id: str, on_response=None) -> CompletionResult:
+        from ultrakb.summary_delivery import preserve_responses_status
+
         if observed is not None:
             observed.finish(response)
+            preserve_responses_status(response, observed.native_response_status)
         if on_response is not None:
             on_response(response)
         self.policy.check()  # Retain spent usage, then discard a late result.
@@ -625,7 +618,9 @@ class CompletionExecutor:
 
     def complete(self, role: str, request: ModelRequest, *, on_response=None) -> CompletionResult:
         self.policy.check()
-        self.check_capacity_input(request.payload(), role=role)
+        from ultrakb.request_budget import PreparedRequest
+
+        prepared = PreparedRequest.capture(self._kwargs(role, request))
         while not self._slots.acquire(timeout=0.05):
             self.policy.check()
         try:
@@ -634,7 +629,7 @@ class CompletionExecutor:
                 self.policy.check()
                 try:
                     with self.attempt(role, request, logical_id) as observed:
-                        response = litellm.completion(**self._kwargs(role, request))
+                        response = litellm.completion(**prepared.kwargs(self.policy))
                         return self._result(response, observed, logical_id, on_response)
                 except Exception as exc:
                     self.model_errors.append(exc)
@@ -678,7 +673,9 @@ class CompletionExecutor:
         self, role: str, request: ModelRequest, *, on_response=None
     ) -> CompletionResult:
         self.policy.check()
-        self.check_capacity_input(request.payload(), role=role)
+        from ultrakb.request_budget import PreparedRequest
+
+        prepared = PreparedRequest.capture(self._kwargs(role, request))
         while not self._slots.acquire(blocking=False):
             self.policy.check()
             await asyncio.sleep(0.01)
@@ -689,9 +686,10 @@ class CompletionExecutor:
                 try:
                     with self.attempt(role, request, logical_id) as observed:
                         response = await self.wait_response(
-                            litellm.acompletion(**self._kwargs(role, request))
+                            litellm.acompletion(**prepared.kwargs(self.policy)),
+                            on_response=on_response,
                         )
-                        return self._result(response, observed, logical_id, on_response)
+                        return self._result(response, observed, logical_id)
                 except Exception as exc:
                     self.model_errors.append(exc)
                     self.policy.check()
@@ -774,6 +772,10 @@ def executor_from_snapshot(snapshot, cancelled: Callable[[], bool]) -> Completio
     executor.index_capacity_policy = captured_capacity_policy(
         snapshot, bindings.model("document_index")
     )
+    for role in ROLES - {"compile", "document_index"}:
+        role_capacity = captured_capacity_policy(snapshot, bindings.model(role))
+        if not role_capacity["unknown_reason"]:
+            executor.request_measures[role] = TokenMeasure(role_capacity)
     return executor
 
 

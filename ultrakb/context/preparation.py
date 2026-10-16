@@ -84,7 +84,7 @@ def prepare_conversation_input(
         raise ContextCapacityError("Conversation context requires captured model capacity")
     measure.require_current(question)
     prepared = recent_input(session, question)
-    diagnostics = {
+    diagnostics: dict = {
         "status": "recent_only",
         "committed_turns": session.turn_count,
         "committed_user_tokens": sum(measure.count(t.user_text) for t in session.turns),

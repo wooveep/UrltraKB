@@ -525,37 +525,29 @@ def test_import_update_keeps_prior_conditions_and_adds_all_new_sections(kb_dir):
     assert "Maintenance: 48 hours." in body
 
 
-def test_import_blocks_proven_numeric_conflict_after_one_page_repair(kb_dir):
+def test_import_accepts_generated_numeric_content_without_spending_a_repair(kb_dir):
+    from ultrakb.agent.source_excerpts import SourceExcerpts
+
     table = (
         "# Limits\n\n| Object | Attribute | Condition | Value |\n"
         "| --- | --- | --- | --- |\n| River Valve | Latency | Winter | {} |\n"
     )
-    failure = None
-    checkpoints = _checkpoints(kb_dir)
-    for attempt in range(2):
-        with pytest.raises(PageResponseError, match="page_numeric_conflict") as raised:
-            validate_page_delivery(
-                json.dumps({"description": "Latency", "content": table.format("24 ms")}),
-                numeric_sources=[table.format("12 ms")],
-            )
-        failure = raised.value
-        if attempt == 0:
-            checkpoints.claim_repair("page", "request")
-            assert (
-                "page_numeric_conflict"
-                in page_repair_message(failure.code, str(failure))["content"]
-            )
-    with pytest.raises(PageResponseError):
-        checkpoints.claim_repair("page", "request")
+    content = table.format("24 ms")
+    delivered = json.loads(
+        validate_page_delivery(
+            json.dumps({"description": "Latency", "content": content}),
+            original_excerpts=SourceExcerpts([table.format("12 ms")]),
+        )
+    )
     wiki = kb_dir / "wiki"
     publish_compile_results(
         wiki,
         "latency",
         _plan(wiki, {"create": [{"name": "latency"}]}),
         summary="Latency.",
-        concept_results=[failure],
+        concept_results=[("latency", delivered["content"], False, delivered["description"])],
     )
-    assert not (wiki / "concepts/latency.md").exists()
+    assert content in (wiki / "concepts/latency.md").read_text()
 
 
 @pytest.mark.parametrize("changed", [False, True])

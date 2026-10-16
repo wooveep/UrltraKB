@@ -5,7 +5,6 @@ import json
 from functools import lru_cache
 from importlib.resources import files
 from pathlib import Path
-from types import SimpleNamespace
 
 from ultrakb.processing_policy import ModelCapacity, ProcessingDecision
 
@@ -18,31 +17,48 @@ def _model_catalog() -> tuple[dict, str]:
 
 
 def capacity_policy(
-    config: dict, *, custom_endpoint: bool, origin: str | None = None, tokenizer_snapshot=None
+    config: dict,
+    *,
+    custom_endpoint: bool,
+    origin: str | None = None,
+    tokenizer_snapshot=None,
+    base_url: str | None = None,
 ) -> dict:
     model = config["model"]
     catalog, fingerprint = _model_catalog()
     explicit = config.get("model_capacity")
+    configured = explicit is not None
+    if explicit is None and (not custom_endpoint or base_url):
+        from ultrakb.model_capabilities import connection_capacity
+
+        explicit = connection_capacity(model, base_url)
     settings = ModelCapacity.model_validate(explicit) if explicit is not None else ModelCapacity()
+    byte_guard = settings.max_input_bytes
     measurement_model = settings.tokenizer_model or (None if custom_endpoint else model)
     # Exact keys only: do not remove provider prefixes, infer aliases, or let
     # token_counter's fallback encoding imply that a private model is known.
     card = catalog.get(measurement_model, {})
     known_measurement = card.get("litellm_provider") == "openai" and card.get("mode") == "chat"
+    upper_bound = settings.measurement == "utf8_token_upper_bound"
+    known_measurement = known_measurement or upper_bound
     from ultrakb.model_tokenizer import tokenizer_asset
 
     asset = tokenizer_snapshot or tokenizer_asset(config)
     if asset:
         known_measurement = True
-    if known_measurement and not asset:
+    if known_measurement and not asset and not upper_bound:
         import tiktoken
 
         try:
             tiktoken.encoding_name_for_model(measurement_model)
         except KeyError:
             known_measurement = False
-    source = "explicit" if explicit is not None else "bundled_model_catalog"
-    if explicit is not None and origin:
+    source = (
+        "explicit"
+        if configured
+        else ("service_profile" if explicit is not None else "bundled_model_catalog")
+    )
+    if configured and origin:
         source += ":" + origin
     limit = settings.max_input_tokens
     reason = None
@@ -65,6 +81,9 @@ def capacity_policy(
             "Capacity preset belongs to another model; "
             "select its connection example or update capacity"
         )
+    if byte_guard is not None:
+        limit = byte_guard
+        reason = None if settings.applies_to_model in {None, model} else reason
     return {
         "model": model,
         "measurement_model": measurement_model if known_measurement else None,
@@ -75,6 +94,24 @@ def capacity_policy(
         "unknown_reason": reason,
         "catalog_fingerprint": fingerprint,
         "tokenizer_asset": asset,
+        **({"measurement_unit": "utf8_byte"} if byte_guard is not None else {}),
+        **({"measurement_unit": "token_upper_bound"} if upper_bound else {}),
+        **(
+            {"max_output_tokens": settings.max_output_tokens}
+            if settings.max_output_tokens is not None
+            else {}
+        ),
+        **(
+            {"max_request_bytes": settings.max_request_bytes}
+            if settings.max_request_bytes is not None
+            else {}
+        ),
+        **({"provenance": settings.provenance} if settings.provenance else {}),
+        **(
+            {"input_ceiling": settings.max_input_tokens}
+            if settings.context_window_tokens is not None
+            else {}
+        ),
     }
 
 
@@ -85,6 +122,7 @@ def captured_capacity_policy(snapshot, model: str) -> dict:
         {**values["effective"], "model": model},
         custom_endpoint=bool(values["credentials"]["base_url"]),
         tokenizer_snapshot=values.get("tokenizer_asset"),
+        base_url=values["credentials"]["base_url"],
     )
 
 
@@ -104,7 +142,31 @@ def require_compile_capacity(measure, kwargs: dict) -> None:
 def require_request_capacity(measure, kwargs: dict, *, operation: str) -> None:
     """Enforce input capacity after SDK options have been merged for a role."""
     from ultrakb.model_tokenizer import ContextCapacityError
+    from ultrakb.request_budget import input_limit
 
+    limit = input_limit(measure, kwargs)
+    payload = request_input(kwargs)
+    measured = measure.payload_tokens(payload)
+    if measured > limit:
+        unit = getattr(measure, "unit", "token")
+        boundary = "local UTF-8 byte guardrail" if unit == "utf8_byte" else "token input limit"
+        raise ContextCapacityError(
+            f"Complete {operation} request exceeds captured model capacity; "
+            f"{measured} > {limit} local input units ({boundary}). "
+            "Review model_capacity input/tokenizer settings; "
+            "original input and completed checkpoints are retained"
+        )
+    if byte_limit := measure.policy.get("max_request_bytes"):
+        size = len(json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8"))
+        if size > byte_limit:
+            raise ContextCapacityError(
+                f"Complete {operation} request exceeds the explicit application byte guard; "
+                f"{size} > {byte_limit} UTF-8 bytes"
+            )
+
+
+def request_input(kwargs: dict) -> dict:
+    """Credential-free wire input, shared by admission, diagnostics and transport."""
     transport = {
         "model",
         "api_key",
@@ -120,14 +182,7 @@ def require_request_capacity(measure, kwargs: dict, *, operation: str) -> None:
     # OpenAI-compatible SDKs merge extra_body into the HTTP JSON object. Count
     # those fields once in their wire shape, as the window admission does.
     payload.update(payload.pop("extra_body", {}))
-    measured = measure.payload_tokens(payload)
-    if measured > measure.input_limit:
-        raise ContextCapacityError(
-            f"Complete {operation} request exceeds captured model capacity; "
-            f"{measured} > {measure.input_limit} local input units. "
-            "Review model_capacity input/tokenizer settings; "
-            "original input and completed checkpoints are retained"
-        )
+    return payload
 
 
 def select_execution_mode(
@@ -141,8 +196,6 @@ def select_execution_mode(
 ) -> ProcessingDecision:
     if processing.length_class == "long":
         return processing
-    import litellm
-
     from ultrakb.agent.compiler import get_agents_md, short_document_messages
     from ultrakb.agent.source_windows import CompileSourceWindows
     from ultrakb.config import resolve_credential_bundle, resolve_effective_config
@@ -157,6 +210,7 @@ def select_execution_mode(
         custom_endpoint=bool(credentials.base_url),
         origin=sources.get("model_capacity", "default"),
         tokenizer_snapshot=captured.get("tokenizer_asset") if captured else None,
+        base_url=credentials.base_url,
     )
     updates = {
         "capacity_model": policy["model"],
@@ -179,21 +233,28 @@ def select_execution_mode(
         original_evidence=original,
     )
     try:
+        from ultrakb.agent.compile_capacity import CompileCapacity
+        from ultrakb.agent.summary_protocol import summary_response_format
+        from ultrakb.llm_execution import CompletionExecutor, RoleBindings
         from ultrakb.model_tokenizer import TokenMeasure
+        from ultrakb.request_budget import fits_request, input_limit
 
-        measure = TokenMeasure(policy)
-        # Use the public custom-tokenizer seam to prevent LiteLLM from guessing
-        # a fallback model or downloading a provider tokenizer.
-        tokenizer = measure.tokenizer or SimpleNamespace(
-            encode=lambda text: SimpleNamespace(ids=measure.encode(text))
+        response_format = summary_response_format(
+            "summary-page-json", model=config["model"], base_url=credentials.base_url
         )
-        measured = litellm.token_counter(
-            model=policy["measurement_model"],
-            messages=messages,
-            custom_tokenizer={"type": "huggingface_tokenizer", "tokenizer": tokenizer},
+        sizing = CompileCapacity(
+            CompletionExecutor(
+                RoleBindings(config["model"], credentials, generation=config.get("role_generation"))
+            ),
+            TokenMeasure(policy),
         )
-        if litellm.disable_token_counter or type(measured) is not int or measured <= 0:
-            raise ValueError("Invalid token measurement")
+        payload = sizing.payload(messages, {"response_format": response_format})
+        measure = sizing.measure
+        if measure is None:
+            raise ValueError("Unknown request measure")
+        measured = measure.payload_tokens(payload)
+        updates["input_limit"] = input_limit(measure, payload)
+        insufficient = not fits_request(measure, payload)
     except Exception:
         return processing.model_copy(
             update={
@@ -201,7 +262,6 @@ def select_execution_mode(
                 "capacity_reason": "The first request could not be measured reliably",
             }
         )
-    insufficient = measured > policy["input_limit"]
     return processing.model_copy(
         update={
             **updates,

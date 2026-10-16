@@ -1,0 +1,895 @@
+{
+  "schema_version": 1,
+  "document": "CNware-WinStack-V9-4-0-接口开发指南",
+  "response_sha256": "49c3d3e62345a94c5c5127fc346b3109ba0a7f098e601744893b995506737e72",
+  "response": "{\"description\":\"Compilation of selected windows from the CNware WinStack V9.4.0 接口开发指南 (Interface Development Guide), a Chinese-language REST API guide for virtual-machine deployment (template- and parameter-based), cloud-init, task/VM query interfaces, delete/recycle/modify operations and device (disk, NIC) management, covering printed pages 44–72 of the original.\",\"sections\":[{\"id\":\"section-1\",\"content\":\"**What this section covers.** The supplied window opens on printed 第45页 inside a numbered JSON listing and runs to the opening of the 部署虚拟机完整参数示例 (complete deployment parameter example) on printed 第50页. Supplied page markers run from physical page 57 to physical page 62; in every window supplied for this guide the printed page label equals the physical page marker minus 12. The subjects here are: the tail of the 使用模板配置部署虚拟机 example (bridge interfaces and disks), section 4.1.7.9 虚拟机使用cloud init, the cloudInitReq request object with its field rules, and the first lines of the complete parameter example.\\n\\n**How the quotes are reproduced.** Each fenced listing reproduces a supplied page block: original line numbers, indentation, key names and value spellings are kept. The running header line 版权所有 ©云宏信息科技股份有限公司 that opens each supplied block and the trailing spaces the extraction uses as Markdown line breaks are omitted; all other tokens, including spaces introduced by extraction inside numbers and identifiers (`42 949672 96`, `fil ePath`, `http s://`), are kept as supplied. Figure references are recorded as image references only — their pixels were not interpreted.\\n\\n**Printed 第44页 (a separate supplied window): the start of the example continued here**\\n\\nThe request body quoted below begins on the preceding page. That page's supplied window shows the end of an earlier deployment body (lines 32–39) followed by the first ten lines of the new example, introduced by 使用模板配置部署虚拟机：指定部署完毕启动,虚拟机名称, 虚拟机hostName，cpu 大小,内存大小, ip,端口组,磁盘名字和磁盘目标存储,其他使用模板配置。同时添加一个磁盘和网卡 — \\\"deploy a virtual machine using a template configuration: specify auto-start after deployment, the virtual machine name, the virtual machine hostName, CPU size, memory size, ip, port group, disk name and disk target storage; use the template configuration for everything else, and add one disk and one network card at the same time.\\\" The extraction wraps that description line after 磁盘名字和磁.\\n\\n[[original:x2.3]]\\n\\n```text\\n第44页\\n32.\\n      \\\"bus\\\": 1,\\n33.\\n      \\\"dev\\\": \\\"vda\\\",\\n34.\\n      \\\"source\\\": 4,\\n35.\\n      \\\"poolName\\\": \\\"defaultpool\\\",\\n36.\\n      \\\"volName\\\": \\\"my_vm_disk\\\"\\n37.\\n    }\\n38.\\n  ]\\n39.\\n}\\n使用模板配置部署虚拟机：指定部署完毕启动,虚拟机名称, 虚拟机hostName，cpu 大小,内存大小, ip,端口组,磁盘名字和磁\\n盘目标存储,其他使用模板配置。同时添加一个磁盘和网卡\\n1.\\n{\\n2.\\n  \\\"isStartNewDomain\\\": true,\\n3.\\n  \\\"deployNum\\\": 1,\\n4.\\n  \\\"deployStartNo\\\": 1,\\n5.\\n  \\\"baseInfo\\\": {\\n6.\\n    \\\"name\\\": \\\"my_vm\\\",\\n7.\\n    \\\"vmHostName\\\": \\\"my_vm\\\",\\n8.\\n    \\\"domainname\\\": \\\"my_vm\\\",\\n9.\\n    \\\"cpu\\\": {\\n10.\\n      \\\"current\\\": 2\\n```\\n\\nThe block ends where that supplied window ends; the same request body continues on printed 第45页, quoted next. The 第44页 window also carries two figure references (p57_img… entries are not part of this quote) and the page marker `[Physical page 57]` after it, which is where the 第45页 content begins.\\n\\n**Printed 第45页 — lines 11–32 of the same request body**\\n\\n[[original:x1.1]]\\n\\n```text\\n第45页\\n11.\\n    },\\n12.\\n    \\\"memory\\\": {\\n13.\\n      \\\"size\\\": 42 949672 96\\n14.\\n    }\\n15.\\n  },\\n16.\\n  \\\"bridgeInterfaces\\\": [\\n17.\\n    {\\n18.\\n      \\\"ip\\\": \\\"11.22.33.46\\\",\\n19.\\n      \\\"networkType\\\": 0,\\n20.\\n      \\\"oldMac\\\": \\\"52:54:00:e1:ac:40\\\",\\n21.\\n      \\\"osMacIp\\\": {\\n22.\\n        \\\"netIpType\\\": 3,\\n23.\\n        \\\"netGateway\\\": \\\"11.22.33.254\\\",\\n24.\\n        \\\"netMask\\\": \\\"255.255.255.0\\\",\\n25.\\n        \\\"netDns\\\": null,\\n26.\\n        \\\"secondaryDns\\\": null\\n27.\\n      },\\n28.\\n      \\\"portGroupId\\\": \\\"9251eba4-2756-48b2-81dc-3937efb5eb4e\\\"\\n29.\\n    },\\n30.\\n        {\\n31.\\n      \\\"ip\\\": \\\"11.22.33.47\\\",\\n32.\\n      \\\"networkType\\\": 0,\\n```\\n\\nLine 11 closes the `cpu` object opened on the previous page and lines 12–14 close `baseInfo`'s memory member, whose `size` is written `42 949672 96` (digit spacing from extraction); this window states no unit for that field. `bridgeInterfaces` then holds two objects: the first (lines 17–29) carries `ip`, `networkType`, `oldMac`, an `osMacIp` object (`netIpType`, `netGateway`, `netMask`, `netDns`, `secondaryDns`) and a `portGroupId`; the second begins at line 30 with `ip` `11.22.33.47`, `networkType` 0 and continues on the next page. The indentation of line 30 differs from line 17 in the supplied text.\\n\\nCompiler synthesis (arithmetic only, not a documented statement): if `42 949672 96` is read as 4294967296 bytes, it equals 4 GiB, because 4294967296 ÷ 1073741824 = 4.\\n\\n**Printed 第46页 — lines 33–54**\\n\\n[[original:x1.4]]\\n\\n```text\\n第46页\\n33.\\n      \\\"osMacIp\\\": {\\n34.\\n        \\\"netIpType\\\": 3,\\n35.\\n        \\\"netGateway\\\": \\\"11.22.33.254\\\",\\n36.\\n        \\\"netMask\\\": \\\"255.255.255.0\\\",\\n37.\\n        \\\"netDns\\\": null,\\n38.\\n        \\\"secondaryDns\\\": null\\n39.\\n      },\\n40.\\n      \\\"portGroupId\\\": \\\"9251eba4-2756-48b2-81dc-3937efb5eb4e\\\"\\n41.\\n    }\\n42.\\n  ],\\n43.\\n  \\\"diskDevices\\\": [\\n44.\\n    {\\n45.\\n      \\\"bus\\\": 1,\\n46.\\n      \\\"dev\\\": \\\"vda\\\",\\n47.\\n      \\\"source\\\": 4,\\n48.\\n      \\\"poolName\\\": \\\"defaultpool\\\",\\n49.\\n      \\\"volName\\\": \\\"my_vm_disk_1\\\"\\n50.\\n    },\\n51.\\n      {\\n52.\\n      \\\"bus\\\": 1,\\n53.\\n      \\\"source\\\": 1,\\n54.\\n      \\\"poolName\\\": \\\"defaultpool\\\",\\n```\\n\\nThe second bridge interface repeats the `osMacIp` shape (same `netGateway`, `netMask`, `netDns`, `secondaryDns`) and the same `portGroupId` as the first, and does not repeat `oldMac`. `diskDevices` then starts: the first entry names `dev` `vda`, `source` 4, `poolName` `defaultpool` and `volName` `my_vm_disk_1`; a second entry begins with `bus` 1, `source` 1, `poolName` `defaultpool`, and its remaining fields are on the next page. The example therefore continues across the page boundary — the page break is an extraction boundary, not a change of example.\\n\\n**Printed 第47页 — lines 55–59, then section 4.1.7.9 虚拟机使用cloud init**\\n\\n[[original:x1.7]]\\n\\n```text\\n第47页\\n55.\\n      \\\"capacity\\\":1073741824,\\n56.\\n      \\\"volName\\\": \\\"my_vm_disk_new\\\"\\n57.\\n    }\\n58.\\n  ]\\n59.\\n}\\n4.1.7.9 虚拟机使用cloud init\\n注意:如果需要使用cloud init 自定义脚本需要调以下接口先上传文件，然后根据返回值填入部署的\\nscriptList 参数中的spath 和name 字段中。\\n接口：/api/compute/cloudInit/script/upload/{hostId}\\n接口返回：fil ePath: 脚本的路径; fil ename: 脚本文件的名字\\n1.\\n[\\n2.\\n  {\\n3.\\n    \\\"fil ePath\\\": \\\"/tmp/cloud-init/dc39e096-af1f-49e3-8c2b-1492ca8e1813\\\",\\n4.\\n    \\\"fil eName\\\": \\\"updatefor804_3.sql\\\"\\n5.\\n  }\\n6.\\n]\\n```\\n\\nThe second disk ends with `capacity` 1073741824 and `volName` `my_vm_disk_new`, closing the array and the request body at line 59. Section 4.1.7.9 then states a prerequisite (注意, note): to use a cloud-init custom script, the file must first be uploaded through the interface below, and the returned values must be filled into the `spath` and `name` fields of the deployment's `scriptList` parameter. The interface is `/api/compute/cloudInit/script/upload/{hostId}` and it returns `filePath` (the script's path) and `filename` (the script file's name) — written `fil ePath` / `fil eName` in the extraction. The response shown is a one-element array whose `fil ePath` value is `/tmp/cloud-init/dc39e096-af1f-49e3-8c2b-1492ca8e1813` and whose `fil eName` is `updatefor804_3.sql`; that path and that file name are the values later re-used in `scriptList` below. Two figures (p59_img40.png, p59_img41.png) are referenced on this page without interpretation.\\n\\n**Printed 第48页–第49页 — the cloudInitReq example**\\n\\n[[original:x1.12]]\\n\\n```text\\n第48页\\n1.\\n{\\n2.\\n    ...\\n3.\\n    \\\"cloudInitReq\\\": {\\n4.\\n        \\\"changePassWordList\\\": [\\n5.\\n            {\\n6.\\n                \\\"password\\\": \\\"2222 22\\\",\\n7.\\n                \\\"username\\\": \\\"root\\\",\\n8.\\n                \\\"sshKeyList\\\": [\\n9.\\n                    \\\"ssh-rsa AAAAB3NzaCroot@cnware-2052 44\\\"\\n10.\\n                ]\\n11.\\n            }\\n12.\\n        ],\\n13.\\n        \\\"sshKeyList\\\": [\\n14.\\n            \\\"ssh-rsa AAAAB3NzaCroot@cnware-2052 44\\\"\\n15.\\n        ],\\n16.\\n        \\\"runcmd\\\": {\\n17.\\n            \\\"cmdList\\\": [\\n18.\\n                \\\"echo '`date` cloudinit' >> /tmp/cloud-init-runcmd.log\\\",\\n19.\\n                \\\"touch /tmp/test_cloud_$(date '+%Y%m%d_%H%M%S').txt\\\"\\n20.\\n            ]\\n```\\n\\n[[original:x1.15]]\\n\\n```text\\n第49页\\n21.\\n        },\\n22.\\n        \\\"scriptList\\\": [\\n23.\\n            {\\n24.\\n                \\\"dpath\\\": \\\"/root/aaaa/bbbb/cccc\\\",\\n25.\\n                \\\"group\\\": \\\"root\\\",\\n26.\\n                \\\"mode\\\": \\\"0755\\\",\\n27.\\n                \\\"name\\\": \\\"updatefor804_3.sql\\\",\\n28.\\n                \\\"owner\\\": \\\"root\\\",\\n29.\\n                \\\"spath\\\": \\\"/tmp/cloud-init/dc39e096-af1f-49e3-8c2b-1492ca8e1813\\\"\\n30.\\n            }\\n31.\\n        ]\\n32.\\n    }\\n33.\\n}\\nchangePassWordList: 选填。 是否修改登录密码；Linux 支持多个时，任意一个用户名不存在时，全部用户都不会修改密码。\\n\\\"password\\\": \\\"2222 22\\\"， 修改密码时,必填。修改后的密码,windows 只能用明文(必须符合密码复杂性要求，否则生成随机密码\\n导致无法登录)；Linux：1. 可用明文；2. 可用密文，如生成md5 算法的密码。\\n\\\"username\\\": \\\"root\\\", 修改密码时,必填。windows 需要修改密码的用户名(用户不存在时，将创建新用户)；Linux 需要修改密码\\n的用户名(用户名不存在不会创建新用户)\\n(changePassWordList)sshKeyList: 选填。 仅windows 使用，sshkey 集合，支持多个sshkey\\n```\\n\\nField rules stated in this block (translated, conditions kept): `changePassWordList` is 选填 (optional) and controls whether the login password is changed; on Linux with several entries, if any one user name does not exist, no user's password is changed. `password` is 必填 (required) when the password is changed: on Windows only plaintext is allowed and it must satisfy the password-complexity requirements, otherwise a random password is generated and login becomes impossible; on Linux either plaintext or ciphertext (for example an md5-generated password) may be used. `username` is required when the password is changed: on Windows it is the user whose password is changed and a new user is created when it does not exist; on Linux it is the user whose password is changed and no new user is created when it does not exist. The nested `(changePassWordList)sshKeyList` is optional, Windows-only, a set of ssh keys, and multiple keys are supported (the sample value `ssh-rsa AAAAB3NzaCroot@cnware-2052 44` is a truncated key with extraction spacing).\\n\\n**Printed 第50页 — remaining field rules and the start of 部署虚拟机完整参数示例**\\n\\n[[original:x1.18]]\\n\\n```text\\n第50页\\nsshKeyList: 选填。仅支持Linux，支持多个sshkey(可选)，windows 的放到了changePassWordList 里。\\n\\\"runcmd\\\":选填。命令实体类，用户自定义命令，按顺序执行。\\n\\\"cmdList\\\": 指定命令时,必填。命令集合\\n\\\"scriptList\\\":选填。 用户自定义脚本集合。\\n\\\"dpath\\\": \\\"/root/aaaa/bbbb/cccc\\\"，指定脚本时必填。脚本在虚拟机的目标路径\\n\\\"group\\\": \\\"root\\\"，选填。属组。\\n\\\"mode\\\": \\\"0755\\\"，选填。权限(可选，默认0755)\\n\\\"name\\\": \\\"updatefor804_3.sql\\\"，必填。脚本名\\n\\\"owner\\\": \\\"root\\\"，选填。 属主(默认root)\\n\\\"spath\\\": \\\"/tmp/cloud-init/dc39e096-af1f-49e3-8c2b-1492ca8e1813\\\"，必填。脚本在物理机的源路径\\n部署虚拟机完整参数示例\\n1.\\n{\\n2.\\n    \\\"isStartNewDomain\\\": false,\\n3.\\n    \\\"deployNum\\\": \\\"3\\\",\\n4.\\n    \\\"deployStartNo\\\": \\\"2\\\",\\n5.\\n    \\\"baseInfo\\\": {\\n6.\\n        \\\"name\\\": \\\"my_vm\\\",\\n7.\\n    \\\"vmHostName\\\": \\\"my_vm\\\",\\n```\\n\\nRemaining rules: the top-level `sshKeyList` is optional and Linux-only (multiple ssh keys allowed); the Windows keys go inside `changePassWordList`. `runcmd` is optional, a command entity class of user-defined commands executed in order; `cmdList` is required once a command is specified and is the command set. `scriptList` is optional and holds user-defined scripts, where `dpath` is required when a script is specified (the script's target path in the virtual machine), `group` is optional (owning group), `mode` is optional (permission, default 0755), `name` is required (script name), `owner` is optional (owner, default root) and `spath` is required (the script's source path on the physical machine). The example that starts here is the 部署虚拟机完整参数示例 (complete deployment parameter example); it begins with `isStartNewDomain` false, `deployNum` `\\\"3\\\"`, `deployStartNo` `\\\"2\\\"` (these two values are strings, unlike the numeric values in the 第44页 example) and a `baseInfo` block. The remainder of that example — `cpu`, `memory`, `bridgeInterfaces`, `diskDevices` and `cloudInitReq` — continues in the next section of this compilation, which corresponds to printed 第51页 onward.\"},{\"id\":\"section-2\",\"content\":\"**What this section covers.** This window begins at the printed 第51页 page marker (physical page 63) and ends at the `[Physical page 68]` marker; it is the body of the 部署虚拟机完整参数示例 (complete deployment parameter example) whose first lines are quoted in the preceding section. The members shown are `baseInfo` (`cpu`, `memory`), `bridgeInterfaces` (two entries), `diskDevices` (three entries) and the opening of `cloudInitReq`. Lines 118–133 of the same example fall in the next section's window, so the listing is split there; the splits are extraction/page boundaries, not changes of example.\\n\\n**Quoting conventions** are as in the preceding section: original line numbers, indentation, key names and values are kept, while the repeated running header line 版权所有 ©云宏信息科技股份有限公司 and trailing line-break spaces are omitted. Extraction spacing inside numbers (`42 949672 96`, `1073741824 000`) and inside keys (`gurantees`) is preserved, not corrected.\\n\\n**Printed 第51页 — cpu, memory and the start of the first bridge interface**\\n\\n[[original:x1.21]]\\n\\n```text\\n第51页\\n8.\\n        \\\"domainname\\\": \\\"my_vm\\\",\\n9.\\n        \\\"cpu\\\": {\\n10.\\n            \\\"arch\\\": 2,\\n11.\\n            \\\"cores\\\": 32,\\n12.\\n            \\\"sockets\\\": 1,\\n13.\\n            \\\"current\\\": 2,\\n14.\\n            \\\"mode\\\": 2,\\n15.\\n            \\\"gurantees\\\": 0,\\n16.\\n            \\\"quota\\\": 100,\\n17.\\n            \\\"shares\\\": 2,\\n18.\\n        },\\n19.\\n        \\\"memory\\\": {\\n20.\\n            \\\"size\\\": 42 949672 96,\\n21.\\n            \\\"autoMem\\\": false,\\n22.\\n            \\\"isHugePages\\\": false,\\n23.\\n            \\\"limit\\\": null,\\n24.\\n            \\\"locked\\\": 0,\\n25.\\n        }\\n26.\\n    },\\n27.\\n    \\\"bridgeInterfaces\\\": [\\n28.\\n        {\\n29.\\n            \\\"ip\\\": \\\"11.22.33.44\\\",\\n```\\n\\nCompared with the 使用模板配置部署虚拟机 example quoted in the preceding section, this example's `cpu` object is the expanded form: `arch` 2, `cores` 32, `sockets` 1, `current` 2, `mode` 2, the field spelled `gurantees` 0, `quota` 100 and `shares` 2; `memory` is `size` `42 949672 96` with `autoMem` false, `isHugePages` false, `limit` null and `locked` 0. `baseInfo` closes at line 26 and `bridgeInterfaces` opens at line 27.\\n\\n**Printed 第52页 — first bridge interface, start of the second**\\n\\n[[original:x1.24]]\\n\\n```text\\n第52页\\n30.\\n            \\\"isVhostDriver\\\": true,\\n31.\\n            \\\"mac\\\": null,\\n32.\\n            \\\"model\\\": 1,\\n33.\\n            \\\"queues\\\": null,\\n34.\\n            \\\"networkType\\\": 0,\\n35.\\n            \\\"oldMac\\\": \\\"52:54:00:df:e3:24\\\",\\n36.\\n            \\\"osMacIp\\\": {\\n37.\\n                \\\"netIpType\\\": 3,\\n38.\\n                \\\"netGateway\\\": \\\"11.22.33.254\\\",\\n39.\\n                \\\"netMask\\\": \\\"255.255.255.0\\\",\\n40.\\n                \\\"netDns\\\": null,\\n41.\\n                \\\"secondaryDns\\\": null\\n42.\\n            },\\n43.\\n            \\\"portGroupId\\\": \\\"586e5c56-e2ee-4a70-a7ac-585441cedcfd\\\"\\n44.\\n        },\\n45.\\n        {\\n46.\\n            \\\"ip\\\": \\\"44.33.22.11\\\",\\n47.\\n            \\\"isVhostDriver\\\": true,\\n48.\\n            \\\"mac\\\": null,\\n49.\\n            \\\"model\\\": 1,\\n50.\\n            \\\"queues\\\": null,\\n51.\\n            \\\"networkType\\\": 0,\\n```\\n\\nThe first `bridgeInterfaces` entry (opened on printed 第51页 line 28) therefore declares `ip` `11.22.33.44`, `isVhostDriver` true, `mac` null, `model` 1, `queues` null, `networkType` 0, an `oldMac`, an `osMacIp` object (`netIpType` 3, gateway `11.22.33.254`, mask `255.255.255.0`, both DNS fields null) and `portGroupId` `586e5c56-e2ee-4a70-a7ac-585441cedcfd`. The second entry starts at line 45 with `ip` `44.33.22.11` and repeats `isVhostDriver`, `mac`, `model`, `queues` and `networkType` with the same values.\\n\\n**Printed 第53页 — second bridge interface and the first disk**\\n\\n[[original:x1.27]]\\n\\n```text\\n第53页\\n52.\\n            \\\"oldMac\\\": null,\\n53.\\n            \\\"osMacIp\\\": {\\n54.\\n                \\\"netIpType\\\": 3,\\n55.\\n                \\\"netGateway\\\": \\\"44.33.22.254\\\",\\n56.\\n                \\\"netMask\\\": \\\"255.255.255.0\\\",\\n57.\\n                \\\"netDns\\\": null,\\n58.\\n                \\\"secondaryDns\\\": null\\n59.\\n            },\\n60.\\n            \\\"portGroupId\\\": \\\"586e5c56-e2ee-4a70-a7ac-585441cedcfd\\\"\\n61.\\n        }\\n62.\\n    ],\\n63.\\n    \\\"diskDevices\\\": [\\n64.\\n        {\\n65.\\n            \\\"shareable\\\": false,\\n66.\\n            \\\"bus\\\": 1,\\n67.\\n            \\\"dev\\\": \\\"vda\\\",\\n68.\\n            \\\"cache\\\": 1,\\n69.\\n            \\\"preallocation\\\": \\\"off\\\" ,\\n70.\\n            \\\"ioHangTimeout\\\": 1800000,\\n71.\\n            \\\"source\\\": 4,\\n72.\\n            \\\"type\\\": null,\\n73.\\n            \\\"capacity\\\": 8589934592,\\n```\\n\\nThe second interface sets `oldMac` to null and uses the gateway `44.33.22.254` while keeping the same `portGroupId` as the first. The first `diskDevices` entry then has `shareable` false, `bus` 1, `dev` `vda`, `cache` 1, `preallocation` `\\\"off\\\"` (written with a space before the comma), `ioHangTimeout` 1800000, `source` 4, `type` null and `capacity` 8589934592, with its pool and volume name on the next page.\\n\\n**Printed 第54页 — first disk closed, second and third disks**\\n\\n[[original:x1.30]]\\n\\n```text\\n第54页\\n74.\\n            \\\"poolName\\\": \\\"defaultpool\\\",\\n75.\\n            \\\"volName\\\": \\\"my_template_disk\\\"\\n76.\\n        },\\n77.\\n        {\\n78.\\n            \\\"shareable\\\": false,\\n79.\\n            \\\"bus\\\": 1,\\n80.\\n            \\\"dev\\\": null,\\n81.\\n            \\\"cache\\\": 4,\\n82.\\n            \\\"preallocation\\\": \\\"off\\\" ,\\n83.\\n            \\\"ioHangTimeout\\\": 1800000,\\n84.\\n            \\\"source\\\": 1,\\n85.\\n            \\\"type\\\": 1,\\n86.\\n            \\\"capacity\\\": 1073741824 000,\\n87.\\n            \\\"poolName\\\": \\\"defaultpool\\\",\\n88.\\n            \\\"volName\\\": \\\"new_create_disk\\\"\\n89.\\n        },\\n90.\\n        {\\n91.\\n            \\\"shareable\\\": false,\\n92.\\n            \\\"bus\\\": 1,\\n93.\\n            \\\"dev\\\": null,\\n94.\\n            \\\"cache\\\": 4,\\n95.\\n            \\\"preallocation\\\": \\\"off\\\" ,\\n```\\n\\nThe three disk entries are distinguishable by `source` (4, 1, 2) and by whether `dev`, `type` and `capacity` are set: the first (`source` 4) has `dev` `vda`, `type` null, `capacity` 8589934592 and `volName` `my_template_disk`; the second (`source` 1) has `dev` null, `type` 1, `cache` 4 and `volName` `new_create_disk`; the third starts at line 90 with `cache` 4. The window does not explain the numeric meanings of `source`, `type`, `cache` or `ioHangTimeout`.\\n\\n**Printed 第55页 — third disk closed and `cloudInitReq` opened**\\n\\n[[original:x1.33]]\\n\\n```text\\n第55页\\n96.\\n            \\\"ioHangTimeout\\\": 1800000,\\n97.\\n            \\\"source\\\": 2,\\n98.\\n            \\\"type\\\": null,\\n99.\\n            \\\"capacity\\\": null,\\n100.             \\\"poolName\\\": \\\"defaultpool\\\",\\n101.             \\\"volName\\\": \\\"old_created_disk\\\"\\n102.         }\\n103.     ],\\n104.     \\\"cloudInitReq\\\": {\\n105.         \\\"changePassWordList\\\": [\\n106.             {\\n107.                 \\\"password\\\": \\\"2222 22\\\",\\n108.                 \\\"username\\\": \\\"root\\\",\\n109.                 \\\"sshKeyList\\\": [\\n110.                     \\\"ssh-rsa AAAAB3NzaCroot@cnware-2052 44\\\"\\n111.                 ]\\n112.             }\\n113.         ],\\n114.         \\\"sshKeyList\\\": [\\n115.             \\\"ssh-rsa AAAAB3NzaCroot@cnware-2052 44\\\"\\n116.         ],\\n117.         \\\"runcmd\\\": {\\n```\\n\\nThe third disk closes with `source` 2, `type` null, `capacity` null and `volName` `old_created_disk`. `cloudInitReq` then repeats the shape documented on printed 第48页–第49页: one `changePassWordList` entry (`password` `\\\"2222 22\\\"`, `username` `root`, one `ssh-rsa` key), one top-level `sshKeyList` with the same key, and `runcmd`. The remaining lines of the example (the `cmdList` array and the `scriptList` array, including the target and source paths for the uploaded script) appear in the next section's window, on printed 第56页.\\n\\nCompiler synthesis (arithmetic only, not documented statements): 8589934592 bytes = 8 GiB and 1073741824 bytes = 1 GiB, since both divide by 1073741824 without remainder; read as digits, `1073741824 000` would be 1073741824000 bytes, which equals 1000 GiB under the same divisor. The guide states the byte unit for disk `capacity`/`addCapacity` explicitly only in 4.4.2 修改虚拟机磁盘 (see the next section).\"},{\"id\":\"section-3\",\"content\":\"**What this section covers.** The window opens at the `[Physical page 68]` marker and runs through section 4.3 回收虚拟机; in printed page labels this is 第56页 to 第57页 (physical pages 68–69). It contains the closing lines of the 部署虚拟机完整参数示例, interfaces 8 to 14 (4.1.8–4.1.14), 4.2 删除虚拟机 and 4.3 回收虚拟机.\\n\\n**Reading limit for this window.** For each interface below, the request-parameter documentation is supplied as a screenshot (figure reference) and was not interpreted, so only the heading text, the purpose sentence and the example request line carry textual content here. The figures referenced are, per supplied page: p68_img42.png (第56页); p69_img43–img46 (第57页); p70_img47–img48; p71_img49–img51; p72_img52–img54; p73_img55–img57; p74_img58–img60; p75_img61–img63; p76_img64–img66; p77_img67–img69.\\n\\n**Closing lines of the deployment example and 4.1.8 接口8:查询任务详情 (printed 第56页)**\\n\\n[[original:x1.36]]\\n\\n```text\\n第56页\\n118.             \\\"cmdList\\\": [\\n119.                 \\\"echo '`date` cloudinit' >> /tmp/cloud-init-runcmd.log\\\",\\n120.                 \\\"touch /tmp/test_cloud_$(date '+%Y%m%d_%H%M%S').txt\\\"\\n121.             ]\\n122.         },\\n123.         \\\"scriptList\\\": [\\n124.             {\\n125.                 \\\"dpath\\\": \\\"/root/aaaa/bbbb/cccc\\\",\\n126.                 \\\"mode\\\": \\\"0755\\\",\\n127.                 \\\"name\\\": \\\"updatefor804_3.sql\\\",\\n128.                 \\\"owner\\\": \\\"root\\\",\\n129.                 \\\"spath\\\": \\\"/tmp/cloud-init/dc39e096-af1f-49e3-8c2b-1492ca8e1813\\\"\\n130.             }\\n131.         ]\\n132.     }\\n133. }\\n4.1.8 接口8:查询任务详情\\n每个操作都会返回任务ID，可以查询任务详情以跟踪任务执行情况\\n```\\n\\nTwo details of this `scriptList` entry are supported by the earlier field rules: it omits `group`, which those rules list as 选填 (optional), and it keeps the `spath` returned by the cloud-init upload interface together with the file name as `name`, as the 4.1.7.9 note requires. Interface 8 has the stated purpose that every operation returns a task ID and that the task detail can be queried to track how the task is executing (每个操作都会返回任务ID，可以查询任务详情以跟踪任务执行情况).\\n\\n[[original:x1.42]]\\n\\nExample: `192.168.205.176/api/notify/tasks/c494a3e8-1bf4-4876-a3e1-069d83a08aa3`\\n\\n**4.1.9 接口9:快速查询虚拟机列表 (printed 第57页)**\\n\\n[[original:x1.48]]\\n\\nPurpose: look up a virtual machine's ID by exact virtual-machine name (根据虚拟机名字精确查询虚拟机的ID). Example:\\n\\n```text\\n示例:\\n192.168.205.176/api/compute/domains/res/quickquery?name=vm01\\n```\\n\\n**4.1.10 接口10:查询虚拟机(表单) (printed 第58页)**\\n\\nThe heading is 查询虚拟机(表单). The example is supplied split across two lines:\\n\\n```text\\n示例:\\n192.168.205.176/api/compute/domains/6245d006-a007-41c5-832a-4567dc0a4267?\\ndomainFlag=3&needHostName=true&&needClusterName=true&needPoolName=true\\n```\\n\\nThe two consecutive `&` characters in `needHostName=true&&needClusterName=true` are as supplied. The window gives no parameter table for this interface.\\n\\n**4.1.11 接口11:查询主机空闲大页内存和主机空闲内存 (printed 第59页)**\\n\\n[[original:x1.60]]\\n\\nPurpose: query a host's free huge-page memory and the host's free memory, for resource-control management (查询主机空闲大页内存和主机空闲内存,用于资源控制管理). Example: `192.168.205.176/api/compute/hosts/77ec1fd5-7c9b-4fe0-88b9-4548470188f2/freeMemory`\\n\\n**4.1.12 接口12:检查虚拟机唯一性 (printed 第60页)**\\n\\n[[original:x1.65]]\\n\\nPurpose: check whether the virtual machine's display name is unique (检查虚拟机的显示名字是否唯一). Example: `192.168.205.176/api/compute/domains/chk/unique?name=vm01`\\n\\n**4.1.13 接口13:检查虚拟机的ip (printed 第61页)**\\n\\nThe example is supplied split across two lines, the second line being the IP that is checked:\\n\\n```text\\n示例:\\n192.168.205.176/api/compute/domains/77ec1fd5-7c9b-4fe0-88b9-4548470188f2/check/\\n192.168.205.176\\n```\\n\\n**4.1.14 接口14:查询虚拟机列表 (printed 第62页)**\\n\\nThe example is supplied split across two lines:\\n\\n```text\\n示例:\\n192.168.205.176/api/compute/domains?\\nneedHostName=true&needClusterName=true&needPoolName=true\\n```\\n\\n**4.2 删除虚拟机 (printed 第63页)**\\n\\n[[original:x1.89]]\\n\\n[[original:x1.91]]\\n\\n```text\\n示例:\\nhttp s://192.168.205.176/api/compute/domains/b14bf9cf-e306-4ee4-9173-ac64c5f60c53/2?\\nisNowDo=true\\n```\\n\\n**4.3 回收虚拟机 (printed 第64页)**\\n\\n[[original:x1.96]]\\n\\n[[original:x1.98]]\\n\\n```text\\n示例:\\nhttp s://192.168.205.176/api/compute/domains/5125b471-0d76-4ec9-bb92-b4b0a3d8c779/2?\\nisNowDo=false\\n```\\n\\nThe two examples share the path shape `/api/compute/domains/{domainId}/2` immediately followed by the `isNowDo` query parameter, and differ in that value (`true` for 4.2, `false` for 4.3) and in the domain ID. The space inside `http s://` and the line break before `isNowDo` are extraction artifacts; this window does not state what the trailing `/2` segment or the `isNowDo` parameter mean. As with the query interfaces, the parameter documentation for both calls is supplied only as figures (p76_img64–img66, p77_img67–img69) and was not interpreted.\"},{\"id\":\"section-4\",\"content\":\"**What this section covers.** The window begins with the closing part of 4.3 回收虚拟机 and covers printed 第67页–第69页 (physical pages 79–81): 4.4 修改虚拟机, 4.4.1 批量修改虚拟机cpu 和内存, 4.4.2 修改虚拟机磁盘 and the first part of 4.4.3 为虚拟机添加磁盘. The continuation of 4.4.3 and sections 4.4.4–4.4.6 come from an adjacent supplied window for printed 第70页–第72页 (physical pages 82–84) and are appended below, clearly marked; the JSON listing of 4.4.3 is split exactly at that page boundary.\\n\\n**Printed 第67页 — 4.4 修改虚拟机 and 4.4.1 批量修改虚拟机cpu 和内存**\\n\\n4.4 修改虚拟机 is followed immediately by 4.4.1, whose text 批量修改虚拟机 and its example state that a single virtual machine or several can be modified at once, changing CPU, memory and the virtual-machine display name together (支持单个或批量 同时修改CPU,内存和虚拟机显示名字).\\n\\n[[original:x1.105]]\\n\\n```text\\n示例: 支持单个或批量 同时修改CPU,内存和虚拟机显示名字\\nhttp s://192.168.205.176/api/compute/domains/batchModify/cpuMem\\n1.\\n[\\n2.\\n    {\\\"domainId\\\":\\\"b48fd1c5-595d-4502-bcd4-0ea1b0b03e83\\\",\\n3.\\n   \\\"cpu\\\":3,\\n4.\\n   \\\"memoryByte\\\":9663676416\\n5.\\n   }\\n6.\\n]\\n```\\n\\nThe request body is an array whose element carries `domainId`, `cpu` and `memoryByte`; the array shape is what supports the stated single-or-batch behaviour, and the display name is mentioned in the description but not set in this sample element. Compiler synthesis (arithmetic only): 9663676416 bytes = 9 GiB, since 9663676416 ÷ 1073741824 = 9; the window does not state the unit of `memoryByte` itself.\\n\\n**Printed 第68页 — 4.4.2 修改虚拟机磁盘**\\n\\nThe example request line is supplied split across two lines, and the body is split across the following page block:\\n\\n[[original:x1.112]]\\n\\n```text\\n示例:\\nhttp s://192.168.205.176/api/compute/domains/b48fd1c5-595d-4502-bcd4-0ea1b0b03e83/devices/\\ndisk/virtio-vda\\n1.\\n{\\n2.\\n    \\\"cache\\\": 4,\\n3.\\n    \\\"capacity\\\": 55834574848,\\n```\\n\\n[[original:x1.116]]\\n\\n```text\\n第68页\\n4.\\n    \\\"addCapacity\\\": 1073741824,\\n5.\\n    \\\"readBytesSecond\\\": null,\\n6.\\n    \\\"writeBytesSecond\\\": null,\\n7.\\n    \\\"readIops\\\": null,\\n8.\\n    \\\"writeIops\\\": null,\\n9.\\n    \\\"shareable\\\": false,\\n10.\\n    \\\"ioHangTimeout\\\": 1800000,\\n11.\\n    \\\"bus\\\": 1,\\n12.\\n    \\\"preallocation\\\": \\\"off\\\" ,\\n13.\\n    \\\"remark\\\": null\\n14.\\n}\\n说明:\\n\\\"capacity\\\": 55834574848 表示磁盘的总大小，单位字节。必填\\n\\\"addCapacity\\\": 1073741824 表示增加的容量大小，单位字节。必填\\n如: 当前磁盘大小为51G，扩容磁盘到 52G, 那么 \\\"capacity\\\"为52G, \\\"addCapacity\\\" 为1G。\\nbusDev：虚拟机磁盘的总线bus 和虚拟机的设备名称 的组合, 格式为bus-dev\\n```\\n\\nConditions stated for this interface: `capacity` is the disk's total size in bytes and is 必填 (required); `addCapacity` is the size of the increase in bytes and is also required. The worked example given is that when the current disk size is 51G and the disk is expanded to 52G, `capacity` is 52G and `addCapacity` is 1G — this is also the guide's explicit statement that these capacity values are expressed in bytes (the accompanying literals 55834574848 and 1073741824 are each divisible by 1073741824, i.e. 52 GiB and 1 GiB respectively, which is consistent with that worked example; the division is compiler arithmetic, not a documented formula). The bus-device identifier is the combination of the disk's bus and the virtual machine's device name in the form bus-dev, which in the example URL is `virtio-vda`.\\n\\n**Printed 第69页 — 4.4.3 为虚拟机添加磁盘**\\n\\n[[original:x1.123]]\\n\\n```text\\n示例:\\nhttp s://192.168.205.176/api/compute/domains/80b991bb-ed71-4082-8466-d5f9d2c4e11f/devices/disk\\n1.\\n{\\n2.\\n    \\\"bus\\\": 1,\\n3.\\n    \\\"cache\\\": 2,\\n4.\\n    \\\"source\\\": 1,\\n5.\\n    \\\"poolName\\\":\\\"defaultpool\\\",\\n6.\\n    \\\"volName\\\": \\\"abc_disk\\\",\\n7.\\n    \\\"capacity\\\":1073741824,\\n8.\\n    \\\"type\\\": 2,\\n```\\n\\n**Adjacent supplied window, printed 第70页–第72页 (physical pages 82–84)**\\n\\nThe window below continues 4.4.3 at line 9 of the same body and then documents 4.4.4–4.4.6. It opens with the tail of the preceding page's numbered listing:\\n\\n[[original:x3.1]]\\n\\n```text\\n第70页\\n9.\\n    \\\"preallocation\\\":\\\"off\\\" ,\\n10.\\n    \\\"remark\\\":null\\n11.\\n}\\n```\\n\\nThus the add-disk body is `bus`, `cache`, `source`, `poolName`, `volName`, `capacity`, `type`, `preallocation` and `remark`; the sample uses `bus` 1, `cache` 2, `source` 1, `poolName` `defaultpool` (written without a space after the colon in this block), `volName` `abc_disk`, `capacity` 1073741824 and `type` 2. One figure (p82_img77.png) precedes this block and was not interpreted.\\n\\n**4.4.4 删除虚拟机设备(磁盘、光驱)**\\n\\n[[original:x3.3]]\\n\\n[[original:x3.5]]\\n\\n```text\\n示例:\\nhttp s://192.168.205.176/api/compute/domains/80b991bb-ed71-4082-8466-d5f9d2c4e11f/devices/\\nby_bus_dev/virtio-vdb/deleteType/1\\n```\\n\\n[[original:x3.9]]\\n\\n说明: busDev：虚拟机磁盘的总线bus 和虚拟机的设备名称 的组合, 格式为bus-dev — the same busDev definition (bus and device name combined as bus-dev) is repeated here as in 4.4.2, and the example URL uses `virtio-vdb` together with a `deleteType` path segment whose value is 1. Figures p82_img78.png, p82_img79.png, p83_img80.png and p83_img81.png are referenced on these pages without interpretation.\\n\\n**4.4.5 为虚拟机添加网卡**\\n\\n[[original:x3.12]]\\n\\n[[original:x3.17]]\\n\\n```text\\n第72页\\nhttp s://192.168.205.176/api/compute/domains/80b991bb-ed71-4082-8466-d5f9d2c4e11f/devices/\\ninterface\\n1.\\n{\\n2.\\n    \\\"isVhostDriver\\\":true,\\n3.\\n    \\\"model\\\":1,\\n4.\\n    \\\"networkType\\\":0,\\n5.\\n    \\\"portGroupId\\\":\\\"69a0e9c0-07d0-43e2-bdf3-0d130af0b1bd\\\"\\n6.\\n}\\n```\\n\\nThe add-NIC request targets `.../devices/interface` and its body carries `isVhostDriver`, `model`, `networkType` and `portGroupId`. The supplied block for this page starts with the running header and the printed page label 第72页; one figure (p83_img82.png) precedes the example and was not interpreted.\\n\\n**4.4.6 修改虚拟机网卡**\\n\\n[[original:x3.18]]\\n\\nThe heading 4.4.6 修改虚拟机网卡 is present at the end of the quoted block, but the window supplies its body only as the figure p84_img83.png (and records two further page images as omitted), so no textual parameters for this operation were available to this compilation.\"}]}",
+  "request_digest": "073c411ab0770710400ee575f96a0445fc700dec43b02cb895847f0a3e4c5e22",
+  "expected_sections": [
+    "section-1",
+    "section-2",
+    "section-3",
+    "section-4"
+  ],
+  "batch": {
+    "path": "sources/CNware-WinStack-V9-4-0-接口开发指南.json",
+    "sha256": "3b7fcce88a27915730dd24bf691230d38e4772b65d36f0f35f1659b65ba06063",
+    "source_role": "current",
+    "selection_offset": 32386,
+    "supplementary_context": [
+      {
+        "content": "---\n\n[Physical page 56]\n\n版权所有 ©云宏信息科技股份有限公司    \n第44页\n32.\n      \"bus\": 1,  \n33.\n      \"dev\": \"vda\",  \n34.\n      \"source\": 4,  \n35.\n      \"poolName\": \"defaultpool\",  \n36.\n      \"volName\": \"my_vm_disk\"  \n37.\n    }  \n38.\n  ]  \n39.\n}\n使用模板配置部署虚拟机：指定部署完毕启动,虚拟机名称, 虚拟机hostName，cpu 大小,内存大小, ip,端口组,磁盘名字和磁\n盘目标存储,其他使用模板配置。同时添加一个磁盘和网卡\n1.\n{  \n2.\n  \"isStartNewDomain\": true,  \n3.\n  \"deployNum\": 1,  \n4.\n  \"deployStartNo\": 1,  \n5.\n  \"baseInfo\": {  \n6.\n    \"name\": \"my_vm\",  \n7.\n    \"vmHostName\": \"my_vm\",  \n8.\n    \"domainname\": \"my_vm\",  \n9.\n    \"cpu\": {  \n10.\n      \"current\": 2  \n\n---\n\n[Physical page 57]\n",
+        "page_spans": [
+          {
+            "page": 56,
+            "start": 0,
+            "end": 541
+          }
+        ],
+        "unit_kind": "page",
+        "coverage": "partial",
+        "units": [
+          {
+            "page": 56,
+            "unit_kind": "page",
+            "printed_page_label": null,
+            "source_structure_policy": "native-page-roles-v1",
+            "text_coverage": "complete",
+            "structure_coverage": "recorded",
+            "images": [],
+            "image_ordinals": [],
+            "omitted_page_images": 0,
+            "image_position_coverage": "recorded"
+          }
+        ],
+        "primary": false
+      },
+      {
+        "content": "\n版权所有 ©云宏信息科技股份有限公司    \n第70页\n9.\n    \"preallocation\":\"off\" ,  \n10.\n    \"remark\":null  \n11.\n}  \n\n![image](sources/images/CNware-WinStack-V9-4-0-接口开发指南/p82_img77.png)\n\n4.4.4 删除虚拟机设备(磁盘、光驱)\n\n![image](sources/images/CNware-WinStack-V9-4-0-接口开发指南/p82_img78.png)\n\n示例:\nhttp s://192.168.205.176/api/compute/domains/80b991bb-ed71-4082-8466-d5f9d2c4e11f/devices/\nby_bus_dev/virtio-vdb/deleteType/1\n\n![image](sources/images/CNware-WinStack-V9-4-0-接口开发指南/p82_img79.png)\n\n\n---\n\n[Physical page 83]\n\n版权所有 ©云宏信息科技股份有限公司    \n第71页\n说明: busDev：虚拟机磁盘的总线bus 和虚拟机的设备名称 的组合, 格式为bus-dev\n\n![image](sources/images/CNware-WinStack-V9-4-0-接口开发指南/p83_img80.png)\n\n\n![image](sources/images/CNware-WinStack-V9-4-0-接口开发指南/p83_img81.png)\n\n4.4.5 为虚拟机添加网卡\n\n![image](sources/images/CNware-WinStack-V9-4-0-接口开发指南/p83_img82.png)\n\n示例:\n\n---\n\n[Physical page 84]\n\n版权所有 ©云宏信息科技股份有限公司    \n第72页\nhttp s://192.168.205.176/api/compute/domains/80b991bb-ed71-4082-8466-d5f9d2c4e11f/devices/\ninterface\n1.\n{  \n2.\n    \"isVhostDriver\":true,  \n3.\n    \"model\":1,  \n4.\n    \"networkType\":0,  \n5.\n    \"portGroupId\":\"69a0e9c0-07d0-43e2-bdf3-0d130af0b1bd\"  \n6.\n}  \n4.4.6 修改虚拟机网卡\n\n![image](sources/images/CNware-WinStack-V9-4-0-接口开发指南/p84_img83.png)\n",
+        "page_spans": [
+          {
+            "page": 82,
+            "start": 0,
+            "end": 456
+          },
+          {
+            "page": 83,
+            "start": 0,
+            "end": 308
+          },
+          {
+            "page": 84,
+            "start": 0,
+            "end": 366
+          }
+        ],
+        "unit_kind": "page",
+        "coverage": "partial",
+        "units": [
+          {
+            "page": 82,
+            "unit_kind": "page",
+            "printed_page_label": null,
+            "source_structure_policy": "native-page-roles-v1",
+            "text_coverage": "complete",
+            "structure_coverage": "recorded",
+            "images": [
+              {
+                "path": "sources/images/CNware-WinStack-V9-4-0-接口开发指南/p82_img77.png"
+              },
+              {
+                "path": "sources/images/CNware-WinStack-V9-4-0-接口开发指南/p82_img78.png"
+              },
+              {
+                "path": "sources/images/CNware-WinStack-V9-4-0-接口开发指南/p82_img79.png"
+              }
+            ],
+            "image_ordinals": [
+              0,
+              1,
+              2
+            ],
+            "omitted_page_images": 0,
+            "image_position_coverage": "recorded"
+          },
+          {
+            "page": 83,
+            "unit_kind": "page",
+            "printed_page_label": null,
+            "source_structure_policy": "native-page-roles-v1",
+            "text_coverage": "complete",
+            "structure_coverage": "recorded",
+            "images": [
+              {
+                "path": "sources/images/CNware-WinStack-V9-4-0-接口开发指南/p83_img80.png"
+              },
+              {
+                "path": "sources/images/CNware-WinStack-V9-4-0-接口开发指南/p83_img81.png"
+              },
+              {
+                "path": "sources/images/CNware-WinStack-V9-4-0-接口开发指南/p83_img82.png"
+              }
+            ],
+            "image_ordinals": [
+              0,
+              1,
+              2
+            ],
+            "omitted_page_images": 0,
+            "image_position_coverage": "recorded"
+          },
+          {
+            "page": 84,
+            "unit_kind": "page",
+            "printed_page_label": null,
+            "source_structure_policy": "native-page-roles-v1",
+            "text_coverage": "partial",
+            "structure_coverage": "recorded",
+            "images": [
+              {
+                "path": "sources/images/CNware-WinStack-V9-4-0-接口开发指南/p84_img83.png"
+              }
+            ],
+            "image_ordinals": [
+              0
+            ],
+            "omitted_page_images": 2,
+            "image_position_coverage": "recorded"
+          }
+        ],
+        "figure_interpretation": "Image references retain original assets, occurrence locations and any original captions. Pixels have not been interpreted. An occurrence or filename does not establish visual content.",
+        "primary": false
+      }
+    ],
+    "content": "\n版权所有 ©云宏信息科技股份有限公司    \n第45页\n11.\n    },  \n12.\n    \"memory\": {  \n13.\n      \"size\": 42 949672 96  \n14.\n    }  \n15.\n  },  \n16.\n  \"bridgeInterfaces\": [  \n17.\n    {  \n18.\n      \"ip\": \"11.22.33.46\",  \n19.\n      \"networkType\": 0,  \n20.\n      \"oldMac\": \"52:54:00:e1:ac:40\",  \n21.\n      \"osMacIp\": {  \n22.\n        \"netIpType\": 3,  \n23.\n        \"netGateway\": \"11.22.33.254\",  \n24.\n        \"netMask\": \"255.255.255.0\",  \n25.\n        \"netDns\": null,  \n26.\n        \"secondaryDns\": null  \n27.\n      },  \n28.\n      \"portGroupId\": \"9251eba4-2756-48b2-81dc-3937efb5eb4e\"  \n29.\n    },  \n30.\n        {  \n31.\n      \"ip\": \"11.22.33.47\",  \n32.\n      \"networkType\": 0,  \n\n---\n\n[Physical page 58]\n\n版权所有 ©云宏信息科技股份有限公司    \n第46页\n33.\n      \"osMacIp\": {  \n34.\n        \"netIpType\": 3,  \n35.\n        \"netGateway\": \"11.22.33.254\",  \n36.\n        \"netMask\": \"255.255.255.0\",  \n37.\n        \"netDns\": null,  \n38.\n        \"secondaryDns\": null  \n39.\n      },  \n40.\n      \"portGroupId\": \"9251eba4-2756-48b2-81dc-3937efb5eb4e\"  \n41.\n    }  \n42.\n  ],  \n43.\n  \"diskDevices\": [  \n44.\n    {  \n45.\n      \"bus\": 1,  \n46.\n      \"dev\": \"vda\",  \n47.\n      \"source\": 4,  \n48.\n      \"poolName\": \"defaultpool\",  \n49.\n      \"volName\": \"my_vm_disk_1\"  \n50.\n    },  \n51.\n      {  \n52.\n      \"bus\": 1,  \n53.\n      \"source\": 1,  \n54.\n      \"poolName\": \"defaultpool\",  \n\n---\n\n[Physical page 59]\n\n版权所有 ©云宏信息科技股份有限公司    \n第47页\n55.\n      \"capacity\":1073741824,  \n56.\n      \"volName\": \"my_vm_disk_new\"  \n57.\n    }  \n58.\n  ]  \n59.\n} \n4.1.7.9 虚拟机使用cloud init\n注意:如果需要使用cloud init 自定义脚本需要调以下接口先上传文件，然后根据返回值填入部署的\nscriptList 参数中的spath 和name 字段中。\n接口：/api/compute/cloudInit/script/upload/{hostId}\n接口返回：fil ePath: 脚本的路径; fil ename: 脚本文件的名字\n1.\n[  \n2.\n  {  \n3.\n    \"fil ePath\": \"/tmp/cloud-init/dc39e096-af1f-49e3-8c2b-1492ca8e1813\",\n4.\n    \"fil eName\": \"updatefor804_3.sql\" \n5.\n  }  \n6.\n]  \n\n![image](sources/images/CNware-WinStack-V9-4-0-接口开发指南/p59_img40.png)\n\n\n![image](sources/images/CNware-WinStack-V9-4-0-接口开发指南/p59_img41.png)\n\n\n---\n\n[Physical page 60]\n\n版权所有 ©云宏信息科技股份有限公司    \n第48页\n1.\n{  \n2.\n    ...  \n3.\n    \"cloudInitReq\": {  \n4.\n        \"changePassWordList\": [  \n5.\n            {  \n6.\n                \"password\": \"2222 22\",  \n7.\n                \"username\": \"root\",  \n8.\n                \"sshKeyList\": [  \n9.\n                    \"ssh-rsa AAAAB3NzaCroot@cnware-2052 44\"  \n10.\n                ]  \n11.\n            }  \n12.\n        ],  \n13.\n        \"sshKeyList\": [  \n14.\n            \"ssh-rsa AAAAB3NzaCroot@cnware-2052 44\"  \n15.\n        ],  \n16.\n        \"runcmd\": {  \n17.\n            \"cmdList\": [  \n18.\n                \"echo '`date` cloudinit' >> /tmp/cloud-init-runcmd.log\",  \n19.\n                \"touch /tmp/test_cloud_$(date '+%Y%m%d_%H%M%S').txt\"  \n20.\n            ]  \n\n---\n\n[Physical page 61]\n\n版权所有 ©云宏信息科技股份有限公司    \n第49页\n21.\n        },  \n22.\n        \"scriptList\": [  \n23.\n            {  \n24.\n                \"dpath\": \"/root/aaaa/bbbb/cccc\",  \n25.\n                \"group\": \"root\",  \n26.\n                \"mode\": \"0755\",  \n27.\n                \"name\": \"updatefor804_3.sql\",  \n28.\n                \"owner\": \"root\",  \n29.\n                \"spath\": \"/tmp/cloud-init/dc39e096-af1f-49e3-8c2b-1492ca8e1813\"  \n30.\n            }  \n31.\n        ]  \n32.\n    }  \n33.\n}  \nchangePassWordList: 选填。 是否修改登录密码；Linux 支持多个时，任意一个用户名不存在时，全部用户都不会修改密码。\n\"password\": \"2222 22\"， 修改密码时,必填。修改后的密码,windows 只能用明文(必须符合密码复杂性要求，否则生成随机密码\n导致无法登录)；Linux：1. 可用明文；2. 可用密文，如生成md5 算法的密码。\n\"username\": \"root\", 修改密码时,必填。windows 需要修改密码的用户名(用户不存在时，将创建新用户)；Linux 需要修改密码\n的用户名(用户名不存在不会创建新用户)\n(changePassWordList)sshKeyList: 选填。 仅windows 使用，sshkey 集合，支持多个sshkey\n\n---\n\n[Physical page 62]\n\n版权所有 ©云宏信息科技股份有限公司    \n第50页\nsshKeyList: 选填。仅支持Linux，支持多个sshkey(可选)，windows 的放到了changePassWordList 里。\n\"runcmd\":选填。命令实体类，用户自定义命令，按顺序执行。\n\"cmdList\": 指定命令时,必填。命令集合\n\"scriptList\":选填。 用户自定义脚本集合。\n\"dpath\": \"/root/aaaa/bbbb/cccc\"，指定脚本时必填。脚本在虚拟机的目标路径\n\"group\": \"root\"，选填。属组。\n\"mode\": \"0755\"，选填。权限(可选，默认0755)\n\"name\": \"updatefor804_3.sql\"，必填。脚本名\n\"owner\": \"root\"，选填。 属主(默认root)\n\"spath\": \"/tmp/cloud-init/dc39e096-af1f-49e3-8c2b-1492ca8e1813\"，必填。脚本在物理机的源路径\n部署虚拟机完整参数示例\n1.\n{  \n2.\n    \"isStartNewDomain\": false,  \n3.\n    \"deployNum\": \"3\",  \n4.\n    \"deployStartNo\": \"2\",  \n5.\n    \"baseInfo\": {  \n6.\n        \"name\": \"my_vm\",  \n7.\n        \"vmHostName\": \"my_vm\",  \n\n---\n\n[Physical page 63]\n\n版权所有 ©云宏信息科技股份有限公司    \n第51页\n8.\n        \"domainname\": \"my_vm\",  \n9.\n        \"cpu\": {  \n10.\n            \"arch\": 2,  \n11.\n            \"cores\": 32,  \n12.\n            \"sockets\": 1,  \n13.\n            \"current\": 2,  \n14.\n            \"mode\": 2,  \n15.\n            \"gurantees\": 0,  \n16.\n            \"quota\": 100,  \n17.\n            \"shares\": 2,  \n18.\n        },  \n19.\n        \"memory\": {  \n20.\n            \"size\": 42 949672 96,  \n21.\n            \"autoMem\": false,  \n22.\n            \"isHugePages\": false,  \n23.\n            \"limit\": null,  \n24.\n            \"locked\": 0,  \n25.\n        }  \n26.\n    },  \n27.\n    \"bridgeInterfaces\": [  \n28.\n        {  \n29.\n            \"ip\": \"11.22.33.44\",  \n\n---\n\n[Physical page 64]\n\n版权所有 ©云宏信息科技股份有限公司    \n第52页\n30.\n            \"isVhostDriver\": true,  \n31.\n            \"mac\": null,  \n32.\n            \"model\": 1,  \n33.\n            \"queues\": null,  \n34.\n            \"networkType\": 0,  \n35.\n            \"oldMac\": \"52:54:00:df:e3:24\",  \n36.\n            \"osMacIp\": {  \n37.\n                \"netIpType\": 3,  \n38.\n                \"netGateway\": \"11.22.33.254\",  \n39.\n                \"netMask\": \"255.255.255.0\",  \n40.\n                \"netDns\": null,  \n41.\n                \"secondaryDns\": null  \n42.\n            },  \n43.\n            \"portGroupId\": \"586e5c56-e2ee-4a70-a7ac-585441cedcfd\"  \n44.\n        },  \n45.\n        {  \n46.\n            \"ip\": \"44.33.22.11\",  \n47.\n            \"isVhostDriver\": true,  \n48.\n            \"mac\": null,  \n49.\n            \"model\": 1,  \n50.\n            \"queues\": null,  \n51.\n            \"networkType\": 0,  \n\n---\n\n[Physical page 65]\n\n版权所有 ©云宏信息科技股份有限公司    \n第53页\n52.\n            \"oldMac\": null,  \n53.\n            \"osMacIp\": {  \n54.\n                \"netIpType\": 3,  \n55.\n                \"netGateway\": \"44.33.22.254\",  \n56.\n                \"netMask\": \"255.255.255.0\",  \n57.\n                \"netDns\": null,  \n58.\n                \"secondaryDns\": null  \n59.\n            },  \n60.\n            \"portGroupId\": \"586e5c56-e2ee-4a70-a7ac-585441cedcfd\"  \n61.\n        }  \n62.\n    ],  \n63.\n    \"diskDevices\": [  \n64.\n        {  \n65.\n            \"shareable\": false,  \n66.\n            \"bus\": 1,  \n67.\n            \"dev\": \"vda\",  \n68.\n            \"cache\": 1,  \n69.\n            \"preallocation\": \"off\" ,  \n70.\n            \"ioHangTimeout\": 1800000,  \n71.\n            \"source\": 4,  \n72.\n            \"type\": null,  \n73.\n            \"capacity\": 8589934592,  \n\n---\n\n[Physical page 66]\n\n版权所有 ©云宏信息科技股份有限公司    \n第54页\n74.\n            \"poolName\": \"defaultpool\",  \n75.\n            \"volName\": \"my_template_disk\"  \n76.\n        },  \n77.\n        {  \n78.\n            \"shareable\": false,  \n79.\n            \"bus\": 1,  \n80.\n            \"dev\": null,  \n81.\n            \"cache\": 4,  \n82.\n            \"preallocation\": \"off\" ,  \n83.\n            \"ioHangTimeout\": 1800000,  \n84.\n            \"source\": 1,  \n85.\n            \"type\": 1,  \n86.\n            \"capacity\": 1073741824 000,  \n87.\n            \"poolName\": \"defaultpool\",  \n88.\n            \"volName\": \"new_create_disk\"  \n89.\n        },  \n90.\n        {  \n91.\n            \"shareable\": false,  \n92.\n            \"bus\": 1,  \n93.\n            \"dev\": null,  \n94.\n            \"cache\": 4,  \n95.\n            \"preallocation\": \"off\" ,  \n\n---\n\n[Physical page 67]\n\n版权所有 ©云宏信息科技股份有限公司    \n第55页\n96.\n            \"ioHangTimeout\": 1800000,  \n97.\n            \"source\": 2,  \n98.\n            \"type\": null,  \n99.\n            \"capacity\": null,  \n100.             \"poolName\": \"defaultpool\",  \n101.             \"volName\": \"old_created_disk\"  \n102.         }  \n103.     ],  \n104.     \"cloudInitReq\": {  \n105.         \"changePassWordList\": [  \n106.             {  \n107.                 \"password\": \"2222 22\",  \n108.                 \"username\": \"root\",  \n109.                 \"sshKeyList\": [  \n110.                     \"ssh-rsa AAAAB3NzaCroot@cnware-2052 44\"  \n111.                 ]  \n112.             }  \n113.         ],  \n114.         \"sshKeyList\": [  \n115.             \"ssh-rsa AAAAB3NzaCroot@cnware-2052 44\"  \n116.         ],  \n117.         \"runcmd\": {  \n\n---\n\n[Physical page 68]\n\n版权所有 ©云宏信息科技股份有限公司    \n第56页\n118.             \"cmdList\": [  \n119.                 \"echo '`date` cloudinit' >> /tmp/cloud-init-runcmd.log\",  \n120.                 \"touch /tmp/test_cloud_$(date '+%Y%m%d_%H%M%S').txt\"  \n121.             ]  \n122.         },  \n123.         \"scriptList\": [  \n124.             {  \n125.                 \"dpath\": \"/root/aaaa/bbbb/cccc\",  \n126.                 \"mode\": \"0755\",  \n127.                 \"name\": \"updatefor804_3.sql\",  \n128.                 \"owner\": \"root\",  \n129.                 \"spath\": \"/tmp/cloud-init/dc39e096-af1f-49e3-8c2b-1492ca8e1813\"  \n130.             }  \n131.         ]  \n132.     }  \n133. } \n4.1.8 接口8:查询任务详情\n每个操作都会返回任务ID，可以查询任务详情以跟踪任务执行情况\n\n![image](sources/images/CNware-WinStack-V9-4-0-接口开发指南/p68_img42.png)\n\n\n---\n\n[Physical page 69]\n\n版权所有 ©云宏信息科技股份有限公司    \n第57页\n\n![image](sources/images/CNware-WinStack-V9-4-0-接口开发指南/p69_img43.png)\n\n示例:192.168.205.176/api/notify/tasks/c494a3e8-1bf4-4876-a3e1-069d83a08aa3\n4.1.9 接口9:快速查询虚拟机列表\n根据虚拟机名字精确查询虚拟机的ID\n\n![image](sources/images/CNware-WinStack-V9-4-0-接口开发指南/p69_img44.png)\n\n\n![image](sources/images/CNware-WinStack-V9-4-0-接口开发指南/p69_img45.png)\n\n\n![image](sources/images/CNware-WinStack-V9-4-0-接口开发指南/p69_img46.png)\n\n\n---\n\n[Physical page 70]\n\n版权所有 ©云宏信息科技股份有限公司    \n第58页\n示例:\n192.168.205.176/api/compute/domains/res/quickquery?name=vm01\n\n![image](sources/images/CNware-WinStack-V9-4-0-接口开发指南/p70_img47.png)\n\n\n![image](sources/images/CNware-WinStack-V9-4-0-接口开发指南/p70_img48.png)\n\n\n---\n\n[Physical page 71]\n\n版权所有 ©云宏信息科技股份有限公司    \n第59页\n4.1.10  接口10:查询虚拟机(表单)\n\n![image](sources/images/CNware-WinStack-V9-4-0-接口开发指南/p71_img49.png)\n\n示例:\n192.168.205.176/api/compute/domains/6245d006-a007-41c5-832a-4567dc0a4267?\ndomainFlag=3&needHostName=true&&needClusterName=true&needPoolName=true\n\n![image](sources/images/CNware-WinStack-V9-4-0-接口开发指南/p71_img50.png)\n\n\n![image](sources/images/CNware-WinStack-V9-4-0-接口开发指南/p71_img51.png)\n\n\n---\n\n[Physical page 72]\n\n版权所有 ©云宏信息科技股份有限公司    \n第60页\n4.1.11  接口11:查询主机空闲大页内存和主机空闲内存\n查询主机空闲大页内存和主机空闲内存,用于资源控制管理\n\n![image](sources/images/CNware-WinStack-V9-4-0-接口开发指南/p72_img52.png)\n\n示例:\n192.168.205.176/api/compute/hosts/77ec1fd5-7c9b-4fe0-88b9-4548470188f2/freeMemory\n\n![image](sources/images/CNware-WinStack-V9-4-0-接口开发指南/p72_img53.png)\n\n\n![image](sources/images/CNware-WinStack-V9-4-0-接口开发指南/p72_img54.png)\n\n4.1.12  接口12:检查虚拟机唯一性\n检查虚拟机的显示名字是否唯一\n\n---\n\n[Physical page 73]\n\n版权所有 ©云宏信息科技股份有限公司    \n第61页\n\n![image](sources/images/CNware-WinStack-V9-4-0-接口开发指南/p73_img55.png)\n\n示例:\n192.168.205.176/api/compute/domains/chk/unique?name=vm01\n\n![image](sources/images/CNware-WinStack-V9-4-0-接口开发指南/p73_img56.png)\n\n\n![image](sources/images/CNware-WinStack-V9-4-0-接口开发指南/p73_img57.png)\n\n\n---\n\n[Physical page 74]\n\n版权所有 ©云宏信息科技股份有限公司    \n第62页\n4.1.13  接口13:检查虚拟机的ip\n\n![image](sources/images/CNware-WinStack-V9-4-0-接口开发指南/p74_img58.png)\n\n示例:\n192.168.205.176/api/compute/domains/77ec1fd5-7c9b-4fe0-88b9-4548470188f2/check/\n192.168.205.176\n\n![image](sources/images/CNware-WinStack-V9-4-0-接口开发指南/p74_img59.png)\n\n\n![image](sources/images/CNware-WinStack-V9-4-0-接口开发指南/p74_img60.png)\n\n\n---\n\n[Physical page 75]\n\n版权所有 ©云宏信息科技股份有限公司    \n第63页\n4.1.14  接口14:查询虚拟机列表\n\n![image](sources/images/CNware-WinStack-V9-4-0-接口开发指南/p75_img61.png)\n\n示例:\n192.168.205.176/api/compute/domains?\nneedHostName=true&needClusterName=true&needPoolName=true\n\n![image](sources/images/CNware-WinStack-V9-4-0-接口开发指南/p75_img62.png)\n\n\n![image](sources/images/CNware-WinStack-V9-4-0-接口开发指南/p75_img63.png)\n\n\n---\n\n[Physical page 76]\n\n版权所有 ©云宏信息科技股份有限公司    \n第64页\n4.2删除虚拟机\n\n![image](sources/images/CNware-WinStack-V9-4-0-接口开发指南/p76_img64.png)\n\n示例:\nhttp s://192.168.205.176/api/compute/domains/b14bf9cf-e306-4ee4-9173-ac64c5f60c53/2?\nisNowDo=true\n\n![image](sources/images/CNware-WinStack-V9-4-0-接口开发指南/p76_img65.png)\n\n\n![image](sources/images/CNware-WinStack-V9-4-0-接口开发指南/p76_img66.png)\n\n\n---\n\n[Physical page 77]\n\n版权所有 ©云宏信息科技股份有限公司    \n第65页\n4.3 回收虚拟机\n\n![image](sources/images/CNware-WinStack-V9-4-0-接口开发指南/p77_img67.png)\n\n示例:\nhttp s://192.168.205.176/api/compute/domains/5125b471-0d76-4ec9-bb92-b4b0a3d8c779/2?\nisNowDo=false\n\n![image](sources/images/CNware-WinStack-V9-4-0-接口开发指南/p77_img68.png)\n\n\n![image](sources/images/CNware-WinStack-V9-4-0-接口开发指南/p77_img69.png)\n\n\n---\n\n[Physical page 78]\n\n版权所有 ©云宏信息科技股份有限公司    \n第66页\n4.4 修改虚拟机\n4.4.1 批量修改虚拟机cpu 和内存\n批量修改虚拟机 \n\n![image](sources/images/CNware-WinStack-V9-4-0-接口开发指南/p78_img70.png)\n\n示例: 支持单个或批量 同时修改CPU,内存和虚拟机显示名字\nhttp s://192.168.205.176/api/compute/domains/batchModify/cpuMem\n1.\n[  \n2.\n    {\"domainId\":\"b48fd1c5-595d-4502-bcd4-0ea1b0b03e83\",  \n3.\n   \"cpu\":3,  \n4.\n   \"memoryByte\":9663676416\n5.\n   }  \n6.\n]  \n\n---\n\n[Physical page 79]\n\n版权所有 ©云宏信息科技股份有限公司    \n第67页\n\n![image](sources/images/CNware-WinStack-V9-4-0-接口开发指南/p79_img71.png)\n\n4.4.2 修改虚拟机磁盘\n\n![image](sources/images/CNware-WinStack-V9-4-0-接口开发指南/p79_img72.png)\n\n示例:\nhttp s://192.168.205.176/api/compute/domains/b48fd1c5-595d-4502-bcd4-0ea1b0b03e83/devices/\ndisk/virtio-vda\n1.\n{  \n2.\n    \"cache\": 4,  \n3.\n    \"capacity\": 55834574848,  \n\n![image](sources/images/CNware-WinStack-V9-4-0-接口开发指南/p79_img73.png)\n\n\n---\n\n[Physical page 80]\n\n版权所有 ©云宏信息科技股份有限公司    \n第68页\n4.\n    \"addCapacity\": 1073741824,  \n5.\n    \"readBytesSecond\": null,  \n6.\n    \"writeBytesSecond\": null,  \n7.\n    \"readIops\": null,  \n8.\n    \"writeIops\": null,  \n9.\n    \"shareable\": false,  \n10.\n    \"ioHangTimeout\": 1800000,  \n11.\n    \"bus\": 1,  \n12.\n    \"preallocation\": \"off\" ,  \n13.\n    \"remark\": null  \n14.\n}  \n说明: \n\"capacity\": 55834574848 表示磁盘的总大小，单位字节。必填\n\"addCapacity\": 1073741824 表示增加的容量大小，单位字节。必填\n如: 当前磁盘大小为51G，扩容磁盘到 52G, 那么 \"capacity\"为52G, \"addCapacity\" 为1G。\nbusDev：虚拟机磁盘的总线bus 和虚拟机的设备名称 的组合, 格式为bus-dev\n\n![image](sources/images/CNware-WinStack-V9-4-0-接口开发指南/p80_img74.png)\n\n\n![image](sources/images/CNware-WinStack-V9-4-0-接口开发指南/p80_img75.png)\n\n\n---\n\n[Physical page 81]\n\n版权所有 ©云宏信息科技股份有限公司    \n第69页\n4.4.3 为虚拟机添加磁盘\n\n![image](sources/images/CNware-WinStack-V9-4-0-接口开发指南/p81_img76.png)\n\n示例: \nhttp s://192.168.205.176/api/compute/domains/80b991bb-ed71-4082-8466-d5f9d2c4e11f/devices/disk\n1.\n{  \n2.\n    \"bus\": 1,  \n3.\n    \"cache\": 2,  \n4.\n    \"source\": 1,  \n5.\n    \"poolName\":\"defaultpool\",  \n6.\n    \"volName\": \"abc_disk\",  \n7.\n    \"capacity\":1073741824,  \n8.\n    \"type\": 2,  \n\n---\n\n[Physical page 82]\n",
+    "page_spans": [
+      {
+        "page": 57,
+        "start": 0,
+        "end": 645
+      },
+      {
+        "page": 58,
+        "start": 0,
+        "end": 637
+      },
+      {
+        "page": 59,
+        "start": 0,
+        "end": 621
+      },
+      {
+        "page": 60,
+        "start": 0,
+        "end": 714
+      },
+      {
+        "page": 61,
+        "start": 0,
+        "end": 812
+      },
+      {
+        "page": 62,
+        "start": 0,
+        "end": 640
+      },
+      {
+        "page": 63,
+        "start": 0,
+        "end": 674
+      },
+      {
+        "page": 64,
+        "start": 0,
+        "end": 837
+      },
+      {
+        "page": 65,
+        "start": 0,
+        "end": 798
+      },
+      {
+        "page": 66,
+        "start": 0,
+        "end": 768
+      },
+      {
+        "page": 67,
+        "start": 0,
+        "end": 779
+      },
+      {
+        "page": 68,
+        "start": 0,
+        "end": 759
+      },
+      {
+        "page": 69,
+        "start": 0,
+        "end": 422
+      },
+      {
+        "page": 70,
+        "start": 0,
+        "end": 234
+      },
+      {
+        "page": 71,
+        "start": 0,
+        "end": 412
+      },
+      {
+        "page": 72,
+        "start": 0,
+        "end": 421
+      },
+      {
+        "page": 73,
+        "start": 0,
+        "end": 301
+      },
+      {
+        "page": 74,
+        "start": 0,
+        "end": 362
+      },
+      {
+        "page": 75,
+        "start": 0,
+        "end": 359
+      },
+      {
+        "page": 76,
+        "start": 0,
+        "end": 351
+      },
+      {
+        "page": 77,
+        "start": 0,
+        "end": 353
+      },
+      {
+        "page": 78,
+        "start": 0,
+        "end": 365
+      },
+      {
+        "page": 79,
+        "start": 0,
+        "end": 427
+      },
+      {
+        "page": 80,
+        "start": 0,
+        "end": 680
+      },
+      {
+        "page": 81,
+        "start": 0,
+        "end": 401
+      }
+    ],
+    "unit_kind": "page",
+    "coverage": "partial",
+    "continuation": 46833,
+    "units": [
+      {
+        "page": 57,
+        "unit_kind": "page",
+        "printed_page_label": null,
+        "source_structure_policy": "native-page-roles-v1",
+        "text_coverage": "complete",
+        "structure_coverage": "recorded",
+        "images": [],
+        "image_ordinals": [],
+        "omitted_page_images": 0,
+        "image_position_coverage": "recorded"
+      },
+      {
+        "page": 58,
+        "unit_kind": "page",
+        "printed_page_label": null,
+        "source_structure_policy": "native-page-roles-v1",
+        "text_coverage": "complete",
+        "structure_coverage": "recorded",
+        "images": [],
+        "image_ordinals": [],
+        "omitted_page_images": 0,
+        "image_position_coverage": "recorded"
+      },
+      {
+        "page": 59,
+        "unit_kind": "page",
+        "printed_page_label": null,
+        "source_structure_policy": "native-page-roles-v1",
+        "text_coverage": "complete",
+        "structure_coverage": "recorded",
+        "images": [
+          {
+            "path": "sources/images/CNware-WinStack-V9-4-0-接口开发指南/p59_img40.png"
+          },
+          {
+            "path": "sources/images/CNware-WinStack-V9-4-0-接口开发指南/p59_img41.png"
+          }
+        ],
+        "image_ordinals": [
+          0,
+          1
+        ],
+        "omitted_page_images": 0,
+        "image_position_coverage": "recorded"
+      },
+      {
+        "page": 60,
+        "unit_kind": "page",
+        "printed_page_label": null,
+        "source_structure_policy": "native-page-roles-v1",
+        "text_coverage": "complete",
+        "structure_coverage": "recorded",
+        "images": [],
+        "image_ordinals": [],
+        "omitted_page_images": 0,
+        "image_position_coverage": "recorded"
+      },
+      {
+        "page": 61,
+        "unit_kind": "page",
+        "printed_page_label": null,
+        "source_structure_policy": "native-page-roles-v1",
+        "text_coverage": "complete",
+        "structure_coverage": "recorded",
+        "images": [],
+        "image_ordinals": [],
+        "omitted_page_images": 0,
+        "image_position_coverage": "recorded"
+      },
+      {
+        "page": 62,
+        "unit_kind": "page",
+        "printed_page_label": null,
+        "source_structure_policy": "native-page-roles-v1",
+        "text_coverage": "complete",
+        "structure_coverage": "recorded",
+        "images": [],
+        "image_ordinals": [],
+        "omitted_page_images": 0,
+        "image_position_coverage": "recorded"
+      },
+      {
+        "page": 63,
+        "unit_kind": "page",
+        "printed_page_label": null,
+        "source_structure_policy": "native-page-roles-v1",
+        "text_coverage": "complete",
+        "structure_coverage": "recorded",
+        "images": [],
+        "image_ordinals": [],
+        "omitted_page_images": 0,
+        "image_position_coverage": "recorded"
+      },
+      {
+        "page": 64,
+        "unit_kind": "page",
+        "printed_page_label": null,
+        "source_structure_policy": "native-page-roles-v1",
+        "text_coverage": "complete",
+        "structure_coverage": "recorded",
+        "images": [],
+        "image_ordinals": [],
+        "omitted_page_images": 0,
+        "image_position_coverage": "recorded"
+      },
+      {
+        "page": 65,
+        "unit_kind": "page",
+        "printed_page_label": null,
+        "source_structure_policy": "native-page-roles-v1",
+        "text_coverage": "complete",
+        "structure_coverage": "recorded",
+        "images": [],
+        "image_ordinals": [],
+        "omitted_page_images": 0,
+        "image_position_coverage": "recorded"
+      },
+      {
+        "page": 66,
+        "unit_kind": "page",
+        "printed_page_label": null,
+        "source_structure_policy": "native-page-roles-v1",
+        "text_coverage": "complete",
+        "structure_coverage": "recorded",
+        "images": [],
+        "image_ordinals": [],
+        "omitted_page_images": 0,
+        "image_position_coverage": "recorded"
+      },
+      {
+        "page": 67,
+        "unit_kind": "page",
+        "printed_page_label": null,
+        "source_structure_policy": "native-page-roles-v1",
+        "text_coverage": "complete",
+        "structure_coverage": "recorded",
+        "images": [],
+        "image_ordinals": [],
+        "omitted_page_images": 0,
+        "image_position_coverage": "recorded"
+      },
+      {
+        "page": 68,
+        "unit_kind": "page",
+        "printed_page_label": null,
+        "source_structure_policy": "native-page-roles-v1",
+        "text_coverage": "complete",
+        "structure_coverage": "recorded",
+        "images": [
+          {
+            "path": "sources/images/CNware-WinStack-V9-4-0-接口开发指南/p68_img42.png"
+          }
+        ],
+        "image_ordinals": [
+          0
+        ],
+        "omitted_page_images": 0,
+        "image_position_coverage": "recorded"
+      },
+      {
+        "page": 69,
+        "unit_kind": "page",
+        "printed_page_label": null,
+        "source_structure_policy": "native-page-roles-v1",
+        "text_coverage": "complete",
+        "structure_coverage": "recorded",
+        "images": [
+          {
+            "path": "sources/images/CNware-WinStack-V9-4-0-接口开发指南/p69_img43.png"
+          },
+          {
+            "path": "sources/images/CNware-WinStack-V9-4-0-接口开发指南/p69_img44.png"
+          },
+          {
+            "path": "sources/images/CNware-WinStack-V9-4-0-接口开发指南/p69_img45.png"
+          },
+          {
+            "path": "sources/images/CNware-WinStack-V9-4-0-接口开发指南/p69_img46.png"
+          }
+        ],
+        "image_ordinals": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "omitted_page_images": 0,
+        "image_position_coverage": "recorded"
+      },
+      {
+        "page": 70,
+        "unit_kind": "page",
+        "printed_page_label": null,
+        "source_structure_policy": "native-page-roles-v1",
+        "text_coverage": "complete",
+        "structure_coverage": "recorded",
+        "images": [
+          {
+            "path": "sources/images/CNware-WinStack-V9-4-0-接口开发指南/p70_img47.png"
+          },
+          {
+            "path": "sources/images/CNware-WinStack-V9-4-0-接口开发指南/p70_img48.png"
+          }
+        ],
+        "image_ordinals": [
+          0,
+          1
+        ],
+        "omitted_page_images": 0,
+        "image_position_coverage": "recorded"
+      },
+      {
+        "page": 71,
+        "unit_kind": "page",
+        "printed_page_label": null,
+        "source_structure_policy": "native-page-roles-v1",
+        "text_coverage": "complete",
+        "structure_coverage": "recorded",
+        "images": [
+          {
+            "path": "sources/images/CNware-WinStack-V9-4-0-接口开发指南/p71_img49.png"
+          },
+          {
+            "path": "sources/images/CNware-WinStack-V9-4-0-接口开发指南/p71_img50.png"
+          },
+          {
+            "path": "sources/images/CNware-WinStack-V9-4-0-接口开发指南/p71_img51.png"
+          }
+        ],
+        "image_ordinals": [
+          0,
+          1,
+          2
+        ],
+        "omitted_page_images": 0,
+        "image_position_coverage": "recorded"
+      },
+      {
+        "page": 72,
+        "unit_kind": "page",
+        "printed_page_label": null,
+        "source_structure_policy": "native-page-roles-v1",
+        "text_coverage": "complete",
+        "structure_coverage": "recorded",
+        "images": [
+          {
+            "path": "sources/images/CNware-WinStack-V9-4-0-接口开发指南/p72_img52.png"
+          },
+          {
+            "path": "sources/images/CNware-WinStack-V9-4-0-接口开发指南/p72_img53.png"
+          },
+          {
+            "path": "sources/images/CNware-WinStack-V9-4-0-接口开发指南/p72_img54.png"
+          }
+        ],
+        "image_ordinals": [
+          0,
+          1,
+          2
+        ],
+        "omitted_page_images": 0,
+        "image_position_coverage": "recorded"
+      },
+      {
+        "page": 73,
+        "unit_kind": "page",
+        "printed_page_label": null,
+        "source_structure_policy": "native-page-roles-v1",
+        "text_coverage": "complete",
+        "structure_coverage": "recorded",
+        "images": [
+          {
+            "path": "sources/images/CNware-WinStack-V9-4-0-接口开发指南/p73_img55.png"
+          },
+          {
+            "path": "sources/images/CNware-WinStack-V9-4-0-接口开发指南/p73_img56.png"
+          },
+          {
+            "path": "sources/images/CNware-WinStack-V9-4-0-接口开发指南/p73_img57.png"
+          }
+        ],
+        "image_ordinals": [
+          0,
+          1,
+          2
+        ],
+        "omitted_page_images": 0,
+        "image_position_coverage": "recorded"
+      },
+      {
+        "page": 74,
+        "unit_kind": "page",
+        "printed_page_label": null,
+        "source_structure_policy": "native-page-roles-v1",
+        "text_coverage": "complete",
+        "structure_coverage": "recorded",
+        "images": [
+          {
+            "path": "sources/images/CNware-WinStack-V9-4-0-接口开发指南/p74_img58.png"
+          },
+          {
+            "path": "sources/images/CNware-WinStack-V9-4-0-接口开发指南/p74_img59.png"
+          },
+          {
+            "path": "sources/images/CNware-WinStack-V9-4-0-接口开发指南/p74_img60.png"
+          }
+        ],
+        "image_ordinals": [
+          0,
+          1,
+          2
+        ],
+        "omitted_page_images": 0,
+        "image_position_coverage": "recorded"
+      },
+      {
+        "page": 75,
+        "unit_kind": "page",
+        "printed_page_label": null,
+        "source_structure_policy": "native-page-roles-v1",
+        "text_coverage": "complete",
+        "structure_coverage": "recorded",
+        "images": [
+          {
+            "path": "sources/images/CNware-WinStack-V9-4-0-接口开发指南/p75_img61.png"
+          },
+          {
+            "path": "sources/images/CNware-WinStack-V9-4-0-接口开发指南/p75_img62.png"
+          },
+          {
+            "path": "sources/images/CNware-WinStack-V9-4-0-接口开发指南/p75_img63.png"
+          }
+        ],
+        "image_ordinals": [
+          0,
+          1,
+          2
+        ],
+        "omitted_page_images": 0,
+        "image_position_coverage": "recorded"
+      },
+      {
+        "page": 76,
+        "unit_kind": "page",
+        "printed_page_label": null,
+        "source_structure_policy": "native-page-roles-v1",
+        "text_coverage": "complete",
+        "structure_coverage": "recorded",
+        "images": [
+          {
+            "path": "sources/images/CNware-WinStack-V9-4-0-接口开发指南/p76_img64.png"
+          },
+          {
+            "path": "sources/images/CNware-WinStack-V9-4-0-接口开发指南/p76_img65.png"
+          },
+          {
+            "path": "sources/images/CNware-WinStack-V9-4-0-接口开发指南/p76_img66.png"
+          }
+        ],
+        "image_ordinals": [
+          0,
+          1,
+          2
+        ],
+        "omitted_page_images": 0,
+        "image_position_coverage": "recorded"
+      },
+      {
+        "page": 77,
+        "unit_kind": "page",
+        "printed_page_label": null,
+        "source_structure_policy": "native-page-roles-v1",
+        "text_coverage": "complete",
+        "structure_coverage": "recorded",
+        "images": [
+          {
+            "path": "sources/images/CNware-WinStack-V9-4-0-接口开发指南/p77_img67.png"
+          },
+          {
+            "path": "sources/images/CNware-WinStack-V9-4-0-接口开发指南/p77_img68.png"
+          },
+          {
+            "path": "sources/images/CNware-WinStack-V9-4-0-接口开发指南/p77_img69.png"
+          }
+        ],
+        "image_ordinals": [
+          0,
+          1,
+          2
+        ],
+        "omitted_page_images": 0,
+        "image_position_coverage": "recorded"
+      },
+      {
+        "page": 78,
+        "unit_kind": "page",
+        "printed_page_label": null,
+        "source_structure_policy": "native-page-roles-v1",
+        "text_coverage": "complete",
+        "structure_coverage": "recorded",
+        "images": [
+          {
+            "path": "sources/images/CNware-WinStack-V9-4-0-接口开发指南/p78_img70.png"
+          }
+        ],
+        "image_ordinals": [
+          0
+        ],
+        "omitted_page_images": 0,
+        "image_position_coverage": "recorded"
+      },
+      {
+        "page": 79,
+        "unit_kind": "page",
+        "printed_page_label": null,
+        "source_structure_policy": "native-page-roles-v1",
+        "text_coverage": "complete",
+        "structure_coverage": "recorded",
+        "images": [
+          {
+            "path": "sources/images/CNware-WinStack-V9-4-0-接口开发指南/p79_img71.png"
+          },
+          {
+            "path": "sources/images/CNware-WinStack-V9-4-0-接口开发指南/p79_img72.png"
+          },
+          {
+            "path": "sources/images/CNware-WinStack-V9-4-0-接口开发指南/p79_img73.png"
+          }
+        ],
+        "image_ordinals": [
+          0,
+          1,
+          2
+        ],
+        "omitted_page_images": 0,
+        "image_position_coverage": "recorded"
+      },
+      {
+        "page": 80,
+        "unit_kind": "page",
+        "printed_page_label": null,
+        "source_structure_policy": "native-page-roles-v1",
+        "text_coverage": "complete",
+        "structure_coverage": "recorded",
+        "images": [
+          {
+            "path": "sources/images/CNware-WinStack-V9-4-0-接口开发指南/p80_img74.png"
+          },
+          {
+            "path": "sources/images/CNware-WinStack-V9-4-0-接口开发指南/p80_img75.png"
+          }
+        ],
+        "image_ordinals": [
+          0,
+          1
+        ],
+        "omitted_page_images": 0,
+        "image_position_coverage": "recorded"
+      },
+      {
+        "page": 81,
+        "unit_kind": "page",
+        "printed_page_label": null,
+        "source_structure_policy": "native-page-roles-v1",
+        "text_coverage": "complete",
+        "structure_coverage": "recorded",
+        "images": [
+          {
+            "path": "sources/images/CNware-WinStack-V9-4-0-接口开发指南/p81_img76.png"
+          }
+        ],
+        "image_ordinals": [
+          0
+        ],
+        "omitted_page_images": 0,
+        "image_position_coverage": "recorded"
+      }
+    ],
+    "figure_interpretation": "Image references retain original assets, occurrence locations and any original captions. Pixels have not been interpreted. An occurrence or filename does not establish visual content.",
+    "output_sections": [
+      {
+        "id": "section-1",
+        "start": 0,
+        "end": 4206
+      },
+      {
+        "id": "section-2",
+        "start": 4206,
+        "end": 8222
+      },
+      {
+        "id": "section-3",
+        "start": 8222,
+        "end": 12299
+      },
+      {
+        "id": "section-4",
+        "start": 12299,
+        "end": 14447
+      }
+    ]
+  },
+  "accepted_summaries": [
+    {
+      "key": "summary:1",
+      "request_digest": "19f09770cb750d4b19fab187af314dd0791f9bfe2a7b25d5c0cf302b81fc16fb",
+      "result": {
+        "description": "云宏WinStack 虚拟化云平台 V9.4.0《开发指南》（日期 2026-04）的编译参考，面向开发人员与测试人员，覆盖第三方平台与 WinStack 接口对接所需的登录认证、凭证使用、会话有效期与单点登录说明，以及部署虚拟机等接口示例的目录与已提取正文；本提取范围内的大部分接口参数、请求与响应细节以图片承载，未作解释。",
+        "sections": [
+          {
+            "id": "section-1",
+            "content": "\n\n本部分对应文件的物理页 1–6（页 2 无提取文本或图片），包括封面、版权与联系方式，以及目录的前半部分（第 1 章至 4.1.12）。\n\n## 封面与版本\n\n封面给出文档名称“开发指南”、产品“云宏WinStack 虚拟化云平台”、日期“2026-04”、版本“V9.4.0”。\n\n\n\n```text\n开发指南\n云宏WinStack 虚拟化云平台\n日期：2026-04   版本：V9.4.0\n```\n\n\n\n## 版权、联系方式与免责声明\n\n页 3 写明公司名称“云宏信息科技股份有限公司”、文档下载站点（原文作 `http ://www.winhong.com/`）、意见反馈邮箱 support@winhong.com、电话 020-282 60045、热线 400-6300-003，以及地址“广州市天河区元岗横路33 号天河慧通产业广场B2 栋”。同页版权声明写明文档受国家版权法及国际协约条款保护，未经本公司书面许可，任何组织和个人不得擅自摘抄、复制文档内容，版权声明不得删除或修改。免责声明写明文档仅提供阶段性信息，所含内容可根据产品的实际情况随时更新、恕不另行通知；如因文档使用不当造成直接或间接损失，本公司不承担任何责任。页 4 仅补充邮编 510650。\n\n提取文本中 URL 的协议部分带空格（如“http ://www.winhong.com/”），属提取断行痕迹；后文接口地址中的“http s://”同理。\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n最新的技术文档可以从 Winhong 网站下载： http ://www.winhong.com/\n该网站还提供最近的产品更新信息。\n您如果对本文档有任何意见或建议，请反馈至： support@winhong.com\n版权声明\n版权所有 ©云宏信息科技股份有限公司，保留所有权利。\n本文档受国家版权法及国际协约条款的保护。未经本公司书面许可，任何组织和个人不得擅\n自摘抄、复制本文档内容。本版权声明不得删除或修改\n免责声明\n本文档仅提供阶段性信息，所含内容可根据产品的实际情况随时更新，恕不另行通知。如因\n文档使用不当造成的直接或间接损失，本公司不承担任何责任。\n云宏信息科技股份有限公司\n \n电话：020-282 60045\n热线：400-6300-003\n地址：广州市天河区元岗横路33 号天河慧通产业广场B2 栋\n```\n\n\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第2页\n邮编：510650\n```\n\n\n\n## 目录（第 1–4 章）\n\n页 5–6 为目录前半部分，按章列出第 1 章文档信息、第 2 章常用数据模型简介、第 3 章接入指南、第 4 章开发指南的条目与页码，第 4 章部分列到 4.1.12 接口12:检查虚拟机唯一性。目录条目只提供导航信息；各接口的参数、请求与响应细节在正文中多以图片承载，本次提取未解释这些图片。\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n目录\n第1 章\n文档信息................................................................................................................................................1\n1.1\n读者对象................................................................................................................................................1\n1.2\n文档版本................................................................................................................................................1\n1.3\n文档说明................................................................................................................................................1\n1.4\n阅读约定................................................................................................................................................1\n第2 章\n常用数据模型简介.............................................................................................................................2\n2.1\n云资源关系...........................................................................................................................................2\n2.2\n主机与虚拟机架构.............................................................................................................................2\n2.3\n主机虚拟机交换机与端口组...........................................................................................................3\n2.4\n主机与存储池.......................................................................................................................................4\n2.5\n存储池与存储卷(磁盘)......................................................................................................................5\n2.6\n虚拟机基本组成..................................................................................................................................6\n第3 章\n接入指南................................................................................................................................................7\n3.1\n接口认证................................................................................................................................................7\n3.2\n接口凭证使用.......................................................................................................................................8\n```\n\n\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第2页\n3.3\n认证会话有效期................................................................................................................................10\n3.4\n单点登录..............................................................................................................................................11\n第4 章\n开发指南..............................................................................................................................................12\n4.1\n部署虚拟机接口示例.......................................................................................................................12\n4.1.1\n接口1: 查询虚拟机模板列表...........................................................................................13\n4.1.2\n接口2:查询虚拟机模板详细信息....................................................................................14\n4.1.3\n接口3: 查询主机(列表)......................................................................................................15\n4.1.4\n接口4: 查询主机(表单)......................................................................................................16\n4.1.5\n接口5:存储池列表................................................................................................................17\n4.1.6\n接口6:查询主机下所有端口组.........................................................................................18\n4.1.7\n接口7:部署虚拟机................................................................................................................19\n4.1.8\n接口8:查询任务详情...........................................................................................................37\n4.1.9\n接口9:快速查询虚拟机列表.............................................................................................38\n4.1.10\n接口10:查询虚拟机(表单)................................................................................................39\n4.1.11\n接口11:查询主机空闲大页内存和主机空闲内存....................................................40\n4.1.12\n接口12:检查虚拟机唯一性..............................................................................................41\n```\n\n"
+          },
+          {
+            "id": "section-2",
+            "content": "\n\n本部分对应文件的物理页 7–8，内容全部是目录的延续，没有正文段落。\n\n页 7 列出第 4 章 4.1.13 接口13:检查虚拟机的ip 至 4.8 暂停虚拟机 的条目（含 4.2 删除虚拟机、4.3 回收虚拟机、4.4 修改虚拟机及其 4.4.1–4.4.7 子项）；页 8 从 4.9 休眠虚拟机 接续，经 4.15 资源统计类接口（4.15.1 查询主机概要信息 至 4.15.5 查询集群资源信息），到第 5 章 V2V 开发指引的 5.1.2 同步源端站点。所列页码来自目录本身。\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第3页\n4.1.13\n接口13:检查虚拟机的ip...................................................................................................42\n4.1.14\n接口14:查询虚拟机列表..................................................................................................43\n4.2\n删除虚拟机.........................................................................................................................................44\n4.3\n回收虚拟机.........................................................................................................................................45\n4.4\n修改虚拟机.........................................................................................................................................46\n4.4.1\n批量修改虚拟机cpu 和内存.............................................................................................46\n4.4.2\n修改虚拟机磁盘....................................................................................................................47\n4.4.3\n为虚拟机添加磁盘...............................................................................................................49\n4.4.4\n删除虚拟机设备(磁盘、光驱)..........................................................................................50\n4.4.5\n为虚拟机添加网卡...............................................................................................................51\n4.4.6\n修改虚拟机网卡....................................................................................................................52\n4.4.7\n删除虚拟机网卡....................................................................................................................53\n4.5\n启动虚拟机.........................................................................................................................................54\n4.6\n关闭虚拟机.........................................................................................................................................54\n4.7\n关闭虚拟机电源................................................................................................................................55\n4.8\n暂停虚拟机.........................................................................................................................................55\n```\n\n\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第4页\n4.9\n休眠虚拟机.........................................................................................................................................56\n4.10 恢复虚拟机.........................................................................................................................................56\n4.11 重启虚拟机.........................................................................................................................................57\n4.12 强制重启虚拟机................................................................................................................................57\n4.13 虚拟机控制台....................................................................................................................................58\n4.14 同步虚拟机.........................................................................................................................................58\n4.15 资源统计类接口................................................................................................................................59\n4.15.1\n查询主机概要信息.............................................................................................................59\n4.15.2\n查询云资源统计..................................................................................................................61\n4.15.3\n查询云资源使用率.............................................................................................................64\n4.15.4\n查询集群基本信息.............................................................................................................67\n4.15.5\n查询集群资源信息.............................................................................................................70\n第5 章\nV2V 开发指引.....................................................................................................................................72\n5.1\n源端站点管理....................................................................................................................................72\n5.1.1\n新增源端站点........................................................................................................................72\n5.1.2\n同步源端站点........................................................................................................................73\n```\n\n"
+          },
+          {
+            "id": "section-3",
+            "content": "\n\n本部分对应文件的物理页 9–10，为目录的延续，没有正文段落。\n\n页 9 列出第 5 章 5.2 迁移任务（5.2.1 获取迁移主机列表 至 5.2.9 取消迁移任务）、5.3 迁移任务状态、5.4 异常描述，以及第 6 章跨版本迁移开发指引的 6.1 接口代理、6.2 任务列表、6.3 发起任务；页 10 列出 6.3.1 查询虚拟机资源树 至 6.3.8 查询迁移任务详情，以及第 7 章附件（7.1 接口文档，页码 90）、第 8 章接口差异（8.1 V9.3.0->V9.4.0 接口差异，页码 91）、第 9 章常见问题（9.1 鉴权问题，页码 92）、第 10 章感谢使用（10.1 售后服务，页码 94）。\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第5页\n5.2\n迁移任务..............................................................................................................................................73\n5.2.1\n获取迁移主机列表...............................................................................................................73\n5.2.2\n获取虚拟机列表....................................................................................................................74\n5.2.3\n策略部署..................................................................................................................................74\n5.2.4\n迁移任务前置检查...............................................................................................................75\n5.2.5\n新增迁移任务........................................................................................................................75\n5.2.6\n查询迁移任务详情...............................................................................................................76\n5.2.7\n批量切换任务........................................................................................................................76\n5.2.8\n重新发起迁移任务...............................................................................................................76\n5.2.9\n取消迁移任务........................................................................................................................76\n5.3\n迁移任务状态....................................................................................................................................77\n5.4\n异常描述..............................................................................................................................................78\n第6 章\n跨版本迁移开发指引.......................................................................................................................83\n6.1\n接口代理..............................................................................................................................................83\n6.2\n任务列表..............................................................................................................................................83\n6.3\n发起任务..............................................................................................................................................84\n```\n\n\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第6页\n6.3.1\n查询虚拟机资源树...............................................................................................................84\n6.3.2\n查询源平台虚拟机...............................................................................................................84\n6.3.3\n查询本平台的虚拟机资源树.............................................................................................85\n6.3.4\n查询存储池.............................................................................................................................86\n6.3.5\n查询源虚拟机详情...............................................................................................................87\n6.3.6\n查询目标主机端口组列表.................................................................................................88\n6.3.7\n创建迁移任务........................................................................................................................88\n6.3.8\n查询迁移任务详情...............................................................................................................88\n第7 章\n附件.......................................................................................................................................................90\n7.1\n接口文档..............................................................................................................................................90\n第8 章\n接口差异..............................................................................................................................................91\n8.1\nV9.3.0->V9.4.0 接口差异..................................................................................................................91\n第9 章\n常见问题..............................................................................................................................................92\n9.1\n鉴权问题..............................................................................................................................................92\n第10 章\n感谢使用..........................................................................................................................................94\n10.1 售后服务..............................................................................................................................................94\n```\n\n"
+          },
+          {
+            "id": "section-4",
+            "content": "\n\n本部分对应物理页 11–30：目录收尾（10.2 问题反馈）、第 1 章文档信息、第 2 章常用数据模型简介、第 3 章接入指南，以及第 4 章开头（4.1 与 4.1.1）。页 12 的提取结果为 `[No extracted text or images]`；页 22 只有页眉页脚文字（第10页），没有正文。\n\n## 目录收尾\n\n页 11 只剩一个目录条目：10.2 问题反馈……94。\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第7页\n10.2 问题反馈..............................................................................................................................................94\n```\n\n\n\n## 第 1 章 文档信息\n\n1.1 读者对象为“开发人员、测试人员”；1.2 文档版本标注为“winstack9.4 版本及以上”；1.3 文档说明指出本文档用于第三方平台与 WinStack 做接口对接，包含登录认证和虚拟机生命周期等主要接口，并提示全量接口文档请查看附件（对应目录中的第 7 章附件 / 7.1 接口文档）。\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第1页\n第1章文档信息\n1.1 读者对象\n本文档主要适用于以下用户：\n\n开发人员、测试人员\n1.2 文档版本\nwinstack9.4 版本及以上\n1.3 文档说明\n本文档用于第三方平台与WinStack 做接口对接，包含登录认证和虚拟机生命周期等主\n要接口，全量接口文档请查看附件。\n```\n\n\n\n1.4 阅读约定以表 1“符号及格式含义”说明排版约定：“说明”表示正文的附加信息，是对正文的强调和补充；“注意”表示有潜在风险，如果忽视这些文本，可能导致设备损坏、数据丢失、设备性能降低或不可预知的结果；“单击”为快速按下并释放鼠标的一个按钮；“双击”为连续两次快速按下并释放鼠标的一个按钮。“注意”处另配有一张图标图片（`sources/images/CNware-WinStack-V9-4-0-接口开发指南/p14_img2.png`），本次提取未解释图片内容。\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第2页\n1.4 阅读约定\n在本文档中可能出现下列标志及操作，他们所代表的含义如表1所示：\n表1 符号及格式含义\n符号及格式\n说明\n说明\n表示是正文的附加信息，是对正文的强调和补充。\n```\n\n\n\n\n\n```text\n注意\n表示有潜在风险，如果忽视这些文本，可能导致设备损坏、数据丢失、设备性能\n降低或不可预知的结果。\n单击\n快速按下并释放鼠标的一个按钮。\n双击\n连续两次快速按下并释放鼠标的一个按钮。\n```\n\n\n\n## 第 2 章 常用数据模型简介\n\n第 2 章以示意图介绍常用数据模型，提取到的说明性文字很少。2.2 主机与虚拟机架构 下注明“编号表示: 接口传参时,用数字编号代表该类资源”。2.1 云资源关系、2.3 主机虚拟机交换机与端口组、2.4 主机与存储池、2.5 存储池与存储卷(磁盘)、2.6 虚拟机基本组成 在本次提取结果中只有标题与一张示意图（依次为 `sources/images/CNware-WinStack-V9-4-0-接口开发指南/p15_img3.png`、`p17_img5.png`、`p18_img6.png`、`p20_img7.png`、`p21_img8.png`），没有文字说明；图中表达的资源关系、编号取值等未在本提取中得到解释。\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第3页\n第2章常用数据模型简介\n2.1 云资源关系\n```\n\n\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第4页\n2.2主机与虚拟机架构\n编号表示: 接口传参时,用数字编号代表该类资源\n```\n\n\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第5页\n2.3主机虚拟机交换机与端口组\n```\n\n\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第6页\n2.4\n主机与\n存储池\n```\n\n\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第7页\n2.5 存储池与存储卷(磁盘)\n```\n\n\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第9页\n2.6虚拟机基本组成\n```\n\n\n\n## 第 3 章 接入指南\n\n### 3.1 接口认证\n\n使用 API 需要先获取访问凭证（sessionId），作为后续调用其他接口的认证凭据。原文示例：调用接口 `http s://{ip}/api/login`，请求类型 POST，输入输出数据格式 JSON；调用成功后接口返回用户认证信息，可从中拿到 sessionId。\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第11页\n第3章接入指南\n3.1 接口认证\n使用API 需要先获取访问凭证（sessionId），作为后续调用其他接口的认证凭据。\n示例：\n调用接口：http s://{ip}/api/login\n请求类型：POST\n输入输出数据格式：JSON\n调用成功接口返回用户认证信息，拿到sessionId，如下：\n```\n\n\n\n原文给出的 Curl 方式（提取结果按行断开，逐字保留）：\n\n\n\n```text\nCurl 方式：\ncurl -H \"Content-Type: application/json\" -X POST -d '{\"user\":\"{账号}\",\"pwd\":\"{密码}\"}' --insecure http s://{ip}/api/login\n示例如下：\n```\n\n\n\n页 24 的两张示例图片（`sources/images/CNware-WinStack-V9-4-0-接口开发指南/p24_img9.png`、`p24_img10.png`）未被解释，其中的返回示例内容未在本提取中建立。\n\n### 3.2 接口凭证使用\n\n拿到 session 后，将其作为 cookie 值插入到 headers 中，即可给接口赋上访问权限。原文给出的 cookie 形式为：\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第13页\nSESSION=xxxxxxxxxxxxxxx\n```\n\n\n\n对应的 Curl 方式（原文在 `--insecure` 之后换行再给出地址，路径前另有一处空格，均为提取断行痕迹）：\n\n\n\n```text\nCurl 方式：\ncurl -H \"Content-Type: application/json\" --cookie \"SESSION={sessionId}\" --insecure \nhttp s://{ip} /api/xxx\n示例如下\n```\n\n\n\n页 26 以“其他示例：开启虚拟机”“关闭虚拟机”为例给出调用示例，两处内容均为图片（`sources/images/CNware-WinStack-V9-4-0-接口开发指南/p26_img13.png`、`p26_img14.png`），其请求与响应未在本提取中解释。\n\n### 3.3 认证会话有效期\n\n每个 session 默认有效时长为 30 分钟，到期后自动失效，需要重新调用认证接口获取新的 session；使用 session 调用其他接口可重置会话时间；也可以通过定时调用会话检查接口延长会话到期时间（会话检查接口的调用示例为图片 `sources/images/CNware-WinStack-V9-4-0-接口开发指南/p27_img15.png`、`p27_img16.png`）。\n\n\n\n```text\n3.3 认证会话有效期\n上述返回的每个session 默认有效时长为30 分钟，到期后自动失效，需要重新调用认证\n接口获取新的session，使用session 调用其他接口可重置会话时间。\n也可以通过定时调用会话检查接口延长会话到期时间，如下\n```\n\n\n\n原文的注意框（提取文本被换行拆成多个碎片，此处按顺序拼接其可读内容）提示：“注意：每个 session 本身有存活期，不需要频繁调登录接口，否则可能导致 session 达到安全阈值而影响使用。”\n\n原文“建议代码示例”给出：当接口返回状态码 401 时表示 session 过期了，此时需要重新认证。\n\n\n\n```text\n \n全阈值而影响使用。\n建议代码示例：\n当接口返回状态码401 时表示session 过期了，此时需要重新认证。\n```\n\n\n\n该建议示例本身是图片（`sources/images/CNware-WinStack-V9-4-0-接口开发指南/p27_img17.png`），其代码内容未在本提取中解释。\n\n### 3.4 单点登录\n\n单点登录分两步：(1) 调用 3.1 的登录接口获取 sessionId；(2) 在浏览器打开链接 `http s://{ip}/api/user/loginBySessionId?sessionId={sessionId}`。文档说明：sessionId 参数即是第一步调用登录接口获取到的 sessionId，可以在打开链接之前校验下 sessionId 是否失效，如果失效了那么重新获取一个新的 sessionId。\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第16页\n（1）调用3.1 的登录接口获取sessionId\n（2）在浏览器打开链接：http s://{ip}/api/user/loginBySessionId?sessionId={sessionId}\n说明：sessionId 参数即是第一步调用登录接口获取到的sessionId，可以在打开链接之前校验\n下sessionId 是否失效，如果失效了那么重新获取一个新的sessionId\n```\n\n\n\n## 第 4 章 开发指南：4.1 部署虚拟机接口示例\n\n第 4 章标题为“开发指南”，4.1 为“部署虚拟机接口示例”。页 30 说明：以下接口详情可在离线文档左上方输入接口名称查询。\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第17页\n第4章开发指南\n4.1 部署虚拟机接口示例\n```\n\n\n\n### 4.1.1 接口1: 查询虚拟机模板列表\n\n用途为查询部署虚拟机模板列表、选择模板；原文示例地址为 `192.168.205.176/api/compute/domain_templates`。该节附图（`sources/images/CNware-WinStack-V9-4-0-接口开发指南/p30_img19.png`、`p30_img20.png`、`p30_img21.png`）未被解释，其请求参数与返回内容未在本提取中建立。\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第18页\n以下接口详情可在离线文档左上方输入接口名称查询。\n4.1.1\n接口1: 查询虚拟机模板列表\n查询部署虚拟机模板列表,选择模板\n```\n\n\n\n\n\n```text\n示例: 192.168.205.176/api/compute/domain_templates\n```\n\n"
+          },
+          {
+            "id": "section-5",
+            "content": "\n\n本节覆盖物理页 31（该页文本覆盖为部分，且有 1 张页面图片未被提取）。\n\n## 4.1.2 接口2: 查询虚拟机模板详细信息\n\n用途：查询指定模板的详细信息。该小节标题与其说明文字是页 31 在本提取中保留的全部正文；页 31 的示意图（`sources/images/CNware-WinStack-V9-4-0-接口开发指南/p31_img22.png`）未被解释。\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第19页\n4.1.2 接口2:查询虚拟机模板详细信息\n查询指定模板的详细信息\n```\n\n\n\n## 续接内容：物理页 31 后半 – 34\n\n以下内容来自随本文档提供的后续原文片段，续接在上一小节之后；这些页面同样以图片承载请求与响应细节，提取到的文字仅为小节标题、简短用途说明和示例地址。示例统一使用主机地址 192.168.205.176。\n\n4.1.2 的示例地址带具体模板 ID：\n\n\n\n```text\n示例:\n192.168.205.176/api/compute/domain_templates/61770930-b771-4cb0-adaa-be52aed5ccd0\n```\n\n\n\n### 4.1.3 接口3: 查询主机(列表)\n\n用途：根据模板的 cpu 架构查询可以部署的主机列表。\n\n\n\n```text\n4.1.3 接口3: 查询主机(列表)\n根据模板的cpu 架构查询可以部署的主机列表\n```\n\n\n\n示例（原文在提取中于 `?` 后换行，且 `needPoolName` 被拆成“needPoolNam”+换行+“e”；此处按原样引用，不重排、不合并）：\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第21页\n192.168.205.176/api/compute/hosts?\ncpuArchitecture=2&isConnected=true&isMaintain=false&needClusterName=true&needPoolNam\ne=true&size=9999\n```\n\n\n\n### 4.1.4 接口4: 查询主机(表单)\n\n用途：获取主机的详细信息。\n\n\n\n```text\n4.1.4 接口4: 查询主机(表单)\n获取主机的详细信息\n```\n\n\n\n示例中的主机以 UUID 标识，提取文本结尾多出一个以空格分隔的“1”（疑为断行残留，未在本提取中确证，不能据此推断标识的实际取值）：\n\n\n\n```text\n示例:\n192.168.205.176/api/compute/hosts/db876dbd-8a33-4860-bce2-af315fddfb0 1\n```\n\n\n\n页 33、页 34 另有多张图片（`sources/images/CNware-WinStack-V9-4-0-接口开发指南/p33_img26.png`、`p33_img27.png`、`p34_img28.png`、`p34_img29.png`、`p34_img30.png`），其请求参数、响应字段与返回示例均未在本提取中解释。\n\n## 页码对应关系\n\n目录中第 4 章各接口标注的页码与这些接口所在页面的页眉页码并不一致：4.1.1 在目录中标注第 13 页，实际出现在标注“第18页”的页面；4.1.2 标注第 14 页，实际为“第19页”；4.1.3 标注第 15 页，实际为“第20页”；4.1.4 标注第 16 页，实际为“第22页”。查找接口时宜按小节标题而非目录页码定位。\n\n"
+          }
+        ]
+      }
+    },
+    {
+      "key": "summary:2",
+      "request_digest": "309c3c66378de5a1add379dc64f63a18c2e97cf8cdbcbbc2ef16b14b804c37cc",
+      "result": {
+        "description": "CNware-WinStack V9.4.0 接口开发指南：部署虚拟机接口示例，涵盖查询模板、主机、存储池、端口组以及部署虚拟机的参数说明与示例。",
+        "sections": [
+          {
+            "id": "section-1",
+            "content": "\n\n## 4.1 部署虚拟机接口示例\n\n**前置条件：** 调用登录接口获取 `sessionId`。每个 session 本身有存活期，不需要频繁调登录接口，否则可能导致 session 达到安全阈值而影响使用。当接口返回状态码 401 时表示 session 过期了，此时需要重新认证。原文该注意说明在提取时存在断行，以下保留可读片段。\n\n\n\n```text\n 本身有存活期，不需要频繁调登录接口，否则可能导致\n \n```\n\n\n\n\n\n```text\n 达到安\n \n```\n\n\n\n\n\n```text\n \n全阈值而影响使用。\n建议代码示例：\n当接口返回状态码401 时表示session 过期了，此时需要重新认证。\n```\n\n\n\n**单点登录：** 可先调用 3.1 的登录接口获取 `sessionId`，然后在浏览器打开链接：`https://{ip}/api/user/loginBySessionId?sessionId={sessionId}`。在打开链接之前可校验 `sessionId` 是否失效，如果失效则重新获取一个新的 `sessionId`。\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第16页\n（1）调用3.1 的登录接口获取sessionId\n（2）在浏览器打开链接：http s://{ip}/api/user/loginBySessionId?sessionId={sessionId}\n说明：sessionId 参数即是第一步调用登录接口获取到的sessionId，可以在打开链接之前校验\n下sessionId 是否失效，如果失效了那么重新获取一个新的sessionId\n```\n\n\n\n### 4.1.2 接口2: 查询虚拟机模板详细信息\n\n查询指定模板的详细信息。示例请求路径：\n\n`192.168.205.176/api/compute/domain_templates/61770930-b771-4cb0-adaa-be52aed5ccd0`\n\n\n\n```text\n示例:\n192.168.205.176/api/compute/domain_templates/61770930-b771-4cb0-adaa-be52aed5ccd0\n```\n\n\n\n### 4.1.3 接口3: 查询主机(列表)\n\n根据模板的 cpu 架构查询可以部署的主机列表。示例请求路径：\n\n`192.168.205.176/api/compute/hosts?cpuArchitecture=2&isConnected=true&isMaintain=false&needClusterName=true&needPoolName=true&size=9999`\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第21页\n192.168.205.176/api/compute/hosts?\ncpuArchitecture=2&isConnected=true&isMaintain=false&needClusterName=true&needPoolNam\ne=true&size=9999\n```\n\n\n\n### 4.1.4 接口4: 查询主机(表单)\n\n获取主机的详细信息。示例请求路径：\n\n`192.168.205.176/api/compute/hosts/db876dbd-8a33-4860-bce2-af315fddfb0 1`\n\n\n\n```text\n示例:\n192.168.205.176/api/compute/hosts/db876dbd-8a33-4860-bce2-af315fddfb0 1\n```\n\n\n\n### 4.1.5 接口5: 存储池列表\n\n获取主机下存储池列表。其中 `storagePoolName` 表示底层存储池名称，用接口传参。示例请求路径：\n\n`192.168.205.176/api/storage/storagePools?queryType=filterIscsi&hostId=db876dbd-8a33-4860-bce2-af315fddfb0 1&isActive=true`\n\n\n\n```text\n示例: (其中storagePoolName 表示底层存储池名称,用接口传参)\n192.168.205.176/api/storage/storagePools?queryType=fil terIscsi&hostId=db876dbd-8a33-4860-\nbce2-af315fddfb0 1&isActive=true \n```\n\n\n\n### 4.1.6 接口6: 查询主机下所有端口组\n\n获取主机下端口组列表。示例请求路径：\n\n`192.168.205.176/api/compute/hosts/db876dbd-8a33-4860-bce2-af315fddfb0 1/portGroups/v2?size=9999`\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第25页\n示例:\n192.168.205.176/api/compute/hosts/db876dbd-8a33-4860-bce2-af315fddfb0 1/portGroups/v2?\nsize=9999 \n4.1.7\n```\n\n\n\n### 4.1.7 接口7: 部署虚拟机\n\n示例返回 `taskId`，表示任务 id。请求路径：\n\n`https://192.168.205.176/api/compute/domain_templates/7866a72d-9a74-49be-9cba-f302dd0015c5/deploy/hosts/db876dbd-8a33-4860-bce2-af315fddfb0 1`\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第26页\nhttp s://192.168.205.176/api/compute/domain_templates/7866a72d-9a74-49be-9cba-f302dd0015c5/\ndeploy/hosts/db876dbd-8a33-4860-bce2-af315fddfb0 1\n```\n\n\n\n### 4.1.7.1 参数概要\n\n部署虚拟机请求体包含以下主要部分：\n- `baseInfo`：虚拟机基本信息，包含了虚拟机名称(`name`)、`vmHostName`、`cpu` 和内存(`memory`)等。\n- `diskDevices`：磁盘集合。\n- `bridgeInterfaces`：网卡集合。\n- `cloudInitReq`：需要使用 cloud init 进行处理虚拟机的脚本是使用。\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第27页\n4.1.7.1 参数概要\nbaseInfo 虚拟机基本信息部分包含了虚拟机名称(name), vmHostName, cpu 和内存(memory)等,\ndiskDevices 磁盘集合  \nbridgeInterfaces 网卡集合\ncloudInitReq: 需要使用cloud init 进行处理虚拟机的脚本是使用\n1.\n{  \n2.\n    \"isStartNewDomain\": false,    \n3.\n    \"deployNum\": \"3\",           \n4.\n    \"deployStartNo\": \"2\",        \n5.\n    \"baseInfo\": {  \n6.\n        \"name\": \"my_vm\",    \n7.\n        \"vmHostName\": \"my_vm\",   \n8.\n        \"domainname\": \"my_vm\",    \n9.\n        \"cpu\": {  \n10.\n        ...  \n11.\n        },  \n12.\n        \"memory\": {  \n13.\n           ...    \n14.\n        }   \n15.\n    },  \n```\n\n\n\n### 4.1.7.2 部署完毕自动启动虚拟机\n\n参数 `isStartNewDomain`（选填，默认 `false`）控制部署完毕后是否自动启动虚拟机：\n- `true`：部署完毕后，自动启动虚拟机；\n- `false`：部署完毕后，虚拟机为关机状态。\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第28页\n16.\n    \"bridgeInterfaces\": [  \n17.\n        ...  \n18.\n    ],  \n19.\n    \"diskDevices\": [  \n20.\n        ...  \n21.\n    ],  \n22.\n\"cloudInitReq\": {    \n23.\n    ...  \n24.\n  }  \n25.\n26.\n27.\n28.\n}  \n4.1.7.2 部署完毕自动启动虚拟机\n1.\n{  \n2.\n    \"isStartNewDomain\": false,\n3.\n...  \n4.\n}  \n如果期望,部署完毕后,虚拟自动启动,可以设置  isStartNewDomain 为true,默认为false\n\"isStartNewDomain\": true  选填。true: 部署完毕后,自动启动虚拟机; false : 部署完毕后,虚拟机为关机状态.\n```\n\n\n\n### 4.1.7.3 批量部署\n\n参数 `deployNum`（选填，默认 1）：部署虚拟机的总数量。\n参数 `deployStartNo`（选填，当 `deployNum > 1` 时生效）：虚拟机名字、磁盘命名起始序号。虚拟机的 `name`、`vmHostName`、`domainname`、磁盘的 `volName` 字段会根据起始序号，叠加命名。如 `deployStartNo=2`，`deployNum=3`，部署出来的虚拟机的名称分别为 `my_vm2`、`my_vm3`、`my_vm4`。\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第29页\n4.1.7.3 批量部署\n1.\n{  \n2.\n    \"isStartNewDomain\": false,    \n3.\n    \"deployNum\": 3,   \n4.\n    \"deployStartNo\": 2,    \n5.\n...  \n6.\n}  \n如果期望,一次调用接口能部署多台虚拟机.可以设置  deployNum 和deployStartNo\n\"deployNum\": 3  选填。部署虚拟机的总数量,默认为1;\n\"deployStartNo\": 2 选填。虚拟机名字,磁盘命名起始序号, 当deployNum>1 时生效, 虚拟机的name,vmHostName,domainname,\n磁盘的volName 字段会根据起始序号,叠加命名;如 deployStartNo=2,deployNum=3,部署出来的虚拟机的名称分别为 my_vm2, \nmy_vm3,  my_vm4  \n4.1.7.4 虚拟机名称,hostname\n1.\n{  \n2.\n  ...\n3.\n  \"baseInfo\": {  \n4.\n    \"name\": \"my_vm\",  \n5.\n    \"vmHostName\": \"my_vm\",  \n```\n\n\n\n### 4.1.7.4 虚拟机名称, hostname\n\n`name`（必填）：虚拟机在平台的显示名称，全平台唯一。\n`vmHostName`（选填）：虚拟机的 hostName。\n`domainname`（选填）：虚拟机在主机底层上显示的名称。\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第29页\n4.1.7.3 批量部署\n1.\n{  \n2.\n    \"isStartNewDomain\": false,    \n3.\n    \"deployNum\": 3,   \n4.\n    \"deployStartNo\": 2,    \n5.\n...  \n6.\n}  \n如果期望,一次调用接口能部署多台虚拟机.可以设置  deployNum 和deployStartNo\n\"deployNum\": 3  选填。部署虚拟机的总数量,默认为1;\n\"deployStartNo\": 2 选填。虚拟机名字,磁盘命名起始序号, 当deployNum>1 时生效, 虚拟机的name,vmHostName,domainname,\n磁盘的volName 字段会根据起始序号,叠加命名;如 deployStartNo=2,deployNum=3,部署出来的虚拟机的名称分别为 my_vm2, \nmy_vm3,  my_vm4  \n4.1.7.4 虚拟机名称,hostname\n1.\n{  \n2.\n  ...\n3.\n  \"baseInfo\": {  \n4.\n    \"name\": \"my_vm\",  \n5.\n    \"vmHostName\": \"my_vm\",  \n```\n\n"
+          },
+          {
+            "id": "section-2",
+            "content": "\n\n## 4.1.7.4 虚拟机名称, hostname（续）\n\n`name`：必填。虚拟机在平台的显示名称，全平台唯一。\n`vmHostName`：选填。虚拟机的 hostName。\n`domainname`：选填。虚拟机在主机底层上显示的名称。\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第30页\n6.\n    \"domainname\": \"my_vm\",  \n7.\n   ...\n8.\n  }  \n9.\n} \n\"name\": \"my_vm\"  必填。虚拟机在平台的显示名称,全平台唯一\n\"vmHostName\": \"my_vm\",  选填。虚拟机的hostName\n\"domainname\": \"my_vm\", 选填。虚拟机在主机底层上显示的名称 \n4.1.7.5 虚拟机cpu\n1.\n{  \n2.\n    ...  \n3.\n    \"baseInfo\": {  \n4.\n        ...  \n5.\n        \"cpu\": {  \n6.\n            \"arch\": 2,       \n7.\n            \"cores\": 32,     \n8.\n            \"sockets\": 1,    \n9.\n            \"current\": 2,   \n10.\n            \"mode\": 2,     \n11.\n            \"gurantees\": 0,    \n12.\n            \"quota\": 100,     \n```\n\n\n\n## 4.1.7.5 虚拟机cpu\n\n`cpu` 对象包含以下字段：\n\n- `arch`（选填）：虚拟机的架构。取值：1：32 位(x86 架构)；2：64 位(x86 架构)；3：aarch64(arm 架构)；4：mips64el(mips 架构)；5：sw_64(申威服务器)；6 loongarch64(龙芯5000)。\n- `cores`（选填）：配置虚拟机的 cpu 核数。虚拟机 cpu 最大值 = `sockets * cores`，`current <= sockets * cores <= 宿主机的最大 cpu`。\n- `sockets`（选填）：配置虚拟机的 cpu 核数。约束同 `cores`。\n- `current`（必填）：虚拟机的 cpu 大小。\n- `mode`（选填）：cpu 工作模式。1.兼容；2.主机匹配；3.直通。x86 平台默认值为 1，misp 平台默认为 3，arm 平台和申威服务器只支持直通模式，其他平台都支持。\n- `gurantees`（选填）：cpu 预留，默认 0，范围 [0~100]，单位：%。CPU 工作模式为兼容模式时不支持，即为 0。\n- `quota`（选填）：cpu 限制，默认 100，范围 [0~100]，单位：MHz。CPU 工作模式为兼容模式时不支持，即为 0。\n- `shares`（选填）：cpu 调度优先级。1.低；2.中(默认)；3.高。\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第30页\n6.\n    \"domainname\": \"my_vm\",  \n7.\n   ...\n8.\n  }  \n9.\n} \n\"name\": \"my_vm\"  必填。虚拟机在平台的显示名称,全平台唯一\n\"vmHostName\": \"my_vm\",  选填。虚拟机的hostName\n\"domainname\": \"my_vm\", 选填。虚拟机在主机底层上显示的名称 \n4.1.7.5 虚拟机cpu\n1.\n{  \n2.\n    ...  \n3.\n    \"baseInfo\": {  \n4.\n        ...  \n5.\n        \"cpu\": {  \n6.\n            \"arch\": 2,       \n7.\n            \"cores\": 32,     \n8.\n            \"sockets\": 1,    \n9.\n            \"current\": 2,   \n10.\n            \"mode\": 2,     \n11.\n            \"gurantees\": 0,    \n12.\n            \"quota\": 100,     \n```\n\n\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第31页\n13.\n            \"shares\": 2,    \n14.\n        },  \n15.\n    ...  \n16.\n    }  \n17.\n} \n\"arch\": 2,  选填。虚拟机的架构,: 1：32 位(x86 架构) 2：64 位(x86 架构)  3：aarch64(arm 架构)  4：mips64el(mips 架构)  5：\nsw_64(申威服务器) 6 loongarch64(龙芯5000)\n\"cores\": 32, 选填。配置虚拟机的cpu 核数，虚拟机cpu 最大值=sockets*cores, current <=sockets*cores <=宿主机的最大\ncpu。\n\"sockets\": 1, 选填。配置虚拟机的cpu 核数，虚拟机cpu 最大值=sockets*cores, current <=sockets*cores <=宿主机的最大\ncpu。\n\"current\": 2, 必填。虚拟机的cpu 大小;\n\"mode\": 2,  选填。cpu 工作模式， 1.兼容  2.主机匹配  3.直通; x86,平台默认值为1,misp 平台默认为3, arm 平台和申威服\n务器只支持直通模式,其他平台都支持。\n\"gurantees\": 0,  选填。cpu 预留，选填  (默认0)[0~100]单位:% CPU 工作模式为兼容模式时不支持,即为0\n\"quota\": 100,  选填。cpu 限制，选填(默认100)[0~100]单位:MHz CPU 工作模式为兼容模式时不支持,即为0\n\"shares\": 2, 选填。cpu 调度优先级，选填 1.低  2.中(默认)  3.高\n```\n\n\n\n## 4.1.7.6 虚拟机内存\n\n`memory` 对象包含以下字段：\n\n- `size`（必填）：虚拟机的内存大小。范围 [>=536870912(512MB)]，单位：字节，必须是 MB 的整数倍，不能大于主机的内存大小。\n- `autoMem`（选填）：启用内存气球，默认 `false`。CPU 工作模式为兼容时不支持，即一定是 `false`。\n- `isHugePages`（选填）：是否开启大页内存，默认 `false`。当设置为 `true` 时，部署虚拟机的目标宿主机必须开启了大页内存，此项才生效。\n- `limit`（选填）：虚拟机的内存限制，默认空。范围 [>=536870912(512MB)]，单位：字节，内存限制的大小不能大于内存总大小。\n- `locked`（选填）：内存预留百分比，单位：%，默认 0，范围 0-100。虚拟机开启了大页内存，则不允许设置内存预留。\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第32页\n4.1.7.6 虚拟机内存\n1.\n{  \n2.\n    ...  \n3.\n    \"baseInfo\": {  \n4.\n        ...  \n5.\n        \"memory\": {  \n6.\n            \"size\": 42 949672 96 ,     \n7.\n            \"autoMem\": false,       \n8.\n            \"isHugePages\": false,   \n9.\n            \"limit\": null,          \n10.\n            \"locked\": 0,    \n11.\n        }   \n12.\n    }  \n13.\n}  \n\"size\": 42 949672 96  必填。虚拟机的内存大小  :[>=536870912(512MB)]单位:字节,必须是MB 的整数倍 ,不能大于主机的内存\n大小。\n\"autoMem\": false, 选填。启用内存气球 ,默认false。 CPU 工作模式为兼容时不支持,即一定是false\n\"isHugePages\": false, 选填。是否开启大页内存，默认false。 当设置为true 时,部署虚拟机的目标宿主机必须开启了大页内\n```\n\n\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第33页\n存,此项才生效。\n\"limit\": null, 选填。虚拟机的内存限制  选填(默认空) [>=536870912(512MB)]单位:字节 ,内存限制的大小不能大于内存总大\n小。\n\"locked\": 0, 选填。内存预留百分比  选填 单位:% (默认0) 选填, 范围0-100; 虚拟机开启了大页内存,则不允许设置内存预\n留。\n4.1.7.7 虚拟机网卡\n1.\n{  \n2.\n    ...  \n3.\n    \"bridgeInterfaces\": [  \n4.\n        {  \n5.\n            \"ip\": \"11.22.33.44\",   \n6.\n            \"isVhostDriver\": true,   \n```\n\n\n\n## 4.1.7.7 虚拟机网卡\n\n`bridgeInterfaces` 是一个网卡对象数组。每个网卡对象包含以下字段：\n\n- `ip`（设置 ip 时必填）：必须结合 `networkType` 和 `osMacIp` 使用。\n- `isVhostDriver`（选填）：是否开启内核加速，默认为 `true`；只有 mode 为高速网卡时，支持开启。\n- `mac`（选填）：自定义网卡 mac 地址，默认由系统自动生成。\n- `model`（选填）：1.高速网卡(默认)；2.普通网卡；3.Intel e1000 网卡。x86 架构和申威服务器支持 1,2,3；arm 和 mips 架构只支持 1。\n- `queues`（选填）：网卡多队列；当 `isVhostDriver=true` 才生效。\n- `networkType`（选填）：网络的模式：0. 经典网络；1.vpc 网络。\n- `oldMac`（选填）：模板网卡的 mac 地址。当填写时，表示使用模板网卡配置；不填写时，表示该网卡为新增加的网卡。\n- `osMacIp`（设置经典网络的 ip 时必填）：经典网络自定义网络参数。包含：\n  - `netIpType`（设置经典网络的 ip 时必填）：网络类型。1.不设置 ip；2.DHCP(经典网络不支持)；3.ipv4(ip 为 ipv4)；4.iPv6 (ip 为 ipv6)。\n  - `netGateway`（设置经典网络的 ip 时选填）：网关。\n  - `netMask`（设置经典网络的 ip 时必填）：子网掩码。\n  - `netDns`（设置经典网络的 ip 时选填）：主 DNS。\n  - `secondaryDns`（设置经典网络的 ip 时选填）：副 DNS。\n- `portGroupId`：端口组 ID。\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第33页\n存,此项才生效。\n\"limit\": null, 选填。虚拟机的内存限制  选填(默认空) [>=536870912(512MB)]单位:字节 ,内存限制的大小不能大于内存总大\n小。\n\"locked\": 0, 选填。内存预留百分比  选填 单位:% (默认0) 选填, 范围0-100; 虚拟机开启了大页内存,则不允许设置内存预\n留。\n4.1.7.7 虚拟机网卡\n1.\n{  \n2.\n    ...  \n3.\n    \"bridgeInterfaces\": [  \n4.\n        {  \n5.\n            \"ip\": \"11.22.33.44\",   \n6.\n            \"isVhostDriver\": true,   \n```\n\n\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第34页\n7.\n            \"mac\": null,             \n8.\n            \"model\": 1,            \n9.\n            \"queues\":null,           \n10.\n            \"networkType\": 0,       \n11.\n            \"oldMac\": \"52:54:00:df:e3:24\",   \n12.\n            \"osMacIp\": {           \n13.\n                 \"netIpType\": 3,   \n14.\n                 \"netGateway\": \"11.22.33.254\",   \n15.\n                 \"netMask\": \"255.255.255.0\",   \n16.\n                 \"netDns\": null,  \n17.\n                 \"secondaryDns\":null  \n18.\n            },  \n19.\n            \"portGroupId\": \"586e5c56-e2ee-4a70-a7ac-585441cedcfd\"   \n20.\n        }  \n21.\n    ]  \n22.\n}  \n\"ip\": \"11.22.33.44\"， 设置ip 时，必填。必须需要结合 networkType 和 osMacIp 使用。\n\"isVhostDriver\": true， 选填。  是否开启内核加速,默认为true;只有mode 为高速网卡时,支持开启;\n\"mac\": null，选填。 自定义网卡mac 地址,默认由系统自动生成。\n\"model\": 1, 选填。 1.高速网卡(默认) 2.普通网卡 3.Intel e1000 网卡 ;x86 架构和申威服务器支持1,2,3 ;arm 和mips 架构 只\n支持1。\n```\n\n\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第35页\n\"queues\":null，选填。网卡多队列; 当isVhostDriver=true 才生效。\n\"networkType\": 0，选填。 网络的模式:  0. 经典网络,1.vpc 网络。\n\"oldMac\": \"52:54:00:df:e3:24\", 选填。模板网卡的mac 地址,当填写时,表示使用模板网卡配置.不填写时,表示该网卡为新增加的\n网卡\n\"osMacIp\": 设置经典网络的ip 时,必填。 经典网络自定义网络参数。\n\"netIpType\": 3，设置经典网络的ip 时,必填。网络类型，1.不设置ip 2.DHCP(经典网络不支持) 3.ipv4(ip 为ipv4)   4.iPv6 (ip 为\nipv6) \n\"netGateway\": \"11.22.33.254\"， 网关, 设置经典网络的ip 时,选填。\n\"netMask\": \"255.255.255.0\"，子网掩码, 设置经典网络的ip 时,必填 。\n\"netDns\": null ，主DNS, 设置经典网络的ip 时,选填。\n\"secondaryDns\":null，副DNS, 设置经典网络的ip 时,选填。\n\"portGroupId\": \"586e5c56-e2ee-4a70-a7ac-585441cedcfd\"，端口组ID。\n使用模板的网卡配置\n1.\n{  \n2.\n    ...  \n3.\n    \"bridgeInterfaces\": [  \n4.\n        {  \n5.\n          \"ip\": \"11.22.33.45\",  \n6.\n          \"networkType\": 0,  \n```\n\n"
+          },
+          {
+            "id": "section-3",
+            "content": "\n\n## 4.1.7.7 虚拟机网卡（续）\n\n**使用模板的网卡配置：** 填写 `oldMac` 表示使用模板网卡配置。示例：\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第35页\n\"queues\":null，选填。网卡多队列; 当isVhostDriver=true 才生效。\n\"networkType\": 0，选填。 网络的模式:  0. 经典网络,1.vpc 网络。\n\"oldMac\": \"52:54:00:df:e3:24\", 选填。模板网卡的mac 地址,当填写时,表示使用模板网卡配置.不填写时,表示该网卡为新增加的\n网卡\n\"osMacIp\": 设置经典网络的ip 时,必填。 经典网络自定义网络参数。\n\"netIpType\": 3，设置经典网络的ip 时,必填。网络类型，1.不设置ip 2.DHCP(经典网络不支持) 3.ipv4(ip 为ipv4)   4.iPv6 (ip 为\nipv6) \n\"netGateway\": \"11.22.33.254\"， 网关, 设置经典网络的ip 时,选填。\n\"netMask\": \"255.255.255.0\"，子网掩码, 设置经典网络的ip 时,必填 。\n\"netDns\": null ，主DNS, 设置经典网络的ip 时,选填。\n\"secondaryDns\":null，副DNS, 设置经典网络的ip 时,选填。\n\"portGroupId\": \"586e5c56-e2ee-4a70-a7ac-585441cedcfd\"，端口组ID。\n使用模板的网卡配置\n1.\n{  \n2.\n    ...  \n3.\n    \"bridgeInterfaces\": [  \n4.\n        {  \n5.\n          \"ip\": \"11.22.33.45\",  \n6.\n          \"networkType\": 0,  \n```\n\n\n\n**新增一个网卡：** 不填写 `oldMac` 表示该网卡为新增加的网卡。示例：\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第36页\n7.\n          \"oldMac\": \"52:54:00:e1:ac:40\",  \n8.\n          \"osMacIp\": {  \n9.\n            \"netIpType\": 3,  \n10.\n            \"netGateway\": \"11.22.33.254\",  \n11.\n            \"netMask\": \"255.255.255.0\",  \n12.\n            \"netDns\": null,  \n13.\n            \"secondaryDns\": null  \n14.\n          },  \n15.\n          \"portGroupId\": \"9251eba4-2756-48b2-81dc-3937efb5eb4e\"  \n16.\n        }  \n17.\n      ]  \n18.\n}  \n新增一个网卡: 区别在于\"oldMac\": \"52:54:00:df:e3:24\"，不填写时,表示该网卡为新增加的网卡。\n1.\n{  \n2.\n    ...  \n3.\n    \"bridgeInterfaces\": [  \n4.\n            {  \n5.\n          \"ip\": \"11.22.33.47\",  \n6.\n          \"networkType\": 0,  \n7.\n          \"osMacIp\": {  \n8.\n            \"netIpType\": 3,  \n9.\n            \"netGateway\": \"11.22.33.254\",  \n```\n\n\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第37页\n10.\n            \"netMask\": \"255.255.255.0\",  \n11.\n            \"netDns\": null,  \n12.\n            \"secondaryDns\": null  \n13.\n          },  \n14.\n          \"portGroupId\": \"9251eba4-2756-48b2-81dc-3937efb5eb4e\"  \n15.\n        }  \n16.\n      ]  \n17.\n}  \n4.1.7.8 虚拟机磁盘\n1.\n{  \n2.\n    ...  \n3.\n    \"diskDevices\": [  \n4.\n        {  \n5.\n            \"shareable\": false,   \n6.\n            \"bus\": 1,  \n7.\n            \"dev\": \"vda\",  \n8.\n            \"cache\": 1,    \n9.\n            \"preallocation\": \"off\" ,  \n10.\n            \"ioHangTimeout\": 1800000,   \n11.\n            \"source\": 4,    \n12.\n            \"type\": null,    \n```\n\n\n\n## 4.1.7.8 虚拟机磁盘\n\n`diskDevices` 是一个磁盘对象数组。每个磁盘对象包含以下字段：\n\n- `shareable`（选填）：是否允许多台虚拟机同时使用该磁盘，默认为 `false`。\n- `bus`（必填）：磁盘的总线。使用模板磁盘的配置时，则指定为模板磁盘的总线值；如果为新增的磁盘，则为自定义总线值。\n- `dev`（选填）：磁盘的设备名。使用模板磁盘的配置时，则指定为模板磁盘的设备名；如果为新增的磁盘，不填。\n- `cache`（选填）：磁盘缓存类型：1.directsync；2.writethrough；3.writeback；4.none。默认使用模板里面的缓存模式。\n- `preallocation`（选填）：置备类型。`off`：精简置备；`falloc`：厚置备延迟置零；`full`：厚置备置零。默认是精简置备。\n- `ioHangTimeout`（选填）：IO 悬挂超时时间，单位：毫秒。\n- `source`（必填）：1.表示新增加一个磁盘；2.挂载已存在磁盘文件；4.从模板磁盘拷贝一个磁盘。\n- `type`（选填）：磁盘类型：1.智能(默认)；2.高速。使用模板磁盘的配置时，不填；如果为新增的磁盘，选填。\n- `capacity`（选填）：磁盘大小，单位：字节。使用模板磁盘的配置时，则填写比原磁盘大小的值表示扩容；如果为新增的磁盘，表示为磁盘的大小。\n- `poolName`（选填）：存储池底层名称。指定虚拟机磁盘所在的存储池。\n- `volName`（选填）：磁盘的名称。指定虚拟机磁盘名称。\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第37页\n10.\n            \"netMask\": \"255.255.255.0\",  \n11.\n            \"netDns\": null,  \n12.\n            \"secondaryDns\": null  \n13.\n          },  \n14.\n          \"portGroupId\": \"9251eba4-2756-48b2-81dc-3937efb5eb4e\"  \n15.\n        }  \n16.\n      ]  \n17.\n}  \n4.1.7.8 虚拟机磁盘\n1.\n{  \n2.\n    ...  \n3.\n    \"diskDevices\": [  \n4.\n        {  \n5.\n            \"shareable\": false,   \n6.\n            \"bus\": 1,  \n7.\n            \"dev\": \"vda\",  \n8.\n            \"cache\": 1,    \n9.\n            \"preallocation\": \"off\" ,  \n10.\n            \"ioHangTimeout\": 1800000,   \n11.\n            \"source\": 4,    \n12.\n            \"type\": null,    \n```\n\n\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第38页\n13.\n            \"capacity\": 8589934592,  \n14.\n            \"poolName\": \"defaultpool\",   \n15.\n            \"volName\": \"my_template_disk\"  \n16.\n        }  \n17.\n    ]  \n18.\n}  \n \n```\n\n\n\n\n\n```text\n\"shareable\": false,选填。是否允许多台虚拟机同时使用该磁盘,默认为false         \n\"bus\": 1, 必填。磁盘的总线。使用模板磁盘的配置时,则指定为模板磁盘的总线值. 如果为新增的磁盘,则为自定义总线值。\n\"dev\": \"vda\", 选填。磁盘的设备名。使用模板磁盘的配置时, 则指定为模板磁盘的设备名. 如果为新增的磁盘,不填。\n\"cache\": 1，选填。磁盘缓存类型：1.directsync 2.writethrough 3.writeback 4.none. 默认使用模板里面的缓存模式。\n\"preallocation\": \"off\" ，选填。  置备类型 off:精简置备 falloc:厚置备延迟置零 full:厚置备置零 ，默认是 精简置备。\n\"ioHangTimeout\": 1800000，选填。 IO 悬挂超时时间，单位是:毫秒\n\"source\": 4，必填。1.表示新增加一个磁盘, 2.挂载已存在磁盘文件 ,4 从模板磁盘拷贝一个磁盘。\n\"type\": null，选填. 磁盘类型: 1.智能(默认) 2.高速。使用模板磁盘的配置时, 不填. 如果为新增的磁盘,选填。\n\"capacity\": 8589934592，选填。 磁盘大小，单位:字节，使用模板磁盘的配置时,则填写比原磁盘大小的值表示扩容。\n如果为新增的磁盘,表示为磁盘的大小。\n\"poolName\": \"defaultpool\"，选填。存储池底层名称。指定虚拟机磁盘所在的存储池。 \n\"volName\": \"my_template_disk\"，选填。磁盘的名称。指定虚拟机磁盘名称。\n```\n\n\n\n**使用模板磁盘：** `bus` 和 `dev` 为模板中对应磁盘的 `bus` 和 `dev` 值，`source=4` 表示使用的是模板磁盘，`poolName` 表示指定磁盘所在存储池的底层名称(可选)，`volName` 表示指定磁盘的名称(可选)。示例：\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第39页\n使用模板磁盘:bus 和dev 为模板中对应磁盘的bus 和dev 值, source=4 表示使用的是模板磁盘,poolName 表示指定磁盘所在存\n储池的底层名称(可选), volName 表示指定磁盘的名称(可选)\n1.\n{  \n2.\n    ...  \n3.\n    \"diskDevices\": [  \n4.\n        {  \n5.\n            \"bus\": 1,  \n6.\n            \"dev\": \"vda\",  \n7.\n            \"source\": 4,  \n8.\n            \"poolName\": \"defaultpool\",  \n9.\n            \"volName\": \"my_vm_disk_1\"  \n10.\n          }  \n11.\n    ]  \n12.\n} \n新增一个磁盘: bus 表示指定磁盘的总线类型, source=1 表示新建一个磁盘, capacity 表示磁盘的大小, poolName 表示指定磁\n盘所在存储池的底层名称(可选), volName 表示指定磁盘的名称(可选)\n1.\n{  \n2.\n    ...  \n3.\n    \"diskDevices\": [  \n4.\n        {  \n```\n\n\n\n**新增一个磁盘：** `bus` 表示指定磁盘的总线类型，`source=1` 表示新建一个磁盘，`capacity` 表示磁盘的大小，`poolName` 表示指定磁盘所在存储池的底层名称(可选)，`volName` 表示指定磁盘的名称(可选)。示例：\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第40页\n5.\n            \"bus\": 1,  \n6.\n            \"source\": 1,  \n7.\n            \"poolName\": \"defaultpool\",  \n8.\n            \"capacity\":1073741824,  \n9.\n            \"volName\": \"my_vm_disk_new\"  \n10.\n        }  \n11.\n    ]  \n12.\n} \n挂载已存在的磁盘: bus 表示指定磁盘的总线类型, source=2 表示挂载现有的磁盘, poolName 表示现有磁盘所在存储池的底\n层名称(必填), volName 表示现有磁盘的名称(必填)\n1.\n{  \n2.\n    ...  \n3.\n    \"diskDevices\": [  \n4.\n        {  \n5.\n            \"bus\": 1,  \n6.\n            \"source\": 2,  \n7.\n            \"poolName\": \"defaultpool\",  \n8.\n            \"volName\": \"my_vm_disk_exist\"  \n9.\n        }  \n10.\n    ]  \n11.\n}  \n```\n\n\n\n**挂载已存在的磁盘：** `bus` 表示指定磁盘的总线类型，`source=2` 表示挂载现有的磁盘，`poolName` 表示现有磁盘所在存储池的底层名称(必填)，`volName` 表示现有磁盘的名称(必填)。示例：\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第40页\n5.\n            \"bus\": 1,  \n6.\n            \"source\": 1,  \n7.\n            \"poolName\": \"defaultpool\",  \n8.\n            \"capacity\":1073741824,  \n9.\n            \"volName\": \"my_vm_disk_new\"  \n10.\n        }  \n11.\n    ]  \n12.\n} \n挂载已存在的磁盘: bus 表示指定磁盘的总线类型, source=2 表示挂载现有的磁盘, poolName 表示现有磁盘所在存储池的底\n层名称(必填), volName 表示现有磁盘的名称(必填)\n1.\n{  \n2.\n    ...  \n3.\n    \"diskDevices\": [  \n4.\n        {  \n5.\n            \"bus\": 1,  \n6.\n            \"source\": 2,  \n7.\n            \"poolName\": \"defaultpool\",  \n8.\n            \"volName\": \"my_vm_disk_exist\"  \n9.\n        }  \n10.\n    ]  \n11.\n}  \n```\n\n\n\n**使用模板配置部署一台虚拟机：** 指定部署完毕启动、虚拟机名称、ip 和端口组，其他使用模板配置。示例：\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第41页\n使用模板配置部署一台虚拟机:指定部署完毕启动,虚拟机名称,ip 和端口组。其他使用模板配置。\n1.\n{  \n2.\n    \"isStartNewDomain\": true,  \n3.\n    \"baseInfo\": {  \n4.\n        \"name\": \"my_vm_min\"  \n5.\n    },  \n6.\n    \"bridgeInterfaces\": [  \n7.\n        {  \n8.\n            \"ip\": \"11.22.33.45\",  \n9.\n            \"networkType\": 0,  \n10.\n            \"oldMac\": \"52:54:00:e1:ac:40\",  \n11.\n            \"osMacIp\": {  \n12.\n                \"netIpType\": 3,  \n13.\n                \"netGateway\": \"11.22.33.254\",  \n14.\n                \"netMask\": \"255.255.255.0\",  \n15.\n                \"netDns\": null,  \n16.\n                \"secondaryDns\": null  \n17.\n            },  \n18.\n            \"portGroupId\": \"9251eba4-2756-48b2-81dc-3937efb5eb4e\"  \n19.\n        }  \n20.\n    ]  \n21.\n} \n```\n\n"
+          },
+          {
+            "id": "section-4",
+            "content": "\n\n## 使用模板配置部署虚拟机（指定资源）\n\n使用模板配置部署一台虚拟机：指定部署完毕启动、虚拟机名称、虚拟机 hostName、cpu 大小、内存大小、ip、端口组、磁盘名字和磁盘目标存储，其他使用模板配置。示例：\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第42页\n使用模板配置部署一台虚拟机: 指定部署完毕启动,虚拟机名称, 虚拟机hostName，cpu 大小,内存大小, ip,端口组,磁盘名字和\n磁盘目标存储,其他使用模板配置。\n1.\n{  \n2.\n  \"isStartNewDomain\": true,  \n3.\n  \"deployNum\": 1,  \n4.\n  \"deployStartNo\": 1,  \n5.\n  \"baseInfo\": {  \n6.\n    \"name\": \"my_vm\",  \n7.\n    \"vmHostName\": \"my_vm\",  \n8.\n    \"cpu\": {  \n9.\n      \"current\": 2  \n```\n\n\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第43页\n10.\n    },  \n11.\n    \"memory\": {  \n12.\n      \"size\": 42 949672 96  \n13.\n    }  \n14.\n  },  \n15.\n  \"bridgeInterfaces\": [  \n16.\n    {  \n17.\n      \"ip\": \"11.22.33.45\",  \n18.\n      \"networkType\": 0,  \n19.\n      \"oldMac\": \"52:54:00:e1:ac:40\",  \n20.\n      \"osMacIp\": {  \n21.\n        \"netIpType\": 3,  \n22.\n        \"netGateway\": \"11.22.33.254\",  \n23.\n        \"netMask\": \"255.255.255.0\",  \n24.\n        \"netDns\": null,  \n25.\n        \"secondaryDns\": null  \n26.\n      },  \n27.\n      \"portGroupId\": \"9251eba4-2756-48b2-81dc-3937efb5eb4e\"  \n28.\n    }  \n29.\n  ],  \n30.\n  \"diskDevices\": [  \n31.\n    {  \n```\n\n\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第44页\n32.\n      \"bus\": 1,  \n33.\n      \"dev\": \"vda\",  \n34.\n      \"source\": 4,  \n35.\n      \"poolName\": \"defaultpool\",  \n36.\n      \"volName\": \"my_vm_disk\"  \n37.\n    }  \n38.\n  ]  \n39.\n}\n使用模板配置部署虚拟机：指定部署完毕启动,虚拟机名称, 虚拟机hostName，cpu 大小,内存大小, ip,端口组,磁盘名字和磁\n盘目标存储,其他使用模板配置。同时添加一个磁盘和网卡\n1.\n{  \n2.\n  \"isStartNewDomain\": true,  \n3.\n  \"deployNum\": 1,  \n4.\n  \"deployStartNo\": 1,  \n5.\n  \"baseInfo\": {  \n6.\n    \"name\": \"my_vm\",  \n7.\n    \"vmHostName\": \"my_vm\",  \n8.\n    \"domainname\": \"my_vm\",  \n9.\n    \"cpu\": {  \n10.\n      \"current\": 2  \n```\n\n\n\n## 使用模板配置部署虚拟机（添加磁盘和网卡）\n\n使用模板配置部署虚拟机：指定部署完毕启动、虚拟机名称、虚拟机 hostName、cpu 大小、内存大小、ip、端口组、磁盘名字和磁盘目标存储，其他使用模板配置。同时添加一个磁盘和网卡。示例：\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第44页\n32.\n      \"bus\": 1,  \n33.\n      \"dev\": \"vda\",  \n34.\n      \"source\": 4,  \n35.\n      \"poolName\": \"defaultpool\",  \n36.\n      \"volName\": \"my_vm_disk\"  \n37.\n    }  \n38.\n  ]  \n39.\n}\n使用模板配置部署虚拟机：指定部署完毕启动,虚拟机名称, 虚拟机hostName，cpu 大小,内存大小, ip,端口组,磁盘名字和磁\n盘目标存储,其他使用模板配置。同时添加一个磁盘和网卡\n1.\n{  \n2.\n  \"isStartNewDomain\": true,  \n3.\n  \"deployNum\": 1,  \n4.\n  \"deployStartNo\": 1,  \n5.\n  \"baseInfo\": {  \n6.\n    \"name\": \"my_vm\",  \n7.\n    \"vmHostName\": \"my_vm\",  \n8.\n    \"domainname\": \"my_vm\",  \n9.\n    \"cpu\": {  \n10.\n      \"current\": 2  \n```\n\n\n\n\n\n```text\n[Physical page 57]\n```\n\n\n\n第二个示例在原始文档中延续到后续页面（第 57 页之后），以下为续接内容：\n\n\n\n```text\n版权所有 ©云宏信息科技股份有限公司    \n第45页\n11.\n    },  \n12.\n    \"memory\": {  \n13.\n      \"size\": 42 949672 96  \n14.\n    }  \n15.\n  },  \n16.\n  \"bridgeInterfaces\": [  \n17.\n    {  \n18.\n      \"ip\": \"11.22.33.46\",  \n19.\n      \"networkType\": 0,  \n20.\n      \"oldMac\": \"52:54:00:e1:ac:40\",  \n21.\n      \"osMacIp\": {  \n22.\n        \"netIpType\": 3,  \n23.\n        \"netGateway\": \"11.22.33.254\",  \n24.\n        \"netMask\": \"255.255.255.0\",  \n25.\n        \"netDns\": null,  \n26.\n        \"secondaryDns\": null  \n27.\n      },  \n28.\n      \"portGroupId\": \"9251eba4-2756-48b2-81dc-3937efb5eb4e\"  \n29.\n    },  \n30.\n        {  \n31.\n      \"ip\": \"11.22.33.47\",  \n32.\n      \"networkType\": 0,  \n```\n\n"
+          }
+        ]
+      }
+    }
+  ],
+  "accepted_description": "Compilation of selected windows from the CNware WinStack V9.4.0 接口开发指南 (Interface Development Guide), a Chinese-language REST API guide for virtual-machine deployment (template- and parameter-based), cloud-init, task/VM query interfaces, delete/recycle/modify operations and device (disk, NIC) management, covering printed pages 44–72 of the original.",
+  "accepted_code_sha256": [
+    "a65f28220f560f85e5097beed3ff3993a407947ecd88af1f013638b41e243da5",
+    "d941444763feb3dd35ec98943b57a9293120795481a6fa64496d66d704ad7337",
+    "8104856e2efb89465feacd138b25279e05ee3a523a573a106c9e49837a0ea56c",
+    "2405ebd92fddcd3d199f71a7e39f09e07bd08f1f7fb2c1c575b701e7fa18e859",
+    "8f0ad1fd1216c336ee09008239a8e274fe8f00173fc065b2343551c3a70c785c",
+    "7831047c767fe4f4324a64dfa67ea6a7b082529a7e9230951d11d77a249f6be0",
+    "54eb143caa223b5f6283a69c7be597438cac5dea14367f7b24734076d5248e10",
+    "09a8efbbbd3318c36c070f3afd73ce02b89f4c199474c9a93a51234bb15ea4de",
+    "719f94c8f3aa6603b21f8478b3f78a6447fafc8299926296b7f5713e92bd2edd",
+    "5e8a9ff39d3ce1931246276afd53c3ea9b7f5ef6db3d38703828592b52f6f4a5",
+    "7fd513bd3f45096c0cb7010b83297a9cacaa598b71c9763c098f5a256d5e6ed1",
+    "b6a4b20f0c77cdce53c84ae1c8ab325e189876493ff7479b499cdc263899f5e4",
+    "565bf747082b33d88964161de12ba90082bcb1328976372532229931c4bfe535",
+    "659688f8c859fd497a1c0c285b7ea1a42b6421041ed6e7a3b42a79e325943711",
+    "f683f584720e9dd7dca726534648acd2aa8870704c248074a16b50dc266cc252",
+    "75bc95d066514a557b00b0b12a434c33c7c89c75fe93597787b995d9d27bcc6d",
+    "15736237863250cdd7e38492b10d6fa4ff507b90b73002cdc6004c06007837b2",
+    "3139458b5d465d13600a899d1aa093bcb3668870a9e1cb04ac0165cf0eaa714a",
+    "c04fce0ad026208948fbf90bfbe00060ba01f80d0a9d0785b260aad21df4932e",
+    "76f3cc1987ce44b307b275b0c346c37194a3473c99cf951e0c834cc0b7d311f3",
+    "4ed7ff2f7ca5b50cc2e10b1f652794700188e9025cf0f98d8a91a830ee19130c",
+    "d7fcb11f99af210311814612351f1ccc4685255fae5168d61780f4631dc82fd1",
+    "8666724ee125f1b1ae94241bcf98d62f0ab68b5b0a6d44200bcdd089f23a0ba3",
+    "b59be338b2ae0052e711b3a801b0dcae41348e7cc290a1f9ebe70f080d69b374",
+    "ad02aa6e1db629496d285934392c83995114749748ce63bf9adcc446874758ad",
+    "20bd05f3e141be8f6468a06114564b7332b3587919522360f466c89236733ce5",
+    "606995a62fb4196c56b34ab0fd52387ff1b7e4532c3d9c929af2d9be2e8761b4",
+    "9b235476dba1c1a3580eb25a8765315f1afe0d109103a892a0562066cfff4575",
+    "c6af773da5c00281a836223314b271c4fb70cc314f865f232bd4c2de188df271",
+    "87a4f51d1d52e3d5750e8a02e084f80f8dcd71e61ed021b899b936d608ad524b",
+    "90dd1de107dfb57f4c008d9cf127ac5df289f9a38a660e8f165d9c1fe09a8ecb",
+    "8529c81f290d1e7115d549553518f11412a2d42d440cb2bdc63465fefa6472aa",
+    "6534c7f84428964b544f841087448bbe79187f068ff258d38fa0120441744d98",
+    "ce06478cb1bba2d0c438c5e65c7cf09013bdaf3c9567596576eb42e69b5b4aad",
+    "d1bcb315660eeff0c903cbc33f4596386a397f76174b123124a742f713a07fed",
+    "74df9e8e2153ff8104be6266dbb95a97c89687418d1bd07e218662d6c46b6387",
+    "74df9e8e2153ff8104be6266dbb95a97c89687418d1bd07e218662d6c46b6387",
+    "24e2ed532d0fb44a2041e105c24ed0fa9e063f5d27c4b62d1b259b203c3e20b0",
+    "789c4bca5b5d37b23e12b6226812f051c9a8f981a78a3ff876311849aa4d646a",
+    "789c4bca5b5d37b23e12b6226812f051c9a8f981a78a3ff876311849aa4d646a",
+    "bfcedc0eefa9e8f9b33c2fa9557cf4da4692c1ea65eb405b9ac8787dd67bd0af",
+    "bfcedc0eefa9e8f9b33c2fa9557cf4da4692c1ea65eb405b9ac8787dd67bd0af",
+    "a98ce58d65750bf097e8f9dc93eabfea1bc6b706c88b4e7ac04a445befc8368e",
+    "a98ce58d65750bf097e8f9dc93eabfea1bc6b706c88b4e7ac04a445befc8368e",
+    "74f7bd50e64c2fb44074b24473f1f19a8033f03c296d364a0fa34e2e4df8e1b9",
+    "a5e2dfa8197ca36fc1677bd8283fd8ac3fd2a799f6c7d849b78643c0f5a6fbb1",
+    "9bc00ad6826d80108bf0249c6f0e43d4e8bec52b340588e7d4db60523a94ee10",
+    "9bc00ad6826d80108bf0249c6f0e43d4e8bec52b340588e7d4db60523a94ee10",
+    "ebaf57796fa555e1050ccdaac2c18ab62fbc5e80268ae35ff3439ac96eaf6ea2",
+    "d4b31ed9bf000245424c9da797c444d5bd7da327782912a6a6c0fca217b68224",
+    "d06b5187e5a548587b52da9acc6db079f4f6e5b0856e7ff3ee8b15a9a8bfb60e",
+    "09bba35c2a10bac30fd5264325302b9dcf8e25ac95a614a27599aeae5afdee68",
+    "09bba35c2a10bac30fd5264325302b9dcf8e25ac95a614a27599aeae5afdee68",
+    "63c0ff4262c3de010bfd6de1d9b24e63682c284dba020d1bace70ecfbe322465",
+    "38fb979784f3d8091239342814bdc89d982d1e76efdb40ebfea51aca4f377436",
+    "f3352c5a46ea19069816f56e4248b1e2e67e4a02603cab611588661e3645274d",
+    "4fa296623ae17dd0b089a46551c3d20e329dda73c47e1656db2bf81e40e5db78",
+    "516a52af3b97bfb9f0e364fcbe51e9bb617d6352277a5f582fd59da063485467"
+  ]
+}

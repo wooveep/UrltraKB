@@ -23,8 +23,10 @@ def test_example_uses_explicit_utf8_bound_and_rejects_another_model(tmp_path, mo
     text = "English 中文， é 👨‍👩‍👧‍👦 🇨🇳\n\t"
     assert measure.count(text) == len(text.encode("utf-8"))
     measure.require_current(text)
+    # Capacity follows the service window, not the retired 64-KiB example.
+    measure.require_current("中" * 22000)
     with pytest.raises(ContextCapacityError, match="retained without truncation"):
-        measure.require_current("中" * 22000)
+        measure.require_current("中" * (measure.input_limit // 3 + 1))
     with pytest.raises(ContextCapacityError, match="another model"):
         TokenMeasure(capacity_policy({**values, "model": "private/unknown"}, custom_endpoint=True))
     # The asset is repeatable; selecting the same example never downloads a tokenizer.

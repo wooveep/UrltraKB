@@ -144,7 +144,9 @@ class LocalBackend:
                 "structure": result["structure"],
                 "pages": pages,
                 "metadata": {
-                    **(parsed.metadata or {}), "parser_policy": parser_policy(parser),
+                    **(parsed.metadata or {}),
+                    "doc_description_status": result.get("doc_description_status", "completed"),
+                    "parser_policy": parser_policy(parser),
                     "parser": parser_identity(parser), "model": self._model,
                     "source_digest": digest(managed_path),
                     "processing_fingerprint": file_hash,

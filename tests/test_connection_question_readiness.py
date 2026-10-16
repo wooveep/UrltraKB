@@ -53,19 +53,20 @@ def old_verified_connection(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("scope", ["global", "kb"])
-def test_missing_question_capacity_blocks_an_old_pass_and_preserves_its_proof(
+def test_connection_proof_survives_missing_capacity_but_question_preflight_blocks(
     old_verified_connection, scope
 ):
     kb, connection, proof_path, proof, service = old_verified_connection
     state = connections.read_connection_state(kb)
-    assert state.state == "missing" and "容量" in state.message
+    assert state.state == "passed" and state.capacity_ready is False and "容量" in state.message
     with kb_ingest_lock(kb / ".ultrakb"):
         snapshot = capture_config(kb)
-        with pytest.raises(connections.ConnectionRequired):
-            connections.require_verified_connection(snapshot)
-        with pytest.raises(connections.ConnectionRequired):
-            with ExecutionContext(require_verified_connection=True).begin(kb):
-                pytest.fail("An old network proof admitted a question without capacity")
+        connections.require_verified_connection(snapshot)
+        from ultrakb.model_tokenizer import ContextCapacityError, question_measure
+
+        with ExecutionContext(require_verified_connection=True).begin(kb):
+            with pytest.raises(ContextCapacityError):
+                question_measure(snapshot)
 
     capacity = template_capacity(CONNECTION_TEMPLATES[2])
     if scope == "global":
@@ -83,20 +84,26 @@ def test_missing_question_capacity_blocks_an_old_pass_and_preserves_its_proof(
 
 
 @pytest.mark.parametrize("case", ["input_only", "tokenizer_only", "wrong_binding", "custom_model"])
-def test_unusable_capacity_cannot_probe_or_reuse_a_pass(old_verified_connection, case):
+def test_unusable_capacity_blocks_question_without_conflating_connection_probe(
+    old_verified_connection, case
+):
     kb, _connection, proof_path, proof, service = old_verified_connection
     capacity = template_capacity(CONNECTION_TEMPLATES[2])
     patch = {"model_capacity": capacity}
     if case == "input_only":
-        capacity.pop("tokenizer_model")
+        patch["model_capacity"] = {"max_input_tokens": 12000}
     elif case == "tokenizer_only":
-        capacity.pop("max_input_tokens")
+        patch["model_capacity"] = {"tokenizer_model": "gpt-4o-mini"}
     elif case == "wrong_binding":
         capacity["applies_to_model"] = "private/another-model"
     else:
         patch = {"model": "openai/private-model", "model_capacity": None}
     apply_kb_config_patch(kb, KbConfigPatchRequest(kb=str(kb), config=patch))
+    from ultrakb.model_tokenizer import ContextCapacityError, question_measure
+
+    with kb_ingest_lock(kb / ".ultrakb"):
+        with pytest.raises(ContextCapacityError):
+            question_measure(capture_config(kb))
     state = connections.verify_model_connection(kb)
-    assert state.state == "missing" and "容量" in state.message
-    assert service.requests == []
-    assert proof_path.read_bytes() == proof
+    assert state.code == "authentication"
+    assert len(service.requests) == 1

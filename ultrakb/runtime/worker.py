@@ -187,6 +187,7 @@ def _execute(
                     scope=scope,
                     source_revision_id=request.source_revision_id,
                     unit_revision_id=request.unit_revision_id,
+                    retry_failed_response=request.retry_failed_response,
                 )
                 if isinstance(request, RetrySource)
                 else retry_worksheet(
@@ -197,6 +198,7 @@ def _execute(
                     scope=scope,
                     source_revision_id=request.source_revision_id,
                     unit_revision_id=request.unit_revision_id,
+                    retry_failed_response=request.retry_failed_response,
                 )
             )
         except (ReprocessingConflict, RetryTargetChanged) as exc:

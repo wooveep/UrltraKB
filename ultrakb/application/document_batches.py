@@ -24,6 +24,7 @@ class DocumentRetryTarget:
     unit_id: str | None = None
     unit_revision_id: str | None = None
     worksheet: bool = False
+    failed_summary: bool = False
 
 
 @dataclass(frozen=True)
@@ -86,6 +87,11 @@ def preview_document_batch(
                             unit["unit_id"] if unit else None,
                             unit.get("target_revision_id") if unit else None,
                             bool(unit and unit.get("key") != "body"),
+                            bool(
+                                unit
+                                and unit.get("status") == "failed"
+                                and "summary" in unit.get("unfinished", ())
+                            ),
                         )
                     )
             return DocumentBatchPreview(

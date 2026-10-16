@@ -5,47 +5,26 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 
+from ultrakb.agent.compile_contract import request_version, require_frozen_request
 from ultrakb.agent.compile_messages import build_page_messages
-from ultrakb.agent.page_response import PageResponseError
+from ultrakb.agent.page_delivery import validate_page_delivery
+from ultrakb.agent.page_response import PageResponseError, update_repair_messages
 from ultrakb.agent.page_updates import PageUpdate, UnchangedPage
+from ultrakb.agent.retained_delivery import reuse_saved_response
 from ultrakb.agent.update_proposals import UpdateProposal, merge_proposals
 from ultrakb.compile_checkpoints import digest, document_checkpoints
 from ultrakb.llm_execution import active_executor, check_model_stop
 
 
 def update_capacity(kb_dir, model, bundle):
-    from ultrakb.config import resolve_effective_config
-    from ultrakb.config_state import active_values
-    from ultrakb.execution_capacity import capacity_policy
-    from ultrakb.model_tokenizer import TokenMeasure
+    from ultrakb.agent.compile_capacity import compile_capacity
 
-    captured = active_values(kb_dir)
-    config = captured["effective"] if captured else resolve_effective_config(kb_dir)[0]
-    executor = active_executor()
-    if executor:
-        model, bundle = executor.bindings.model("compile"), executor.bindings.credentials()
-    policy = capacity_policy(
-        {**config, "model": model},
-        custom_endpoint=bool(bundle and bundle.base_url),
-        tokenizer_snapshot=captured.get("tokenizer_asset") if captured else None,
-    )
-    if policy["unknown_reason"]:
+    sizing = compile_capacity(kb_dir, model, bundle)
+    if sizing.measure is None:
         from ultrakb.compilation_report import report_compile_issue
 
         report_compile_issue("page_update_capacity_unknown")
-        return lambda messages: len(json.dumps(messages, ensure_ascii=False)) <= 24000
-    measure = TokenMeasure(policy)
-    options = executor.bindings.generation_options("compile") if executor else {}
-    return (
-        lambda messages: measure.payload_tokens(
-            {
-                "messages": messages,
-                **options,
-                "response_format": {"type": "json_object"},
-            }
-        )
-        <= measure.input_limit
-    )
+    return sizing
 
 
 def capacity_error():
@@ -55,7 +34,18 @@ def capacity_error():
     )
 
 
-def prepare_update_requests(patch, originals, windows, *, messages, fits, scoped):
+def prepare_update_requests(
+    patch, originals, windows, *, messages, fits, scoped, include_repairs=True
+):
+    if include_repairs:
+        initial_fits = fits
+        corrections = update_repair_messages()
+
+        def fits(request):
+            return initial_fits(request) and all(
+                initial_fits([*request, correction]) for correction in corrections
+            )
+
     """Admit every frozen source selection and editing group before generation."""
     all_blocks = tuple(
         block
@@ -160,7 +150,6 @@ async def generate_page_update(
         return PageUpdate(
             patch.original,
             known_targets=patch.known_targets,
-            originals=patch.originals,
             allowed_types=patch.allowed_types,
             preserved_fragments=patch.preserved_fragments,
             allowed_blocks=(
@@ -173,9 +162,11 @@ async def generate_page_update(
         )
 
     def excerpts(batch):
-        return windows.original_excerpts(
+        result = windows.original_excerpts(
             replace(originals, windows=tuple(batch)), long=current_original is None
         )
+        result.request_version = request_version(checkpoints)
+        return result
 
     def messages(batch, editable, extra=""):
         check_model_stop()
@@ -192,7 +183,13 @@ async def generate_page_update(
         return excerpts(batch).messages(result)
 
     requests = prepare_update_requests(
-        patch, originals, windows, messages=messages, fits=fits, scoped=scoped
+        patch,
+        originals,
+        windows,
+        messages=messages,
+        fits=fits,
+        scoped=scoped,
+        include_repairs=request_version(checkpoints) != 1,
     )
 
     combined_figures = None
@@ -219,21 +216,42 @@ async def generate_page_update(
         return editable
 
     def accepted(key, signature, editable, batch):
+        require_frozen_request(checkpoints, key, signature)
+        original_excerpts = excerpts(batch)
+
+        def validate(raw):
+            return validate_page_delivery(
+                raw,
+                page_update=editable,
+                read_current=lambda: page_path.read_bytes().decode("utf-8"),
+                proposal_only=True,
+                original_excerpts=original_excerpts,
+            )
+
         value = checkpoints.load(key, signature) if checkpoints else None
         if value is not None:
-            value = json.loads(
-                excerpts(batch).response(
-                    json.dumps(value),
-                    "page-json",
-                    update=True,
-                    previous_description=editable.request()["description"],
-                )
-            )
             try:
-                editable.apply(json.dumps(value), current=patch.original)
-            except PageResponseError:
-                return None
-        return value
+                validate(json.dumps(value))
+                return value
+            except PageResponseError as error:
+                if error.code == "page_update_stale":
+                    raise
+        if checkpoints:
+            return reuse_saved_response(
+                checkpoints,
+                key,
+                signature,
+                protocol="page-json",
+                stage=key,
+                validate=validate,
+                excerpts=original_excerpts,
+                metadata={
+                    "base_sha256": patch.digest,
+                    "blocks": editable.request()["blocks"],
+                    "sources": [{k: v for k, v in w.items() if k != "content"} for w in batch],
+                },
+            )
+        return None
 
     async def generate(batch, editable, key, extra=""):
         check_model_stop()
@@ -246,6 +264,10 @@ async def generate_page_update(
         signature = digest(request)
         value = accepted(key, signature, editable, batch)
         if value is None:
+            # Historical grouping keeps its frozen signature. Missing historical
+            # results still need room for the current, bounded protocol repair.
+            if not all(fits([*request, repair]) for repair in update_repair_messages()):
+                raise capacity_error()
             if checkpoints:
                 checkpoints.require_generation(key, signature)
                 if ":conflict:" in key:

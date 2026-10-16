@@ -9,6 +9,7 @@ import pytest
 @pytest.mark.parametrize("tokenizer", ["gpt", "utf8"])
 async def test_summary_admission_reserves_every_delivery_repair(kb_dir, monkeypatch, tokenizer):
     from ultrakb import config as config_module
+    from ultrakb.agent.compiler import _prepare_messages
     from ultrakb.agent.document_summary import (
         SYSTEM_TEMPLATE,
         build_document_summary,
@@ -59,18 +60,18 @@ async def test_summary_admission_reserves_every_delivery_repair(kb_dir, monkeypa
     system = {"role": "system", "content": SYSTEM_TEMPLATE.format(language="en")}
     generation = {"max_tokens": 128, "reasoning_effort": "none"}
     parent = next(CompileSourceWindows.iter_document_windows(reader, fits=lambda _: True))
-    parent_messages = summary_messages(system, "manual", parent)
+    parent_messages = summary_messages(system, "manual", parent, structured=True)
     short_repair = page_repair_message(
         "page_truncated_response",
         "LLM [document-summary:1] hit the length limit; skipping to avoid a truncated page",
-        response_protocol="summary-json",
+        response_protocol="summary-parts-json",
         expected_sections=tuple(section["id"] for section in window_sections(parent)),
     )
     # Admit a whole request at its short-repair boundary. Reserving only this
-    # shape would let a longer literal correction overflow after a paid response.
+    # shape would let a longer protocol correction overflow after a paid response.
     capacity["max_input_tokens"] = measure.payload_tokens(
         {
-            "messages": [*parent_messages, short_repair],
+            "messages": _prepare_messages(config["model"], [*parent_messages, short_repair]),
             "response_format": {"type": "json_object"},
             **generation,
         }
@@ -97,7 +98,7 @@ async def test_summary_admission_reserves_every_delivery_repair(kb_dir, monkeypa
         for start, end in window["source_spans"]:
             assert start == cursor and start < end
             cursor = end
-        messages = summary_messages(system, "manual", window)
+        messages = summary_messages(system, "manual", window, structured=True)
         sections = tuple(section["id"] for section in window_sections(window))
         # Different real validator failures must fit, including dynamic diagnostics
         # that formerly escaped the single, shorter length-repair reservation.
@@ -106,15 +107,10 @@ async def test_summary_admission_reserves_every_delivery_repair(kb_dir, monkeypa
             ("summary_invalid_json", "Extra JSON follows the object"),
             ("summary_invalid_sections", "Unknown, duplicate or empty section"),
             ("page_excerpt_invalid", "Unknown original excerpt ID"),
-            (
-                "page_literal_conflict",
-                "Code or table syntax must match a complete original excerpt",
-            ),
-            ("page_numeric_conflict", str([{"unsupported": 97}] * 40)),
             ("summary_invalid_shape", "未通过响应合同检查。" * 100),
         ):
             correction = page_repair_message(
-                code, detail, response_protocol="summary-json", expected_sections=sections
+                code, detail, response_protocol="summary-parts-json", expected_sections=sections
             )
             payload = {
                 "messages": [*messages, correction],
@@ -125,6 +121,7 @@ async def test_summary_admission_reserves_every_delivery_repair(kb_dir, monkeypa
                 measure,
                 {
                     **payload,
+                    "messages": _prepare_messages(config["model"], payload["messages"]),
                     "model": config["model"],
                     "max_tokens": 128,
                     "extra_body": {"reasoning_effort": "none"},

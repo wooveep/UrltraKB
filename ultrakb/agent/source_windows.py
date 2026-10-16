@@ -108,7 +108,6 @@ class CompileSourceWindows:
         self._parsed: dict[str, object] = {}
         self._selections: dict[str, tuple[dict, dict]] = {}
         self._unresolved_updates: set[str] = set()
-        self._numeric_text: dict[str, str] = {}
         self._figure_sources: dict[str, tuple] = {}
 
     def figure_source(self, path: str):
@@ -141,23 +140,6 @@ class CompileSourceWindows:
         from ultrakb.agent.page_figures import page_figure_context
 
         return page_figure_context(self, windows, long=long)
-
-    def numeric_sources(self, context: PageOriginalContext, *, long: bool) -> list[str]:
-        """Supply only original text; generated navigation is never a numeric reference."""
-        texts = [window["content"] for window in context.windows if window["content"]]
-        if not long and (path := self._path()):
-            if path not in self._numeric_text:
-                data = self._read(path)
-                raw = json.loads(data) if path.endswith(".json") else data.decode("utf-8")
-                self._numeric_text[path] = (
-                    raw
-                    if isinstance(raw, str)
-                    else raw["text"]
-                    if isinstance(raw, dict)
-                    else "\n".join(page.get("content", "") for page in raw)
-                )
-            texts.insert(0, self._numeric_text[path])
-        return texts
 
     def original_excerpts(self, context: PageOriginalContext, *, long: bool):
         """Preserve qualified cells for response checks, including adjacent windows."""

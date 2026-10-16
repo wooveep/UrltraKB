@@ -2618,7 +2618,7 @@ def test_global_config_get_defaults_when_absent(monkeypatch, tmp_path):
     assert {key: body[key] for key in expected} == expected
     assert body["pdf_short_max_pages"] == 10 and body["pdf_limit"]["source"] == "default"
     assert body["model_capacity"] is None
-    assert body["capacity"]["source"] == "bundled_model_catalog"
+    assert body["capacity"]["source"] == "service_profile"
 
 
 def test_global_config_patch_sets_value_and_preserves_registry(monkeypatch, tmp_path):

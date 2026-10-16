@@ -5,12 +5,29 @@ import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
+from ultrakb.agent.compile_contract import (
+    historical_summary_repairs,
+    legacy_prompts,
+    request_version,
+    require_frozen_request,
+)
 from ultrakb.agent.source_windows import CompileSourceWindows
+from ultrakb.agent.summary_protocol import (
+    REFERENCED_SUMMARY,
+    SECTIONED_SUMMARY,
+    summary_response_format,
+)
 from ultrakb.execution_budget import admit_document_summary
 from ultrakb.source_context import COMPILATION_FACT_RULES
 
 logger = logging.getLogger(__name__)
 PROMPT_VERSION = "compiler-document-sections-v5"
+REFERENCE_PROMPT_VERSION = "compiler-document-references-v1"
+_SPLITTABLE_DELIVERY_ERRORS = {
+    "page_truncated_response",
+    "summary_invalid_sections",
+    "summary_missing_sections",
+}
 SYSTEM_TEMPLATE = (
     "You are UltraKB's wiki compilation agent for document knowledge. "
     "Write independently readable knowledge in {language}.\n" + COMPILATION_FACT_RULES
@@ -23,59 +40,81 @@ def summary_capacity(
     custom_endpoint: bool,
     tokenizer_snapshot=None,
     generation_options: dict | None = None,
+    legacy_format: bool = False,
+    base_url: str | None = None,
 ) -> Callable[[list[dict]], bool]:
     from ultrakb.compilation_report import report_compile_issue
     from ultrakb.execution_capacity import capacity_policy
     from ultrakb.model_tokenizer import TokenMeasure
 
     policy = capacity_policy(
-        config, custom_endpoint=custom_endpoint, tokenizer_snapshot=tokenizer_snapshot
+        config,
+        custom_endpoint=custom_endpoint,
+        tokenizer_snapshot=tokenizer_snapshot,
+        base_url=base_url,
     )
     if policy["unknown_reason"]:
         report_compile_issue("document_summary_capacity_unknown")
-        logger.info("Document summary token capacity unknown: %s", policy["unknown_reason"])
-        return lambda messages: True
+        from ultrakb.model_tokenizer import ContextCapacityError
+
+        raise ContextCapacityError("Document summary capacity unknown: " + policy["unknown_reason"])
     measure = TokenMeasure(policy)
-    options = {**(generation_options or {}), "response_format": {"type": "json_object"}}
-    return (
-        lambda messages: measure.payload_tokens({"messages": messages, **options})
-        <= measure.input_limit
+    from ultrakb.agent.compile_capacity import CompileCapacity
+    from ultrakb.config import LlmCredentialBundle
+    from ultrakb.llm_execution import CompletionExecutor, RoleBindings, active_executor
+
+    executor = active_executor() or CompletionExecutor(
+        RoleBindings(
+            config["model"],
+            LlmCredentialBundle(
+                base_url=base_url or ("https://custom.invalid" if custom_endpoint else None)
+            ),
+        )
     )
+    sizing = CompileCapacity(executor, measure)
+
+    def fits(messages):
+        sections = ()
+        protocol = summary_request_protocol(messages)
+        excerpt_ids = ()
+        for message in messages:
+            content = message.get("content")
+            if isinstance(content, str) and content.startswith("Original document: "):
+                original = json.loads(content.split("\n", 1)[1])
+                sections = tuple(section["id"] for section in original["output_sections"])
+            if isinstance(content, str) and content.startswith(
+                "Structured original reference catalog:\n"
+            ):
+                excerpt_ids = tuple(
+                    r["id"] for r in json.loads(content.split("\n", 1)[1])["references"]
+                )
+        response_format = summary_response_format(
+            protocol,
+            sections,
+            model=config["model"],
+            base_url=base_url or ("https://custom.invalid" if custom_endpoint else None),
+            legacy=legacy_format,
+            excerpt_ids=excerpt_ids,
+        )
+        options = {**(generation_options or {}), "response_format": response_format}
+        return sizing(messages, options)
+
+    return fits
 
 
-_SUMMARY_TASK = """Turn each supplied original section into a usable reference section.
-For each operation or object, carry its applicability and prerequisites together
-with its steps, parameters, alternatives, exceptions and results. Cover requirements
-stated only once, including those without a planned concept page. Combine repetition
-within the same scope; retain separate variants when their conditions differ.
-
-Use explanatory prose for meaning, and the original excerpt catalog for command or
-configuration syntax: select its complete supplied block instead of rewriting it.
-Keep standalone paths from prose or complete qualified native cells in inline code
-with exact original spelling. Do not put a decoded table cell or path in a new code
-fence; use the complete original table excerpt when preserving its syntax, including
-its HTML tags and entity encoding. Preserve every token, prefix and comment marker
-in each quoted line. A quoted template remains a template. When extraction has split a command or
-lost table alignment, retain the readable fragment and identify that specific
-structural gap; a reconstructed executable command or column assignment needs
-explicit support. Reproduce reliably aligned tables with their object and condition
-headers. Keep page/section boundaries and cross-references visible where they affect
-interpretation. Preceding context supplies conditions, not extra primary ranges.
-
-Include explanations, comparisons and source-supported calculations with their
-premises. Each paragraph should explain or preserve the supplied section, without
-adding unrelated advice or expanding a local observation to the entire document.
-Return one JSON object in this complete shape:
-{"description": "brief document description", "sections":
- [{"id": "the supplied output section id", "content": "complete Markdown knowledge"}]}.
-Return every output_sections id exactly once, retaining its original requirements,
-conditions and useful explanation in the corresponding body, not only its heading.
-Use the document's necessary level of detail without a fixed compression ratio.
-Return JSON without an outer code fence or frontmatter. Markdown code fences inside
-section content are appropriate for exact technical excerpts.
-Place each [[original:ID]] in an unindented top-level paragraph with blank lines
-around it. Do not put excerpt references in numbered lists, bullets or blockquotes.
-"""
+_SUMMARY_TASK = (
+    "Turn each supplied original section into a usable reference section. Preserve its "
+    "objects, applicability, prerequisites, steps, parameters, alternatives, exceptions, "
+    "results and explanations. Keep variants and source positions distinct. Generated "
+    "Markdown may include inline code, fences, tables, examples and supported calculations "
+    "with their premises. Use explicit excerpt IDs when an exact original copy is needed; "
+    "the program copies and attributes it. Reading coverage proves protocol completion, "
+    "not factual correctness or semantic completeness. "
+    "Return one JSON object in this complete shape: " + SECTIONED_SUMMARY.example() + ". "
+    "Return every output_sections ID exactly once with useful knowledge, not just headings. "
+    "Use the necessary detail, preserving source conditions and local evidence gaps. "
+    "Place [[original:ID]] alone in an unindented top-level paragraph with blank lines."
+)
 
 
 def summary_sections(content: str, *, native_pages: bool = False) -> list[dict]:
@@ -117,13 +156,28 @@ def window_sections(window: dict) -> list[dict]:
     return summary_sections(window["content"], native_pages="page_spans" in window)
 
 
-def summary_messages(system: dict, doc_name: str, window: dict) -> list[dict]:
+def summary_request_protocol(messages: list[dict]) -> str:
+    for message in messages:
+        content = message.get("content")
+        if isinstance(content, str) and content.startswith("Original document: "):
+            if (
+                json.loads(content.split("\n", 1)[1]).get("summary_protocol")
+                == REFERENCE_PROMPT_VERSION
+            ):
+                return "summary-parts-json"
+    return "summary-json"
+
+
+def summary_messages(
+    system: dict, doc_name: str, window: dict, *, structured=False, request_format=None
+) -> list[dict]:
     from ultrakb.agent.source_excerpts import SourceExcerpts
 
-    excerpts = SourceExcerpts([window, *window["supplementary_context"]])
+    version = request_version() if request_format is None else request_format
+    excerpts = SourceExcerpts([window, *window["supplementary_context"]], request_format=version)
     window = {
         **window,
-        "summary_protocol": PROMPT_VERSION,
+        "summary_protocol": REFERENCE_PROMPT_VERSION if structured else PROMPT_VERSION,
         "output_sections": window_sections(window),
     }
     return excerpts.messages(
@@ -134,8 +188,26 @@ def summary_messages(system: dict, doc_name: str, window: dict) -> list[dict]:
                 "content": f"Original document: {doc_name}\n"
                 + json.dumps(window, ensure_ascii=False, separators=(",", ":")),
             },
-            {"role": "user", "content": _SUMMARY_TASK},
-        ]
+            {
+                "role": "user",
+                "content": (
+                    legacy_prompts()["summary_reference_task" if structured else "summary_task"]
+                    if version == 1
+                    else (
+                        _SUMMARY_TASK.split("Return one JSON object in this complete shape:")[0]
+                        + "Return description and sections with every requested ID exactly once. "
+                        "Each section has ordered parts with kind, text and refs. Prose uses "
+                        "ordinary Markdown and refs: []; excerpt uses empty text and "
+                        "supplied refs. "
+                        "Legacy derived_template uses nonempty text and resolvable refs. "
+                        + REFERENCED_SUMMARY.example()
+                        if structured
+                        else _SUMMARY_TASK
+                    )
+                ),
+            },
+        ],
+        structured=structured,
     )
 
 
@@ -177,11 +249,25 @@ async def build_document_summary(
     from ultrakb.agent.page_response import PageResponseError, summary_repair_messages
     from ultrakb.llm_execution import raise_if_terminal
 
+    structured = getattr(checkpoints, "structured_summary", False) if checkpoints else True
+
     def request_fits(window: dict) -> bool:
-        messages = summary_messages(system_message, windows.doc_name, window)
-        corrections = summary_repair_messages(
-            tuple(section["id"] for section in window_sections(window))
+        messages = summary_messages(
+            system_message,
+            windows.doc_name,
+            window,
+            structured=structured,
+            request_format=request_version(checkpoints),
         )
+        corrections = summary_repair_messages(
+            tuple(section["id"] for section in window_sections(window)),
+            protocol=summary_request_protocol(messages),
+        )
+        if request_version(checkpoints) == 1:
+            corrections = historical_summary_repairs(
+                summary_request_protocol(messages),
+                tuple(section["id"] for section in window_sections(window)),
+            )
         return fits(messages) and all(fits([*messages, correction]) for correction in corrections)
 
     batches: list[dict] = []
@@ -197,14 +283,48 @@ async def build_document_summary(
     from ultrakb.compile_checkpoints import digest
 
     def request(key: str, batch: dict, *, can_split: bool) -> _SummaryRequest:
-        messages = summary_messages(system_message, windows.doc_name, batch)
+        messages = summary_messages(
+            system_message,
+            windows.doc_name,
+            batch,
+            structured=structured,
+            request_format=request_version(checkpoints),
+        )
+        require_frozen_request(checkpoints, f"summary:{key}", digest(messages))
         cached = checkpoints.load(f"summary:{key}", digest(messages)) if checkpoints else None
+        if cached is not None:
+            from ultrakb.agent.page_delivery import validate_page_delivery
+            from ultrakb.agent.source_excerpts import SourceExcerpts
+
+            validate_page_delivery(
+                json.dumps(cached),
+                response_protocol="summary-json",
+                expected_sections=tuple(s["id"] for s in window_sections(batch)),
+                original_excerpts=SourceExcerpts([batch, *batch["supplementary_context"]]),
+            )
+        if checkpoints and cached is None:
+            from ultrakb.agent.retained_summary import reuse_saved_summary
+
+            cached = reuse_saved_summary(
+                checkpoints,
+                f"summary:{key}",
+                digest(messages),
+                batch,
+                protocol=summary_request_protocol(messages),
+                section_ranges=window_sections(batch),
+            )
         return _SummaryRequest(key, batch, messages, cached, can_split)
 
     def children(parent: _SummaryRequest) -> list[_SummaryRequest]:
+        parts = list(windows.split_document_window(parent.window))
+        if len(parts) < 2 or any(
+            len(part["content"]) >= len(parent.window["content"]) for part in parts
+        ):
+            raise PageResponseError(
+                "document_summary_capacity_exceeded", "Minimal complete source cannot be split"
+            )
         divided = [
-            request(f"{parent.key}.{i}", batch, can_split=False)
-            for i, batch in enumerate(windows.split_document_window(parent.window), 1)
+            request(f"{parent.key}.{i}", batch, can_split=True) for i, batch in enumerate(parts, 1)
         ]
         if not all(request_fits(child.window) for child in divided):
             raise PageResponseError(
@@ -212,19 +332,17 @@ async def build_document_summary(
             )
         return divided
 
-    requests = []
-    for index, batch in enumerate(batches, 1):
-        parent = request(str(index), batch, can_split=True)
+    def restored(parent):
         marker = (
-            checkpoints.load(f"summary-split:{index}", digest(parent.messages))
+            checkpoints.load(f"summary-split:{parent.key}", digest(parent.messages))
             if checkpoints and parent.accepted is None
             else None
         )
         truncated = (
             checkpoints
             and parent.accepted is None
-            and checkpoints.failure_code(f"summary:{index}", digest(parent.messages))
-            == "page_truncated_response"
+            and checkpoints.failure_code(f"summary:{parent.key}", digest(parent.messages))
+            in _SPLITTABLE_DELIVERY_ERRORS
         )
         if marker is not None or truncated:
             divided = children(parent)
@@ -232,10 +350,17 @@ async def build_document_summary(
             if marker is not None and marker != child_digests:
                 raise PageResponseError("compile_checkpoint_invalid", "Summary split changed")
             if marker is None:
-                checkpoints.save(f"summary-split:{index}", digest(parent.messages), child_digests)
-            requests.extend(divided)
-        else:
-            requests.append(parent)
+                checkpoints.save(
+                    f"summary-split:{parent.key}", digest(parent.messages), child_digests
+                )
+            return [child for part in divided for child in restored(part)]
+        return [parent]
+
+    requests = [
+        child
+        for index, batch in enumerate(batches, 1)
+        for child in restored(request(str(index), batch, can_split=True))
+    ]
     if missing := sum(r.accepted is None for r in requests):
         admit_document_summary(missing)
     bodies, descriptions, ranges = [], [], []
@@ -262,7 +387,7 @@ async def build_document_summary(
                     tuple(s["id"] for s in window_sections(batch)),
                 )
             except PageResponseError as error:
-                if error.code != "page_truncated_response" or not current.can_split:
+                if error.code not in _SPLITTABLE_DELIVERY_ERRORS or not current.can_split:
                     raise
                 divided = children(current)
                 if checkpoints:
@@ -275,16 +400,14 @@ async def build_document_summary(
                 # The existing task ledger owns every send, including the failed
                 # parent and each child's one repair. Reserve no fresh allowance.
                 admit_document_summary(sum(r.accepted is None for r in requests[cursor:]))
-                logger.info("Split truncated document summary batch %s once", current.key)
+                logger.info("Split document summary batch %s after %s", current.key, error.code)
                 continue
-            if checkpoints:
-                checkpoints.save(
-                    f"summary:{current.key}",
-                    digest(messages),
-                    decoded,
-                    metadata={**batch, "output_sections": window_sections(batch)},
-                )
-        else:
+        if decoded is None:
+            raise PageResponseError("summary_response_invalid", "Summary delivery is not JSON")
+        retained = decoded
+        if current.accepted is not None or any(
+            "parts" in section for section in decoded["sections"]
+        ):
             from ultrakb.agent.page_response import parse_summary
             from ultrakb.agent.source_excerpts import SourceExcerpts
 
@@ -297,8 +420,13 @@ async def build_document_summary(
                 ),
                 sections,
             )
-        if decoded is None:
-            raise PageResponseError("summary_response_invalid", "Summary delivery is not JSON")
+        if checkpoints and current.accepted is None:
+            checkpoints.save(
+                f"summary:{current.key}",
+                digest(messages),
+                retained,
+                metadata={**batch, "output_sections": window_sections(batch)},
+            )
         description = decoded["description"]
         body = "\n\n".join(section["content"] for section in decoded["sections"])
         bodies.append(body)

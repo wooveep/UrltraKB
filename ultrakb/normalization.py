@@ -45,14 +45,11 @@ def normalization_fingerprint(
 
     from ultrakb.agent.compiler import get_agents_md, short_document_messages
     from ultrakb.config import resolve_credential_bundle
-    from ultrakb.config_state import active_values
-    from ultrakb.execution_capacity import capacity_policy
     from ultrakb.knowledge_scope import resolve_scope
     from ultrakb.pdf_recognition import PDF_RECOGNITION_POLICY
 
     config = resolve_effective_config(kb_dir)[0]
     credentials = bundle if bundle is not None else resolve_credential_bundle(kb_dir)
-    captured = active_values(kb_dir)
     request_basis = short_document_messages(
         "", "", get_agents_md(resolve_scope(kb_dir, scope).wiki_dir), config.get("language", "en")
     )
@@ -150,7 +147,9 @@ def normalization_fingerprint(
             # Runtime injection changed no successful tree content. Keep the
             # established content identity so old paid trees remain reusable.
             "index_sdk": (
-                "0.3.0.dev3+urltrakb.5"
+                "0.3.0.dev3+urltrakb.13"
+                if version("pageindex") == "0.3.0.dev3+urltrakb.14"
+                else "0.3.0.dev3+urltrakb.5"
                 if version("pageindex")
                 in {
                     "0.3.0.dev3+urltrakb.6",
@@ -162,11 +161,8 @@ def normalization_fingerprint(
             "index_endpoint": hashlib.sha256(
                 (credentials.base_url or "provider-default").encode()
             ).hexdigest(),
-            "capacity": capacity_policy(
-                config,
-                custom_endpoint=bool(credentials.base_url),
-                tokenizer_snapshot=captured.get("tokenizer_asset") if captured else None,
-            ),
+            # Request budgets belong to execution snapshots, not normalized
+            # original evidence. Changing capacity must not re-convert a source.
             "request_basis": hashlib.sha256(
                 json.dumps(request_basis, sort_keys=True).encode()
             ).hexdigest(),

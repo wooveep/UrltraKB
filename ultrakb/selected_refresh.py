@@ -77,7 +77,6 @@ async def _reconcile_page(kb_dir, view, page, identities, retained, config, bund
     patch = PageUpdate(
         original,
         known_targets=targets,
-        originals=reader.numeric_sources(context, long=True),
         allowed_types=frozenset(resolve_entity_types(config))
         if page.startswith("entities/")
         else None,

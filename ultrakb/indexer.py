@@ -189,6 +189,7 @@ def _build_index_config(
         executor.index_capacity_policy = capacity_policy(
             {**config, "model": executor.bindings.model("document_index")},
             custom_endpoint=bool(executor.bindings.credentials().base_url),
+            base_url=executor.bindings.credentials().base_url,
         )
     kwargs["llm_client"] = PageIndexLLM(executor)
     kwargs["require_llm_client"] = True
@@ -224,6 +225,27 @@ def index_long_document(
 
     model: str = config.get("model", "gpt-5.4")
     index_config = _build_index_config(config, bundle=resolve_credential_bundle(kb_dir))
+    from ultrakb.index_stages import IndexStages
+
+    index_config.llm_client.checkpoints = IndexStages(
+        kb_dir,
+        pdf_path,
+        identity={
+            "document": source_name,
+            "connection": index_config.llm_client.executor.bindings.public_identity(),
+            "index": index_config.model_dump(exclude={"llm_params", "usage_observer"}),
+        },
+    )
+    from ultrakb.index_originals import retained_pdf_pages
+
+    original_pages = retained_pdf_pages(
+        pdf_path,
+        source_name,
+        index_config.llm_client.checkpoints,
+        scope.wiki_dir / "sources/images" / source_name,
+        extract=_convert_pdf_to_pages,
+        normalize=_normalize_page_content,
+    )
 
     client = LocalClient(
         model=model,
@@ -253,8 +275,14 @@ def index_long_document(
                 )
                 break
             except Exception as exc:
+                from pageindex.errors import IndexCapacityError
                 from pageindex.index.block_policy import BlockContractError
                 from pageindex.index.page_parts_policy import PagePartsContractError
+
+                if isinstance(exc, IndexCapacityError):
+                    from ultrakb.model_tokenizer import ContextCapacityError
+
+                    raise ContextCapacityError(str(exc)) from exc
 
                 cause: BaseException | None = exc
                 while cause is not None:
@@ -313,7 +341,9 @@ def index_long_document(
             sources_dir.mkdir(parents=True, exist_ok=True)
             images_dir = sources_dir / "images" / source_name
 
-            if pdf_path.suffix == ".okpi":
+            if original_pages is not None:
+                all_pages = original_pages
+            elif pdf_path.suffix == ".okpi":
                 from ultrakb.office.slide_content import attach_slides
                 from ultrakb.office.slide_package import materialize_slide_package
 

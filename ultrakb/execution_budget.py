@@ -121,14 +121,18 @@ class TaskBudget:
             self._used, self._stages = used, dict(stages)
 
 
-def admit_compile_plan(plan, *, rewrite_summary: bool):
+def admit_compile_plan(plan, *, rewrite_summary: bool, missing_creates: int | None = None):
     from ultrakb.llm_execution import active_executor
 
     executor = active_executor()
     if executor is None:
         return
     # Updates admit their actual missing proposals after sizing and checkpoint validation.
-    count = sum(len(group.create) for group in (plan.concepts, plan.entities))
+    count = (
+        sum(len(group.create) for group in (plan.concepts, plan.entities))
+        if missing_creates is None
+        else missing_creates
+    )
     minimum = count
     repairs = min(count, executor.policy.compile_repair_calls)
     executor.budget.require("compile", minimum + repairs)

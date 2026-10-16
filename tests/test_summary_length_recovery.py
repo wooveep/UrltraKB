@@ -248,6 +248,7 @@ async def test_summary_window_admits_its_length_repair_before_using_the_allowanc
     )
     from ultrakb.agent.page_response import PageResponseError, page_repair_message
     from ultrakb.agent.source_windows import CompileSourceWindows
+    from ultrakb.agent.summary_protocol import summary_response_format
     from ultrakb.compile_checkpoints import digest
     from ultrakb.config import LlmCredentialBundle
     from ultrakb.execution_capacity import capacity_policy
@@ -314,7 +315,12 @@ async def test_summary_window_admits_its_length_repair_before_using_the_allowanc
         assert "failed validation (page_truncated_response)" in str(correction)
         assert (
             measure.payload_tokens(
-                {"messages": repair_messages, "response_format": {"type": "json_object"}}
+                {
+                    "messages": repair_messages,
+                    "response_format": summary_response_format(
+                        "summary-json", tuple(s["id"] for s in window_sections(window)), model=model
+                    ),
+                }
             )
             <= limit
         )
@@ -326,7 +332,12 @@ async def test_summary_window_admits_its_length_repair_before_using_the_allowanc
     parent = next(reader.iter_document_windows(fits=lambda _: True))
     messages = summary_messages(system, "manual", parent)
     normal_tokens = measure.payload_tokens(
-        {"messages": messages, "response_format": {"type": "json_object"}}
+        {
+            "messages": messages,
+            "response_format": summary_response_format(
+                "summary-json", tuple(s["id"] for s in window_sections(parent)), model=model
+            ),
+        }
     )
     tight_fits = summary_capacity(
         {

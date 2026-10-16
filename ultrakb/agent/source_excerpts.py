@@ -7,140 +7,35 @@ turn a partial reader window into a complete procedure or authorize new claims.
 import hashlib
 import json
 import re
-import unicodedata
 from collections.abc import Iterable
+from functools import cached_property
 
+from ultrakb.agent.compile_contract import legacy_prompts, request_version
+from ultrakb.agent.excerpt_matching import ExcerptIndex, problem
 from ultrakb.agent.page_response import PageResponseError, parse_page, parse_summary
-from ultrakb.agent.table_evidence import plain_prose_blocks
 from ultrakb.content_blocks import markdown_layout
-from ultrakb.source_contract import complete_cell_values
 
 PROTOCOL = "original-excerpts-v3"
 _MARKER = re.compile(r"^\[\[original:(x\d+\.\d+)\]\][ \t]*$", re.MULTILINE)
 _PREFIX = "[[original:"
-_ABSOLUTE_PATH = re.compile(r"(?:/(?!/)[^\s]+|[A-Za-z]:[\\/][^\r\n]+|\\\\[^\\\s]+\\[^\r\n]+)\Z")
-
-
-def _standalone_path(value: str) -> bool:
-    # This is a narrow transcription check, not a shell parser. Do not treat
-    # URLs, relative wiki links, numeric ratios or commands as path literals.
-    return bool(
-        _ABSOLUTE_PATH.fullmatch(value)
-        and any(character.isalpha() or character == "_" for character in value)
-        and not re.search(r"\s[-/<>|&;]|[\r\n]", value)
-        and not re.search(r"\.(?:exe|com|bat|cmd)\s+\S", value, re.IGNORECASE)
-    )
-
-
-def _path_character(character: str) -> bool:
-    return bool(character) and (
-        character.isalnum()
-        or unicodedata.category(character).startswith("M")
-        or character in "._/\\~:%+-"
-    )
-
-
-def _cjk_prose_prefix(source: str, start: int) -> bool:
-    end = start
-    while start and _path_character(source[start - 1]):
-        start -= 1
-    prefix = source[start:end]
-    return bool(prefix) and all(
-        unicodedata.name(character, "").startswith("CJK UNIFIED IDEOGRAPH-") for character in prefix
-    )
-
-
-def _contains_path(source: str, path: str, *, prose: bool = False) -> bool:
-    start = source.find(path)
-    while start >= 0:
-        end = start + len(path)
-        left, right = source[max(0, start - 1) : start], source[end : end + 1]
-        # A final sentence period is punctuation; a filename extension is not.
-        if right == "." and not _path_character(source[end + 1 : end + 2]):
-            right = ""
-        # Native Chinese prose often has no space before an absolute path.
-        # Only prose may use this boundary; code and longer path prefixes may not.
-        left_boundary = not _path_character(left) or (prose and _cjk_prose_prefix(source, start))
-        if left_boundary and not _path_character(right):
-            return True
-        start = source.find(path, start + 1)
-    return False
-
-
-def _qualified_table_locations(source: str | dict) -> set[str]:
-    """Distinguish mapped HTML table coordinates from filesystem path literals."""
-    if not isinstance(source, dict):
-        return set()
-    from ultrakb.text_source import TextOrigin
-
-    spans = []
-    for table in source.get("native_tables", []):
-        if (
-            not isinstance(table, dict)
-            or set(table) != {"native_location", "coverage", "status", "rows", "cells"}
-            or table["status"] != "observed"
-            or table["coverage"] != "complete"
-        ):
-            continue
-        location = table["native_location"]
-        if not isinstance(location, dict) or set(location) != {"source_spans"}:
-            continue
-        mapped = location["source_spans"]
-        if isinstance(mapped, list) and len(mapped) == 1 and isinstance(mapped[0], list):
-            span = mapped[0]
-            if len(span) == 2 and all(type(n) is int for n in span) and 0 <= span[0] < span[1]:
-                spans.append(span)
-    locations = set()
-    for raw in source.get("origins", []):
-        try:
-            origin = TextOrigin.model_validate_json(json.dumps(raw))
-        except ValueError:
-            continue
-        left, right = origin.normalized_span
-        if (
-            origin.kind == "html"
-            and origin.coordinate == "unicode_codepoint"
-            and origin.html is not None
-            and origin.html.tag == "table"
-            and 0 <= origin.original_span[0] < origin.original_span[1]
-            and re.fullmatch(
-                r"(?:/[a-z][a-z0-9_-]*\[[1-9][0-9]*\])*/table\[[1-9][0-9]*\]",
-                origin.html.path,
-            )
-            and any(left == start < end <= right for start, end in spans)
-        ):
-            locations.add(origin.html.path)
-    return locations
 
 
 class SourceExcerpts:
-    def __init__(self, sources: Iterable[str | dict]):
+    def __init__(self, sources: Iterable[str | dict], *, request_format: int | None = None):
         from ultrakb.llm_execution import check_model_stop
 
+        self.request_version = request_version() if request_format is None else request_format
+        sources = list(sources)
+        self._input_sources = sources
+        self.resolutions: list[dict] = []
         self.blocks: dict[str, str] = {}
         self.catalog: list[dict] = []
         self.sources: list[dict] = []
-        self.literal_bodies: set[str] = set()
-        self.path_sources: list[str] = []
-        self.prose_path_sources: list[str] = []
-        self.table_locations: set[str] = set()
         for number, source in enumerate(sources, 1):
             check_model_stop()
             text = source if isinstance(source, str) else source["content"]
             tokens, offsets = markdown_layout(text)
             check_model_stop()
-            self.path_sources.append(text)
-            self.prose_path_sources.extend(plain_prose_blocks(tokens))
-            # The source contract owns decoding and cell visibility. Keep each
-            # line separate; missing proof never turns printed tags into cells.
-            cell_parts = [
-                part
-                for value in complete_cell_values(source if isinstance(source, dict) else {})
-                for part in value.splitlines()
-            ]
-            self.path_sources.extend(cell_parts)
-            self.prose_path_sources.extend(cell_parts)
-            self.table_locations.update(_qualified_table_locations(source))
             protected: list[tuple[int, int]] = []
             for index, token in enumerate(tokens):
                 if index % 128 == 0:
@@ -151,10 +46,6 @@ class SourceExcerpts:
                         protected[-1] = (protected[-1][0], max(right, protected[-1][1]))
                     else:
                         protected.append((left, right))
-            for token in tokens:
-                # Indentation in extracted native text is not a code delimiter.
-                if token.type == "fence":
-                    self.literal_bodies.add(token.content.rstrip("\n"))
             # Blank lines are separators, not claims about native PDF headings.
             cuts = [0]
             cursor = 0
@@ -190,9 +81,16 @@ class SourceExcerpts:
                         **({"closing": lines[-1][:120]} if len(lines) > 1 else {}),
                     }
                 )
-                self.literal_bodies.add(body.replace("\r\n", "\n").strip("\n"))
 
-    def message(self) -> dict:
+    @cached_property
+    def index(self):
+        return ExcerptIndex(self._input_sources, self.catalog)
+
+    @cached_property
+    def references(self):
+        return self.index.references()
+
+    def message(self, *, compact: bool = False) -> dict:
         return {
             "role": "user",
             "content": "Original excerpt catalog:\n"
@@ -201,36 +99,86 @@ class SourceExcerpts:
                     "protocol": PROTOCOL,
                     "sources": self.sources,
                     "interpretation": (
-                        "Sources follow supplied-original order; offsets are Unicode positions. "
-                        "Previews locate text, not evidence. Exact repeats within one source share "
-                        "its first anchor; all occurrences remain in the original. Anchors prove "
-                        "transcription, not an occurrence's applicability, scope or completeness. "
-                        "Put a supplied [[original:ID]] alone in an unindented top-level "
-                        "content paragraph, outside code/HTML, lists and blockquotes; the program "
-                        "copies the whole block. Other fences must be "
-                        "closed standalone blocks reproducing a complete supplied block or "
-                        "original fenced example, including prefixes, comments and values. "
-                        "Carry the selected occurrence's adjacent conditions and operation stage; "
-                        "window-edge blocks may be partial. Do not reconstruct commands or table "
-                        "alignment from extraction line breaks. Explain lost alignment locally. "
-                        "Standalone inline file paths must occur verbatim in supplied text. "
-                        "Native table coordinates must match qualified source metadata. "
-                        "Metadata stays ordinary prose."
+                        legacy_prompts()["excerpt_catalog"]
+                        if self.request_version == 1
+                        else "Sources follow supplied-original order; offsets are Unicode "
+                        "positions. "
+                        "Previews locate text, not evidence. Put a supplied [[original:ID]] alone "
+                        "in an unindented top-level content paragraph outside code, lists, HTML "
+                        "and blockquotes; the program copies its original block. Reference "
+                        "positions identify the source, not applicability or completeness. "
+                        "Ordinary Markdown, inline code, tables and fences are generated content. "
+                        "Preserve the source's objects, conditions, exceptions and explanations."
                     ),
-                    "blocks": self.catalog,
+                    "blocks": [
+                        {
+                            k: (v[:64] if k == "opening" else v)
+                            for k, v in block.items()
+                            if k != "closing"
+                        }
+                        for block in self.catalog
+                    ]
+                    if compact
+                    else self.catalog,
                 },
                 ensure_ascii=False,
                 separators=(",", ":"),
             ),
         }
 
-    def messages(self, messages: list[dict]) -> list[dict]:
-        message = self.message()
+    def messages(self, messages: list[dict], *, structured=False, compact=False) -> list[dict]:
+        message = self.reference_message() if structured else self.message(compact=compact)
         return messages if message in messages else [*messages, message]
 
-    def render(self, content: str) -> str:
+    def reference_message(self) -> dict:
+        return {
+            "role": "user",
+            "content": "Structured original reference catalog:\n"
+            + json.dumps(
+                {
+                    "protocol": "original-references-v1",
+                    "interpretation": (
+                        legacy_prompts()["excerpt_references"]
+                        if self.request_version == 1
+                        else "Select supplied reference IDs in excerpt parts; the program copies "
+                        "the original bytes and records source positions. References establish "
+                        "transcription, not applicability or a complete procedure. Prose parts "
+                        "allow normal Markdown including examples. Legacy derived_template "
+                        "parts are labelled synthesis with resolvable source references."
+                    ),
+                    "references": [
+                        {
+                            "id": key,
+                            **self.index.locator(match),
+                            "opening": self.index.body(match).splitlines()[0][:120],
+                        }
+                        for key, match in self.references.items()
+                    ],
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ),
+        }
+
+    def _reference(self, identity, **where):
+        match = self.references.get(identity)
+        if match is None:
+            raise problem(
+                "excerpt_unknown_reference",
+                "Unknown original excerpt ID",
+                reference_id=identity,
+                **where,
+            )
+        return match
+
+    @staticmethod
+    def _fence(body):
+        fence = "`" * max(3, 1 + max((len(s) for s in re.findall(r"`+", body)), default=0))
+        return f"\n\n{fence}text\n{body}\n{fence}\n\n"
+
+    def render(self, content: str, *, field_path="$.content") -> str:
         tokens, offsets = markdown_layout(content)
-        self._check_paths(tokens)
+        replacements = []
         paragraphs = [
             (offsets[token.map[0]], offsets[token.map[1]])
             for index, token in enumerate(tokens)
@@ -245,30 +193,14 @@ class SourceExcerpts:
                 if child.type in {"html_inline", "code_inline"}
             )
         ]
-        for token in tokens:
-            if token.type == "fence" and token.map:
-                closing = content[offsets[token.map[1] - 1] : offsets[token.map[1]]].rstrip("\r\n")
-                if token.map[1] - 1 <= token.map[0] or not re.fullmatch(
-                    r" {0,3}"
-                    + re.escape(token.markup[0])
-                    + "{"
-                    + str(len(token.markup))
-                    + r",}[ \t]*",
-                    closing,
-                ):
-                    raise PageResponseError(
-                        "page_literal_conflict", "A literal excerpt needs its closing fence"
-                    )
-            if token.type in {"fence", "code_block"} and (
-                _PREFIX in token.content or token.content.rstrip("\n") not in self.literal_bodies
-            ):
-                raise PageResponseError(
-                    "page_literal_conflict",
-                    "A code excerpt changes or truncates the supplied syntax. "
-                    "Select the complete original block using its catalog ID.",
-                )
-        markers = list(_MARKER.finditer(content))
-        if _PREFIX in _MARKER.sub("", content):
+        # Ordinary code, including reference-syntax examples, has no copy contract.
+        visible = content
+        for token in reversed(tokens):
+            if token.map and token.type in {"fence", "code_block"}:
+                start, end = offsets[token.map[0]], offsets[token.map[1]]
+                visible = visible[:start] + " " * (end - start) + visible[end:]
+        markers = list(_MARKER.finditer(visible))
+        if _PREFIX in _MARKER.sub("", visible):
             raise PageResponseError(
                 "page_excerpt_invalid", "Excerpt references need their own line"
             )
@@ -279,39 +211,15 @@ class SourceExcerpts:
                 raise PageResponseError(
                     "page_excerpt_invalid", "Excerpt references must be visible prose paragraphs"
                 )
-
-        def expand(match):
-            body = self.blocks[match.group(1)].strip("\r\n")
-            fence = "`" * max(3, 1 + max((len(s) for s in re.findall(r"`+", body)), default=0))
-            # Edits may be inserted next to unedited bytes without a separator.
-            return f"\n\n{fence}text\n{body}\n{fence}\n\n"
-
-        # One substitution: inserted native text is never interpreted as a new reference.
-        rendered = _MARKER.sub(expand, content)
-        if markers or any(token.type in {"fence", "code_block"} for token in tokens):
-            # Direct verbatim excerpts need the same assembly boundary as anchors.
-            rendered = "\n\n" + rendered.strip("\n") + "\n\n"
-        return rendered
-
-    def _check_paths(self, tokens) -> None:
-        for token in tokens:
-            for child in token.children or []:
-                if child.type != "code_inline" or not _standalone_path(child.content):
-                    continue
-                if child.content in self.table_locations:
-                    continue  # This exact coordinate came from the qualified source projection.
-                if not any(
-                    _contains_path(source, child.content) for source in self.path_sources
-                ) and not any(
-                    _contains_path(source, child.content, prose=True)
-                    for source in self.prose_path_sources
-                ):
-                    raise PageResponseError(
-                        "page_literal_conflict",
-                        "An inline path does not occur verbatim in the supplied original. "
-                        "Copy its exact spelling or select the original excerpt; "
-                        "do not reconstruct it across extraction line breaks.",
-                    )
+            source = self._reference(match.group(1), path=field_path)
+            body = self.index.body(source)
+            self.resolutions.append(self.index.record(source, body, path=field_path))
+            replacements.append((match.start(), match.end(), self._fence(body)))
+        rendered = content
+        # Inserted originals are data, never another round of reference commands.
+        for start, end, replacement in reversed(replacements):
+            rendered = rendered[:start] + replacement + rendered[end:]
+        return "\n\n" + rendered.strip("\n") + "\n\n" if markers else rendered
 
     def response(
         self,
@@ -322,6 +230,7 @@ class SourceExcerpts:
         update=False,
         previous_description: str | None = None,
     ) -> str:
+        self.resolutions.clear()
         if protocol == "markdown":
             return self.render(raw)
         if update:
@@ -334,8 +243,12 @@ class SourceExcerpts:
             bodies = value.get("edits", [])
             if not isinstance(bodies, list):
                 return raw
-        elif protocol == "summary-json":
-            value = parse_summary(raw, expected_sections)
+        elif protocol in {"summary-json", "summary-parts-json"}:
+            value = parse_summary(
+                raw,
+                expected_sections,
+                protocol=protocol if protocol == "summary-parts-json" else None,
+            )
             bodies = value["sections"]
         else:
             value = parse_page(raw, strict=protocol == "summary-page-json")
@@ -343,11 +256,47 @@ class SourceExcerpts:
         for field in ("description", "type", "reason"):
             if isinstance(value.get(field), str) and _PREFIX in value[field]:
                 raise PageResponseError("page_excerpt_invalid", "Metadata cannot contain excerpts")
-        if isinstance(value.get("description"), str) and not (
-            update and value["description"] == previous_description
-        ):
-            self._check_paths(markdown_layout(value["description"])[0])
-        for item in bodies:
+        for index, item in enumerate(bodies):
+            field = (
+                f"$.sections[{index}]"
+                if protocol in {"summary-json", "summary-parts-json"}
+                else f"$.edits[{index}]"
+                if update
+                else "$"
+            )
+            if protocol in {"summary-json", "summary-parts-json"} and "parts" in item:
+                item["content"] = self._parts(item.pop("parts"), field)
+                continue  # Copied originals are not reinterpreted as response commands.
             if isinstance(item, dict) and isinstance(item.get("content"), str):
-                item["content"] = self.render(item["content"])
+                item["content"] = self.render(item["content"], field_path=field + ".content")
         return json.dumps(value, ensure_ascii=False)
+
+    def _parts(self, parts, field):
+        bodies = []
+        for number, part in enumerate(parts):
+            path = f"{field}.parts[{number}]"
+            refs = [
+                self._reference(identity, path=f"{path}.refs[{index}]")
+                for index, identity in enumerate(part["refs"])
+            ]
+            if part["kind"] == "prose":
+                bodies.append(self.render(part["text"], field_path=path + ".text"))
+            elif part["kind"] == "excerpt":
+                for ref in refs:
+                    body = self.index.body(ref)
+                    bodies.append(self._fence(body))
+                    self.resolutions.append(self.index.record(ref, body, path=path + ".refs"))
+            else:
+                originals = [self.index.body(ref) for ref in refs]
+                locations = [
+                    {"id": identity, **self.index.locator(ref)}
+                    for identity, ref in zip(part["refs"], refs)
+                ]
+                self.resolutions.append(
+                    {"mode": "derived_template", "path": path + ".text", "references": locations}
+                )
+                bodies.append(
+                    f"推导路径模板 / Derived path template: `{part['text']}`.\n\n"
+                    + "\n\n".join(self._fence(body) for body in originals)
+                )
+        return "\n\n".join(bodies)

@@ -50,8 +50,33 @@ class TokenMeasure:
         self.input_limit = policy["input_limit"]
         self.policy = policy
         self.asset = policy.get("tokenizer_asset")
+        self.unit = policy.get("measurement_unit", "token")
+        if self.unit in {"utf8_byte", "token_upper_bound"} and not self.asset:
+            self.tokenizer, self.fingerprint = None, "utf8-byte-bound-v1"
+            self.encoding = None
+            return
         if self.asset:
             self.tokenizer = _local_tokenizer(**self.asset)
+            raw = json.loads(self.tokenizer.to_str())
+            model, pre = raw.get("model", {}), raw.get("pre_tokenizer", {})
+            if (
+                model.get("type") == "BPE"
+                and len(model.get("vocab", {})) == 256
+                and model.get("merges") == []
+                and not raw.get("added_tokens")
+                and raw.get("normalizer") is None
+                and raw.get("post_processor") is None
+                and raw.get("padding") is None
+                and not model.get("continuing_subword_prefix")
+                and not model.get("end_of_word_suffix")
+                and pre.get("type") == "ByteLevel"
+                and pre.get("add_prefix_space") is False
+                and pre.get("use_regex") is False
+            ):
+                from tokenizers.pre_tokenizers import ByteLevel
+
+                if set(model["vocab"]) == set(ByteLevel.alphabet()):
+                    self.unit = "utf8_byte"
             self.encoding = None
             self.fingerprint = self.asset["digest"]
         else:
@@ -62,6 +87,8 @@ class TokenMeasure:
             self.fingerprint = self.encoding.name
 
     def encode(self, text: str) -> list[int]:
+        if self.unit in {"utf8_byte", "token_upper_bound"}:
+            return list(text.encode("utf-8"))
         if self.tokenizer:
             return self.tokenizer.encode(text, add_special_tokens=False).ids
         assert self.encoding is not None
@@ -77,8 +104,9 @@ class TokenMeasure:
 
     def require_current(self, question: str) -> None:
         if self.count(question) > self.input_limit:
+            unit = "UTF-8 bytes" if self.unit == "utf8_byte" else "tokens"
             raise ContextCapacityError(
-                f"Current question exceeds model capacity ({self.input_limit} input tokens); "
+                f"Current question exceeds model capacity ({self.input_limit} input {unit}); "
                 "the original submission is retained without truncation"
             )
 
@@ -104,5 +132,6 @@ def question_measure(snapshot) -> TokenMeasure:
         values["effective"],
         custom_endpoint=bool(values["credentials"]["base_url"]),
         tokenizer_snapshot=values.get("tokenizer_asset"),
+        base_url=values["credentials"]["base_url"],
     )
     return TokenMeasure(policy)

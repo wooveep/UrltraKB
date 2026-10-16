@@ -13,6 +13,7 @@ on:
     tags: ['v*']
     paths:
       - '.github/workflows/desktop-build.yml'
+      - '.github/workflows/import-regressions.yml'
       - 'scripts/**'
       - 'packaging/**'
       - 'ultrakb/**'
@@ -32,8 +33,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  import-regressions:
+    name: Verify offline import safeguards before packaging
+    uses: ./.github/workflows/import-regressions.yml
+
   targets:
     name: Select native targets
+    needs: import-regressions
     runs-on: ubuntu-24.04
     outputs:
       debian: ${{ steps.matrix.outputs.debian }}

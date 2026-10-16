@@ -105,18 +105,27 @@ def build_index(parsed: ParsedDocument, model: str = None, opt=None) -> dict:
             policy.require_navigation_text()
         strategy = "content_based" if policy else detect_strategy(nodes)
 
-        if strategy == "level_based":
-            structure = build_tree_from_levels(nodes)
-            # For level-based, text is already in the tree nodes
-        else:
-            # Strategies 1-3: convert ContentNode list to page_list format for existing pipeline
+        runtime = opt.llm_client
+        retained = getattr(runtime, "stage_result", None)
+        structure = retained("navigation") if retained else None
+        if structure is None:
+            if strategy == "level_based":
+                structure = build_tree_from_levels(nodes)
+                # For level-based, text is already in the tree nodes
+            else:
+                # Strategies 1-3: convert ContentNode list to page_list format for existing pipeline
+                page_list = [(n.content, n.tokens) for n in nodes]
+                index_pages = page_list
+                if policy:
+                    from ..tokens import count_tokens
+                    index_pages = [(policy.render(i), count_tokens(policy.render(i), model))
+                                   for i in range(1, len(nodes) + 1)]
+                structure = _run_async(_content_based_pipeline(index_pages, opt, **({"policy": policy} if policy else {})))
+
+            if retained:
+                retained("navigation", structure)
+        if strategy != "level_based":
             page_list = [(n.content, n.tokens) for n in nodes]
-            index_pages = page_list
-            if policy:
-                from ..tokens import count_tokens
-                index_pages = [(policy.render(i), count_tokens(policy.render(i), model))
-                               for i in range(1, len(nodes) + 1)]
-            structure = _run_async(_content_based_pipeline(index_pages, opt, **({"policy": policy} if policy else {})))
 
         # Unified enhancement
         if opt.if_add_node_id:
@@ -135,10 +144,18 @@ def build_index(parsed: ParsedDocument, model: str = None, opt=None) -> dict:
         }
 
         if opt.if_add_doc_description:
-            clean_structure = create_clean_structure_for_description(structure)
-            result["doc_description"] = generate_doc_description(
-                clean_structure, model=opt.model
-            )
+            try:
+                clean_structure = create_clean_structure_for_description(structure)
+                result["doc_description"] = generate_doc_description(clean_structure, model=opt.model)
+                result["doc_description_status"] = "completed"
+            except Exception as error:
+                deferred = getattr(runtime, "may_defer", lambda error: False)
+                if not deferred(error):
+                    raise
+                result["doc_description"] = parsed.doc_name
+                result["doc_description_status"] = "pending"
+                if retained:
+                    retained("description-pending", {"error_type": type(error).__name__})
 
         # 'text' is populated for level_based (Markdown, always) or for
         # content_based when if_add_node_text/if_add_node_summary requested it.

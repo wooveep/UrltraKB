@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ultrakb.application.connection_capacity import template_capacity
 from ultrakb.application.connection_templates import CONNECTION_TEMPLATES
 from ultrakb.application.model_catalog import ModelCatalogRequest, read_model_catalog
 from ultrakb.application.model_connections import read_connection_state, verify_model_connection
@@ -317,9 +316,9 @@ class ConnectionSetup(QWidget):
             or address != self._saved_address
             or (values.model_capacity is None and model == template.model)
         ):
-            changes["model_capacity"] = (
-                template_capacity(template) if model == template.model else None
-            )
+            from ultrakb.model_capabilities import connection_capacity
+
+            changes["model_capacity"] = connection_capacity(model, address)
         credentials = {}
         if address != self._saved_address:
             credentials["openai_api_base"] = address

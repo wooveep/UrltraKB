@@ -190,6 +190,8 @@ def main():
                 window.manager, "get", lambda identity: next(t for t in current if t.id == identity)
             )
             if args.scenario == "progress":
+                from test_gui_task_progress import model_usage_receipt
+
                 window.shell.navigate("资料")
                 panel = window.workspaces.panels["资料"][0]
                 wait(lambda: panel.table.rowCount() == 1)
@@ -202,16 +204,33 @@ def main():
                     HashRegistry(kb / ".ultrakb/hashes.json").add(
                         "b" * 64, {"name": "第二份.md", "doc_name": "第二份", "type": "md"}
                     )
-                current[0] = replace(current[0], results=(UnitResult("completed"),))
+                completed_usage = model_usage_receipt()
+                completed_usage["model_tasks"][0]["actual_sends"] = 16
+                current[0] = replace(
+                    current[0],
+                    results=(
+                        UnitResult(
+                            "completed",
+                            model_usage=completed_usage,
+                            changes=("模型任务累计发送：16 / 1000；任务：" + "a" * 32,),
+                        ),
+                    ),
+                    current_source="第二份.docx",
+                    model_usage=model_usage_receipt(),
+                )
                 pump(750)
                 assert progress.status.text() != before, "Completed count did not refresh"
                 assert "1 / 3" in progress.status.text()
                 assert "converting" not in progress.status.text()
                 wait(lambda: panel.table.rowCount() == 2)
                 observed = []
-                QTimer.singleShot(
-                    100, lambda: current.__setitem__(0, replace(current[0], stage="compiling"))
-                )
+
+                def advance():
+                    receipt = model_usage_receipt()
+                    receipt["model_tasks"][0]["actual_sends"] = 272
+                    current[0] = replace(current[0], stage="compiling", model_usage=receipt)
+
+                QTimer.singleShot(100, advance)
 
                 def inspect():
                     dialog = next(
@@ -220,6 +239,24 @@ def main():
                         if d.isVisible() and d.windowTitle() == "任务结果"
                     )
                     observed.append(dialog.findChild(QPlainTextEdit).toPlainText())
+                    assert dialog.progress.maximum() == 3 and dialog.progress.value() == 1
+                    assert "已发送 272 次" in dialog.budget.text()
+                    assert "上限 1000 次" in dialog.budget.text()
+                    assert "剩余 728 次" in dialog.budget.text()
+                    assert "不代表资料完成进度" in dialog.budget.text()
+                    assert "模型调用预算" not in observed[-1]
+                    assert "16 / 1000" not in observed[-1]
+                    assert "第 2 项：正在执行" in observed[-1]
+                    assert "第 3 项：等待执行" in observed[-1]
+                    for theme in ("浅色", "深色"):
+                        window.theme.setCurrentText(theme)
+                        for width in (820, 720):
+                            dialog.resize(width, 620)
+                            pump(50)
+                            assert (
+                                dialog.budget.visibleRegion().boundingRect() == dialog.budget.rect()
+                            )
+                            dialog.grab().save(str(root / f"task-details-{theme}-{width}.png"))
                     dialog.grab().save(str(root / "task-details.png"))
                     dialog.accept()
 

@@ -38,3 +38,11 @@ class FileTypeError(PageIndexError, ValueError):
 
 class IndexQualityError(IndexingError):
     """Verified structure quality failure; a bounded rebuild may help."""
+
+
+class IndexCapacityError(IndexingError, ValueError):
+    """A minimal complete index request cannot fit the injected request budget."""
+
+
+class IndexOutputLimitError(IndexCapacityError):
+    """The model stopped before a complete response was available."""

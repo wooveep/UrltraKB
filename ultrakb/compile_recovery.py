@@ -139,7 +139,17 @@ def interrupted_repair_request(root: Path, task_id: str, stage: str) -> dict | N
     match = _retry_request(root, task_id, stage)
     if match is None:
         return None
-    _, request, previous = match
+    scope, request, previous = match
+    publication = _FAILED.get().get(scope.unit_id)
+    if publication and previous.state != "completed" and request.state == "completed":
+        # Legacy interrupted deliveries could record a paid HTTP response but
+        # lose its in-memory body before validation. The caller proves no
+        # accepted result/failure exists and consumes this recovery exactly once.
+        return {
+            **_receipt(request, stage),
+            "outcome": "received_delivery_not_persisted",
+            "publication": publication,
+        }
     if (
         previous.state == "completed"
         or request.observation != "call"

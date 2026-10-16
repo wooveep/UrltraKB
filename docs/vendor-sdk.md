@@ -6,7 +6,7 @@ ConDB。自动会话记忆和检索路由仍由后续任务接入。
 
 | 目录 | 分发名 / 导入名 | 本地版本 | 上游提交 | 许可证 |
 | --- | --- | --- | --- | --- |
-| PageIndex | pageindex / pageindex | 0.3.0.dev3+urltrakb.11 | 9ad54122bbd519cec8913198e2d63cff92781c1e | MIT |
+| PageIndex | pageindex / pageindex | 0.3.0.dev3+urltrakb.14 | 9ad54122bbd519cec8913198e2d63cff92781c1e | MIT |
 | ChatIndex | ictree / ctree | 0.1.0+urltrakb.3 | 7df2c9208db6f113f85a6c09295bec7f0f2114e7 | Apache-2.0 |
 | ConDB | pageindex-condb / contextdb | 1.0+urltrakb.6 | 62da030426b3eee96a77b464e7007cdf8530c42e | Apache-2.0 |
 | LiteLLM | litellm / litellm | 1.87.2+urltrakb.3 | 1296275dc52d9f4e05696380735037fbb841fcc3 | MIT |
@@ -14,6 +14,18 @@ ConDB。自动会话记忆和检索路由仍由后续任务接入。
 每个目录的 `UPSTREAM.json` 记录原文件 SHA-256、选定与排除范围、实际纳入文件、
 新增/修改/删除的本地补丁。包内 `_urltrakb_source.json` 同时进入 editable 和 wheel，
 用于识别分发版本和来源提交。清单自身不参与自我摘要；根源码导出清单覆盖它。
+
+2026-10-16 核对 PageIndex `.13` 清单时，发现 `8b85bcb7` 已提交的两个物理页文件
+仍记录中间补丁哈希。逐项对照上一份匹配清单的源码及该提交的最终差异后，补齐
+`page_index.py` 和 `physical_sections.py` 的哈希与审计说明。该次清单修正没有修改
+SDK 源码、依赖版本、解析器或内容策略，也不要求重建已有索引。
+
+PageIndex `.14` 将完整请求准入交给注入的共享模型执行器；目录提取、验证、
+修正和节点摘要按原文范围缩小，最终导航描述逐层归约。UltraKB 独立保存已收到
+响应、已验证目录、节点摘要及原始页/图片，发布回滚不会删除这些检查点。
+可选描述失败保留 pending 状态和完整核心索引。此次改变不修改冻结原文和
+内容定位策略，仍接受 `.13` 已验证的索引包，避免因请求预算变化要求重建付费索引。
+外部依赖版本保持不变，根依赖和锁文件精确跟随本地 `.14` 包。
 
 LiteLLM v1.87.2 的审核 sdist SHA-256 为
 `36b172cf8824bed6ae17fb8031a021c8bb2046014303c2220045868f1230690a`。
@@ -106,6 +118,10 @@ LiteLLM `.2` 验证（2026-10-06）：开发与独立 wheel 环境分别通过 2
 编译通过 `ultrakb/llm_execution.py`，在 KB 租约取得后由 `ExecutionContext` 冻结角色模型、凭据和政策。默认所有角色继承 `model`；可选 `conversation_model`、`retrieval_model` 只覆盖模型名，共享同一凭据与端点。运行中编辑配置只影响新任务。API key 在快照中缺失时，API key 认证路径在发送前失败，不能读取之后加入的环境或 SDK 全局 key；订阅登录、工作负载身份和本地 Ollama 保留 SDK 自有认证路径。
 
 KB 的 `model_policy` 可设置 `max_calls`（默认 1000）、`concurrency`（5）、`retries`（2）、`backoff`（0.25 秒）及可选 `deadline_seconds`。计数跨角色、修复和重试共用。文档索引同时遵守已有 `concurrency` / `IndexConfig.max_concurrency`，实际并发不会超过任一限制。普通 completion 的网络重试只有执行器负责，首次发送就关闭 SDK 自动重试；没有可观察 HTTPX 发送的失败不自动重试，也不声称传输观测完整。取消或过期后保留已花费的用量，丢弃迟到结果。
+
+容量、调用次数、上下文配额、文件接入、转换与调度的清单见
+[默认容量与执行限制](default-limits.md)。发送预算与已处理资料数量分别展示，
+发送次数不用于估算导入完成百分比；当前 `model_policy` 不在全局配置继承白名单中。
 
 账本区分逻辑调用、发送尝试、父调用与 operation/stage/prompt version，只保存模型/政策摘要，不保存请求正文或凭据。HTTPX 观察更新同一条发送记录；应用缓存命中与供应商缓存 token 分开。独立算法客户端将通过各自窄协议使用同一执行器。Agent、PageIndex 和 ChatIndex 的迁移分别验证，不代表技能及幻灯片生成等所有旧入口已迁移。
 

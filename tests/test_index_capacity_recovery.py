@@ -135,8 +135,8 @@ def test_index_capacity_block_preserves_history_and_normalization_through_worker
         assert outcome.error_type == "ContextCapacityError"
         assert result.resources and outcome.model_usage
         assert result.model_usage["current"]["actual_sends"] == 0
-        assert result.model_usage["current"]["requests"] == 1
-        assert result.model_usage["current"]["unsent_attempts"] == 1
+        assert result.model_usage["current"]["requests"] == 0
+        assert result.model_usage["current"]["unsent_attempts"] == 0
         assert result.model_usage["current"]["usage_complete"]
         assert result.model_usage["current"]["in_flight_requests"] == 0
         assert result.model_usage["cumulative"]["input_total"] == 41

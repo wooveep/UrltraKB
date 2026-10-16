@@ -6,6 +6,7 @@ import time
 import uuid
 from dataclasses import replace
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, TypeAdapter
 
@@ -27,6 +28,8 @@ class ModelTask(Record):
     stages: dict[str, int] = Field(default_factory=dict)
     inputs: dict[str, str] = Field(default_factory=dict)
     execution_task_ids: list[RecordId] = Field(default_factory=list)
+    # Missing markers belong to historical requests, never to the newest format.
+    compiler_request_version: Literal[1, 2] = 1
 
 
 def task_path(kb_dir: Path, task_id: str) -> Path:
@@ -41,6 +44,15 @@ def read_task(kb_dir: Path, task_id: str) -> ModelTask:
     if value.task_id != task_id or value.kb_generation != current_generation(kb_dir):
         raise ValueError("Model task belongs to another knowledge base generation")
     return value
+
+
+def compatible_bindings(before, after):
+    """Catalog provenance may differ while its exact captured bytes remain identical."""
+    before, after = dict(before), dict(after)
+    first, second = before.get("model_table", {}), after.get("model_table", {})
+    if first.get("sha256") and first.get("sha256") == second.get("sha256"):
+        before["model_table"] = after["model_table"] = {"sha256": first["sha256"]}
+    return before == after
 
 
 class TaskJournal:
@@ -73,12 +85,17 @@ class TaskJournal:
             bindings=bindings,
             policy=policy,
             deadline_at=deadline_at,
+            compiler_request_version=2,
         )
         if previous:
             # Only an explicitly changed captured limit may expand this logical task.
             before, after = dict(previous.policy), dict(policy)
             old_limit, new_limit = before.pop("max_calls", 1000), after.pop("max_calls", 1000)
-            if previous.bindings != bindings or before != after or new_limit < old_limit:
+            if (
+                not compatible_bindings(previous.bindings, bindings)
+                or before != after
+                or new_limit < old_limit
+            ):
                 raise ValueError("Task policy changed; start a new task or reprocess the source")
             self.record = (
                 previous
@@ -90,6 +107,7 @@ class TaskJournal:
                         "inputs": previous.inputs,
                         "deadline_at": previous.deadline_at,
                         "execution_task_ids": previous.execution_task_ids,
+                        "compiler_request_version": previous.compiler_request_version,
                     }
                 )
             )
