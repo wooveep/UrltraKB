@@ -107,9 +107,12 @@ def read_document_source(
     if chars is not None or blocks is not None:
         raise PageRangeError("Legacy source has no frozen character map")
     scope = resolve_scope(kb_dir, scope)
+    if scope.publication is not None and source_revision_id is not None:
+        return None
     if scope.view_id != "legacy":
         return None
-    registry = HashRegistry(kb_dir / ".ultrakb" / "hashes.json")
+    metadata_root = scope.publication.metadata_dir if scope.publication is not None else kb_dir
+    registry = HashRegistry(metadata_root / ".ultrakb" / "hashes.json")
     meta = registry.get(file_hash)
     if meta is None:
         return None
@@ -133,6 +136,7 @@ def read_document_source(
         page_count = None
 
     return {
+        "publication_id": scope.publication_id,
         "hash": file_hash,
         "name": meta.get("name", doc_name),
         "doc_name": doc_name,

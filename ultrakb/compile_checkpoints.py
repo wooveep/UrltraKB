@@ -228,9 +228,13 @@ class CompileCheckpoints:
         reused_response: dict | None = None,
     ):
         from ultrakb.agent.compile_contract import ACCEPTANCE_VERSION
+        from ultrakb.execution_timing import phase_observation
         from ultrakb.llm_execution import check_model_stop
 
-        with atomic_record_lock(self.directory / "checkpoint.lock"):
+        with (
+            phase_observation("checkpoint_save", stage="compile", work_id=key),
+            atomic_record_lock(self.directory / "checkpoint.lock"),
+        ):
             check_model_stop()
             _, previous = self._entry(key, request_digest)
             payload = {"key": key, "result": result}

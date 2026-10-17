@@ -203,6 +203,8 @@ def test_capacity_failure_survives_worker_receipt_and_restart(
     from ultrakb.knowledge_scope import live_scope
     from ultrakb.locks import atomic_write_text, kb_ingest_lock
     from ultrakb.model_task import read_task
+    from ultrakb.mutation import mutation_scope
+    from ultrakb.published_knowledge import read_publication
     from ultrakb.runtime.records import UnitResult
     from ultrakb.runtime.requests import RetrySource
     from ultrakb.unit_publication import read_head, read_unit_publication
@@ -210,11 +212,13 @@ def test_capacity_failure_survives_worker_receipt_and_restart(
     kb, admission, state, marker, service, model_task_id = retained_index
     retained = marker.read_bytes()
     original = (kb / admission.revision.original).read_bytes()
-    head = read_head(kb)
     manual = live_scope(kb).wiki_dir / "concepts/operator-note.md"
     human_content = "# Operator review\nKeep this manually maintained procedure.\n"
     with kb_ingest_lock(kb / ".ultrakb"):
-        atomic_write_text(manual, human_content)
+        with mutation_scope(kb, [manual], operation="manual-knowledge"):
+            atomic_write_text(manual, human_content)
+    head = read_head(kb)
+    published = read_publication(kb)
     if boundary == "wire":
         monkeypatch.setattr(tasks, "run_unit", _capacity_worker)
     history = tmp_path / "tasks"
@@ -243,6 +247,7 @@ def test_capacity_failure_survives_worker_receipt_and_restart(
         assert model_task["actual_sends"] == 1 and model_task["limit"] == 8
         assert read_task(kb, model_task_id).used == 1
         assert read_head(kb) == head
+        assert read_publication(kb).knowledge_revision_id == published.knowledge_revision_id
         assert manual.read_text() == human_content
         assert marker.read_bytes() == retained
         assert (kb / admission.revision.original).read_bytes() == original
@@ -267,8 +272,10 @@ def test_capacity_failure_survives_worker_receipt_and_restart(
 def test_short_import_capacity_failure_retains_completed_conversion(kb_dir, monkeypatch):
     from ultrakb import config
     from ultrakb.application.documents import import_document
+    from ultrakb.locks import kb_ingest_lock
     from ultrakb.model_tokenizer import ContextCapacityError
     from ultrakb.normalization import NormalizedInput, read_normalization
+    from ultrakb.published_knowledge import initialize_publication, read_publication
     from ultrakb.unit_publication import read_head, read_unit_publication
 
     monkeypatch.setattr(config, "GLOBAL_CONFIG_DIR", kb_dir / "profile")
@@ -278,6 +285,8 @@ def test_short_import_capacity_failure_retains_completed_conversion(kb_dir, monk
     source = kb_dir / "raw/safety.md"
     source.write_text("# Safety\nClose the inlet before inspecting the seal.\n")
     before = source.read_bytes()
+    with kb_ingest_lock(kb_dir / ".ultrakb"):
+        published = initialize_publication(kb_dir)
     head = read_head(kb_dir)
     starts = []
 
@@ -298,5 +307,6 @@ def test_short_import_capacity_failure_retains_completed_conversion(kb_dir, monk
     assert outcome.error_type == "ContextCapacityError"
     assert read_unit_publication(kb_dir, outcome.unit_id).completed_stages == ("conversion",)
     assert starts == [1] and read_head(kb_dir) == head
+    assert read_publication(kb_dir).knowledge_revision_id == published.knowledge_revision_id
     assert source.read_bytes() == before
     assert result.model_usage["current"]["requests"] == 0

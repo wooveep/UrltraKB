@@ -12,11 +12,27 @@ import tempfile
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from functools import wraps
 from pathlib import Path
+from threading import RLock
+from typing import Callable, Concatenate, ParamSpec, TypeVar
 
 from ultrakb.locks import DelegatedWriteLease, _fsync_directory, _target_mode, atomic_write_json
 
 logger = logging.getLogger(__name__)
+P = ParamSpec("P")
+T = TypeVar("T")
+
+
+def _serialized(
+    method: Callable[Concatenate[MutationSnapshot, P], T],
+) -> Callable[Concatenate[MutationSnapshot, P], T]:
+    @wraps(method)
+    def call(snapshot: MutationSnapshot, *args: P.args, **kwargs: P.kwargs) -> T:
+        with snapshot.journal_guard:
+            return method(snapshot, *args, **kwargs)
+
+    return call
 
 
 class RecoveryRequired(RuntimeError):
@@ -156,6 +172,11 @@ class MutationSnapshot:
     # crash-rebuilt snapshot leaves this empty and rollback falls back to the
     # safe full-copy path). Drives O(touched) rollback via inode-diff restore.
     hardlinked_dirs: set[Path] = field(default_factory=set)
+    publication: dict | None = None
+    parent_journal: str | None = None
+    publication_active: bool = False
+    journal_guard: RLock = field(default_factory=RLock, repr=False, compare=False)
+    cleanup_paths: list[str] = field(default_factory=list)
 
     def _journal_data(self, status: str) -> dict:
         return {
@@ -166,6 +187,9 @@ class MutationSnapshot:
             "backup_dir": str(self.backup_dir),
             "details": self.details,
             "attempts": self.attempts,
+            "publication": self.publication,
+            "parent_journal": self.parent_journal,
+            "cleanup_paths": self.cleanup_paths,
             "entries": [
                 {
                     "target": str(target),
@@ -175,10 +199,12 @@ class MutationSnapshot:
             ],
         }
 
+    @_serialized
     def write_journal(self, status: str) -> None:
         self.journal_path.parent.mkdir(parents=True, exist_ok=True)
         atomic_write_json(self.journal_path, self._journal_data(status))
 
+    @_serialized
     def mark_committed(self) -> None:
         """Mark the journal committed without removing the backup.
 
@@ -192,6 +218,14 @@ class MutationSnapshot:
         """
         self.write_journal("committed")
 
+    def committed_on_disk(self) -> bool:
+        """Account for a replace that succeeded before its final fsync raised."""
+        try:
+            return json.loads(self.journal_path.read_text("utf-8")).get("status") == "committed"
+        except (OSError, ValueError, AttributeError):
+            return False
+
+    @_serialized
     def track_new(self, paths: list[Path]) -> None:
         """Register paths created *after* the snapshot for removal on rollback.
 
@@ -218,6 +252,75 @@ class MutationSnapshot:
         if changed:
             self.write_journal("active")
 
+    @_serialized
+    def capture(self, paths: list[Path]) -> None:
+        """Extend the same transaction before a publication adds internal metadata."""
+        for path in paths:
+            if path.is_symlink():
+                raise ValueError("Mutation targets cannot be symbolic links")
+            target = path.resolve()
+            relative = target.relative_to(self.kb_dir)
+            if target == self.kb_dir:
+                raise ValueError("A mutation cannot replace its knowledge-base root")
+            if target in self.entries or any(parent in self.entries for parent in target.parents):
+                continue
+            if not target.exists():
+                self.entries[target] = None
+                continue
+            backup = self.backup_dir / relative
+            if target.is_dir():
+                raise ValueError("Additional publication metadata must be a regular file")
+            _copy_file_atomic(target, backup, preserve_mode=True)
+            self.entries[target] = backup
+        self.write_journal("active")
+
+    @_serialized
+    def absorb(self, child: MutationSnapshot) -> None:
+        """Retain child preimages until the enclosing business operation commits."""
+        for target, source in sorted(child.entries.items(), key=lambda item: len(item[0].parts)):
+            if target in self.entries or any(parent in self.entries for parent in target.parents):
+                continue
+            backup = self.backup_dir / "nested" / uuid.uuid4().hex if source else None
+            if source is not None and backup is not None:
+                backup.parent.mkdir(parents=True, exist_ok=True)
+                if source.is_dir():
+                    shutil.copytree(source, backup, copy_function=_hardlink_or_copy)
+                else:
+                    _copy_file_atomic(source, backup, preserve_mode=True)
+            # If a later child snapshots a parent directory, fold earlier
+            # narrower preimages into that backup rather than overwriting them
+            # with an intermediate business state during rollback.
+            for nested in [path for path in self.entries if path.is_relative_to(target)]:
+                previous = self.entries.pop(nested)
+                self.hardlinked_dirs.discard(nested)
+                if backup is None:
+                    continue
+                destination = backup / nested.relative_to(target)
+                if destination.is_dir():
+                    shutil.rmtree(destination)
+                else:
+                    destination.unlink(missing_ok=True)
+                if previous is not None:
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    if previous.is_dir():
+                        shutil.copytree(previous, destination, copy_function=_hardlink_or_copy)
+                    else:
+                        _copy_file_atomic(previous, destination, preserve_mode=True)
+            self.entries[target] = backup
+        self.write_journal("active")
+
+    @_serialized
+    def schedule_cleanup(self, paths: list[Path]) -> None:
+        """Retain exact disposable checkpoints until this result is public."""
+        for path in paths:
+            relative = path.resolve().relative_to(self.kb_dir).as_posix()
+            if not relative.startswith(".ultrakb/compile-checkpoints/"):
+                raise ValueError("Only compiler checkpoints can be cleaned after publication")
+            if relative not in self.cleanup_paths:
+                self.cleanup_paths.append(relative)
+        self.write_journal("active")
+
+    @_serialized
     def rollback(self) -> None:
         # Persist BEFORE touching live data. If restoration or its later repair
         # marker fails, a future normal acquisition must not retry it implicitly.
@@ -260,6 +363,7 @@ class MutationSnapshot:
             return exc
         return None
 
+    @_serialized
     def discard(self) -> None:
         # Best-effort post-commit/post-rollback cleanup: callers have already
         # written a terminal status (mark_committed or rollback), so there is
@@ -403,6 +507,7 @@ def mutation_scope(
     operation: str,
     lock_path: Path | None = None,
     delegated_lease: DelegatedWriteLease | None = None,
+    hardlink_dirs: set[Path] | None = None,
 ):
     """Commit a protected multi-file change, retaining evidence if rollback fails.
 
@@ -420,18 +525,46 @@ def mutation_scope(
         delegated_lease is not None and delegated_lease.authorizes(required_lock)
     ):
         raise RuntimeError("Mutation requires the knowledge-base write lease")
-    snapshot = snapshot_paths(kb_dir, paths, operation=operation)
-    try:
-        yield snapshot
-        snapshot.mark_committed()
-    except BaseException:
-        if snapshot.rollback_best_effort() is not None:
-            mark_needs_repair(kb_dir, snapshot.journal_path)
-            raise RecoveryRequired(f"Knowledge base needs repair: {kb_dir}")
-        snapshot.discard_best_effort()
-        raise
-    else:
-        snapshot.discard_best_effort()
+    from ultrakb.published_knowledge import (
+        prepare_publication,
+        publication_transaction,
+        publish_committed,
+        recover_before_mutation,
+    )
+
+    if lock_path is None:
+        recover_before_mutation(kb_dir, delegated_lease=delegated_lease)
+    snapshot = snapshot_paths(kb_dir, paths, operation=operation, hardlink_dirs=hardlink_dirs)
+    with publication_transaction(snapshot) as outer:
+        try:
+            yield snapshot
+            if outer and lock_path is None:
+                prepare_publication(snapshot)
+            snapshot.mark_committed()
+        except BaseException as exc:
+            if snapshot.publication is not None and snapshot.committed_on_disk():
+                from ultrakb.published_knowledge import PublicationPending
+
+                raise PublicationPending(
+                    snapshot.publication["publication_id"], snapshot.journal_path
+                ) from exc
+            if snapshot.rollback_best_effort() is not None:
+                mark_needs_repair(kb_dir, snapshot.journal_path)
+                raise RecoveryRequired(f"Knowledge base needs repair: {kb_dir}")
+            snapshot.discard_best_effort()
+            raise
+        # Publication follows the durable internal commit and is deliberately
+        # outside rollback handling. A failed switch/receipt retains the journal.
+        if outer and snapshot.publication:
+            from ultrakb.execution_timing import record_phase_event
+
+            record_phase_event(
+                "internal_commit",
+                stage="publication",
+                work_id=snapshot.publication["publication_id"],
+            )
+        if not outer or publish_committed(snapshot, delegated_lease=delegated_lease):
+            snapshot.discard_best_effort()
 
 
 def _snapshot_from_journal(path: Path, data: dict) -> MutationSnapshot:
@@ -441,6 +574,9 @@ def _snapshot_from_journal(path: Path, data: dict) -> MutationSnapshot:
         journal_path=path,
         operation=data.get("operation", "mutation"),
         details=data.get("details") or {},
+        publication=data.get("publication"),
+        parent_journal=data.get("parent_journal"),
+        cleanup_paths=data.get("cleanup_paths", []),
     )
     snapshot.entries = {
         Path(item["target"]): Path(item["backup"]) if item.get("backup") else None
@@ -463,6 +599,14 @@ def _validate_recovery_data(kb_dir: Path, data: dict) -> None:
         raise ValueError("Invalid mutation backup directory")
     if data.get("status") not in {"active", "recovering", "committed", "rolled_back"}:
         raise ValueError("Unknown mutation journal status")
+    parent = data.get("parent_journal")
+    if parent is not None and (
+        not isinstance(parent, str)
+        or len(parent) != 37
+        or not parent.endswith(".json")
+        or any(char not in "0123456789abcdef" for char in parent[:-5])
+    ):
+        raise ValueError("Invalid parent mutation journal")
     entries = data.get("entries")
     if not isinstance(entries, list):
         raise ValueError("Invalid mutation entries")
@@ -479,8 +623,35 @@ def _validate_recovery_data(kb_dir: Path, data: dict) -> None:
                 raise ValueError("Mutation backup is missing; live content was not removed")
 
 
+def _recovery_order(journal_dir: Path) -> list[Path]:
+    journals = sorted(journal_dir.glob("*.json"))
+    parents = {}
+    for path in journals:
+        try:
+            data = json.loads(path.read_text("utf-8"))
+            parents[path.name] = data.get("parent_journal") if isinstance(data, dict) else None
+        except (OSError, ValueError):
+            parents[path.name] = None
+
+    def depth(path: Path) -> int:
+        seen = {path.name}
+        parent = parents[path.name]
+        while isinstance(parent, str) and parent in parents and parent not in seen:
+            seen.add(parent)
+            parent = parents[parent]
+        return len(seen)
+
+    # Children restore their immediate preimages first; the outermost journal
+    # then restores the operation's original state regardless of UUID order.
+    return sorted(journals, key=depth, reverse=True)
+
+
 def recover_pending_journals(
-    kb_dir: Path, *, repairing: bool = False, lock_path: Path | None = None
+    kb_dir: Path,
+    *,
+    repairing: bool = False,
+    lock_path: Path | None = None,
+    delegated_lease: DelegatedWriteLease | None = None,
 ) -> list[str]:
     """Rollback active journals left by an interrupted process."""
     if repairing:
@@ -494,7 +665,7 @@ def recover_pending_journals(
     if not journal_dir.is_dir():
         return []
     messages: list[str] = []
-    for journal_path in sorted(journal_dir.glob("*.json")):
+    for journal_path in _recovery_order(journal_dir):
         snapshot: MutationSnapshot | None = None
         try:
             data = json.loads(journal_path.read_text(encoding="utf-8"))
@@ -502,6 +673,15 @@ def recover_pending_journals(
             snapshot = _snapshot_from_journal(journal_path, data)
             status = data.get("status", "active")
             if status in {"committed", "rolled_back"}:
+                if status == "committed" and snapshot.publication is not None:
+                    from ultrakb.published_knowledge import publish_committed
+
+                    if not publish_committed(snapshot, delegated_lease=delegated_lease):
+                        from ultrakb.published_knowledge import PublicationPending
+
+                        raise PublicationPending(
+                            snapshot.publication["publication_id"], snapshot.journal_path
+                        )
                 snapshot.discard()
                 messages.append(f"Cleaned terminal mutation journal {journal_path.name}.")
                 continue
@@ -515,6 +695,12 @@ def recover_pending_journals(
                 f"Rolled back interrupted {snapshot.operation} journal {journal_path.name}."
             )
         except Exception as exc:
+            from ultrakb.published_knowledge import PublicationPending
+
+            if isinstance(exc, PublicationPending):
+                # This is committed work awaiting a switch/receipt, not dirty
+                # mutable state. The next writer retries it without model work.
+                raise
             # Never discard evidence or repeatedly retry partial recovery during
             # ordinary operations. All adapters see this durable repair barrier.
             mark_needs_repair(kb_dir, journal_path, exc)

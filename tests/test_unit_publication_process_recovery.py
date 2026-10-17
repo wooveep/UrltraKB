@@ -310,6 +310,13 @@ def _run_crashed_child(kb, source_id, point, timing, evidence):
 )
 def test_process_death_exposes_one_complete_publication(kb_dir, tmp_path, point, timing):
     first, target, before, old_pages = _seed_and_prepare(kb_dir)
+    prior_history = list_knowledge_history(kb_dir, scope=view_scope(kb_dir, "legacy"))
+    directory = kb_dir / ".ultrakb/knowledge/legacy/revisions"
+    prior_files = {
+        p.relative_to(directory).as_posix(): p.read_bytes()
+        for p in directory.rglob("*")
+        if p.is_file()
+    }
     admission, unit, revision, started = target
     observed = _run_crashed_child(
         kb_dir, admission.source.source_id, point, timing, tmp_path / "child-exit.json"
@@ -380,7 +387,6 @@ def test_process_death_exposes_one_complete_publication(kb_dir, tmp_path, point,
             admission.revision.source_revision_id if committed else old_input.source_revision_id
         )
         assert all(Path(path).exists() for path in receipt.resources)
-        directory = kb_dir / ".ultrakb/knowledge/legacy/revisions"
         if committed:
             published = directory / observed["knowledge_revision_id"]
             assert (
@@ -415,11 +421,12 @@ def test_process_death_exposes_one_complete_publication(kb_dir, tmp_path, point,
         original = read_source_revision(kb_dir, admission.revision.source_revision_id)
         assert (kb_dir / original.original).read_text() == NEW_SOURCE
     history = list_knowledge_history(kb_dir, scope=view_scope(kb_dir, "legacy"))
-    assert [item["knowledge_revision_id"] for item in history] == (
-        [current.knowledge_revision_id, first.knowledge_revision_id]
-        if committed
-        else [first.knowledge_revision_id]
-    )
+    if committed:
+        assert history[0]["knowledge_revision_id"] == current.knowledge_revision_id
+        assert history[1:] == prior_history
+    else:
+        assert history == prior_history
+    assert {rel: (directory / rel).read_bytes() for rel in prior_files} == prior_files
     historical = view_scope(kb_dir, "legacy", historical_revision=first.knowledge_revision_id)
     assert (historical.wiki_dir / f"sources/{unit.doc_name}.md").read_text() == OLD_SOURCE
     assert not list((kb_dir / ".ultrakb/journal").glob("*.json"))

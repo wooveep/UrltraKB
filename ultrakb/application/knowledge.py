@@ -4,8 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ultrakb import frontmatter
-from ultrakb.knowledge_scope import KnowledgeScope, resolve_scope
-from ultrakb.locks import kb_read_lock
+from ultrakb.knowledge_scope import KnowledgeScope, reading_scope, resolve_scope
 from ultrakb.schema import PAGE_CONTENT_DIRS
 
 KNOWLEDGE_LABELS = {
@@ -42,10 +41,9 @@ def list_knowledge(
     kb_dir: Path, *, scope: KnowledgeScope | None = None
 ) -> tuple[KnowledgeEntry, ...]:
     scope = resolve_scope(kb_dir, scope)
-    root = kb_dir.resolve()
     wiki = scope.wiki_dir
     entries = []
-    with kb_read_lock(root / ".ultrakb"):
+    with reading_scope(scope):
         for section in (*PAGE_CONTENT_DIRS, "explorations"):
             for path in (wiki / section).rglob("*.md"):
                 if not path.resolve().is_relative_to(wiki) or any(

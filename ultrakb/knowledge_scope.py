@@ -1,11 +1,16 @@
 """Separate knowledge paths from the real KB's configuration and write lease."""
 
-from dataclasses import dataclass
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pydantic import TypeAdapter
 
 from ultrakb.source_records import ViewId
+
+if TYPE_CHECKING:
+    from ultrakb.published_knowledge import PublishedKnowledge
 
 
 @dataclass(frozen=True)
@@ -13,6 +18,7 @@ class KnowledgeScope:
     kb_dir: Path
     wiki_dir: Path
     view_id: str = "legacy"
+    publication: "PublishedKnowledge | None" = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         root = self.kb_dir.expanduser().resolve()
@@ -35,6 +41,20 @@ class KnowledgeScope:
             raise ValueError("Invalid knowledge view directory")
         object.__setattr__(self, "kb_dir", root)
         object.__setattr__(self, "wiki_dir", wiki)
+        if self.publication is not None and (
+            self.publication.kb_dir != root
+            or self.publication.wiki_dir != wiki
+            or self.publication.view_id != self.view_id
+        ):
+            raise ValueError("Public reading context belongs to another knowledge snapshot")
+
+    @property
+    def publication_id(self) -> str | None:
+        return self.publication.publication_id if self.publication is not None else None
+
+    @property
+    def historical(self) -> bool:
+        return self.read_only and self.publication is None
 
     @property
     def read_only(self) -> bool:
@@ -64,3 +84,21 @@ def resolve_scope(
     if writable and selected.read_only:
         raise ValueError("Knowledge revisions and proposals are read-only")
     return selected
+
+
+@contextmanager
+def reading_scope(scope: KnowledgeScope):
+    """Only an explicitly fixed public snapshot can bypass the writer's lease."""
+    if scope.publication is None:
+        from ultrakb.locks import kb_read_lock
+
+        with kb_read_lock(scope.kb_dir / ".ultrakb"):
+            yield
+    else:
+        from ultrakb.lifecycle import expected_generation, read_lifecycle
+
+        with (
+            expected_generation(scope.kb_dir, scope.publication.generation),
+            read_lifecycle(scope.kb_dir),
+        ):
+            yield

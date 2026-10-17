@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
-from ultrakb.api_views import ViewRequest
+from ultrakb.api_views import PublishedReadRequest, ViewRequest
 from ultrakb.application.settings_data import (
     _KB_CONFIG_WRITABLE_KEYS as _KB_CONFIG_WRITABLE_KEYS,
 )
@@ -176,7 +176,7 @@ class AddResponse(BaseModel):
     model_usage: dict | None = None
 
 
-class KbRequest(ViewRequest):
+class KbRequest(PublishedReadRequest):
     kb: str = Field(..., min_length=1)
 
 
@@ -211,6 +211,7 @@ class DocumentItem(BaseModel):
 
 
 class ListResponse(BaseModel):
+    publication_id: str | None = None
     documents: list[DocumentItem]
     document_count: int
     summaries: list[str]
@@ -220,6 +221,7 @@ class ListResponse(BaseModel):
 
 
 class StatusResponse(BaseModel):
+    publication_id: str | None = None
     needs_refresh: dict = Field(default_factory=dict)
     directories: dict[str, int]
     raw_count: int
@@ -347,23 +349,26 @@ class SkillListResponse(BaseModel):
     skills: list[dict]
 
 
-class GraphRequest(ViewRequest):
+class GraphRequest(PublishedReadRequest):
     kb: str = Field(..., min_length=1)
 
 
 class GraphResponse(BaseModel):
+    publication_id: str | None = None
     nodes: list[dict[str, Any]]
     edges: list[dict[str, Any]]
     types: list[str]
 
 
-class PageRequest(ViewRequest):
+class PageRequest(PublishedReadRequest):
     knowledge_revision_id: str | None = None
     kb: str = Field(..., min_length=1)
     path: str = Field(..., min_length=1)
 
 
 class PageResponse(BaseModel):
+    publication_id: str | None = None
+    version: str | None = None
     path: str
     content: str
     validity: str = "current"
@@ -372,7 +377,7 @@ class PageResponse(BaseModel):
     refresh_reasons: tuple[dict, ...] = ()
 
 
-class DocumentSourceRequest(ViewRequest):
+class DocumentSourceRequest(PublishedReadRequest):
     unit_id: str | None = None
     cells: str | None = None
     part: Literal["body", "notes"] | None = None
@@ -388,6 +393,7 @@ class DocumentSourceRequest(ViewRequest):
 
 
 class DocumentSourceResponse(BaseModel):
+    publication_id: str | None = None
     unit_id: str | None = None
     sheet: dict | None = None
     cell_range: str | None = None
@@ -442,7 +448,8 @@ class DocumentSourceResponse(BaseModel):
     original_kind: str | None = None
 
 
-class PageDeleteRequest(ViewRequest):
+class PageDeleteRequest(PublishedReadRequest):
+    version: str | None = Field(default=None, min_length=1)
     kb: str = Field(..., min_length=1)
     # A '<section>/<name>' wiki-page ref, e.g. "concepts/attention". Only
     # concepts/ and entities/ pages are user-deletable (validated server-side).
@@ -451,8 +458,19 @@ class PageDeleteRequest(ViewRequest):
     # the UI can show "these N pages will have their links demoted" + confirm.
     dry_run: bool = False
 
+    @model_validator(mode="after")
+    def require_delete_preconditions(self) -> PageDeleteRequest:
+        if not self.dry_run and (self.publication_id is None or self.version is None):
+            raise ValueError(
+                "Deleting a page requires publication_id and version from confirmation"
+            )
+        return self
+
 
 class PageDeleteResponse(BaseModel):
+    # Identity and hash of the confirmed page before deletion.
+    publication_id: str | None = None
+    version: str | None = None
     status: str
     target: str
     # Content pages whose inbound [[links]] to the target will be / were demoted
@@ -462,12 +480,13 @@ class PageDeleteResponse(BaseModel):
     ghosts_stripped: int | None = None
 
 
-class PageLinksRequest(ViewRequest):
+class PageLinksRequest(PublishedReadRequest):
     kb: str = Field(..., min_length=1)
     path: str = Field(..., min_length=1)
 
 
 class PageLinksResponse(BaseModel):
+    publication_id: str | None = None
     status: str
     target: str
     outlinks: list[str] = []  # pages this page links to
@@ -475,6 +494,8 @@ class PageLinksResponse(BaseModel):
 
 
 class PageEditRequest(ViewRequest):
+    publication_id: str = Field(..., min_length=1)
+    version: str = Field(..., min_length=1)
     kb: str = Field(..., min_length=1)
     path: str = Field(..., min_length=1)
     # New page BODY. The OKF frontmatter (type/description/sources) is
@@ -483,6 +504,8 @@ class PageEditRequest(ViewRequest):
 
 
 class PageEditResponse(BaseModel):
+    publication_id: str | None = None
+    version: str | None = None
     status: str
     target: str
     # Dead [[links]] the edit introduced, demoted to plain text on save (so the

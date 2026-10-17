@@ -82,6 +82,7 @@ def test_rest_watch_keeps_raw_input_identity_when_a_file_becomes_a_symlink(
 
     admit = ingestion.admit_source_revision
     compiled = []
+    admitted = []
     replaced = False
 
     def replace_input(path):
@@ -93,6 +94,7 @@ def test_rest_watch_keeps_raw_input_identity_when_a_file_becomes_a_symlink(
 
     def after_admission(root, prepared, **kwargs):
         result = admit(root, prepared, **kwargs)
+        admitted.append(result)
         replace_input(source)
         return result
 
@@ -127,6 +129,82 @@ def test_rest_watch_keeps_raw_input_identity_when_a_file_becomes_a_symlink(
     assert compiled == (["# Original\n"] if moment == "admitted" else [])
     entries = HashRegistry(kb_dir / ".ultrakb/hashes.json").all_entries()
     assert all(item.get("path") != outside.as_posix() for item in entries.values())
+    assert outside.read_text() == "# Outside\n"
+    if moment == "admitted":
+        from ultrakb.application.views import published_scope
+        from ultrakb.documents import read_document_source
+        from ultrakb.published_knowledge import read_publication
+
+        public = read_publication(kb_dir)
+        [admission] = admitted
+        assert admission.source.identity == "raw/inbox/note.md"
+        assert (public.metadata_dir / admission.revision.original).read_text() == "# Original\n"
+        assert not (public.metadata_dir / "raw/inbox/note.md").exists()
+        assert all(
+            b"# Outside\n" not in (public.metadata_dir / relative).read_bytes()
+            for relative in public.record.metadata_files
+        )
+        outside.write_text("# Changed outside\n")
+        preview = read_document_source(
+            kb_dir, admission.source.source_id, scope=published_scope(kb_dir)
+        )
+        assert preview["content"] == "# Original\n"
+        assert preview["publication_id"] == public.publication_id
+        assert (kb_dir / preview["original_path"]).read_text() == "# Original\n"
+
+
+@pytest.mark.parametrize("directory_link", [False, True])
+def test_publication_isolates_unadmitted_raw_symlinks(kb_dir, directory_link):
+    from ultrakb.locks import kb_ingest_lock
+    from ultrakb.published_knowledge import initialize_publication, read_publication
+
+    outside = kb_dir.with_name(kb_dir.name + "-outside")
+    outside.mkdir()
+    original = outside / "external.md"
+    original.write_text("External content must remain outside publication.\n")
+    raw = kb_dir / "raw"
+    (raw / "local.md").write_text("Local input.\n")
+    link = raw / ("outside" if directory_link else "external.md")
+    try:
+        link.symlink_to(outside if directory_link else original, target_is_directory=directory_link)
+    except OSError:
+        pytest.skip("File symlinks unavailable")
+
+    with kb_ingest_lock(kb_dir / ".ultrakb"):
+        initialize_publication(kb_dir)
+    public = read_publication(kb_dir)
+
+    assert (public.metadata_dir / "raw/local.md").read_text() == "Local input.\n"
+    assert not (public.metadata_dir / link.relative_to(kb_dir)).exists()
+    assert all(
+        b"External content" not in (public.metadata_dir / relative).read_bytes()
+        for relative in public.record.metadata_files
+    )
+    assert original.read_text() == "External content must remain outside publication.\n"
+
+
+@pytest.mark.parametrize("relative", ["raw", ".ultrakb/artifacts/unsafe.md"])
+def test_publication_still_rejects_symlink_in_retained_storage(kb_dir, relative):
+    from ultrakb.locks import kb_ingest_lock
+    from ultrakb.published_knowledge import initialize_publication
+
+    outside = kb_dir.with_name(kb_dir.name + "-outside")
+    outside.mkdir()
+    original = outside / "external.md"
+    original.write_text("External content must remain outside publication.\n")
+    link = kb_dir / relative
+    if link.is_dir():
+        link.rmdir()
+    link.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        link.symlink_to(outside if relative == "raw" else original)
+    except OSError:
+        pytest.skip("File symlinks unavailable")
+
+    with kb_ingest_lock(kb_dir / ".ultrakb"):
+        with pytest.raises(ValueError, match="Publication resources must be regular files"):
+            initialize_publication(kb_dir)
+    assert original.read_text() == "External content must remain outside publication.\n"
 
 
 @pytest.mark.parametrize("marker_failure", [False, True])

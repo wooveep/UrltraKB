@@ -81,6 +81,7 @@ def _configure_cors(app: FastAPI) -> None:
         allow_credentials=allow_credentials,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["X-UltraKB-Publication-ID"],
     )
 
 

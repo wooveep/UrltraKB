@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 
 from fastapi.testclient import TestClient
+from publication_read_inputs import publish_fixture
 
 from ultrakb.api import create_app
 
@@ -46,6 +47,7 @@ def test_document_source_short_md(monkeypatch, kb_dir):
     _write_hashes(kb_dir, {"h1": {"name": "notes.md", "doc_name": "notes", "type": "md"}})
     (kb_dir / "wiki" / "sources" / "notes.md").write_text("# Notes\n\nBody text.", encoding="utf-8")
 
+    publish_fixture(kb_dir)
     resp = client.post("/api/v1/document/source", json={"kb": kb, "hash": "h1"}, headers=_auth())
 
     assert resp.status_code == 200
@@ -66,6 +68,7 @@ def test_document_source_long_json_concatenates_pages(monkeypatch, kb_dir):
     ]
     (kb_dir / "wiki" / "sources" / "paper.json").write_text(json.dumps(pages), encoding="utf-8")
 
+    publish_fixture(kb_dir)
     resp = client.post("/api/v1/document/source", json={"kb": kb, "hash": "h2"}, headers=_auth())
 
     assert resp.status_code == 200
@@ -95,6 +98,7 @@ def test_document_source_prefers_stored_source_path(monkeypatch, kb_dir):
     )
     (kb_dir / "wiki" / "sources" / "report.md").write_text("Converted.", encoding="utf-8")
 
+    publish_fixture(kb_dir)
     resp = client.post("/api/v1/document/source", json={"kb": kb, "hash": "h3"}, headers=_auth())
 
     assert resp.status_code == 200
@@ -106,6 +110,7 @@ def test_document_source_unknown_hash_404(monkeypatch, kb_dir):
     kb = _use_named_kb(monkeypatch, kb_dir)
     _write_hashes(kb_dir, {})
 
+    publish_fixture(kb_dir)
     resp = client.post("/api/v1/document/source", json={"kb": kb, "hash": "nope"}, headers=_auth())
 
     assert resp.status_code == 404
@@ -117,6 +122,7 @@ def test_document_source_missing_file_404(monkeypatch, kb_dir):
     kb = _use_named_kb(monkeypatch, kb_dir)
     _write_hashes(kb_dir, {"h4": {"name": "gone.md", "doc_name": "gone", "type": "md"}})
 
+    publish_fixture(kb_dir)
     resp = client.post("/api/v1/document/source", json={"kb": kb, "hash": "h4"}, headers=_auth())
 
     assert resp.status_code == 404
@@ -140,6 +146,7 @@ def test_document_source_doc_name_collision_resolves_by_type(monkeypatch, kb_dir
         json.dumps([{"page": 1, "content": "LONG page one", "images": []}]), encoding="utf-8"
     )
 
+    publish_fixture(kb_dir)
     long_resp = client.post(
         "/api/v1/document/source", json={"kb": kb, "hash": "long"}, headers=_auth()
     )
@@ -162,6 +169,7 @@ def test_document_source_malformed_json_is_controlled_500(monkeypatch, kb_dir):
     _write_hashes(kb_dir, {"h": {"name": "broken.pdf", "doc_name": "broken", "type": "long_pdf"}})
     (kb_dir / "wiki" / "sources" / "broken.json").write_text("{not valid json", encoding="utf-8")
 
+    publish_fixture(kb_dir)
     resp = client.post("/api/v1/document/source", json={"kb": kb, "hash": "h"}, headers=_auth())
 
     assert resp.status_code == 500
@@ -175,6 +183,7 @@ def test_document_source_non_list_json_is_controlled_500(monkeypatch, kb_dir):
     _write_hashes(kb_dir, {"h": {"name": "odd.pdf", "doc_name": "odd", "type": "long_pdf"}})
     (kb_dir / "wiki" / "sources" / "odd.json").write_text('{"pages": 3}', encoding="utf-8")
 
+    publish_fixture(kb_dir)
     resp = client.post("/api/v1/document/source", json={"kb": kb, "hash": "h"}, headers=_auth())
 
     assert resp.status_code == 500

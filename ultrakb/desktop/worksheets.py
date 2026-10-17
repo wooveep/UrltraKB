@@ -16,10 +16,15 @@ from ultrakb.runtime.records import TERMINAL
 
 
 class WorksheetsDialog(QDialog):
-    def __init__(self, window, kb, source):
+    def __init__(self, window, kb, source, *, read_scope=None):
         super().__init__(window)
         self.window, self.kb, self.source = window, kb, source
         self.scope = getattr(window, "scope", None)
+        self.read_scope = read_scope
+        if self.read_scope is None and source.get("publication_id"):
+            from ultrakb.application.views import published_scope
+
+            self.read_scope = published_scope(kb, publication_id=source["publication_id"])
         self._closed, self._busy, self._task = False, False, None
         self.setWindowTitle(f"工作表 · {source['name']}")
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
@@ -85,7 +90,7 @@ class WorksheetsDialog(QDialog):
         rows = self.table.selectionModel().selectedRows()
         return self.table.item(rows[0].row(), 0).data(Qt.ItemDataRole.UserRole) if rows else None
 
-    def operate(self, function, callback):
+    def operate(self, function, callback, *, snapshot=False):
         if self._busy or self._task:
             return
         self._busy = True
@@ -101,14 +106,19 @@ class WorksheetsDialog(QDialog):
             elif value is not None:
                 callback(value)
 
-        self.window.io.submit(function, loaded, kb=self.kb, obsolete=lambda: self._closed)
+        self.window.io.submit(
+            function, loaded, kb=self.kb, snapshot=snapshot, obsolete=lambda: self._closed
+        )
 
     def reload(self):
         from ultrakb.documents import read_document_source
 
         self.operate(
-            lambda: read_document_source(self.kb, self.source["source_id"], scope=self.scope),
+            lambda: read_document_source(
+                self.kb, self.source["source_id"], scope=self.read_scope or self.scope
+            ),
             lambda source: self.render(source["available_units"]),
+            snapshot=self.read_scope is not None,
         )
 
     def read(self):
@@ -119,9 +129,13 @@ class WorksheetsDialog(QDialog):
         if unit:
             self.operate(
                 lambda: read_document_source(
-                    self.kb, self.source["source_id"], unit_id=unit["unit_id"], scope=self.scope
+                    self.kb,
+                    self.source["source_id"],
+                    unit_id=unit["unit_id"],
+                    scope=self.read_scope or self.scope,
                 ),
                 lambda source: show_source(self.window, self.kb, source),
+                snapshot=self.read_scope is not None,
             )
 
     def retry(self):

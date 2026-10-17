@@ -3,8 +3,10 @@
 from collections.abc import Sequence
 from pathlib import Path
 
+from ultrakb import frontmatter
 from ultrakb.agent.compile_plan import CompilePlan
 from ultrakb.agent.page_updates import UnchangedPage
+from ultrakb.locks import atomic_write_text
 
 
 def publish_compile_results(
@@ -42,6 +44,21 @@ def publish_compile_results(
     )
 
     check_model_stop()
+    # Validate every proposed alias before any page/summary write. Names are
+    # metadata for these exact planned paths; aliases never create new paths.
+    plan_aliases = {}
+    for kind in ("concepts", "entities"):
+        group = getattr(plan, kind)
+        for item in [*group.create, *group.update]:
+            if "aliases" not in item:
+                continue
+            aliases = frontmatter.alias_values(item["aliases"])
+            name = _sanitize_concept_name(item["name"])
+            path = wiki_dir / kind / f"{name}.md"
+            if path.is_file():
+                frontmatter.merge_aliases(path.read_bytes().decode("utf-8"), aliases)
+            plan_aliases[(kind, name)] = aliases
+    accepted_aliases: set[tuple[str, str]] = set()
     source_file = f"summaries/{doc_name}.md"
     related_items = plan.concepts.related
     entity_related = plan.entities.related
@@ -79,6 +96,7 @@ def publish_compile_results(
                 failure_types.append(type(concept_result).__name__)
                 continue
             name, page_content, is_update, brief = concept_result
+            accepted_aliases.add(("concepts", _sanitize_concept_name(name)))
             if isinstance(page_content, UnchangedPage):
                 unchanged += 1
                 report_compile_issue("page_update_unchanged")
@@ -118,6 +136,7 @@ def publish_compile_results(
                 entity_failure_types.append(type(entity_result).__name__)
                 continue
             name, page_content, brief, etype = entity_result
+            accepted_aliases.add(("entities", _sanitize_concept_name(name)))
             if isinstance(page_content, UnchangedPage):
                 unchanged += 1
                 report_compile_issue("page_update_unchanged")
@@ -208,6 +227,20 @@ def publish_compile_results(
             brief=brief,
             preserve_body=is_update,
         )
+
+    # A model may correctly leave the body unchanged while the accepted global
+    # identity pass learns another name. Persist that name without adding a new
+    # source contribution or rewriting the page body.
+    for kind, name in sorted(accepted_aliases):
+        aliases = plan_aliases.get((kind, name), [])
+        if not aliases:
+            continue
+        check_model_stop()
+        path = wiki_dir / kind / f"{name}.md"
+        text = path.read_bytes().decode("utf-8")
+        updated = frontmatter.merge_aliases(text, aliases)
+        if updated != text:
+            atomic_write_text(path, updated)
 
     # --- Step 3b: Process related items (code only, no LLM) ---
     sanitized_related = [_sanitize_concept_name(s) for s in related_items]

@@ -144,10 +144,12 @@ def normalization_fingerprint(
                 "version": INDEX_CONTENT_POLICY,
                 "navigation": config.get("index_navigation", {}),
             },
-            # Runtime injection changed no successful tree content. Keep the
-            # established content identity so old paid trees remain reusable.
+            # Recovery changes revalidate and reuse successful checkpoints.
+            # Keep their established content identity and paid responses.
             "index_sdk": (
-                "0.3.0.dev3+urltrakb.13"
+                "0.3.0.dev3+urltrakb.16"
+                if version("pageindex") == "0.3.0.dev3+urltrakb.17"
+                else "0.3.0.dev3+urltrakb.13"
                 if version("pageindex") == "0.3.0.dev3+urltrakb.14"
                 else "0.3.0.dev3+urltrakb.5"
                 if version("pageindex")

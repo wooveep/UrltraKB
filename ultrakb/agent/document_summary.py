@@ -1,7 +1,9 @@
 """Build ordered document knowledge from all original ranges, independently of page plans."""
 
+import asyncio
 import json
 import logging
+from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
@@ -195,8 +197,16 @@ def summary_messages(
                     if version == 1
                     else (
                         _SUMMARY_TASK.split("Return one JSON object in this complete shape:")[0]
-                        + "Return description and sections with every requested ID exactly once. "
-                        "Each section has ordered parts with kind, text and refs. Prose uses "
+                        + (
+                            "Return one JSON object with description and sections with every "
+                            "requested ID exactly once. "
+                            if version >= 3
+                            else (
+                                "Return description and sections with every requested ID "
+                                "exactly once. "
+                            )
+                        )
+                        + "Each section has ordered parts with kind, text and refs. Prose uses "
                         "ordinary Markdown and refs: []; excerpt uses empty text and "
                         "supplied refs. "
                         "Legacy derived_template uses nonempty text and resolvable refs. "
@@ -245,11 +255,20 @@ async def build_document_summary(
     generate: Callable[[list[dict], str, list[dict], tuple[str, ...]], Awaitable[dict]],
     fits: Callable[[list[dict]], bool],
     checkpoints=None,
+    max_concurrency: int = 1,
 ) -> SummaryDraft:
     from ultrakb.agent.page_response import PageResponseError, summary_repair_messages
     from ultrakb.llm_execution import raise_if_terminal
 
     structured = getattr(checkpoints, "structured_summary", False) if checkpoints else True
+    if type(max_concurrency) is not int or not 1 <= max_concurrency <= 3:
+        raise ValueError("Document summary concurrency must be 1, 2 or 3")
+    from ultrakb.llm_execution import active_executor
+
+    if executor := active_executor():
+        max_concurrency = min(max_concurrency, executor.policy.concurrency)
+    if prepare := getattr(checkpoints, "prepare_summary_delivery", None):
+        prepare()
 
     def request_fits(window: dict) -> bool:
         messages = summary_messages(
@@ -332,6 +351,8 @@ async def build_document_summary(
             )
         return divided
 
+    split_parents: set[str] = set()
+
     def restored(parent):
         marker = (
             checkpoints.load(f"summary-split:{parent.key}", digest(parent.messages))
@@ -345,6 +366,7 @@ async def build_document_summary(
             in _SPLITTABLE_DELIVERY_ERRORS
         )
         if marker is not None or truncated:
+            split_parents.add(parent.key)
             divided = children(parent)
             child_digests = [digest(child.messages) for child in divided]
             if marker is not None and marker != child_digests:
@@ -363,13 +385,8 @@ async def build_document_summary(
     ]
     if missing := sum(r.accepted is None for r in requests):
         admit_document_summary(missing)
-    bodies, descriptions, ranges = [], [], []
-    cursor = 0
-    while cursor < len(requests):
-        from ultrakb.llm_execution import check_model_stop
 
-        check_model_stop()
-        current = requests[cursor]
+    async def complete(current):
         batch, messages = current.window, current.messages
         decoded = current.accepted
         if decoded is None:
@@ -396,12 +413,8 @@ async def build_document_summary(
                         digest(messages),
                         [digest(child.messages) for child in divided],
                     )
-                requests[cursor : cursor + 1] = divided
-                # The existing task ledger owns every send, including the failed
-                # parent and each child's one repair. Reserve no fresh allowance.
-                admit_document_summary(sum(r.accepted is None for r in requests[cursor:]))
                 logger.info("Split document summary batch %s after %s", current.key, error.code)
-                continue
+                return divided
         if decoded is None:
             raise PageResponseError("summary_response_invalid", "Summary delivery is not JSON")
         retained = decoded
@@ -427,6 +440,77 @@ async def build_document_summary(
                 retained,
                 metadata={**batch, "output_sections": window_sections(batch)},
             )
+        return decoded
+
+    pending = deque(requests)
+    running: dict[asyncio.Task, _SummaryRequest] = {}
+    accepted: dict[str, tuple[_SummaryRequest, dict]] = {}
+    leaves = {request.key for request in requests}
+    from ultrakb.compilation_report import compile_repair_count
+
+    initial_repairs = compile_repair_count()
+
+    def notify_work():
+        from ultrakb.compilation_report import report_compile_work
+
+        report_compile_work(
+            "summary",
+            completed=len(accepted),
+            pending=len(leaves) - len(accepted) - len(running),
+            in_flight=len(running),
+            splits=len(split_parents),
+            repairs=compile_repair_count() - initial_repairs,
+        )
+
+    failure: BaseException | None = None
+    notify_work()
+    try:
+        while pending or running:
+            from ultrakb.llm_execution import check_model_stop
+
+            while pending and len(running) < max_concurrency and failure is None:
+                try:
+                    check_model_stop()
+                except BaseException as error:
+                    failure = error
+                    break
+                current = pending.popleft()
+                running[asyncio.create_task(complete(current))] = current
+                notify_work()
+            if not running:
+                break
+            done, _ = await asyncio.wait(running, return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                current = running.pop(task)
+                try:
+                    result = task.result()
+                    if isinstance(result, list):
+                        split_parents.add(current.key)
+                        leaves.remove(current.key)
+                        leaves.update(child.key for child in result)
+                        pending.extendleft(reversed(result))
+                        if failure is None:
+                            # In-flight sends are already charged to the shared budget.
+                            admit_document_summary(sum(r.accepted is None for r in pending))
+                    else:
+                        accepted[current.key] = current, result
+                except BaseException as error:
+                    failure = failure or error
+                notify_work()
+            if failure is not None:
+                pending.clear()
+        if failure is not None:
+            raise failure
+    finally:
+        # Do not cancel in-flight transports or detach their paid responses from
+        # the KB lease. Each worker settles its receipt/checkpoint before return.
+        if running:
+            await asyncio.shield(asyncio.gather(*running, return_exceptions=True))
+
+    bodies, descriptions, ranges = [], [], []
+    for key in sorted(accepted, key=lambda value: tuple(map(int, value.split(".")))):
+        current, decoded = accepted[key]
+        batch = current.window
         description = decoded["description"]
         body = "\n\n".join(section["content"] for section in decoded["sections"])
         bodies.append(body)
@@ -438,7 +522,6 @@ async def build_document_summary(
                 if key in batch
             }
         )
-        cursor += 1
     logger.info(
         "Document summary: %d original batches included for %s", len(bodies), windows.doc_name
     )

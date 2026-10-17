@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 from typing import Iterator
 
 from ultrakb.ingest_result import IngestResult
@@ -20,10 +20,57 @@ class CompileReport:
     quality: list[str] = field(default_factory=list)
     unfinished: list[str] = field(default_factory=list)
     checkpoints: list[dict] = field(default_factory=list)
+    repairs: int = 0
 
     def require_complete(self) -> None:
         if self.unfinished:
             raise CompilationIncomplete(tuple(self.quality), tuple(self.unfinished))
+
+
+@dataclass(frozen=True)
+class CompileWork:
+    """Mechanical work counts, independent of semantic correctness or budget."""
+
+    stage: str
+    completed: int
+    pending: int
+    in_flight: int = 0
+    splits: int = 0
+    repairs: int = 0
+
+    def __post_init__(self):
+        if (
+            not isinstance(self.stage, str)
+            or not self.stage
+            or any(
+                type(value) is not int or value < 0
+                for value in (
+                    self.completed,
+                    self.pending,
+                    self.in_flight,
+                    self.splits,
+                    self.repairs,
+                )
+            )
+        ):
+            raise ValueError("Invalid compilation work progress")
+
+
+def report_compile_work(
+    stage: str, *, completed: int, pending: int, in_flight=0, splits=0, repairs=0
+):
+    from ultrakb.llm_usage import active_scope
+
+    work = CompileWork(stage, completed, pending, in_flight, splits, repairs)
+    if (scope := active_scope()) and scope.on_event:
+        try:
+            scope.on_event({"event": "compile_work", "data": asdict(work)})
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Compilation work progress delivery failed", exc_info=True
+            )
 
 
 def merge_compile_report(result: IngestResult, report: CompileReport) -> IngestResult:
@@ -74,6 +121,16 @@ def report_compile_checkpoint(path: str, batch: str, state: str) -> None:
         entry = {"path": path, "batch": batch, "state": state}
         if entry not in report.checkpoints:
             report.checkpoints.append(entry)
+
+
+def report_compile_repair() -> None:
+    if report := _ACTIVE.get():
+        report.repairs += 1
+
+
+def compile_repair_count() -> int:
+    report = _ACTIVE.get()
+    return report.repairs if report else 0
 
 
 @contextmanager

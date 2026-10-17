@@ -29,7 +29,7 @@ class ModelTask(Record):
     inputs: dict[str, str] = Field(default_factory=dict)
     execution_task_ids: list[RecordId] = Field(default_factory=list)
     # Missing markers belong to historical requests, never to the newest format.
-    compiler_request_version: Literal[1, 2] = 1
+    compiler_request_version: Literal[1, 2, 3] = 1
 
 
 def task_path(kb_dir: Path, task_id: str) -> Path:
@@ -85,16 +85,16 @@ class TaskJournal:
             bindings=bindings,
             policy=policy,
             deadline_at=deadline_at,
-            compiler_request_version=2,
+            compiler_request_version=3,
         )
         if previous:
-            # Only an explicitly changed captured limit may expand this logical task.
+            # Removing or increasing a limit retains all paid work and its deadline.
             before, after = dict(previous.policy), dict(policy)
             old_limit, new_limit = before.pop("max_calls", 1000), after.pop("max_calls", 1000)
             if (
                 not compatible_bindings(previous.bindings, bindings)
                 or before != after
-                or new_limit < old_limit
+                or (new_limit is not None and (old_limit is None or new_limit < old_limit))
             ):
                 raise ValueError("Task policy changed; start a new task or reprocess the source")
             self.record = (

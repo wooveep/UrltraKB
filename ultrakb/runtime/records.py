@@ -179,8 +179,13 @@ class TaskView:
     unit_count: int = 0
     not_applicable: tuple[TaskExclusion, ...] = ()
     current_source: str | None = None
+    compile_work: dict | None = None
 
     def __post_init__(self) -> None:
+        if self.compile_work is not None:
+            from ultrakb.compilation_report import CompileWork
+
+            CompileWork(**self.compile_work)
         if not isinstance(self.not_applicable, tuple) or not all(
             isinstance(item, TaskExclusion) for item in self.not_applicable
         ):

@@ -543,6 +543,8 @@ async def _llm_call_page_async(
     figure_context=None,
     original_excerpts=None,
     create_delivery: tuple[str, ...] | None = None,
+    link_registry=None,
+    request_fits=None,
     **kwargs,
 ) -> str | UnchangedPage:
     """Validate each page and repair only that response, at most once."""
@@ -594,6 +596,7 @@ async def _llm_call_page_async(
         )
 
     correction = []
+    repaired_links = None
 
     def observe_response(response):
         nonlocal received_raw
@@ -623,13 +626,16 @@ async def _llm_call_page_async(
 
             checkpoints.record_failure(checkpoint_key, digest(messages), "page_truncated_response")
 
-    for attempt in range(2):
+    attempt = 0
+    while attempt < 2:
         raw = received_raw = None
         try:
             if attempt == 0 and initial_error is not None:
                 raise initial_error
             raw = (
-                initial_response
+                repaired_links
+                if repaired_links is not None
+                else initial_response
                 if attempt == 0 and initial_response is not None
                 else await _llm_call_async(
                     model,
@@ -641,17 +647,22 @@ async def _llm_call_page_async(
                     **kwargs,
                 )
             )
-            result = validate_page_delivery(
-                raw,
-                response_protocol=response_protocol,
-                expected_sections=expected_sections,
-                original_excerpts=original_excerpts,
-                page_update=page_update,
-                read_current=read_current,
-                proposal_only=proposal_only,
-                figure_context=figure_context,
-                expected_coverage=create_delivery or (),
-            )
+            from ultrakb.execution_timing import phase_observation
+
+            with phase_observation("validation", stage=step_name, work_id=checkpoint_key):
+                if link_registry:
+                    raw = link_registry.response(raw)
+                result = validate_page_delivery(
+                    raw,
+                    response_protocol=response_protocol,
+                    expected_sections=expected_sections,
+                    original_excerpts=original_excerpts,
+                    page_update=page_update,
+                    read_current=read_current,
+                    proposal_only=proposal_only,
+                    figure_context=figure_context,
+                    expected_coverage=create_delivery or (),
+                )
             if attempt:
                 report_compile_issue("page_response_repaired")
             if checkpoints and original_excerpts and original_excerpts.resolutions:
@@ -692,6 +703,27 @@ async def _llm_call_page_async(
                     field_errors=getattr(error, "field_errors", ()),
                     response_format=kwargs.get("response_format"),
                 )
+            if (
+                code in {"page_link_ambiguous", "page_link_unresolved"}
+                and link_registry
+                and request_fits
+            ):
+                from ultrakb.agent.link_resolution import resolve_response_links
+
+                repaired_links = await resolve_response_links(
+                    failed_response,
+                    link_registry,
+                    error.field_errors,
+                    model=model,
+                    bundle=bundle,
+                    call=_llm_call_async,
+                    fits=request_fits,
+                    checkpoints=checkpoints,
+                    key=checkpoint_key,
+                    stage=step_name,
+                    options=kwargs,
+                )
+                continue
             if attempt:
                 if checkpoints:
                     from ultrakb.compile_checkpoints import digest
@@ -719,21 +751,28 @@ async def _llm_call_page_async(
                             field_errors=getattr(error, "field_errors", ()),
                         ) from repair_error
                     raise
+            from ultrakb.compilation_report import report_compile_repair
+
+            report_compile_repair()
             if create_delivery is not None:
                 from ultrakb.agent.create_delivery import create_repair_message
 
                 correction = [create_repair_message(code, create_delivery)]
+                repaired_links = None
+                attempt += 1
                 continue
             correction = [
                 page_repair_message(
                     code,
-                    str(error),
+                    f"{step_name}: {error}",
                     page_update=page_update is not None,
                     response_protocol=response_protocol,
                     expected_sections=expected_sections,
                     field_errors=getattr(error, "field_errors", ()),
                 )
             ]
+            repaired_links = None
+            attempt += 1
     raise AssertionError("Unreachable page retry state")
 
 
@@ -1834,6 +1873,8 @@ async def _compile_concepts(
     bundle=None,
     source_windows=None,
     current_original: dict | None = None,
+    compact_doc_msg: dict | None = None,
+    force_partition_planning: bool = False,
 ) -> None:
     """Shared Steps 2-4: concepts plan → generate/update → index.
 
@@ -1879,27 +1920,67 @@ async def _compile_concepts(
     from ultrakb.compile_checkpoints import digest, document_checkpoints
 
     checkpoints = document_checkpoints(kb_dir, source_windows.view_id, doc_name)
-    plan = request_compile_plan(
-        lambda correction: _llm_call(
-            model,
-            plan_messages + ([{"role": "user", "content": correction}] if correction else []),
-            "concepts-plan",
-            response_format=_JSON_RESPONSE_FORMAT,
-            bundle=bundle,
-        ),
-        _parse_json,
-        validate_updates=lambda plan: source_windows.validate_updates(
-            plan, long=doc_type == "pageindex"
-        ),
-        existing={
-            kind: {path.stem for path in (wiki_dir / kind).glob("*.md")}
-            for kind in ("concepts", "entities")
-        },
-        entity_types=valid_types,
-        sanitize=_sanitize_concept_name,
-        checkpoints=checkpoints,
-        request_digest=digest([plan_messages, source_windows.original_identity()]),
-    )
+    from ultrakb.agent.compile_capacity import compile_capacity
+    from ultrakb.agent.planning_capacity import fit_planning_messages
+    from ultrakb.model_tokenizer import ContextCapacityError
+
+    plan_capacity = compile_capacity(kb_dir, model, bundle)
+
+    def send_plan(messages, stage="concepts-plan"):
+        return _llm_call(
+            model, messages, stage, response_format=_JSON_RESPONSE_FORMAT, bundle=bundle
+        )
+
+    def request_plan(correction):
+        messages = plan_messages + ([{"role": "user", "content": correction}] if correction else [])
+        messages = fit_planning_messages(
+            messages, plan_capacity, compact_document_message=compact_doc_msg
+        )
+        return send_plan(messages)
+
+    try:
+        if force_partition_planning:
+            report_compile_issue("compile_planning_partition_preflight")
+        plan_messages = fit_planning_messages(
+            plan_messages, plan_capacity, compact_document_message=compact_doc_msg
+        )
+        plan = request_compile_plan(
+            request_plan,
+            _parse_json,
+            validate_updates=lambda plan: source_windows.validate_updates(
+                plan, long=doc_type == "pageindex"
+            ),
+            existing={
+                kind: {path.stem for path in (wiki_dir / kind).glob("*.md")}
+                for kind in ("concepts", "entities")
+            },
+            entity_types=valid_types,
+            sanitize=_sanitize_concept_name,
+            checkpoints=checkpoints,
+            request_digest=digest([plan_messages, source_windows.original_identity()]),
+        )
+    except ContextCapacityError:
+        from ultrakb.agent.compile_plan import CompilePlanError
+        from ultrakb.agent.partition_planning import partitioned_plan
+
+        report_compile_issue("compile_planning_partitioned")
+        try:
+            plan = partitioned_plan(
+                system=system_msg,
+                windows=source_windows,
+                fits=plan_capacity,
+                send=send_plan,
+                entity_types=entity_types,
+                sanitize=_sanitize_concept_name,
+                checkpoints=checkpoints,
+                wiki_dir=wiki_dir,
+            )
+        except CompilePlanError as error:
+            report_compile_issue(error.code, "concepts", "entities")
+            raise
+        except ContextCapacityError:
+            report_compile_issue("compile_planning_capacity_exceeded", "concepts", "entities")
+            raise
     from ultrakb.execution_budget import admit_compile_plan
 
     create_items, update_items, related_items = (
@@ -1971,6 +2052,18 @@ async def _compile_concepts(
         ),
     }
 
+    from ultrakb.agent.link_registry import FrozenLinkRegistry
+
+    link_registry = FrozenLinkRegistry.capture(
+        wiki_dir,
+        known_targets,
+        planned=[
+            {**item, "path": f"{kind}/{_sanitize_concept_name(item['name'])}"}
+            for kind, items in (("concepts", create_items), ("entities", entity_create))
+            for item in items
+        ],
+    )
+
     # Prepare every new page before starting concurrent model calls. Existing
     # summaries and the accepted concepts plan retain their request identities.
     from ultrakb.agent.create_generation import prepare_page_creation
@@ -2011,6 +2104,7 @@ async def _compile_concepts(
                 },
                 page=f"{kind}/{_sanitize_concept_name(item['name'])}.md",
                 checkpoints=checkpoints,
+                link_registry=link_registry,
             )
     admit_compile_plan(
         plan,
@@ -2060,6 +2154,7 @@ async def _compile_concepts(
                 system_message=system_msg,
                 current_original=current_original,
                 known_targets_message=known_targets_msg,
+                link_registry=link_registry,
                 task_message={
                     "role": "user",
                     "content": template.format(
@@ -2245,6 +2340,17 @@ async def compile_short_doc(
     )
     system_msg, doc_msg = summary_messages[:2]
 
+    from ultrakb.agent.compile_capacity import compile_capacity
+    from ultrakb.agent.planning_capacity import preflight_planning
+
+    force_partition_planning = preflight_planning(
+        system_msg,
+        doc_msg,
+        wiki_dir=wiki_dir,
+        entity_types=entity_types,
+        fits=compile_capacity(kb_dir, model, bundle),
+    )
+
     # --- Step 1: Generate summary (v1, held in memory) ---
     # Planning uses this draft; page writing receives the fixed originals.
     # Validated links are assembled before publication.
@@ -2348,6 +2454,7 @@ async def compile_short_doc(
             bundle=bundle,
             source_windows=windows,
             current_original=current_original,
+            force_partition_planning=force_partition_planning,
         )
     finally:
         # Close per-loop litellm async clients before asyncio.run tears this
@@ -2378,12 +2485,13 @@ async def compile_long_doc(
         summary_capacity,
     )
     from ultrakb.agent.page_response import PageResponseError
+    from ultrakb.agent.planning_capacity import navigation_messages
     from ultrakb.agent.source_windows import CompileSourceWindows
     from ultrakb.compilation_report import CompilationIncomplete
     from ultrakb.config import resolve_effective_config
     from ultrakb.config_state import active_values
     from ultrakb.llm_execution import active_executor
-    from ultrakb.source_navigation import planning_navigation, stored_navigation
+    from ultrakb.source_navigation import stored_navigation
 
     config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
     captured = active_values(kb_dir)
@@ -2413,6 +2521,19 @@ async def compile_long_doc(
         from ultrakb.compile_checkpoints import document_checkpoints
 
         checkpoints = document_checkpoints(kb_dir, selected_scope.view_id, doc_name)
+        from ultrakb.agent.compile_capacity import compile_capacity
+        from ultrakb.agent.planning_capacity import preflight_planning
+
+        full_navigation, compact_navigation = navigation_messages(doc_name, doc_id, navigation)
+        force_partition_planning = preflight_planning(
+            system_msg,
+            full_navigation,
+            wiki_dir=wiki_dir,
+            entity_types=resolve_entity_types(config),
+            fits=compile_capacity(kb_dir, model, bundle),
+            long=True,
+            compact_document_message=compact_navigation,
+        )
         credentials = executor.bindings.credentials() if executor else bundle
         fits = summary_capacity(
             {**config, "model": executor.bindings.model("compile") if executor else model},
@@ -2461,6 +2582,7 @@ async def compile_long_doc(
                 generate=generate,
                 fits=fits,
                 checkpoints=checkpoints,
+                max_concurrency=config.get("document_summary_concurrency", 2),
             )
         except PageResponseError as error:
             report_compile_issue(error.code, "summary")
@@ -2492,16 +2614,8 @@ async def compile_long_doc(
             description=draft.description or doc_description,
             full_text=windows.original_path,
         )
-        planning = json.dumps(planning_navigation(navigation), ensure_ascii=False)
         overview = planning_overview(draft, MAX_DOCUMENT_PLANNING_CHARS)
-        doc_msg = {
-            "role": "user",
-            "content": (
-                f"Generated navigation for document {doc_name} (doc_id: {doc_id}); "
-                "these titles and navigation summaries are planning aids, not original evidence. "
-                "parent_node_id identifies the retained parent section.\n" + planning
-            ),
-        }
+        doc_msg, compact_doc_msg = navigation_messages(doc_name, doc_id, navigation)
         await _compile_concepts(
             wiki_dir,
             kb_dir,
@@ -2516,6 +2630,8 @@ async def compile_long_doc(
             entity_types=resolve_entity_types(config),
             bundle=bundle,
             source_windows=windows,
+            compact_doc_msg=compact_doc_msg,
+            force_partition_planning=force_partition_planning,
         )
     finally:
         await _close_async_llm_clients()

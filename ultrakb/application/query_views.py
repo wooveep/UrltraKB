@@ -5,7 +5,7 @@ from pathlib import Path
 
 from ultrakb.application.views import view_scope
 from ultrakb.ingest_records import ImportUnit, KnowledgeRevision
-from ultrakb.knowledge_scope import KnowledgeScope, resolve_scope
+from ultrakb.knowledge_scope import KnowledgeScope, reading_scope, resolve_scope
 from ultrakb.locks import kb_read_lock
 from ultrakb.source_catalog import read_record
 from ultrakb.unit_publication import read_head, wiki_versions
@@ -55,14 +55,18 @@ class QuerySelection:
 
 
 def _pin_view(kb_dir: Path, scope: KnowledgeScope | None = None) -> QueryView | None:
-    head = read_head(kb_dir)
+    public = scope.publication if scope is not None else None
+    head = public.head if public is not None else read_head(kb_dir)
+    catalog = public.metadata_dir if public is not None else kb_dir
     selected = (
         scope
         if scope and scope.read_only
         else view_scope(kb_dir, "legacy", historical_revision=head.knowledge_revision_id)
     )
     manifest = (
-        KnowledgeRevision.model_validate_json(
+        public.manifest
+        if public is not None
+        else KnowledgeRevision.model_validate_json(
             (selected.wiki_dir.parent / "manifest.json").read_text()
         )
         if selected.read_only
@@ -73,19 +77,24 @@ def _pin_view(kb_dir: Path, scope: KnowledgeScope | None = None) -> QueryView | 
     inputs = manifest.input_revisions if manifest else tuple(head.inputs.values())
     from ultrakb.source_changes import effective_input
 
-    historical = bool(scope and scope.read_only)
+    historical = bool(scope and scope.historical)
+    if public is not None:
+        from ultrakb.application.published_sources import effective_input
     active = {
         identity
         for identity in inputs
-        if historical or effective_input(kb_dir, selected.view_id, identity)
+        if historical or effective_input(catalog, selected.view_id, identity)
     }
     from ultrakb.retained_reprocessing import retained_reprocessing_input
+
+    if public is not None:
+        from ultrakb.application.published_sources import retained_reprocessing_input
 
     retained = {
         identity: status
         for identity in inputs
         if identity not in active
-        and (status := retained_reprocessing_input(kb_dir, selected.view_id, identity))
+        and (status := retained_reprocessing_input(catalog, selected.view_id, identity))
     }
     allowed = tuple(identity for identity in inputs if identity in active or identity in retained)
     if inputs and not allowed:
@@ -102,9 +111,9 @@ def _pin_view(kb_dir: Path, scope: KnowledgeScope | None = None) -> QueryView | 
     for identity in allowed:
         from ultrakb.knowledge_evidence import validated_input
 
-        unit, source = validated_input(kb_dir, identity, selected.view_id)
+        unit, source = validated_input(catalog, identity, selected.view_id)
         sources.append(source.source_revision_id)
-        named = read_record(kb_dir, "units", unit.unit_id, ImportUnit)
+        named = read_record(catalog, "units", unit.unit_id, ImportUnit)
         if selected.read_only:
             from ultrakb.application.sources import _snapshot_source
             from ultrakb.source_map import read_source_map
@@ -196,7 +205,8 @@ def resolve_query_views(
     root = kb_dir.resolve()
     if scope is not None:
         scope = resolve_scope(root, scope)
-    with kb_read_lock(root / ".ultrakb"):
+
+    with reading_scope(scope) if scope is not None else kb_read_lock(root / ".ultrakb"):
         pinned = _pin_view(root, scope)
         selected = (pinned,) if pinned is not None else ()
         missing = (
@@ -269,6 +279,19 @@ def read_query_page(
 
 def selection_current(selection: QuerySelection) -> bool:
     """A finished answer must not claim verification against a changed knowledge head."""
+    public_views = [view for view in selection.views if view.scope.publication is not None]
+    if public_views:
+        from ultrakb.mutation import RecoveryRequired
+        from ultrakb.published_knowledge import PublicationUnavailable, read_publication
+
+        try:
+            return all(
+                read_publication(selection.kb_dir, view_id=view.view_id).publication_id
+                == view.scope.publication_id
+                for view in public_views
+            )
+        except (FileNotFoundError, PublicationUnavailable, RecoveryRequired):
+            return False
     with kb_read_lock(selection.kb_dir / ".ultrakb"):
         for view in selection.views:
             if read_head(selection.kb_dir, view.view_id).generation != view.head_generation:

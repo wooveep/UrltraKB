@@ -44,6 +44,7 @@ def collection(root, adapter):
             llm_client=adapter,
             require_llm_client=True,
             max_concurrency=1,
+            node_batch_size=1,
             if_add_node_text=True,
         ),
     )

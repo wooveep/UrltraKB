@@ -25,6 +25,7 @@ class DocumentsDialog(ManagementPanel):
         super().__init__(window)
         self.window, self.kb = window, kb
         self.scope = getattr(window, "scope", None)
+        self.read_scope = getattr(window, "read_scope", None)
         self.view_id = self.scope.view_id if self.scope else None
         self._closed = False
         self._generation = 0
@@ -258,6 +259,7 @@ class DocumentsDialog(ManagementPanel):
         from ultrakb.desktop.document_rows import focused
 
         identity = focused(self).identity
+        read_scope = self.read_scope
 
         def loaded(value, error):
             if error or value is None:
@@ -268,7 +270,7 @@ class DocumentsDialog(ManagementPanel):
             if any(unit.get("key") != "body" for unit in value.get("available_units", [])):
                 from ultrakb.desktop.worksheets import WorksheetsDialog
 
-                WorksheetsDialog(self.window, self.kb, value).show()
+                WorksheetsDialog(self.window, self.kb, value, read_scope=read_scope).show()
             else:
                 show_source(self.window, self.kb, value)
 
@@ -276,8 +278,9 @@ class DocumentsDialog(ManagementPanel):
             self,
             identity,
             "阅读原文",
-            lambda: read_document_source(self.kb, identifier, scope=self.scope),
+            lambda: read_document_source(self.kb, identifier, scope=read_scope or self.scope),
             loaded,
+            snapshot=read_scope is not None,
         )
 
     def invalidate(self):
@@ -307,11 +310,15 @@ class DocumentsDialog(ManagementPanel):
 
         retry(self, tuple(self.selection.checked))
 
-    def reload(self, *, preserve_result=False):
+    def reload(self, *, preserve_result=False, scope=None):
         from ultrakb.application.document_actions import document_inventory
         from ultrakb.desktop.document_rows import render
 
         if self._closed:
+            return
+        if scope is None and getattr(self.window, "read_scope", None) is not None:
+            self.status.setText("正在刷新资料；当前列表和阅读内容保留。")
+            self.window._refresh()
             return
         if self._inventory_loading:
             self._reload_pending = True
@@ -323,6 +330,7 @@ class DocumentsDialog(ManagementPanel):
         self.status.setText(
             "正在刷新资料；当前列表和阅读内容保留。" if self.rows else "正在读取资料…"
         )
+        read_scope = scope
 
         def loaded(value, error):
             self._inventory_loading = False
@@ -337,6 +345,7 @@ class DocumentsDialog(ManagementPanel):
                 )
                 return
             self.rows = {row.identity: row for row in value}
+            self.read_scope = read_scope
             removed = self.selection.reconcile(self.rows)
             render(self)
             if removed:
@@ -347,9 +356,10 @@ class DocumentsDialog(ManagementPanel):
             self.read_button.setEnabled(bool(self.rows))
 
         self.window.io.submit(
-            lambda: document_inventory(self.kb, scope=self.scope),
+            lambda: document_inventory(self.kb, scope=read_scope or self.scope),
             loaded,
             kb=self.kb,
+            snapshot=read_scope is not None,
             obsolete=lambda: self._closed or generation != self._load_generation,
             on_wait=lambda: self.status.setText(
                 "正在等待知识库完成当前写入后刷新资料；已显示的内容保留。"

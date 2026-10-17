@@ -4,6 +4,7 @@ import argparse
 import json
 import logging
 import os
+import threading
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -30,6 +31,8 @@ def main():
     from ultrakb.desktop.verification_workbench import button
     from ultrakb.desktop.window import Workbench
     from ultrakb.locks import atomic_write_text, kb_ingest_lock
+    from ultrakb.mutation import mutation_scope
+    from ultrakb.published_knowledge import read_publication
     from ultrakb.runtime.records import TaskView, UnitResult
     from ultrakb.state import HashRegistry
 
@@ -37,7 +40,15 @@ def main():
     config.GLOBAL_CONFIG_PATH = config.GLOBAL_CONFIG_DIR / "global.yaml"
     kb = root / "交互验收库"
     initialize_kb(kb, seed_environment=False)
-    with kb_ingest_lock(kb / ".ultrakb"):
+    seed_paths = [
+        *(kb / f"wiki/concepts/{name}.md" for name in ("第一知识", "第二知识")),
+        kb / "wiki/sources/原文.md",
+        kb / ".ultrakb/hashes.json",
+    ]
+    with (
+        kb_ingest_lock(kb / ".ultrakb"),
+        mutation_scope(kb, seed_paths, operation="verify-interaction-inputs"),
+    ):
         for name in ("第一知识", "第二知识"):
             atomic_write_text(kb / f"wiki/concepts/{name}.md", f"# {name}\n\n{name}正文。")
         atomic_write_text(kb / "wiki/sources/原文.md", "# 原文\n\n可读资料正文。")
@@ -87,22 +98,49 @@ def main():
         setattr(obj, attr, value)
 
     try:
+        publication_id = read_publication(kb).publication_id
         window.open_knowledge_base(kb)
-        wait(lambda: window.kb == kb and not window.io._callbacks)
+        wait(
+            lambda: window.kb == kb
+            and window.page is not None
+            and window.read_scope.publication_id == publication_id
+            and window.save_button.isEnabled()
+        )
         if args.scenario == "navigation":
             window.open_page("concepts/第一知识")
-            wait(lambda: window.page and window.page.path == "concepts/第一知识")
+            wait(
+                lambda: window.page
+                and window.page.path == "concepts/第一知识"
+                and window.save_button.isEnabled()
+            )
             window.pages.expandAll()
             target = node()
             window.pages.scrollToItem(target)
-            with kb_ingest_lock(kb / ".ultrakb"):
-                click(window.pages.viewport(), window.pages.visualItemRect(target).center())
-                pump(350)
-                assert "等待" in window.location.text(), window.location.text()
-                assert "第二知识" in window.location.text()
-                assert "第一知识正文" not in window.reader.toPlainText()
-                window.shell.navigate("资料")
-            wait(lambda: not window.io._callbacks)
+            from ultrakb.desktop import window as window_module
+
+            original_read = window_module.read_page_context
+            reading, release, completed = threading.Event(), threading.Event(), threading.Event()
+
+            def delayed_read(*args, **kwargs):
+                reading.set()
+                try:
+                    assert release.wait(5)
+                    return original_read(*args, **kwargs)
+                finally:
+                    completed.set()
+
+            patch(window_module, "read_page_context", delayed_read)
+            try:
+                with kb_ingest_lock(kb / ".ultrakb"):
+                    click(window.pages.viewport(), window.pages.visualItemRect(target).center())
+                    wait(reading.is_set)
+                    assert "第二知识" in window.location.text()
+                    assert "第一知识正文" in window.reader.toPlainText()
+                    window.shell.navigate("资料")
+            finally:
+                release.set()
+            wait(completed.is_set)
+            setattr(window_module, "read_page_context", original_read)
             assert window.shell.title.text() == "资料", "Late page read stole navigation"
             window.shell.navigate("知识")
             wait(lambda: "第一知识正文" in window.reader.toPlainText())
@@ -113,14 +151,15 @@ def main():
             )
             assert window.workspaces.ask_page.isEnabled()
             target = node()
-            click(window.pages.viewport(), window.pages.visualItemRect(target).center())
-            wait(lambda: window.page.path == "concepts/第二知识")
+            with kb_ingest_lock(kb / ".ultrakb"):
+                click(window.pages.viewport(), window.pages.visualItemRect(target).center())
+                wait(
+                    lambda: window.page.path == "concepts/第二知识"
+                    and "第二知识正文" in window.reader.toPlainText()
+                )
             # A failed reread of the already selected title must be retryable too.
             from PySide6.QtWidgets import QApplication, QMessageBox
 
-            from ultrakb.desktop import window as window_module
-
-            original_read = window_module.read_page_context
             calls, dismissed = [], []
 
             def fail_once(*args, **kwargs):
@@ -171,8 +210,15 @@ def main():
                 )
                 with kb_ingest_lock(kb / ".ultrakb"):
                     click(control, QPoint(control.width() // 2, control.height() - 3))
-                    pump(350)
-                    assert "等待" in panel.status.text(), panel.status.text()
+                    if label == "阅读":
+                        wait(
+                            lambda: any(
+                                r.isVisible() and "可读资料正文" in r.reader.toPlainText()
+                                for r in window.findChildren(SourceReader)
+                            )
+                        )
+                    else:
+                        wait(lambda: "等待" in panel.status.text())
                 if label == "阅读":
                     wait(lambda: any(r.isVisible() for r in window.findChildren(SourceReader)))
                     next(r for r in window.findChildren(SourceReader) if r.isVisible()).close()
@@ -199,7 +245,14 @@ def main():
                 progress.track(kb, current[0].id)
                 pump(350)
                 before = progress.status.text()
-                with kb_ingest_lock(kb / ".ultrakb"):
+                with (
+                    kb_ingest_lock(kb / ".ultrakb"),
+                    mutation_scope(
+                        kb,
+                        [kb / "wiki/sources/第二份.md", kb / ".ultrakb/hashes.json"],
+                        operation="verify-interaction-progress",
+                    ),
+                ):
                     atomic_write_text(kb / "wiki/sources/第二份.md", "# 新资料\n\n已保留。")
                     HashRegistry(kb / ".ultrakb/hashes.json").add(
                         "b" * 64, {"name": "第二份.md", "doc_name": "第二份", "type": "md"}

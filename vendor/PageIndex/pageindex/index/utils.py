@@ -325,40 +325,15 @@ def get_leaf_nodes(structure):
 
 
 async def generate_node_summary(node, model=None):
-    from .request_budget import navigation_summary
-    from ..errors import IndexCapacityError
-    from ..llm import current_client
-    import hashlib
-    key = "node-summary:" + hashlib.sha256(
-        json.dumps({"title": node.get("title"), "text": node["text"]}, ensure_ascii=False).encode()
-    ).hexdigest()
-    retained = getattr(current_client(), "stage_result", None)
-    previous = retained(key) if retained else None
-    if previous is not None:
-        if previous.get("status"):
-            node["summary_status"] = previous["status"]
-        return previous["summary"]
-    try:
-        summary = await navigation_summary(node['text'], model)
-    except IndexCapacityError:
-        node['summary_status'] = 'unavailable'
-        summary = node.get('title', '')
-    if retained:
-        retained(key, {"summary": summary, "status": node.get("summary_status")})
-    return summary
+    from .node_batches import summarize_nodes
+    await summarize_nodes([node], model)
+    return node["summary"]
 
 
 async def generate_summaries_for_structure(structure, model=None):
+    from .node_batches import summarize_nodes
     nodes = structure_to_list(structure)
-    tasks = [generate_node_summary(node, model=model) for node in nodes]
-    summaries = await gather_required(*tasks)
-    for node, summary in zip(nodes, summaries):
-        if not summary or not summary.strip():
-            node['summary_status'] = 'unavailable'
-            logger.warning("Optional summary unavailable for node %s", node.get('node_id'))
-            summary = node.get('text', '')
-        node['summary'] = summary
-
+    await summarize_nodes(nodes, model)
     return structure
 
 
@@ -378,10 +353,20 @@ def list_to_tree(data):
     # First pass: Create nodes and track parent-child relationships
     nodes = {}
     root_nodes = []
+    active = []
 
     for item in data:
         structure = item.get('structure')
         parent_structure = get_parent_structure(structure)
+        parent = nodes.get(parent_structure) if parent_structure else None
+        physical = item.get('anchor') and item.get('unit_kind') in (None, 'page')
+        if physical and structure:
+            # Body order closes earlier subtrees. An original numbering error
+            # cannot reopen a distant chapter merely because its prefix matches.
+            depth = len(str(structure).split('.'))
+            while active and active[-1][0] >= depth:
+                active.pop()
+            parent = active[-1][1] if active else None
         node = {
             'title': item.get('title'),
             'start_index': item.get('start_index'),
@@ -390,28 +375,36 @@ def list_to_tree(data):
         }
         if 'title_correction' in item:
             node['title_correction'] = copy.deepcopy(item['title_correction'])
-        for key in ('title_origin', 'anchor', 'end_anchor', 'unit_kind', 'structure'):
+        for key in ('title_origin', 'anchor', 'end_anchor', 'unit_kind',
+                    'structure', 'toc_recovery', 'navigation_gaps'):
             if key in item:
                 node[key] = copy.deepcopy(item[key])
+        if physical and parent and parent.get('structure') != parent_structure:
+            node['hierarchy_note'] = {
+                'reason': ('original_number_outside_parent'
+                           if item['anchor'].get('section') == structure
+                           else 'proposed_number_outside_parent'),
+                'original_section': structure,
+                'body_parent_section': parent.get('structure'),
+                'evidence': 'body_order',
+            }
         import hashlib
         identity = {
-            'parent': nodes.get(parent_structure, {}).get('source_node_id'),
+            'parent': parent.get('source_node_id') if parent else None,
             'position': item.get('anchor') or {'page': item.get('start_index'),
                                               'section': structure, 'title': item.get('title')},
         }
         node['source_node_id'] = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:24]
 
         nodes[structure] = node
+        if physical and structure:
+            active.append((depth, node))
 
         # Find parent
         parent_structure = get_parent_structure(structure)
 
-        if parent_structure:
-            # Add as child to parent if parent exists
-            if parent_structure in nodes:
-                nodes[parent_structure]['nodes'].append(node)
-            else:
-                root_nodes.append(node)
+        if parent:
+            parent['nodes'].append(node)
         else:
             # No parent, this is a root node
             root_nodes.append(node)

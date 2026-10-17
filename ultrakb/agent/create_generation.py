@@ -13,12 +13,14 @@ from ultrakb.agent.create_requests import coverage_id, original_message, partiti
 from ultrakb.agent.page_delivery import validate_page_delivery
 from ultrakb.agent.page_figures import PageFigures
 from ultrakb.agent.page_input import page_input
+from ultrakb.agent.page_originals import bounded_short_originals
 from ultrakb.agent.page_response import PageResponseError, parse_page
 from ultrakb.agent.retained_delivery import reuse_saved_response
 from ultrakb.compile_checkpoints import digest, document_checkpoints
 from ultrakb.llm_execution import check_model_stop
 
 PROTOCOL = "compiler-create-contributions-v1"
+_SPLITTABLE_ERRORS = {"page_truncated_response", "page_truncated_json"}
 
 
 @dataclass
@@ -31,9 +33,13 @@ class CreationBatch:
     excerpts: Any
     coverage: tuple[str, ...]
     accepted: dict | None = None
+    links: Any = None
+    stage_name: str = ""
 
 
 def _validate(raw, batch):
+    if batch.links:
+        raw = batch.links.response(raw)
     return parse_page(
         validate_page_delivery(
             raw,
@@ -52,8 +58,12 @@ class PageCreation:
     checkpoints: Any
     batches: list[CreationBatch]
     fits: Any
+    splitter: Any = None
+    splits: int = 0
 
     def stage(self, number):
+        if self.batches[number - 1].stage_name:
+            return self.batches[number - 1].stage_name
         stage = "entity" if self.page.startswith("entities/") else "concept"
         stage += ": " + self.page.split("/")[-1].removesuffix(".md")
         if len(self.batches) > 1:
@@ -66,6 +76,7 @@ class PageCreation:
 
     async def generate(self):
         from ultrakb.agent.compiler import _llm_call_page_async
+        from ultrakb.agent.link_resolution import request_admitted, retained_link_response
         from ultrakb.llm_execution import active_executor
 
         check_model_stop()
@@ -74,7 +85,14 @@ class PageCreation:
                 "compile", self.missing + min(self.missing, executor.policy.compile_repair_calls)
             )
         values = []
-        for i, batch in enumerate(self.batches, 1):
+        index = 0
+        while index < len(self.batches):
+            i, batch = index + 1, self.batches[index]
+            from ultrakb.compilation_report import report_compile_work
+
+            report_compile_work(
+                "create", completed=index, pending=len(self.batches) - index, splits=self.splits
+            )
             check_model_stop()
             value = batch.accepted
             if value is None:
@@ -85,19 +103,36 @@ class PageCreation:
                     self.checkpoints.claim_generation(
                         batch.key, batch.signature, stage=f"compile.{stage}"
                     )
-                raw = await _llm_call_page_async(
-                    self.model,
-                    batch.messages,
-                    stage,
-                    bundle=self.bundle,
-                    prompt_version=PROTOCOL,
-                    response_format={"type": "json_object"},
-                    figure_context=batch.figures if batch.figures.figures else None,
-                    original_excerpts=batch.excerpts,
-                    checkpoints=self.checkpoints,
-                    checkpoint_key=batch.key,
-                    create_delivery=batch.coverage,
-                )
+                try:
+                    raw = await _llm_call_page_async(
+                        self.model,
+                        batch.messages,
+                        stage,
+                        bundle=self.bundle,
+                        prompt_version=PROTOCOL,
+                        response_format={"type": "json_object"},
+                        figure_context=batch.figures if batch.figures.figures else None,
+                        original_excerpts=batch.excerpts,
+                        checkpoints=self.checkpoints,
+                        checkpoint_key=batch.key,
+                        create_delivery=batch.coverage,
+                        link_registry=batch.links,
+                        request_fits=lambda messages, options: request_admitted(
+                            self.fits, messages, options
+                        ),
+                        initial_response=retained_link_response(
+                            self.checkpoints,
+                            batch.key,
+                            batch.signature,
+                            stage=stage,
+                            registry=batch.links,
+                        ),
+                    )
+                except PageResponseError as error:
+                    if error.code not in _SPLITTABLE_ERRORS or self.splitter is None:
+                        raise
+                    self.batches[index : index + 1] = self.splitter(batch)
+                    continue
                 value = _validate(raw, batch)
                 if self.checkpoints:
                     self.checkpoints.save(
@@ -116,6 +151,8 @@ class PageCreation:
                     )
             batch.accepted = value
             values.append(value)
+            index += 1
+        report_compile_work("create", completed=len(self.batches), pending=0, splits=self.splits)
         if len(values) == 1:
             merged = dict(values[0])
         else:
@@ -152,6 +189,7 @@ def prepare_page_creation(
     page,
     checkpoints=None,
     fits=None,
+    link_registry=None,
 ):
     """Plan all complete requests before the caller starts concurrent generation."""
     fits = fits or compile_capacity(windows.kb_dir, model, bundle)
@@ -159,10 +197,23 @@ def prepare_page_creation(
         windows.kb_dir, windows.view_id, windows.doc_name
     )
 
+    from ultrakb.agent.link_registry import writing_catalogue
+
+    known_targets_message, link_registry = writing_catalogue(
+        known_targets_message,
+        context=json.dumps([task_message, originals.message], ensure_ascii=False),
+        registry=link_registry,
+    )
+    if link_registry:
+        link_registry.persist(checkpoints)
+
+    active_originals = originals
+
     def build(batch, multipart):
         check_model_stop()
-        context = replace(originals, windows=tuple(batch))
-        long = current_original is None
+        multipart = multipart or active_originals is not originals
+        context = replace(active_originals, windows=tuple(batch))
+        long = current_original is None or multipart
         figures = windows.page_figures(batch, long=long)
         excerpts = windows.original_excerpts(context, long=long)
         excerpts.request_version = request_version(checkpoints)
@@ -180,8 +231,8 @@ def prepare_page_creation(
             )
         messages = build_page_messages(
             system_message=system_message,
-            current_original=current_original,
-            original_context=original_message(originals, batch),
+            current_original=None if multipart else current_original,
+            original_context=original_message(active_originals, batch),
             known_targets_message=known_targets_message,
             task_message={**task_message, "content": task_message["content"] + extra},
         )
@@ -196,6 +247,7 @@ def prepare_page_creation(
             figures,
             excerpts,
             coverage,
+            links=link_registry,
         )
 
     def admitted(batch, multipart):
@@ -209,7 +261,9 @@ def prepare_page_creation(
             fits([*planned.messages, repair]) for repair in repairs
         )
 
-    groups = partition_originals(originals, windows, admitted)
+    if current_original is not None and not admitted(list(originals.windows), False):
+        active_originals = bounded_short_originals(originals, windows)
+    groups = partition_originals(active_originals, windows, admitted)
     batches = []
     for i, group in enumerate(groups):
         b = build(group, len(groups) > 1)
@@ -235,7 +289,7 @@ def prepare_page_creation(
                     protocol="page-json",
                     stage=creation.stage(number),
                     validate=lambda raw, batch=batch: validate_page_delivery(
-                        raw,
+                        batch.links.response(raw) if batch.links else raw,
                         original_excerpts=batch.excerpts,
                         figure_context=batch.figures if batch.figures.figures else None,
                         expected_coverage=batch.coverage,
@@ -250,4 +304,72 @@ def prepare_page_creation(
                         ],
                     },
                 )
+    from ultrakb.agent.source_fragments import fragment_layouts, split_fragment_batch
+
+    def loaded(batch):
+        require_frozen_request(checkpoints, batch.key, batch.signature)
+        cached = checkpoints.load(batch.key, batch.signature) if checkpoints else None
+        if cached is not None:
+            batch.accepted = _validate(json.dumps(cached, ensure_ascii=False), batch)
+        elif checkpoints:
+            batch.accepted = reuse_saved_response(
+                checkpoints,
+                batch.key,
+                batch.signature,
+                protocol="page-json",
+                stage=batch.stage_name,
+                validate=lambda raw: json.dumps(_validate(raw, batch), ensure_ascii=False),
+                excerpts=batch.excerpts,
+                metadata={"protocol": PROTOCOL, "page": page, "coverage": list(batch.coverage)},
+            )
+        return batch
+
+    def children(parent):
+        nonlocal active_originals
+        if not parent.coverage and current_original is not None:
+            active_originals = bounded_short_originals(originals, windows)
+            selected = list(active_originals.windows)
+        else:
+            selected = parent.windows or list(active_originals.windows)
+        layouts = fragment_layouts(active_originals.windows)
+        divided = split_fragment_batch(selected, windows, layouts)
+        child_batches = []
+        for number, parts in enumerate(divided, 1):
+            child = build(parts, True)
+            child.key = f"{parent.key}:part:{number}"
+            child.stage_name = parent.stage_name + f" [part {number}]"
+            child_batches.append(loaded(child))
+        child_signatures = [child.signature for child in child_batches]
+        marker_key = "create-split:" + parent.key
+        marker = checkpoints.load(marker_key, parent.signature) if checkpoints else None
+        if marker is not None and marker != child_signatures:
+            raise PageResponseError("compile_checkpoint_invalid", "Creation split changed")
+        if marker is None and checkpoints:
+            checkpoints.save(marker_key, parent.signature, child_signatures)
+        creation.splits += 1
+        return [leaf for child in child_batches for leaf in restored(child)]
+
+    def restored(batch):
+        marker = (
+            checkpoints.load("create-split:" + batch.key, batch.signature)
+            if checkpoints and batch.accepted is None
+            else None
+        )
+        failure = (
+            checkpoints.failure_code(batch.key, batch.signature)
+            if checkpoints and batch.accepted is None
+            else None
+        )
+        if (
+            marker is not None
+            or failure in _SPLITTABLE_ERRORS
+            or not admitted(batch.windows, bool(batch.coverage))
+        ):
+            return children(batch)
+        return [batch]
+
+    for number, batch in enumerate(batches, 1):
+        batch.stage_name = creation.stage(number)
+    creation.splitter = children
+    creation.batches = [leaf for batch in batches for leaf in restored(batch)]
     return creation

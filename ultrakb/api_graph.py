@@ -16,7 +16,7 @@ from starlette.concurrency import run_in_threadpool
 
 from ultrakb.api_helpers import _resolve_kb, require_bearer_token
 from ultrakb.api_models import GraphRequest, GraphResponse
-from ultrakb.api_views import resolve_api_scope
+from ultrakb.api_views import resolve_api_read_scope
 
 graph_router = APIRouter()
 
@@ -30,7 +30,9 @@ async def graph_endpoint(
     from ultrakb.application.artifacts import read_graph
 
     graph = await run_in_threadpool(
-        read_graph, kb_dir, scope=await resolve_api_scope(kb_dir, request.view_id)
+        read_graph,
+        kb_dir,
+        scope=await resolve_api_read_scope(kb_dir, request.view_id, request.publication_id),
     )
     return GraphResponse(**graph)
 
@@ -39,6 +41,7 @@ async def graph_endpoint(
 async def graph_html_endpoint(
     kb: str = Query(...),
     view_id: str | None = Query(None),
+    publication_id: str | None = Query(None),
     _: None = Depends(require_bearer_token),
 ) -> HTMLResponse:
     # Self-contained graph HTML (the same renderer the ``ultrakb visualize`` CLI
@@ -47,7 +50,8 @@ async def graph_html_endpoint(
     kb_dir = await asyncio.to_thread(_resolve_kb, kb)
     from ultrakb.application.artifacts import graph_html
 
-    html = await run_in_threadpool(
-        graph_html, kb_dir, scope=await resolve_api_scope(kb_dir, view_id)
+    scope = await resolve_api_read_scope(kb_dir, view_id, publication_id)
+    html = await run_in_threadpool(graph_html, kb_dir, scope=scope)
+    return HTMLResponse(
+        content=html, headers={"X-UltraKB-Publication-ID": scope.publication_id or ""}
     )
-    return HTMLResponse(content=html)

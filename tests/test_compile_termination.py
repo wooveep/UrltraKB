@@ -42,11 +42,15 @@ def test_terminal_factory_failure_never_waits_or_restarts(monkeypatch, error):
 @pytest.mark.parametrize("error", terminal_errors(), ids=lambda error: type(error).__name__)
 def test_import_preserves_original_and_head_and_propagates_termination(kb_dir, monkeypatch, error):
     from ultrakb.application.documents import import_document
+    from ultrakb.locks import kb_ingest_lock
+    from ultrakb.published_knowledge import initialize_publication, read_publication
     from ultrakb.source_catalog import list_sources, read_source_revision
     from ultrakb.unit_publication import list_source_units, read_head, read_unit_publication
 
     source = kb_dir / "raw/gardening.md"
     source.write_text("# Gardening\nWater seedlings in the morning.\n")
+    with kb_ingest_lock(kb_dir / ".ultrakb"):
+        published = initialize_publication(kb_dir)
     head = read_head(kb_dir)
     starts, waits = [], []
 
@@ -61,6 +65,7 @@ def test_import_preserves_original_and_head_and_propagates_termination(kb_dir, m
     assert raised.value is error
     assert starts == [1] and waits == []
     assert read_head(kb_dir) == head
+    assert read_publication(kb_dir).knowledge_revision_id == published.knowledge_revision_id
     retained = list_sources(kb_dir)[0]
     revision = read_source_revision(kb_dir, retained.target_revision_id)
     assert (kb_dir / revision.original).read_bytes() == source.read_bytes()

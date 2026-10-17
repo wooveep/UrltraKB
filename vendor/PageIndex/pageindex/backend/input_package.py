@@ -9,7 +9,7 @@ from ..config import get_llm_params
 from ..tokens import count_tokens
 
 PARSER_POLICY = "physical-pdf-v1"
-INDEX_CONTENT_POLICY = "content-based-physical-v4"
+INDEX_CONTENT_POLICY = "content-based-physical-v6"
 IMAGE_REFERENCE_POLICY = "generated-spans-v1"
 
 

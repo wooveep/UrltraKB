@@ -4,10 +4,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ultrakb import frontmatter
+from ultrakb.application.knowledge import KnowledgeEntry, list_knowledge
 from ultrakb.application.pages import Page, read_page
-from ultrakb.knowledge_scope import KnowledgeScope, resolve_scope
+from ultrakb.knowledge_scope import KnowledgeScope, reading_scope, resolve_scope
 from ultrakb.lint import _extract_wikilinks, _normalize_target
-from ultrakb.locks import kb_read_lock
 
 
 @dataclass(frozen=True)
@@ -26,11 +26,60 @@ class PageContext:
     problems: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class KnowledgeContext:
+    scope: KnowledgeScope
+    entries: tuple[KnowledgeEntry, ...]
+    context: PageContext | None
+
+
+def read_knowledge_context(
+    kb_dir: Path,
+    path: str | None = None,
+    *,
+    view_id: str = "legacy",
+    publication_id: str | None = None,
+) -> KnowledgeContext:
+    """Prepare a whole refresh before replacing any part of the displayed knowledge."""
+    from ultrakb.application.views import published_scope
+
+    scope = published_scope(kb_dir, view_id, publication_id=publication_id)
+    with reading_scope(scope):
+        entries = list_knowledge(kb_dir, scope=scope)
+        if path is None:
+            path = entries[0].path if entries else None
+        try:
+            context = read_page_context(kb_dir, path, scope=scope) if path else None
+        except FileNotFoundError:
+            context = read_page_context(kb_dir, entries[0].path, scope=scope) if entries else None
+        return KnowledgeContext(scope, entries, context)
+
+
+def read_knowledge_image(kb_dir: Path, path: str, *, scope: KnowledgeScope) -> tuple[bytes, str]:
+    """Read a raster image from the same fixed wiki as the displayed body."""
+    selected = resolve_scope(kb_dir, scope)
+    media_types = {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".gif": "image/gif",
+        ".webp": "image/webp",
+        ".bmp": "image/bmp",
+    }
+    target = (selected.wiki_dir / path).resolve()
+    if Path(path).is_absolute() or not target.is_relative_to(selected.wiki_dir):
+        raise ValueError("Invalid image path")
+    if target.suffix.lower() not in media_types:
+        raise ValueError("Unsupported knowledge image format")
+    with reading_scope(selected):
+        return target.read_bytes(), media_types[target.suffix.lower()]
+
+
 def read_page_context(
     kb_dir: Path, path: str, *, scope: KnowledgeScope | None = None
 ) -> PageContext:
     scope = resolve_scope(kb_dir, scope)
-    with kb_read_lock(kb_dir / ".ultrakb"):
+    with reading_scope(scope):
         page = read_page(kb_dir, path, scope=scope)
         wiki = (scope.wiki_dir).resolve()
         known = {

@@ -1812,7 +1812,7 @@ wheels = [
 
 [[package]]
 name = "pageindex"
-version = "0.3.0.dev3+urltrakb.14"
+version = "0.3.0.dev3+urltrakb.17"
 source = { editable = "vendor/PageIndex" }
 dependencies = [
     { name = "httpx", extra = ["socks"] },

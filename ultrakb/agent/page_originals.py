@@ -1,7 +1,7 @@
 """Frozen original evidence and the message view for a page-generation batch."""
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 
 @dataclass(frozen=True)
@@ -39,3 +39,35 @@ class PageOriginalContext:
             "No relevant original window was located for this page. "
             "Read the original source before using specific values or operating rules.\n",
         )
+
+
+def bounded_short_originals(originals, reader):
+    """Expose the complete short original as qualified, partitionable source windows."""
+    current = reader.current_original_evidence()
+    if current is None:
+        return originals
+    current = {
+        **current,
+        "source_role": "current",
+        "selection_offset": 0,
+        "selection_length": len(current["content"]),
+    }
+    selected = [current, *[w for w in originals.windows if w["path"] != current["path"]]]
+    message = originals.for_windows(selected)
+    for block in message["content"]:
+        block["text"] = (
+            block["text"]
+            .replace(
+                "Current short-document original is supplied in full in its dedicated "
+                "original message. The windows below supplement it with linked sources.",
+                "Current original evidence is partitioned in the frozen windows below.",
+            )
+            .replace("An empty supplementary list does not remove the current full original. ", "")
+        )
+    return replace(
+        originals,
+        message=message,
+        windows=tuple(selected),
+        has_original=True,
+        has_current_original=True,
+    )

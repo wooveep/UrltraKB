@@ -104,6 +104,8 @@ def test_index_capacity_block_preserves_history_and_normalization_through_worker
     from ultrakb.knowledge_scope import live_scope
     from ultrakb.locks import atomic_write_text, kb_ingest_lock
     from ultrakb.model_task import read_task
+    from ultrakb.mutation import mutation_scope
+    from ultrakb.published_knowledge import read_publication
     from ultrakb.runtime.records import UnitResult
     from ultrakb.runtime.requests import RetrySource
     from ultrakb.runtime.tasks import TaskManager
@@ -113,11 +115,13 @@ def test_index_capacity_block_preserves_history_and_normalization_through_worker
     retained = {path: path.read_bytes() for path in directory.rglob("*") if path.is_file()}
     retained[marker] = marker.read_bytes()
     original = (kb / admission.revision.original).read_bytes()
-    head = read_head(kb)
     manual = live_scope(kb).wiki_dir / "concepts/operator-note.md"
     content = "# 人工维护\n必须保留现场确认的检修步骤。\n"
     with kb_ingest_lock(kb / ".ultrakb"):
-        atomic_write_text(manual, content)
+        with mutation_scope(kb, [manual], operation="manual-knowledge"):
+            atomic_write_text(manual, content)
+    head = read_head(kb)
+    published = read_publication(kb)
     history = tmp_path / "tasks"
     manager = TaskManager(history_dir=history, max_workers=1)
     try:
@@ -146,6 +150,7 @@ def test_index_capacity_block_preserves_history_and_normalization_through_worker
         assert model_task["actual_sends"] == 1 and model_task["limit"] == 8
         assert read_task(kb, model_task_id).used == 1
         assert read_head(kb) == head and manual.read_text() == content
+        assert read_publication(kb).knowledge_revision_id == published.knowledge_revision_id
         assert all(path.read_bytes() == data for path, data in retained.items())
         assert (kb / admission.revision.original).read_bytes() == original
         assert not list((kb / ".ultrakb/index-checkpoints").rglob("checkpoint.json"))

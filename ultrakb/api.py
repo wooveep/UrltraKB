@@ -443,12 +443,11 @@ def create_app() -> FastAPI:
         _: None = Depends(require_bearer_token),
     ) -> ListResponse:
         kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
+        from ultrakb.api_views import resolve_api_read_scope
+
+        scope = await resolve_api_read_scope(kb_dir, request.view_id, request.publication_id)
         try:
-            return ListResponse(
-                **await run_in_threadpool(
-                    get_kb_list, kb_dir, scope=await resolve_api_scope(kb_dir, request.view_id)
-                )
-            )
+            return ListResponse(**await run_in_threadpool(get_kb_list, kb_dir, scope=scope))
         except Exception as exc:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -461,12 +460,11 @@ def create_app() -> FastAPI:
         _: None = Depends(require_bearer_token),
     ) -> StatusResponse:
         kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
+        from ultrakb.api_views import resolve_api_read_scope
+
+        scope = await resolve_api_read_scope(kb_dir, request.view_id, request.publication_id)
         try:
-            return StatusResponse(
-                **await run_in_threadpool(
-                    get_kb_status, kb_dir, scope=await resolve_api_scope(kb_dir, request.view_id)
-                )
-            )
+            return StatusResponse(**await run_in_threadpool(get_kb_status, kb_dir, scope=scope))
         except Exception as exc:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

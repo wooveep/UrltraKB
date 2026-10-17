@@ -6,6 +6,18 @@ from ultrakb.knowledge_scope import KnowledgeScope, live_scope
 from ultrakb.locks import kb_ingest_lock, kb_read_lock
 
 
+def published_scope(
+    kb_dir: Path, view_id: str = "legacy", *, publication_id: str | None = None
+) -> KnowledgeScope:
+    """Pin the public pointer once without touching mutable writer state."""
+    from ultrakb.published_knowledge import read_publication
+
+    public = read_publication(kb_dir, publication_id=publication_id)
+    if public.view_id != view_id:
+        raise ValueError("Public knowledge publication belongs to another view")
+    return KnowledgeScope(public.kb_dir, public.wiki_dir, view_id, public)
+
+
 def map_legacy_sources(kb_dir: Path) -> dict:
     """Record retained legacy evidence without changing wiki pages or invoking a model."""
     from ultrakb.ingest_diagnostics import failure_reason

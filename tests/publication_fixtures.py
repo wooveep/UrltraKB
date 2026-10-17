@@ -15,6 +15,7 @@ def publish_document(
     bundle,
     shared_body=None,
     shared_sources=None,
+    concept_pages=None,
     expected_status="completed",
 ):
     from ultrakb.agent.compiler import _write_concept, _write_summary
@@ -84,6 +85,8 @@ def publish_document(
                         shared,
                         _prepend_source_to_frontmatter(shared.read_text("utf-8"), source_page),
                     )
+            for name, body in (concept_pages or {}).items():
+                _write_concept(wiki, name, body, f"summaries/{unit.doc_name}.md", False, name)
             _refresh_index(wiki)
             physical = converted.pdf_path or (
                 kb / admission.revision.original

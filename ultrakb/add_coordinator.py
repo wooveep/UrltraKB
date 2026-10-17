@@ -10,6 +10,13 @@ import click
 
 from ultrakb.locks import kb_ingest_lock_held
 from ultrakb.mutation import MutationSnapshot, RecoveryRequired, mark_needs_repair, snapshot_paths
+from ultrakb.published_knowledge import (
+    PublicationPending,
+    prepare_publication,
+    publication_transaction,
+    publish_committed,
+    recover_before_mutation,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +100,7 @@ def run_add_mutation(kb_dir: Path, plan: AddMutationPlan) -> bool:
     if not kb_ingest_lock_held(kb_dir / ".ultrakb"):
         raise RuntimeError("run_add_mutation requires the caller to hold kb_ingest_lock")
     snapshot = None
+    recover_before_mutation(kb_dir)
     try:
         snapshot = snapshot_paths(
             kb_dir,
@@ -101,9 +109,20 @@ def run_add_mutation(kb_dir: Path, plan: AddMutationPlan) -> bool:
             details=plan.details,
             hardlink_dirs=plan.hardlink_dirs,
         )
-        plan.body(snapshot)
-        snapshot.mark_committed()
+        with publication_transaction(snapshot) as outer:
+            plan.body(snapshot)
+            if outer:
+                prepare_publication(snapshot)
+            snapshot.mark_committed()
     except Exception as exc:
+        if (
+            snapshot is not None
+            and snapshot.publication is not None
+            and snapshot.committed_on_disk()
+        ):
+            raise PublicationPending(
+                snapshot.publication["publication_id"], snapshot.journal_path
+            ) from exc
         dirty_journal = _rollback_snapshot(plan, snapshot)
         if dirty_journal is not None:
             # Rollback failed and left an active journal. Stop the batch rather
@@ -120,10 +139,21 @@ def run_add_mutation(kb_dir: Path, plan: AddMutationPlan) -> bool:
         # its side-effects only. Do NOT raise DirtyRollbackError — propagate the
         # interrupt so the user's abort is honored. Any retained journal or
         # orphaned staging is recovered next run by the drain + reaper.
-        _rollback_snapshot(plan, snapshot)
+        if snapshot is None or snapshot.publication is None or not snapshot.committed_on_disk():
+            _rollback_snapshot(plan, snapshot)
         raise
     finally:
         _cleanup_staging_dirs(plan.staging_dirs)
+
+    # The commit is final. A pointer or receipt failure is recovered from the
+    # retained committed journal, and must never enter the rollback path.
+    if outer and snapshot.publication:
+        from ultrakb.execution_timing import record_phase_event
+
+        record_phase_event(
+            "internal_commit", stage="publication", work_id=snapshot.publication["publication_id"]
+        )
+    publication_receipted = not outer or publish_committed(snapshot)
 
     for hook in plan.post_commit_hooks:
         try:
@@ -131,7 +161,7 @@ def run_add_mutation(kb_dir: Path, plan: AddMutationPlan) -> bool:
         except Exception as exc:
             logger.warning("Post-commit hook failed for %s: %s", plan.operation, exc)
 
-    cleanup_error = snapshot.discard_best_effort()
+    cleanup_error = snapshot.discard_best_effort() if publication_receipted else None
     if cleanup_error is not None:
         click.echo(f"  [WARN] mutation journal cleanup failed: {cleanup_error}")
     return True

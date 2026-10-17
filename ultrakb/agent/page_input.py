@@ -4,7 +4,10 @@
 def page_input(messages, *, figures=None, excerpts=None, structured=False, compact=False):
     result = list(messages)
     if figures is not None:
-        message = figures.message(compact=compact)
+        from ultrakb.agent.compile_contract import request_version
+
+        current = getattr(excerpts, "request_version", request_version())
+        message = figures.message(compact=compact, bounded_catalogue=compact and current >= 3)
         if message not in result:
             result.append(message)
     if excerpts is not None:

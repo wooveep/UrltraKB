@@ -274,11 +274,22 @@ def write_kb_file(
     from ultrakb.model_outputs import write_model_output
 
     if not write_model_output(root, full_path, content):
-        # Generators own a transaction spanning all of their output files.
-        # Chat/review instead commit each tool write before reporting Written.
-        full_path.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write_text(full_path, content)
+        _write_tool_file(root, full_path, content)
     return f"Written: {path}"
+
+
+def _write_tool_file(kb_dir: Path, target: Path, content: str) -> None:
+    if (kb_dir / ".ultrakb/config.yaml").is_file():
+        from ultrakb.locks import kb_ingest_lock
+        from ultrakb.mutation import mutation_scope
+
+        with kb_ingest_lock(kb_dir / ".ultrakb"):
+            with mutation_scope(kb_dir, [target], operation="tool-file-write"):
+                atomic_write_text(target, content)
+    else:
+        # Unmanaged scratch directories are also supported by this low-level
+        # utility. Managed knowledge always uses the journaled public protocol.
+        atomic_write_text(target, content)
 
 
 def write_wiki_file(path: str, content: str, wiki_root: str) -> str:
@@ -298,12 +309,21 @@ def write_wiki_file(path: str, content: str, wiki_root: str) -> str:
     full_path = (root / path).resolve()
     if not full_path.is_relative_to(root):
         return "Access denied: path escapes wiki root."
-    full_path.parent.mkdir(parents=True, exist_ok=True)
-    # Atomic temp-file + os.replace rename (ultrakb.locks): reached from the
-    # write-capable REST /chat agent, a plain write_text could leave a torn
-    # page for a concurrent lint/recompile scan — the same hazard write_kb_file
-    # already closes. (See write_kb_file above.)
-    atomic_write_text(full_path, content)
+    kb_dir = next(
+        (parent for parent in root.parents if (parent / ".ultrakb/config.yaml").is_file()),
+        None,
+    )
+    if kb_dir is not None:
+        from ultrakb.knowledge_scope import KnowledgeScope
+        from ultrakb.model_outputs import write_model_output
+
+        scope = KnowledgeScope(kb_dir, root)
+        if scope.read_only:
+            return "Access denied: knowledge revisions and proposals are read-only."
+        if not write_model_output(kb_dir, full_path, content):
+            _write_tool_file(kb_dir, full_path, content)
+    else:
+        atomic_write_text(full_path, content)
     return f"Written: {path}"
 
 

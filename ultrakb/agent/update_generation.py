@@ -8,6 +8,7 @@ from dataclasses import replace
 from ultrakb.agent.compile_contract import request_version, require_frozen_request
 from ultrakb.agent.compile_messages import build_page_messages
 from ultrakb.agent.page_delivery import validate_page_delivery
+from ultrakb.agent.page_originals import bounded_short_originals
 from ultrakb.agent.page_response import PageResponseError, update_repair_messages
 from ultrakb.agent.page_updates import PageUpdate, UnchangedPage
 from ultrakb.agent.retained_delivery import reuse_saved_response
@@ -27,10 +28,12 @@ def update_capacity(kb_dir, model, bundle):
     return sizing
 
 
-def capacity_error():
+def capacity_error(detail="", *, field_errors=()):
     return PageResponseError(
         "page_update_capacity_exceeded",
-        "Necessary originals and an indivisible editing target exceed request capacity",
+        "Necessary originals and an indivisible editing target exceed request capacity"
+        + (f": {detail}; original retained" if detail else ""),
+        field_errors=field_errors,
     )
 
 
@@ -61,10 +64,28 @@ def prepare_update_requests(
         groups: list[list[str]] = [[]]
         for block in all_blocks:
             if not fits(messages([], scoped([block]))):
-                raise capacity_error()
+                raise capacity_error(
+                    f"captured base {patch.digest}, block {block}, "
+                    f"body characters {patch.blocks[block]}",
+                    field_errors=(
+                        {
+                            "base_sha256": patch.digest,
+                            "block_id": block,
+                            "body_span": list(patch.blocks[block]),
+                        },
+                    ),
+                )
             if groups[-1] and not fits(messages([], scoped([*groups[-1], block]))):
                 groups.append([])
             groups[-1].append(block)
+        from ultrakb.agent.create_requests import selection_key
+        from ultrakb.agent.source_fragments import (
+            fragment_layouts,
+            iter_fragments,
+            require_splittable,
+        )
+
+        layouts = fragment_layouts(originals.windows)
         budget = 24000
         while any(
             not fits(messages([window], scoped(group)))
@@ -82,7 +103,19 @@ def prepare_update_requests(
                 ]
                 continue
             if budget <= 32:
-                raise capacity_error()
+                raise capacity_error(
+                    ", ".join(
+                        f"{part['path']} at {part.get('native_location')}" for part in batch_windows
+                    ),
+                    field_errors=tuple(
+                        {
+                            "path": part["path"],
+                            "native_location": part.get("native_location"),
+                            "selection_offset": part.get("selection_offset"),
+                        }
+                        for part in batch_windows
+                    ),
+                )
             budget //= 2
             selections: dict[tuple[str, str], tuple[dict, dict]] = {}
             for window in originals.windows:
@@ -92,10 +125,11 @@ def prepare_update_requests(
                 selections.setdefault((window["path"], digest(location)), (window, location))
             batch_windows = []
             for window, location in selections.values():
-                for part in windows.iter_selection(window["path"], location, budget=budget):
-                    part = {**part, "source_role": window["source_role"]}
+                layout = layouts[selection_key(window)]
+                for part in iter_fragments(windows, window, budget=budget, layout=layout):
                     batch_windows.append(part)
                     if not fits(messages([part], scoped(groups[0]))):
+                        require_splittable(part, layout, prefix="page_update")
                         # This subdivision already fails. Retry the full frozen
                         # selections before measuring every old-page combination.
                         # The outer condition checks every group before admission.
@@ -130,11 +164,24 @@ async def generate_page_update(
     known_targets_message,
     task_message,
     fits=None,
+    link_registry=None,
 ) -> dict | UnchangedPage:
     from ultrakb.agent.compiler import _llm_call_page_async
 
     fits = fits or update_capacity(windows.kb_dir, model, bundle)
     checkpoints = document_checkpoints(windows.kb_dir, windows.view_id, windows.doc_name)
+    from ultrakb.agent.link_registry import FrozenLinkRegistry, writing_catalogue
+    from ultrakb.agent.link_resolution import request_admitted, retained_link_response
+
+    if link_registry is None and patch.known_targets is not None:
+        link_registry = FrozenLinkRegistry.capture(windows.wiki, patch.known_targets)
+    known_targets_message, link_registry = writing_catalogue(
+        known_targets_message,
+        context=json.dumps([task_message, originals.message], ensure_ascii=False),
+        registry=link_registry,
+    )
+    if link_registry:
+        link_registry.persist(checkpoints)
     page_key = f"page:{page_path.parent.name}/{page_path.name}:{patch.digest}"
     if checkpoints:
         checkpoints.bind_page(
@@ -161,9 +208,14 @@ async def generate_page_update(
             source_ranges=ranges if ranges is not None else patch.source_ranges,
         )
 
+    bounded_original = False
+
+    def evidence_long():
+        return current_original is None or bounded_original
+
     def excerpts(batch):
         result = windows.original_excerpts(
-            replace(originals, windows=tuple(batch)), long=current_original is None
+            replace(originals, windows=tuple(batch)), long=evidence_long()
         )
         result.request_version = request_version(checkpoints)
         return result
@@ -172,33 +224,51 @@ async def generate_page_update(
         check_model_stop()
         result = build_page_messages(
             system_message=system_message,
-            current_original=current_original,
+            current_original=None if bounded_original else current_original,
             original_context=originals.for_windows(batch),
             known_targets_message=known_targets_message,
             task_message={**task_message, "content": task_message["content"] + extra},
             update_message=editable.message(),
         )
         if patch.source_ranges is not None:
-            result.append(windows.page_figures(batch, long=current_original is None).message())
+            result.append(
+                windows.page_figures(batch, long=evidence_long()).message(
+                    compact=request_version(checkpoints) >= 3,
+                    bounded_catalogue=request_version(checkpoints) >= 3,
+                )
+            )
         return excerpts(batch).messages(result)
 
-    requests = prepare_update_requests(
-        patch,
-        originals,
-        windows,
-        messages=messages,
-        fits=fits,
-        scoped=scoped,
-        include_repairs=request_version(checkpoints) != 1,
-    )
+    def prepare():
+        return prepare_update_requests(
+            patch,
+            originals,
+            windows,
+            messages=messages,
+            fits=fits,
+            scoped=scoped,
+            include_repairs=request_version(checkpoints) != 1,
+        )
+
+    try:
+        requests = prepare()
+    except PageResponseError as error:
+        if current_original is None or not (
+            error.code == "page_update_capacity_exceeded"
+            or error.code.startswith("page_update_indivisible_")
+        ):
+            raise
+        # Preserve fitting historical request bytes and accepted editing groups.
+        # Only a complete capacity failure activates the bounded source view.
+        originals = bounded_short_originals(originals, windows)
+        bounded_original = True
+        requests = prepare()
 
     combined_figures = None
     if patch.source_ranges is not None:
         from ultrakb.agent.page_figures import PageFigures
 
-        contexts = [
-            windows.page_figures(batch, long=current_original is None) for batch, _ in requests
-        ]
+        contexts = [windows.page_figures(batch, long=evidence_long()) for batch, _ in requests]
         combined_figures = PageFigures(
             windows.wiki,
             tuple({r["id"]: r for context in contexts for r in context.ranges}.values()),
@@ -211,7 +281,7 @@ async def generate_page_update(
             return scoped(
                 all_blocks if editable.allowed_blocks is None else editable.allowed_blocks,
                 metadata=editable.allow_metadata,
-                ranges=windows.page_figures(batch, long=current_original is None).ids,
+                ranges=windows.page_figures(batch, long=evidence_long()).ids,
             )
         return editable
 
@@ -220,6 +290,8 @@ async def generate_page_update(
         original_excerpts = excerpts(batch)
 
         def validate(raw):
+            if link_registry:
+                raw = link_registry.response(raw)
             return validate_page_delivery(
                 raw,
                 page_update=editable,
@@ -285,6 +357,11 @@ async def generate_page_update(
                 checkpoints=checkpoints,
                 checkpoint_key=key,
                 original_excerpts=excerpts(batch),
+                link_registry=link_registry,
+                request_fits=lambda messages, options: request_admitted(fits, messages, options),
+                initial_response=retained_link_response(
+                    checkpoints, key, signature, stage=key, registry=link_registry
+                ),
             )
             value = (
                 {"status": "unchanged", "base_sha256": result.base_sha256, "reason": result.reason}

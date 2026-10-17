@@ -84,6 +84,22 @@ _SUMMARY_REPAIR_DETAILS = {
     "page_excerpt_invalid": "Use only supplied original excerpt IDs, each on its own line",
 }
 
+_PAGE_REPAIR_DETAILS = {
+    "page_empty_response": "Return one nonempty JSON page object",
+    "page_empty_content": "Return nonempty supported content",
+    "page_duplicate_field": "Every JSON object member must occur exactly once",
+    "page_multiple_objects": "Return exactly one page object",
+    "page_wrong_shape": "Return exactly one JSON object with page fields",
+    "page_wrong_field_type": "Description, content and type must be strings",
+    "page_truncated_json": "Complete every JSON string and object",
+    "page_excerpt_invalid": "Select supplied original excerpt IDs in visible top-level paragraphs.",
+    "page_invalid_source_ranges": "Select only supplied figure source range ID strings.",
+    "page_incomplete_coverage": "Acknowledge every required covered_ranges ID exactly once.",
+    "page_truncated_response": "Return complete JSON and complete statements for this batch.",
+    "page_invalid_response": "Return a nonempty page with string description, content and type.",
+    "page_unchanged_not_allowed": "New pages require nonempty supported content",
+}
+
 _UPDATE_REPAIR_DETAILS = {
     "page_update_invalid": "Use the declared update fields, result type and editing targets",
     "page_update_conflict": "Return at most one consistent set of edits for each target",
@@ -136,7 +152,7 @@ def page_repair_message(
     expected_sections: tuple[str, ...] = (),
     field_errors: tuple[dict, ...] = (),
 ) -> dict:
-    """Summary corrections have finite shapes; raw diagnostics are not model input."""
+    """Keep finite correction rules and a bounded local page-validation reason."""
     from ultrakb.agent.summary_protocol import (
         REFERENCE_REPAIR_HINTS,
         summary_protocol,
@@ -159,6 +175,15 @@ def page_repair_message(
             or detail
             or summary_protocol(response_protocol).structure_hint()
         )
+    elif not page_update:
+        # Keep the local target and specific validation reason, while a field
+        # name, response body or complete ID set remains in the local receipt.
+        rule = _PAGE_REPAIR_DETAILS.get(code, _PAGE_REPAIR_DETAILS["page_invalid_response"])
+        if detail and detail != rule:
+            prefix = " ".join(detail[:256].split())
+            detail = f"{rule}; local validation: {prefix}" + ("…" if len(detail) > 256 else "")
+        else:
+            detail = rule
     return {
         "role": "user",
         "content": (

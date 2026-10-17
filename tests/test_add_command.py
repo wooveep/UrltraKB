@@ -175,23 +175,14 @@ class TestAddCommand:
         assert saved["content"] == "# Coordinated\n"
         assert saved["knowledge_revision_id"] is not None
 
-    def _long_doc_conv(self, kb_dir, name, file_hash):
-        from ultrakb.converter import ConvertResult
+    def test_long_doc_rollback_removes_only_the_new_blob(self, tmp_path):
+        """The add storage seam removes only uncommitted, newly owned blobs.
 
-        return ConvertResult(
-            raw_path=kb_dir / "raw" / f"{name}.pdf",
-            source_path=None,
-            is_long_doc=True,
-            file_hash=file_hash,
-            doc_name=name,
-        )
-
-    def test_long_doc_rollback_removes_only_the_new_blob(self, tmp_path, physical_pdf):
-        """A failed long-doc add must roll back the blob IT created under
-        .ultrakb/files, while a pre-existing blob (another document) survives —
-        the targeted track_new must not touch blobs this add didn't create."""
-        from ultrakb.cli import add_single_file
-        from ultrakb.indexer import IndexResult
+        Validated successful indexes have a separate lifetime; application
+        retention/reuse is covered by test_index_checkpoint.py.
+        """
+        from ultrakb.add_coordinator import AddMutationPlan, run_add_mutation
+        from ultrakb.locks import kb_ingest_lock
 
         kb_dir = self._setup_kb(tmp_path)
         files = kb_dir / ".ultrakb" / "files" / "default"
@@ -201,37 +192,35 @@ class TestAddCommand:
 
         new_id = "11111111-1111-1111-1111-111111111111"
 
-        def fake_index(raw_path, kb_dir_arg, doc_name=None):
-            (files / f"{new_id}.pdf").write_bytes(b"new-blob")
-            (files / new_id / "images").mkdir(parents=True)
-            (files / new_id / "images" / "p1.png").write_bytes(b"img")
-            return IndexResult(doc_id=new_id, description="", tree={"structure": []})
+        def uncommitted_body(snapshot):
+            blob = files / f"{new_id}.pdf"
+            images = files / new_id
+            blob.write_bytes(b"new-blob")
+            (images / "images").mkdir(parents=True)
+            (images / "images/p1.png").write_bytes(b"img")
+            snapshot.track_new([blob, images])
+            raise RuntimeError("Compilation failed before the index was accepted")
 
-        doc = tmp_path / "paper.pdf"
-        doc.write_bytes(physical_pdf.read_bytes())
-        conv = self._long_doc_conv(kb_dir, "paper", "cafebabe00" * 8)
+        with kb_ingest_lock(kb_dir / ".ultrakb"):
+            outcome = run_add_mutation(
+                kb_dir,
+                AddMutationPlan(
+                    operation="add",
+                    details={"doc_name": "paper"},
+                    touched_paths=[],
+                    body=uncommitted_body,
+                ),
+            )
 
-        with (
-            patch("ultrakb.application.documents.convert_document", return_value=conv),
-            patch("ultrakb.indexer.index_long_document", side_effect=fake_index),
-            patch("ultrakb.agent.compiler.compile_long_doc", side_effect=RuntimeError("boom")),
-            patch("ultrakb.application.documents.time.sleep"),
-            patch("ultrakb.cli._setup_llm_key"),
-        ):
-            outcome = add_single_file(doc, kb_dir)
-
-        assert outcome == "failed"
+        assert outcome is False
         assert not (files / f"{new_id}.pdf").exists()  # new blob rolled back
         assert not (files / new_id).exists()  # new images subtree rolled back
         assert other.read_bytes() == b"another-doc-keep-me"  # pre-existing survives
 
-    def test_long_doc_dedup_hit_does_not_delete_existing_blob(self, tmp_path, physical_pdf):
-        """PageIndex content-dedup can return an EXISTING doc_id and write no new
-        blob (diverged hashes.json/pageindex.db). A failed add must NOT delete
-        that pre-existing blob on rollback (regression: track_new globbing the
-        doc_id would otherwise register and delete it)."""
-        from ultrakb.cli import add_single_file
-        from ultrakb.indexer import IndexResult
+    def test_long_doc_dedup_hit_does_not_delete_existing_blob(self, tmp_path):
+        """A deduplicated add owns no new blob and preserves the existing bytes."""
+        from ultrakb.add_coordinator import AddMutationPlan, run_add_mutation
+        from ultrakb.locks import kb_ingest_lock
 
         kb_dir = self._setup_kb(tmp_path)
         files = kb_dir / ".ultrakb" / "files" / "default"
@@ -240,24 +229,22 @@ class TestAddCommand:
         existing_blob = files / f"{existing_id}.pdf"
         existing_blob.write_bytes(b"pre-existing-do-not-delete")
 
-        def fake_index_dedup(raw_path, kb_dir_arg, doc_name=None):
-            # Dedup hit: return the existing doc_id, create NO new blob.
-            return IndexResult(doc_id=existing_id, description="", tree={"structure": []})
+        def deduplicated_body(snapshot):
+            snapshot.track_new([])
+            raise RuntimeError("Compilation failed after a deduplicated index lookup")
 
-        doc = tmp_path / "dup.pdf"
-        doc.write_bytes(physical_pdf.read_bytes())
-        conv = self._long_doc_conv(kb_dir, "dup", "feedface00" * 8)
+        with kb_ingest_lock(kb_dir / ".ultrakb"):
+            outcome = run_add_mutation(
+                kb_dir,
+                AddMutationPlan(
+                    operation="add",
+                    details={"doc_name": "dup"},
+                    touched_paths=[],
+                    body=deduplicated_body,
+                ),
+            )
 
-        with (
-            patch("ultrakb.application.documents.convert_document", return_value=conv),
-            patch("ultrakb.indexer.index_long_document", side_effect=fake_index_dedup),
-            patch("ultrakb.agent.compiler.compile_long_doc", side_effect=RuntimeError("boom")),
-            patch("ultrakb.application.documents.time.sleep"),
-            patch("ultrakb.cli._setup_llm_key"),
-        ):
-            outcome = add_single_file(doc, kb_dir)
-
-        assert outcome == "failed"
+        assert outcome is False
         assert existing_blob.read_bytes() == b"pre-existing-do-not-delete"
 
     def test_add_directory_calls_helper_for_each_file(self, tmp_path):

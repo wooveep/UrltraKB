@@ -38,6 +38,7 @@ def main():
     from ultrakb.desktop.verification_workbench import button
     from ultrakb.desktop.window import Workbench
     from ultrakb.locks import atomic_write_text, kb_ingest_lock
+    from ultrakb.mutation import mutation_scope
     from ultrakb.runtime.records import TERMINAL
     from ultrakb.state import HashRegistry
 
@@ -161,9 +162,10 @@ def main():
         panel.grab().save(str(root / "mixed-selection.png"))
         checks.append("A09: selected 4/applicable 2; exact typed subset and per-item skip reasons")
         with kb_ingest_lock(kb / ".ultrakb"):
-            HashRegistry(kb / ".ultrakb/hashes.json").remove_by_hash("f" * 64)
+            with mutation_scope(kb, [kb / ".ultrakb/hashes.json"], operation="fixture-remove"):
+                HashRegistry(kb / ".ultrakb/hashes.json").remove_by_hash("f" * 64)
         panel.reload()
-        wait(lambda: not window.io._callbacks)
+        wait(lambda: panel.table.rowCount() == 3 and len(panel.selection.checked) == 3)
         assert len(panel.selection.checked) == 3 and "消失资料" in panel.status.text()
         panel.state_filter.setCurrentText("未完成")
         assert not panel.selection.checked and "清空勾选" in panel.status.text()

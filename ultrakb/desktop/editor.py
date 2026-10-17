@@ -18,6 +18,7 @@ from ultrakb.application.pages import Page
 class PageDraft:
     body: str
     version: str
+    publication_id: str | None = None
 
 
 class DraftDialog(QDialog):

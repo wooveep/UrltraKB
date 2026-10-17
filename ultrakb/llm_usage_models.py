@@ -61,11 +61,16 @@ class UsageAggregate(_UsageModel):
     collection_complete: bool
     usage_complete: bool
     request_ids: list[Identity]
+    request_ids_complete: bool = True
     stages: dict[str, StageUsage]
 
     @model_validator(mode="after")
     def consistent(self):
-        if self.requests != len(set(self.request_ids)) or self.requests != len(self.request_ids):
+        if (
+            len(set(self.request_ids)) != len(self.request_ids)
+            or (self.request_ids_complete and self.requests != len(self.request_ids))
+            or len(self.request_ids) > self.requests
+        ):
             raise ValueError("Usage request set does not match its count")
         if self.total_known != self.input_total + self.output_total:
             raise ValueError("Usage total must be the sum of known input and output")

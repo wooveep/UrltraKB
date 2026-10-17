@@ -15,10 +15,8 @@ from PySide6.QtWidgets import (
 )
 
 from ultrakb.application.catalog import knowledge_bases
-from ultrakb.application.knowledge_bases import get_kb_list, get_kb_status, open_kb
 from ultrakb.application.pages import Page, read_page
-from ultrakb.application.reading import read_page_context
-from ultrakb.application.sessions import list_conversations
+from ultrakb.application.reading import read_knowledge_context, read_page_context
 from ultrakb.config import GLOBAL_CONFIG_DIR
 from ultrakb.desktop.brand import NAME
 from ultrakb.desktop.editor import DraftDialog, PageDraft
@@ -42,6 +40,8 @@ class Workbench(QMainWindow):
         self.view_id: str | None = None
         self._requested_page: str | None = None
         self.page: Page | None = None
+        self._knowledge_scope = None
+        self._knowledge_request_id = 0
         self._drafts: dict[tuple[str, str, str], PageDraft] = {}
         self._save_tasks: dict[str, tuple[tuple[str, str], str]] = {}
         self._seen_terminal: set[str] = set()
@@ -85,6 +85,10 @@ class Workbench(QMainWindow):
         from ultrakb.knowledge_scope import live_scope
 
         return live_scope(self.kb, self.view_id) if self.kb and self.view_id else None
+
+    @property
+    def read_scope(self):
+        return self._knowledge_scope
 
     def _watch(self):
         self.shell.navigate("任务")
@@ -237,25 +241,62 @@ class Workbench(QMainWindow):
         self._pending_open = path
 
         def loaded(value, error):
-            if request_id == self._open_request_id:
+            if request_id != self._open_request_id:
+                return
+            if error:
                 self._pending_open = None
-                self._opened(value, error, attempted=path)
-                if not error and self.kb == path and workspace is not None:
+                from ultrakb.desktop.publication_baseline import offer_baseline
+
+                if offer_baseline(self, path, error, request_id, workspace=workspace):
+                    return
+                self._opened(None, error, attempted=path)
+                return
+
+            def current():
+                from ultrakb.lifecycle import current_generation
+                from ultrakb.mutation import RecoveryRequired
+
+                try:
+                    return (
+                        request_id == self._open_request_id
+                        and path not in self._deleting_kbs
+                        and current_generation(path) == value.scope.publication.generation
+                    )
+                except (OSError, ValueError, RecoveryRequired):
+                    return False
+
+            def ready():
+                self._pending_open = None
+                self._opened(
+                    value.scope.kb_dir, None, attempted=path, knowledge=value, rendered=True
+                )
+                if self.kb == path and workspace is not None:
                     self.shell.navigate(workspace)
+
+            if value.context is None:
+                ready()
+            else:
+                page = value.context.page
+                self.reader.show_markdown(
+                    page.body,
+                    (value.scope.wiki_dir / page.path).parent,
+                    preserve=True,
+                    on_ready=ready,
+                    is_current=current,
+                )
 
         if self.kb:
             self.kbs.setCurrentIndex(self.kbs.findData(str(self.kb)))
-        self.statusBar().showMessage(f"正在打开 {path}；若有写入任务，将等待其安全完成。")
+        self.statusBar().showMessage(f"正在打开 {path} 的已公开知识…")
         self.io.submit(
-            lambda: open_kb(path),
+            lambda: read_knowledge_context(path),
             loaded,
             kb=path,
-            exclusive=True,
-            global_settings=True,
+            snapshot=True,
             obsolete=lambda: request_id != self._open_request_id,
         )
 
-    def _opened(self, root, error, *, attempted=None):
+    def _opened(self, root, error, *, attempted=None, knowledge=None, rendered=False):
         from ultrakb.mutation import RecoveryRequired
 
         if isinstance(error, RecoveryRequired) and attempted is not None:
@@ -265,12 +306,14 @@ class Workbench(QMainWindow):
             return
         self._keep_draft()
         self.kb, self.page = root, None
+        self._knowledge_scope = knowledge.scope if knowledge else None
         self.pending_dispatcher.watch(root)
         self.view_id = None
         self.page_context.clear()
         self._page_request_id += 1
         self._chat_task = None
-        self.reader.show_temporary("正在读取当前知识库…")
+        if knowledge is None:
+            self.reader.show_temporary("正在读取当前知识库…")
         self.conversations.reset()
         self.editor.blockSignals(True)
         self.editor.clear()
@@ -285,59 +328,50 @@ class Workbench(QMainWindow):
         self.kbs.setCurrentIndex(index)
         self.kbs.setToolTip(str(root))
         self.workspaces.reset()
+        if knowledge is not None:
+            from ultrakb.desktop.knowledge_loading import (
+                apply_knowledge,
+                load_details,
+                load_sessions,
+            )
+
+            request_id = self._open_request_id
+
+            def obsolete():
+                return (
+                    self.kb != root
+                    or root in self._deleting_kbs
+                    or request_id != self._open_request_id
+                )
+
+            apply_knowledge(
+                self,
+                knowledge,
+                on_ready=lambda: load_details(self, knowledge.scope, obsolete),
+                rendered=rendered,
+            )
+            load_sessions(self, root, self.view_id, obsolete)
+            from ultrakb.config import register_kb
+
+            self.io.submit(
+                lambda: register_kb(root),
+                lambda value, error: self._error(error),
+                kb=root,
+                global_settings=True,
+                obsolete=obsolete,
+            )
+        else:
+            self._refresh()
         self.conversations.recover(root)
         self.onboarding.switched(root)
 
     def _refresh(self):
-        if self.kb is None or self.kb in self._deleting_kbs:
-            return
-        root = self.kb
-        scope, view_id = self.scope, self.view_id
-        request_id = self._open_request_id
+        from ultrakb.desktop.knowledge_loading import refresh
 
-        def obsolete():
-            return (
-                root != self.kb
-                or view_id != self.view_id
-                or request_id != self._open_request_id
-                or root in self._deleting_kbs
-            )
-
-        def read():
-            from ultrakb.application.knowledge import list_knowledge
-
-            return (
-                list_knowledge(root, scope=scope),
-                list_conversations(root, view_id=view_id),
-                get_kb_list(root, scope=scope),
-                get_kb_status(root, scope=scope),
-            )
-
-        def loaded(value, error):
-            if obsolete() or self._error(error):
-                return
-            pages, sessions, info, status = value
-            self.workspaces.overview_loaded(info, status)
-            self.workspaces.knowledge.set_entries(pages)
-            if self.page:
-                self.workspaces.select_page(self.page.path)
-            self.conversations.catalog_loaded(sessions)
-            self.statusBar().showMessage(f"{root.name} · {info.get('document_count', 0)} 份资料")
-            if self.page is None and not getattr(self, "_page_loading", False):
-                if pages:
-                    self.open_page(pages[0].path, activate=False)
-                else:
-                    self.location.setText("我的知识")
-                    self.reader.show_temporary(
-                        "还没有知识页面。\n\n从「资料」导入文件或网址，整理完成后即可阅读、关联和提问。"
-                    )
-
-        self.io.submit(read, loaded, kb=root, global_settings=True, obsolete=obsolete)
+        refresh(self)
 
     def _refresh_current(self):
         self._refresh()
-        if self.page:
-            self.open_page(self.page.path, activate=False)
 
     def _activate_page(self, item, column):
         path = item.data(0, Qt.ItemDataRole.UserRole)
@@ -348,7 +382,7 @@ class Workbench(QMainWindow):
         if self.kb is None or self.kb in self._deleting_kbs:
             return
         root = self.kb
-        scope, view_id = self.scope, self.view_id
+        scope = self.read_scope
         self._requested_page = path.removesuffix(".md")
         self._page_request_id += 1
         request_id = self._page_request_id
@@ -362,48 +396,35 @@ class Workbench(QMainWindow):
             self.shell.navigate("知识")
             self.tabs.setCurrentIndex(0)
             self.location.setText(f"正在读取「{Path(target).name}」…")
-            self.reader.show_temporary(f"正在读取「{Path(target).name}」…")
             self.save_button.setEnabled(False)
             self.workspaces.ask_page.setEnabled(False)
 
         def loaded(context, error):
             if self.kb != root or request_id != self._page_request_id:
                 return
-            self._page_loading = False
             if error:
+                self._page_loading = False
                 self._requested_page = None
                 self.save_button.setEnabled(False)
                 self.workspaces.ask_page.setEnabled(False)
                 self.location.setText(f"「{Path(target).name}」读取失败，点击标题可重试。")
-                self.reader.show_temporary("读取失败。请点击知识目录中的标题重试。")
+                if self.page is None:
+                    self.reader.show_temporary("读取失败。请点击知识目录中的标题重试。")
                 self._error(error)
                 return
-            page = context.page
-            self.page = page
-            self.workspaces.select_page(page.path)
-            self.page_context.show_context(root, context)
-            editable = page.path.split("/")[0] in EDITABLE_SECTIONS
-            self.save_button.setEnabled(editable)
-            self.editor.setReadOnly(not editable)
-            draft = self._drafts.get((str(root), view_id or "legacy", page.path))
-            self.editor.blockSignals(True)
-            self.editor.setPlainText(draft.body if draft else page.body)
-            self.editor.blockSignals(False)
-            from ultrakb.application.knowledge import KNOWLEDGE_LABELS, page_title
+            from ultrakb.desktop.knowledge_loading import display_context
 
-            section = KNOWLEDGE_LABELS.get(page.path.split("/")[0], "阅读")
-            self.location.setText(f"{section}  /  {page_title(page.content, Path(page.path).name)}")
-            self.workspaces.ask_page.setEnabled(True)
-            self.reader.show_markdown(
-                page.body,
-                ((scope.wiki_dir if scope else root / "wiki") / page.path).parent,
-                anchor=anchor,
-            )
+            display_context(self, context, scope, anchor=anchor)
+
+        if scope is None:
+            self._refresh()
+            return
 
         self.io.submit(
             lambda: read_page_context(root, path, scope=scope),
             loaded,
             kb=root,
+            snapshot=True,
             obsolete=lambda: root != self.kb or request_id != self._page_request_id,
             on_wait=lambda: self.location.setText(
                 f"正在等待知识库完成当前写入，随后打开「{Path(target).name}」…"
@@ -421,7 +442,10 @@ class Workbench(QMainWindow):
             self.location.setText(self._page_restore_location)
             self.reader.show_markdown(
                 self.page.body,
-                ((self.scope.wiki_dir if self.scope else self.kb / "wiki") / self.page.path).parent,
+                (
+                    (self.read_scope.wiki_dir if self.read_scope else self.kb / "wiki")
+                    / self.page.path
+                ).parent,
             )
             self.save_button.setEnabled(self.page.path.split("/")[0] in EDITABLE_SECTIONS)
             self.workspaces.ask_page.setEnabled(True)
@@ -439,6 +463,7 @@ class Workbench(QMainWindow):
             self._drafts[key] = PageDraft(
                 self.editor.toPlainText(),
                 previous.version if previous else self.page.version,
+                previous.publication_id if previous else self.page.publication_id,
             )
 
     def _save_page(self):
@@ -446,10 +471,21 @@ class Workbench(QMainWindow):
             return
         self._keep_draft()
         key = (str(self.kb), self.view_id or "legacy", self.page.path)
-        draft = self._drafts.get(key, PageDraft(self.page.body, self.page.version))
+        draft = self._drafts.get(
+            key, PageDraft(self.page.body, self.page.version, self.page.publication_id)
+        )
         body, version = draft.body, draft.version
         task_id = self.manager.submit(
-            self.kb, [SavePage(self.page.path, body, version, view_id=self.view_id)]
+            self.kb,
+            [
+                SavePage(
+                    self.page.path,
+                    body,
+                    version,
+                    view_id=self.view_id,
+                    publication_id=draft.publication_id,
+                )
+            ],
         )
         self._save_tasks[task_id] = (key, body)
         self.statusBar().showMessage("保存任务已提交；出现版本冲突时草稿会保留。")
@@ -458,7 +494,7 @@ class Workbench(QMainWindow):
         if not self.kb or not self.page or self.kb in self._deleting_kbs:
             return
         root, path = self.kb, self.page.path
-        scope, view_id = self.scope, self.view_id
+        view_id = self.view_id
         request_id = self._page_request_id
         self._keep_draft()
 
@@ -482,14 +518,17 @@ class Workbench(QMainWindow):
             if dialog.exec():
                 self.page = latest
                 self._drafts[(str(root), view_id or "legacy", path)] = PageDraft(
-                    dialog.draft.toPlainText(), latest.version
+                    dialog.draft.toPlainText(), latest.version, latest.publication_id
                 )
                 self.editor.setPlainText(dialog.draft.toPlainText())
                 self._save_page()
 
-        self.io.submit(
-            lambda: read_page(root, path, scope=scope), loaded, kb=root, obsolete=obsolete
-        )
+        def read_latest():
+            from ultrakb.application.views import published_scope
+
+            return read_page(root, path, scope=published_scope(root, view_id or "legacy"))
+
+        self.io.submit(read_latest, loaded, kb=root, snapshot=True, obsolete=obsolete)
 
     def _export_draft(self):
         if not self.page:
@@ -537,7 +576,7 @@ class Workbench(QMainWindow):
             self.open_page(url.path(QUrl.ComponentFormattingOption.FullyDecoded), url.fragment())
         elif url.isLocalFile():
             path = Path(url.toLocalFile()).resolve()
-            wiki = self.scope.wiki_dir if self.scope else self.kb / "wiki"
+            wiki = self.read_scope.wiki_dir if self.read_scope else self.kb / "wiki"
             if path.is_relative_to(wiki) and path.suffix == ".md":
                 self.open_page(str(path.relative_to(wiki)), url.fragment())
         elif not url.scheme() and url.fragment():
@@ -654,19 +693,17 @@ class Workbench(QMainWindow):
             current_body = self.editor.toPlainText() if active else draft.body if draft else body
             confirmed = task.results[-1].page
             if version and (current_body != body or confirmed is None):
-                self._drafts[key] = PageDraft(current_body, version)
+                self._drafts[key] = PageDraft(
+                    current_body, version, confirmed.publication_id if confirmed else None
+                )
             else:
                 self._drafts.pop(key, None)
             if active and confirmed:
-                # The receipt carries exactly the page this save committed.
-                # A later filesystem read could silently adopt another writer's
-                # unseen version and authorize overwriting it on the next save.
-                self.page = confirmed
-                self.page_context.invalidate()
-                if not self._quitting:
-                    self.reader.show_markdown(
-                        confirmed.body, (Path(key[0]) / "wiki" / key[1]).parent
-                    )
+                # Retain the opened save baseline while a complete public
+                # context is prepared; the displayed old context stays coherent.
+                self._drafts[key] = PageDraft(
+                    current_body, confirmed.version, confirmed.publication_id
+                )
                 if current_body == body:
                     self.editor.blockSignals(True)
                     self.editor.setPlainText(confirmed.body)

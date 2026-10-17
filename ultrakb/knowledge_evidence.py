@@ -65,10 +65,30 @@ def publication_originals(kb_dir, view_id, inputs, dependencies, wiki, pages) ->
 
 
 def page_evidence(scope: KnowledgeScope, page: str) -> dict:
+    if scope.publication is not None:
+        public = scope.publication
+        dependencies = public.manifest.page_dependencies.get(page, ())
+        reasons = public.head.needs_refresh.get(page, ())
+        return {
+            "validity": "needs_refresh" if reasons else "current",
+            "knowledge_revision_id": public.knowledge_revision_id,
+            "source_revision_ids": tuple(
+                sorted(
+                    {
+                        validated_input(public.metadata_dir, identity, scope.view_id)[
+                            1
+                        ].source_revision_id
+                        for identity in dependencies
+                    }
+                    | {reason.source_revision_id for reason in reasons if not dependencies}
+                )
+            ),
+            "refresh_reasons": tuple(reason.model_dump(mode="json") for reason in reasons),
+        }
     head = read_head(scope.kb_dir, scope.view_id)
     directory = (
         scope.wiki_dir.parent
-        if scope.read_only
+        if scope.historical
         else (
             scope.kb_dir
             / ".ultrakb/knowledge"
@@ -103,13 +123,13 @@ def page_evidence(scope: KnowledgeScope, page: str) -> dict:
                 | {
                     r.source_revision_id
                     for r in head.needs_refresh.get(page, ())
-                    if not scope.read_only and not dependencies and scope.view_id == "legacy"
+                    if not scope.historical and not dependencies and scope.view_id == "legacy"
                 }
             )
         ),
         "refresh_reasons": tuple(
             r.model_dump(mode="json") for r in head.needs_refresh.get(page, ())
         )
-        if not scope.read_only
+        if not scope.historical
         else (),
     }

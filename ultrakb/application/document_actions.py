@@ -7,8 +7,7 @@ from typing import Literal
 from ultrakb.application.knowledge_bases import get_kb_list
 from ultrakb.application.query_views import resolve_query_views
 from ultrakb.documents import read_document_source
-from ultrakb.knowledge_scope import KnowledgeScope
-from ultrakb.locks import kb_read_lock
+from ultrakb.knowledge_scope import KnowledgeScope, reading_scope, resolve_scope
 
 
 @dataclass(frozen=True, order=True)
@@ -63,7 +62,8 @@ def document_inventory(
     kb_dir: Path, *, scope: KnowledgeScope | None = None
 ) -> tuple[DocumentRow, ...]:
     """Use the same retained bodies and query snapshot as reading and asking."""
-    with kb_read_lock(kb_dir / ".ultrakb"):
+    scope = resolve_scope(kb_dir, scope)
+    with reading_scope(scope):
         documents = get_kb_list(kb_dir, scope=scope)["documents"]
         source_ids = {doc["source_id"] for doc in documents if doc.get("source_id")}
         legacy_ids = {doc["hash"] for doc in documents if not doc.get("source_id")}
@@ -77,12 +77,21 @@ def document_inventory(
             if identity.kind == "source":
                 from ultrakb.source_catalog import read_source, read_source_revision
 
-                source = read_source(kb_dir, identity.value)
+                if scope.publication is not None:
+                    from ultrakb.source_catalog import read_record
+                    from ultrakb.source_records import Source, SourceRevision
+
+                    metadata = scope.publication.metadata_dir
+                    source = read_record(metadata, "sources", identity.value, Source)
+                    target = read_record(
+                        metadata, "source-revisions", source.target_revision_id, SourceRevision
+                    )
+                else:
+                    source = read_source(kb_dir, identity.value)
+                    target = read_source_revision(kb_dir, source.target_revision_id)
                 doc["location"] = source.identity
                 doc["target_source_revision_id"] = source.target_revision_id
-                doc["original_kind"] = read_source_revision(
-                    kb_dir, source.target_revision_id
-                ).original_kind
+                doc["original_kind"] = target.original_kind
             units = doc.get("units", [])
             read = False
             body_names = []
@@ -124,7 +133,7 @@ def document_inventory(
                     unit.get("successful_source_revision_id") in readable_revisions
                     for unit in units
                 )
-            mutable = not (scope and scope.read_only)
+            mutable = not scope.historical
             unfinished = identity.kind == "source" and (
                 not units
                 or any(

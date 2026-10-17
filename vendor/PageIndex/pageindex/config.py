@@ -26,6 +26,9 @@ class IndexConfig(BaseModel):
     max_navigation_depth: int = Field(default=8, ge=1, le=32)
     max_nodes_per_unit: int = Field(default=4, ge=1, le=32)
     max_subtree_attempts: int = Field(default=2, ge=1, le=3)
+    # Scheduling is not part of semantic checkpoint identity. One restores
+    # per-node requests while preserving receipts accepted in larger batches.
+    node_batch_size: int = Field(default=8, ge=1, le=8, strict=True, exclude=True)
     if_add_node_id: bool = True
     if_add_node_summary: bool = True
     if_add_doc_description: bool = True

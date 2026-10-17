@@ -262,6 +262,18 @@ def test_api_error_exits_preserve_received_status_retry_bound_and_committed_stat
         assert len(errors) == 1 and error_type.__name__ in errors[0]["message"]
         assert not any(name in {"delta", "final"} for name, data in events)
         usages = [data for name, data in events if name == "model_usage"]
+        complete = [data for data in usages if data["current"].get("request_ids_complete", True)]
+        assert len(complete) == 1 and complete[0] is usages[-1]
+        assert any(not data["current"].get("request_ids_complete", True) for data in usages)
+        assert not any(name == "model_usage_progress" for name, _ in events)
+        assert set(complete[0]["current"]["request_ids"]) == {
+            record.request_attempt_id for record in read_requests(kb_dir)
+        }
+        assert complete[0]["current"]["requests"] == len(complete[0]["current"]["request_ids"])
+        assert complete[0]["cumulative"].get("request_ids_complete", True)
+        assert set(complete[0]["cumulative"]["request_ids"]) == set(
+            complete[0]["current"]["request_ids"]
+        )
         assert usages[-1]["current"]["actual_sends"] == sends
         assert usages[-1]["current"]["unknown_requests"] == sends
         assert usages[-1]["current"]["in_flight_requests"] == 0
@@ -274,3 +286,60 @@ def test_api_error_exits_preserve_received_status_retry_bound_and_committed_stat
         assert "answer" not in body and "saved_path" not in body
     _assert_content_preserved(kb_dir, before)
     _assert_conversation_not_committed(kb_dir, operation, previous, question)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["query", "new-chat"])
+async def test_answer_stream_model_stop_keeps_one_complete_terminal_receipt(
+    kb_dir, isolated_application, operation
+):
+    import threading
+
+    from ultrakb.application.streams import answer_events
+
+    gate = threading.Event()
+    entered = asyncio.Event()
+    contexts = []
+    observed = []
+
+    async def operation_with_context(context):
+        contexts.append(context)
+        return await (
+            ask_question(kb_dir, "Read the original measurement.", context=context)
+            if operation == "query"
+            else continue_conversation(kb_dir, "Read the original measurement.", context=context)
+        )
+
+    async def consume():
+        async for event in answer_events(operation_with_context):
+            observed.append(event)
+            if event.get("event") == "model_usage":
+                entered.set()
+
+    with ErrorTransport(status=400, gate=gate) as service:
+        _configure_model(kb_dir, service)
+        consumer = asyncio.create_task(consume())
+        try:
+            assert await asyncio.to_thread(service.wait_for_requests, 1)
+            await asyncio.wait_for(entered.wait(), timeout=3)
+            contexts[0].executor.cancel()
+            # Let the application's 50-ms stop polling observe cancellation
+            # while HTTP is still gated, then deliver within its 250-ms drain.
+            await asyncio.sleep(0.1)
+            gate.set()
+            await asyncio.wait_for(consumer, timeout=10)
+        finally:
+            gate.set()
+            if not consumer.done():
+                consumer.cancel()
+            await asyncio.gather(consumer, return_exceptions=True)
+    usages = [row["data"] for row in observed if row.get("event") == "model_usage"]
+    complete = [row for row in usages if row["current"].get("request_ids_complete", True)]
+    assert len(complete) == 1 and complete[0] is usages[-1]
+    [result] = [row["data"] for row in observed if row.get("event") == "result"]
+    assert result.status == "stopped" and result.model_usage == complete[0]
+    [record] = read_requests(kb_dir)
+    assert record.business_state == "cancelled"
+    assert complete[0]["current"]["request_ids"] == [record.request_attempt_id]
+    assert complete[0]["current"]["actual_sends"] == 1
+    assert complete[0]["current"]["in_flight_requests"] == 0

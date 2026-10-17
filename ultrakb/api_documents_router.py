@@ -16,7 +16,7 @@ from starlette.concurrency import run_in_threadpool
 
 from ultrakb.api_helpers import _resolve_kb, require_bearer_token
 from ultrakb.api_models import DocumentSourceRequest, DocumentSourceResponse
-from ultrakb.api_views import ViewRequest, resolve_api_scope
+from ultrakb.api_views import ViewRequest, resolve_api_read_scope, resolve_api_scope
 from ultrakb.documents import read_document_source
 from ultrakb.source_pages import PageRangeError
 
@@ -88,19 +88,12 @@ async def document_source_endpoint(
     _: None = Depends(require_bearer_token),
 ) -> DocumentSourceResponse:
     kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
-    scope = await resolve_api_scope(kb_dir, request.view_id)
-    if request.knowledge_revision_id:
-        from ultrakb.application.views import view_scope
-
-        try:
-            scope = await asyncio.to_thread(
-                view_scope,
-                kb_dir,
-                request.view_id or "legacy",
-                historical_revision=request.knowledge_revision_id,
-            )
-        except (OSError, ValueError) as exc:
-            raise HTTPException(status_code=404, detail="Knowledge revision unavailable.") from exc
+    scope = await resolve_api_read_scope(
+        kb_dir,
+        request.view_id,
+        request.publication_id,
+        knowledge_revision_id=request.knowledge_revision_id,
+    )
     try:
         result = await run_in_threadpool(
             read_document_source,

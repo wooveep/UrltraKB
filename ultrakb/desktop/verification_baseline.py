@@ -8,9 +8,22 @@ def verify_baseline(window, kb, root, wait):
     from ultrakb.desktop.conversation_activity import task_status
     from ultrakb.desktop.source_reader import SourceReader
     from ultrakb.locks import atomic_write_json, atomic_write_text, kb_ingest_lock
+    from ultrakb.mutation import mutation_scope
+    from ultrakb.published_knowledge import read_publication
     from ultrakb.runtime.records import TaskView
 
-    with kb_ingest_lock(kb / ".ultrakb"):
+    with (
+        kb_ingest_lock(kb / ".ultrakb"),
+        mutation_scope(
+            kb,
+            [
+                kb / "wiki/sources/短文.md",
+                kb / "wiki/sources/长文.json",
+                kb / ".ultrakb/hashes.json",
+            ],
+            operation="verify-baseline-documents",
+        ),
+    ):
         atomic_write_text(kb / "wiki/sources/短文.md", "# 短文\n\n原始 Markdown 正文。")
         atomic_write_json(
             kb / "wiki/sources/长文.json",
@@ -26,11 +39,20 @@ def verify_baseline(window, kb, root, wait):
                 "b" * 64: {"name": "长文.pdf", "doc_name": "长文", "type": "long_pdf"},
             },
         )
+    publication_id = read_publication(kb).publication_id
     window.open_knowledge_base(kb)
-    wait(lambda: window.kb == kb and not window.io._callbacks)
+    wait(
+        lambda: window.kb == kb
+        and window.read_scope is not None
+        and window.read_scope.publication_id == publication_id
+    )
     window.shell.navigate("资料")
     panel = window.workspaces.panels["资料"][0]
-    wait(lambda: panel.table.rowCount() == 2)
+    wait(
+        lambda: panel.table.rowCount() == 2
+        and not panel._inventory_loading
+        and panel.read_scope.publication_id == publication_id
+    )
     assert panel.table.columnCount() == 4
     assert all(panel.table.item(row, 2).text() == "已导入（旧资料）" for row in range(2))
     assert not panel.details.isVisible()

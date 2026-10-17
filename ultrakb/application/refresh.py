@@ -364,6 +364,12 @@ async def refresh_selected_sources(
                 config = resolve_effective_config(kb_dir)[0]
                 resolved, owners, reconciled = {}, {}, {}
                 readers: dict = {}
+                from ultrakb.agent.link_registry import FrozenLinkRegistry
+                from ultrakb.lint import list_existing_wiki_targets
+
+                link_registry = FrozenLinkRegistry.capture(
+                    view.scope.wiki_dir, list_existing_wiki_targets(view.scope.wiki_dir)
+                )
                 with (
                     mutation_scope(
                         kb_dir, [view.scope.wiki_dir.parent], operation="refresh-selected-sources"
@@ -399,6 +405,7 @@ async def refresh_selected_sources(
                                     config,
                                     bundle,
                                     readers,
+                                    link_registry=link_registry,
                                 )
                                 resolved[page] = pending
                     if (

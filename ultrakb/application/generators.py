@@ -271,8 +271,11 @@ async def generate_artifact(
                 failure: Exception | None = None
                 quality_diff_failed = False
                 context.on_event({"stage": "generating"})
+                from ultrakb.model_outputs import model_output_scope
+
                 with (
                     mutation_scope(kb_dir, roots, operation="generate-artifact"),
+                    model_output_scope(kb_dir),
                     preserve_artifact_history(kb_dir, target=target) as history,
                 ):
                     try:

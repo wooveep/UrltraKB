@@ -150,7 +150,12 @@ async def ask_question(
                             context.check_stop()
                             answer = event["data"]["answer"]
                             unfinished_stage = "save answer"
-                            with context.activity("saving"):
+                            from ultrakb.published_knowledge import knowledge_operation
+
+                            with (
+                                context.activity("saving"),
+                                knowledge_operation(root, operation="save-query-result"),
+                            ):
                                 path = (
                                     save_exploration(root, question, answer, scope=scope)
                                     if save

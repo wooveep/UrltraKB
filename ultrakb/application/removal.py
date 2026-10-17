@@ -312,6 +312,22 @@ def _execute_remove_plan(
     keep_empty: bool,
     scope: KnowledgeScope | None = None,
 ) -> RemoveResult:
+    from ultrakb.published_knowledge import knowledge_operation
+
+    with knowledge_operation(
+        kb_dir, operation="remove-document", paths=tuple(_commit_paths(kb_dir, plan, scope=scope))
+    ):
+        return _execute_remove_contents(kb_dir, plan, registry, keep_empty=keep_empty, scope=scope)
+
+
+def _execute_remove_contents(
+    kb_dir: Path,
+    plan: RemovePlan,
+    registry,
+    *,
+    keep_empty: bool,
+    scope: KnowledgeScope | None = None,
+) -> RemoveResult:
     """Carry out a remove plan. Registry write is the commit point.
 
     Every step before ``registry.remove_by_hash`` is idempotent, so a

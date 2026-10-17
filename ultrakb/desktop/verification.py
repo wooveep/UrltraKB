@@ -59,6 +59,7 @@ def main() -> int:
     from ultrakb.application.knowledge_bases import initialize_kb
     from ultrakb.application.pages import read_page, save_page
     from ultrakb.locks import atomic_write_text, kb_ingest_lock
+    from ultrakb.mutation import mutation_scope
 
     config.GLOBAL_CONFIG_DIR = root / "settings"
     config.GLOBAL_CONFIG_PATH = root / "settings/global.yaml"
@@ -122,7 +123,10 @@ flowchart LR
 print("UltraKB")  # fenced_code 中文知识
 ```
 """
-    with kb_ingest_lock(first / ".ultrakb"):
+    with (
+        kb_ingest_lock(first / ".ultrakb"),
+        mutation_scope(first, [page_path], operation="verify-native-page"),
+    ):
         atomic_write_text(page_path, source)
     window = Workbench(history_dir=root / "tasks")
     window.show()

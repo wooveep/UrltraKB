@@ -118,7 +118,7 @@ class PageFigures:
     def ids(self) -> tuple[str, ...]:
         return tuple(r["id"] for r in self.ranges)
 
-    def message(self, *, compact: bool = False) -> dict:
+    def message(self, *, compact: bool = False, bounded_catalogue: bool = False) -> dict:
         ranges = self.ranges
         sources = {}
         if compact:
@@ -132,7 +132,12 @@ class PageFigures:
                 identity = digest(source)
                 sources[identity] = source
                 projected.append(
-                    {k: value[k] for k in ("id", "location", "label", "figures")}
+                    {k: value[k] for k in ("id", "location", "label")}
+                    | (
+                        {"figure_count": len(value["figures"])}
+                        if bounded_catalogue
+                        else {"figures": value["figures"]}
+                    )
                     | {"source": identity}
                 )
             ranges = tuple(projected)
@@ -141,7 +146,9 @@ class PageFigures:
             "content": "Figure source ranges:\n"
             + json.dumps(
                 {
-                    "protocol": "page-source-ranges-v2",
+                    "protocol": "page-source-ranges-v3"
+                    if bounded_catalogue
+                    else "page-source-ranges-v2",
                     "ranges": ranges,
                     **({"sources": sources} if compact else {}),
                     "source_ranges_schema": {

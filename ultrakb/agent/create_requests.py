@@ -123,23 +123,50 @@ def partition_originals(originals, windows, fits):
         raise PageResponseError(
             "page_create_capacity_exceeded", "Indivisible current original is too large"
         )
+    from ultrakb.agent.source_fragments import (
+        fragment_layouts,
+        iter_fragments,
+        require_splittable,
+    )
+
+    layouts = fragment_layouts(initial)
     budget = 24000
     batch_windows = initial
     while any(not fits([part], True) for part in batch_windows):
         budget //= 2
         if budget < 32:
+            details = tuple(
+                {
+                    "path": part["path"],
+                    "native_location": part["native_location"],
+                    "selection_span": [
+                        part["selection_offset"],
+                        part["selection_offset"] + len(part["content"]),
+                    ],
+                    "component_bytes": {
+                        name: len(json.dumps(value, ensure_ascii=False).encode())
+                        for name, value in part.items()
+                    },
+                }
+                for part in batch_windows
+            )
+            location = ", ".join(
+                f"{part['path']} selection characters {part['selection_span']}" for part in details
+            )
             raise PageResponseError(
-                "page_create_capacity_exceeded", "Indivisible original metadata cannot fit"
+                "page_create_capacity_exceeded",
+                f"Indivisible required source metadata cannot fit at {location}; original retained",
+                field_errors=details,
             )
         unique = {selection_key(w): w for w in initial}
         batch_windows = []
         rejected = False
         for original in unique.values():
-            location = {k: v for k, v in original["native_location"].items() if k != "offset"}
-            for part in windows.iter_selection(original["path"], location, budget=budget):
-                part = {**part, "source_role": original.get("source_role", "current")}
+            layout = layouts[selection_key(original)]
+            for part in iter_fragments(windows, original, budget=budget, layout=layout):
                 batch_windows.append(part)
                 if not fits([part], True):
+                    require_splittable(part, layout)
                     rejected = True
                     break
             if rejected:

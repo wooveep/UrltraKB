@@ -29,7 +29,10 @@ def append_log(
     entry = f"## [{date_str}] {operation} | {description}\n\n"
 
     with kb_ingest_lock(root / ".ultrakb"):
+        from ultrakb.mutation import mutation_scope
+
         content = (
             log_path.read_text(encoding="utf-8") if log_path.exists() else "# Operations Log\n\n"
         )
-        atomic_write_text(log_path, content + entry)
+        with mutation_scope(root, [log_path], operation="append-operation-log"):
+            atomic_write_text(log_path, content + entry)

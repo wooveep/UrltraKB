@@ -1,5 +1,9 @@
 """PageIndex's narrow runtime adapter; no vendor dependency on UltraKB."""
 
+import asyncio
+from concurrent.futures import Future
+from threading import Lock
+
 from pageindex.llm import IndexResponse
 
 from ultrakb.llm_execution import CompletionExecutor, ModelRequest
@@ -9,6 +13,8 @@ class PageIndexLLM:
     def __init__(self, executor: CompletionExecutor):
         self.executor = executor
         self.checkpoints = None
+        self._responses: dict[str, Future[IndexResponse]] = {}
+        self._response_lock = Lock()
 
     def _request(self, messages, stage):
         return ModelRequest(
@@ -61,7 +67,21 @@ class PageIndexLLM:
 
     def _load(self, key):
         self.executor.policy.check()
-        return self.checkpoints.load(key, once=True) if self.checkpoints else None
+        return self.checkpoints.load(key) if self.checkpoints else None
+
+    def retained_response(self, messages, *, stage):
+        """Read an exact frozen request's delivered response without sending it."""
+        self.executor.policy.check()
+        cached = self.checkpoints.load(self._key(messages, stage)) if self.checkpoints else None
+        return IndexResponse(**cached) if cached is not None else None
+
+    def _claim(self, key):
+        with self._response_lock:
+            if key in self._responses:
+                return self._responses[key], False
+            future: Future[IndexResponse] = Future()
+            self._responses[key] = future
+            return future, True
 
     def _receive(self, key):
         def save(response):
@@ -92,18 +112,37 @@ class PageIndexLLM:
         key = self._key(messages, stage)
         if cached := self._load(key):
             return IndexResponse(**cached)
-        return self._response(
-            self.executor.complete(
-                "document_index", self._request(messages, stage), on_response=self._receive(key)
-            )
-        )
+        future, owner = self._claim(key)
+        if owner:
+            try:
+                result = self._response(
+                    self.executor.complete(
+                        "document_index",
+                        self._request(messages, stage),
+                        on_response=self._receive(key),
+                    )
+                )
+            except BaseException as error:
+                future.set_exception(error)
+                raise
+            future.set_result(result)
+        return future.result()
 
     async def acomplete(self, messages, *, stage):
         key = self._key(messages, stage)
         if cached := self._load(key):
             return IndexResponse(**cached)
-        return self._response(
-            await self.executor.acomplete(
-                "document_index", self._request(messages, stage), on_response=self._receive(key)
+        future, owner = self._claim(key)
+        if not owner:
+            return await asyncio.shield(asyncio.wrap_future(future))
+        try:
+            result = self._response(
+                await self.executor.acomplete(
+                    "document_index", self._request(messages, stage), on_response=self._receive(key)
+                )
             )
-        )
+        except BaseException as error:
+            future.set_exception(error)
+            raise
+        future.set_result(result)
+        return result

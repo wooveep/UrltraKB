@@ -7,7 +7,7 @@ from pydantic import Field
 from ultrakb.file_state import contained_paths
 from ultrakb.source_records import Record
 
-WRITER_VERSION = 3
+WRITER_VERSION = 4
 
 
 class UnsupportedCatalogWriter(ValueError):
@@ -30,6 +30,7 @@ SUPPORTED_CAPABILITIES = frozenset(
         "pending-import-receipts-v1",
         "html-empty-admission-v1",
         "cnki-conversion-v1",
+        "post-commit-publication-v1",
     }
 )
 

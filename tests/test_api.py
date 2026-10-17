@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 
 import yaml
 from fastapi.testclient import TestClient
+from publication_read_inputs import page_preconditions, publish_fixture
 
 from ultrakb.api import create_app
 
@@ -838,6 +839,7 @@ def test_list_endpoint_returns_empty_inventory(monkeypatch, kb_dir):
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
 
+    published = publish_fixture(kb_dir)
     response = client.post(
         "/api/v1/list",
         json={"kb": kb},
@@ -846,6 +848,7 @@ def test_list_endpoint_returns_empty_inventory(monkeypatch, kb_dir):
 
     assert response.status_code == 200
     assert response.json() == {
+        "publication_id": published.publication_id,
         "documents": [],
         "document_count": 0,
         "summaries": [],
@@ -868,6 +871,7 @@ def test_list_endpoint_returns_structured_inventory(monkeypatch, kb_dir):
     reports_dir = kb_dir / "wiki" / "reports"
     (reports_dir / "lint_20260101_000000.md").write_text("# Report", encoding="utf-8")
 
+    publish_fixture(kb_dir)
     response = client.post(
         "/api/v1/list",
         json={"kb": kb},
@@ -909,6 +913,7 @@ def test_list_endpoint_includes_entities(monkeypatch, kb_dir):
     (kb_dir / "wiki" / "entities" / "nvidia.md").write_text("# NVIDIA", encoding="utf-8")
     (kb_dir / "wiki" / "entities" / "anthropic.md").write_text("# Anthropic", encoding="utf-8")
 
+    publish_fixture(kb_dir)
     response = client.post("/api/v1/list", json={"kb": kb}, headers=_auth())
 
     assert response.status_code == 200
@@ -930,6 +935,7 @@ def test_status_endpoint_returns_structured_counts(monkeypatch, kb_dir):
         encoding="utf-8",
     )
 
+    publish_fixture(kb_dir)
     response = client.post(
         "/api/v1/status",
         json={"kb": kb},
@@ -1907,6 +1913,7 @@ def test_graph_endpoint_returns_build_graph_shape(monkeypatch, kb_dir):
         "---\ntype: concept\n---\nNo links here.", encoding="utf-8"
     )
 
+    publish_fixture(kb_dir)
     response = client.post("/api/v1/graph", json={"kb": kb}, headers=_auth())
 
     assert response.status_code == 200
@@ -1920,10 +1927,16 @@ def test_graph_endpoint_empty_wiki_returns_empty_shape(monkeypatch, kb_dir):
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
 
+    published = publish_fixture(kb_dir)
     response = client.post("/api/v1/graph", json={"kb": kb}, headers=_auth())
 
     assert response.status_code == 200
-    assert response.json() == {"nodes": [], "edges": [], "types": []}
+    assert response.json() == {
+        "publication_id": published.publication_id,
+        "nodes": [],
+        "edges": [],
+        "types": [],
+    }
 
 
 def test_graph_html_endpoint_returns_self_contained_html(monkeypatch, kb_dir):
@@ -1936,6 +1949,7 @@ def test_graph_html_endpoint_returns_self_contained_html(monkeypatch, kb_dir):
         "---\ntype: concept\n---\nNo links here.", encoding="utf-8"
     )
 
+    publish_fixture(kb_dir)
     response = client.get("/api/v1/graph/html", params={"kb": kb}, headers=_auth())
 
     assert response.status_code == 200
@@ -1951,6 +1965,7 @@ def test_graph_html_endpoint_empty_wiki_still_renders(monkeypatch, kb_dir):
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
 
+    publish_fixture(kb_dir)
     response = client.get("/api/v1/graph/html", params={"kb": kb}, headers=_auth())
 
     assert response.status_code == 200
@@ -2036,13 +2051,16 @@ def test_page_endpoint_returns_content(monkeypatch, kb_dir):
     kb = _use_named_kb(monkeypatch, kb_dir)
     (kb_dir / "wiki" / "concepts" / "a.md").write_text("# A\n\nHello.", encoding="utf-8")
 
+    published = publish_fixture(kb_dir)
     response = client.post("/api/v1/page", json={"kb": kb, "path": "concepts/a"}, headers=_auth())
 
     assert response.status_code == 200
     assert response.json() == {
+        "publication_id": published.publication_id,
+        "version": "babdf1d96a8a5734f9d1686c842367308f08d07ad54267c2ace199597497be81",
         "path": "concepts/a",
         "content": "# A\n\nHello.",
-        "knowledge_revision_id": None,
+        "knowledge_revision_id": published.knowledge_revision_id,
         "source_revision_ids": [],
         "validity": "current",
         "refresh_reasons": [],
@@ -2053,6 +2071,7 @@ def test_page_endpoint_404_on_missing_page(monkeypatch, kb_dir):
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
 
+    publish_fixture(kb_dir)
     response = client.post(
         "/api/v1/page", json={"kb": kb, "path": "concepts/nope"}, headers=_auth()
     )
@@ -2064,6 +2083,7 @@ def test_page_endpoint_rejects_path_traversal(monkeypatch, kb_dir):
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
 
+    publish_fixture(kb_dir)
     response = client.post(
         "/api/v1/page", json={"kb": kb, "path": "../../../etc/passwd"}, headers=_auth()
     )
@@ -2075,6 +2095,7 @@ def test_page_endpoint_rejects_absolute_path(monkeypatch, kb_dir):
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
 
+    publish_fixture(kb_dir)
     response = client.post("/api/v1/page", json={"kb": kb, "path": "/etc/passwd"}, headers=_auth())
 
     assert response.status_code == 400
@@ -2084,6 +2105,7 @@ def test_page_endpoint_rejects_mid_path_escape(monkeypatch, kb_dir):
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
 
+    publish_fixture(kb_dir)
     response = client.post(
         "/api/v1/page",
         json={"kb": kb, "path": "concepts/../../../secret"},
@@ -3258,6 +3280,7 @@ def test_delete_page_demotes_inbound_links_and_removes_index_entry(monkeypatch, 
     )
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
+    publish_fixture(kb_dir)
 
     # dry-run reports the impacted backlink page and deletes nothing.
     r = client.post(
@@ -3269,9 +3292,14 @@ def test_delete_page_demotes_inbound_links_and_removes_index_entry(monkeypatch, 
     assert r.json()["status"] == "dry_run"
     assert "concepts/bar" in r.json()["backlinks"]
     assert (wiki / "concepts" / "foo.md").exists()
+    confirmation = {key: r.json()[key] for key in ("publication_id", "version")}
 
     # execute
-    r = client.post("/api/v1/page/delete", json={"kb": kb, "path": "concepts/foo"}, headers=_auth())
+    r = client.post(
+        "/api/v1/page/delete",
+        json={"kb": kb, "path": "concepts/foo", **confirmation},
+        headers=_auth(),
+    )
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["status"] == "deleted"
@@ -3289,7 +3317,9 @@ def test_delete_page_not_found_returns_404(monkeypatch, kb_dir):
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
     r = client.post(
-        "/api/v1/page/delete", json={"kb": kb, "path": "concepts/nope"}, headers=_auth()
+        "/api/v1/page/delete",
+        json={"kb": kb, "path": "concepts/nope", **page_preconditions(kb_dir, "concepts/nope")},
+        headers=_auth(),
     )
     assert r.status_code == 404
 
@@ -3298,7 +3328,11 @@ def test_delete_page_rejects_unsafe_or_non_editable_ref(monkeypatch, kb_dir):
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
     for bad in ["summaries/x", "index", "concepts/a/b", "concepts/..", "reports/health"]:
-        r = client.post("/api/v1/page/delete", json={"kb": kb, "path": bad}, headers=_auth())
+        r = client.post(
+            "/api/v1/page/delete",
+            json={"kb": kb, "path": bad, **page_preconditions(kb_dir, bad)},
+            headers=_auth(),
+        )
         assert r.status_code == 400, bad
 
 
@@ -3318,7 +3352,12 @@ def test_edit_page_preserves_frontmatter_and_demotes_dead_links(monkeypatch, kb_
     new_body = "# Foo\n\nEdited, links [[concepts/bar]] and [[concepts/ghost]].\n"
     r = client.put(
         "/api/v1/page",
-        json={"kb": kb, "path": "concepts/foo", "content": new_body},
+        json={
+            **page_preconditions(kb_dir, "concepts/foo"),
+            "kb": kb,
+            "path": "concepts/foo",
+            "content": new_body,
+        },
         headers=_auth(),
     )
     assert r.status_code == 200, r.text
@@ -3339,7 +3378,12 @@ def test_edit_page_not_found_returns_404(monkeypatch, kb_dir):
     kb = _use_named_kb(monkeypatch, kb_dir)
     r = client.put(
         "/api/v1/page",
-        json={"kb": kb, "path": "concepts/nope", "content": "x"},
+        json={
+            **page_preconditions(kb_dir, "concepts/nope"),
+            "kb": kb,
+            "path": "concepts/nope",
+            "content": "x",
+        },
         headers=_auth(),
     )
     assert r.status_code == 404
@@ -3354,6 +3398,7 @@ def test_page_links_reports_out_and_backlinks(monkeypatch, kb_dir):
     (wiki / "concepts" / "ref.md").write_text("# Ref\n\nsee [[concepts/hub]]\n", encoding="utf-8")
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
+    publish_fixture(kb_dir)
     r = client.post("/api/v1/page/links", json={"kb": kb, "path": "concepts/hub"}, headers=_auth())
     assert r.status_code == 200, r.text
     body = r.json()
@@ -3376,6 +3421,7 @@ def test_delete_page_leaves_excluded_docs_untouched(monkeypatch, kb_dir):
     agents_before = agents.read_text(encoding="utf-8")
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
+    publish_fixture(kb_dir)
 
     r = client.post(
         "/api/v1/page/delete",
@@ -3385,9 +3431,12 @@ def test_delete_page_leaves_excluded_docs_untouched(monkeypatch, kb_dir):
     assert r.status_code == 200
     assert "concepts/bar" in r.json()["backlinks"]
     assert all("AGENTS" not in b for b in r.json()["backlinks"])  # excluded doc absent
+    confirmation = {key: r.json()[key] for key in ("publication_id", "version")}
 
     r = client.post(
-        "/api/v1/page/delete", json={"kb": kb, "path": "concepts/attention"}, headers=_auth()
+        "/api/v1/page/delete",
+        json={"kb": kb, "path": "concepts/attention", **confirmation},
+        headers=_auth(),
     )
     assert r.status_code == 200
     assert agents.read_text(encoding="utf-8") == agents_before  # generated doc untouched
@@ -3405,7 +3454,14 @@ def test_edit_page_keeps_body_starting_with_dashes(monkeypatch, kb_dir):
     kb = _use_named_kb(monkeypatch, kb_dir)
     body = "---\nkey: value\n---\nReal content below the fence.\n"
     r = client.put(
-        "/api/v1/page", json={"kb": kb, "path": "concepts/foo", "content": body}, headers=_auth()
+        "/api/v1/page",
+        json={
+            **page_preconditions(kb_dir, "concepts/foo"),
+            "kb": kb,
+            "path": "concepts/foo",
+            "content": body,
+        },
+        headers=_auth(),
     )
     assert r.status_code == 200, r.text
     saved = (wiki / "concepts" / "foo.md").read_text(encoding="utf-8")
@@ -3445,7 +3501,12 @@ def test_summary_page_is_editable_but_not_deletable(monkeypatch, kb_dir):
     # edit is allowed, frontmatter preserved
     r = client.put(
         "/api/v1/page",
-        json={"kb": kb, "path": "summaries/doc", "content": "# Doc\n\nnew body\n"},
+        json={
+            **page_preconditions(kb_dir, "summaries/doc"),
+            "kb": kb,
+            "path": "summaries/doc",
+            "content": "# Doc\n\nnew body\n",
+        },
         headers=_auth(),
     )
     assert r.status_code == 200, r.text
@@ -3455,7 +3516,9 @@ def test_summary_page_is_editable_but_not_deletable(monkeypatch, kb_dir):
 
     # delete is refused for a summary (400, not deletable on its own)
     r = client.post(
-        "/api/v1/page/delete", json={"kb": kb, "path": "summaries/doc"}, headers=_auth()
+        "/api/v1/page/delete",
+        json={"kb": kb, "path": "summaries/doc", **page_preconditions(kb_dir, "summaries/doc")},
+        headers=_auth(),
     )
     assert r.status_code == 400
 
@@ -3502,8 +3565,8 @@ def test_delete_kb_filenotfound_is_idempotent(monkeypatch, tmp_path):
     assert r.json()["deleted"] is True
 
 
-def test_inventory_requests_wait_without_blocking_active_async_writer(kb_dir):
-    """A blocked request must leave its writer's event loop able to finish.
+def test_inventory_reads_public_version_while_async_writer_is_active(kb_dir):
+    """A public read completes before its writer releases the working directory.
 
     Bound the process, since regressing to a synchronous lock would prevent
     even an asyncio timeout from running in the stuck application loop.
@@ -3512,6 +3575,8 @@ def test_inventory_requests_wait_without_blocking_active_async_writer(kb_dir):
     import subprocess
     import sys
     import textwrap
+
+    publish_fixture(kb_dir)
 
     probe = textwrap.dedent("""
         import asyncio
@@ -3533,11 +3598,7 @@ def test_inventory_requests_wait_without_blocking_active_async_writer(kb_dir):
                         requests.append(asyncio.create_task(client.post(
                             f"/api/v1/{endpoint}", json={"kb": kb.name}
                         )))
-                    # Both public requests must be able to start waiting without
-                    # blocking the loop that owns their writer's lease.
-                    await asyncio.sleep(0.2)
-                    assert all(not request.done() for request in requests)
-                responses = await asyncio.gather(*requests)
+                    responses = await asyncio.wait_for(asyncio.gather(*requests), timeout=2)
                 assert [r.status_code for r in responses] == [200, 200], responses
 
         asyncio.run(main())

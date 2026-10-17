@@ -53,7 +53,14 @@ def import_usage_execution(
         if existing and existing.kb_dir == root:
             yield existing
             return
-        scope = UsageScope(root, execution_id or uuid.uuid4().hex, on_event=on_event)
+        from ultrakb.lifecycle import current_generation
+
+        scope = UsageScope(
+            root,
+            execution_id or uuid.uuid4().hex,
+            on_event=on_event,
+            generation=current_generation(root),
+        )
         record = UsageExecution(
             execution_id=scope.execution_id, operation=operation, state="started", task_id=task_id
         )
@@ -62,7 +69,10 @@ def import_usage_execution(
         token = _SCOPE.set(scope)
         state = "completed"
         try:
-            yield scope
+            from ultrakb.execution_timing import observation_task
+
+            with observation_task(task_id):
+                yield scope
         except BaseException:
             state = "interrupted"
             raise

@@ -48,15 +48,18 @@ class TaskBudget:
 
         self.policy.check()
         held = sum(count for name, count in self._reserved.items() if name != role)
-        remaining = self.policy.max_calls - self._used - len(self._pending) - held
-        if minimum > remaining:
-            if self._reserved.get("answer_finish") and minimum <= remaining + held:
-                raise AnswerReserveReached("Final-answer send is reserved; stop new model tools")
-            raise ModelBudgetExceeded(
-                f"{role} needs at least {minimum} sends; {remaining} available "
-                f"({self._used}/{self.policy.max_calls} used, {held} reserved). "
-                "Retained input and completed checkpoints can be resumed."
-            )
+        if self.policy.max_calls is not None:
+            remaining = self.policy.max_calls - self._used - len(self._pending) - held
+            if minimum > remaining:
+                if self._reserved.get("answer_finish") and minimum <= remaining + held:
+                    raise AnswerReserveReached(
+                        "Final-answer send is reserved; stop new model tools"
+                    )
+                raise ModelBudgetExceeded(
+                    f"{role} needs at least {minimum} sends; {remaining} available "
+                    f"({self._used}/{self.policy.max_calls} used, {held} reserved). "
+                    "Retained input and completed checkpoints can be resumed."
+                )
         stage, limit = self._stage(role)
         pending = sum(self._stage(value)[0] == stage for value in self._pending.values())
         if limit is not None and self._stages.get(stage, 0) + pending + minimum > limit:

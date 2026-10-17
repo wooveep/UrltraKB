@@ -75,3 +75,114 @@ def test_open_accepts_legacy_zero_threshold_after_settings_save(kb_dir, tmp_path
         kb_dir, KbConfigPatchRequest(kb="test", config={"pageindex_threshold": 0, "model": ""})
     )
     assert open_kb(kb_dir) == kb_dir.resolve()
+
+
+@pytest.mark.parametrize("changed", ["first", "second"])
+def test_page_deletion_rejects_a_stale_publication_or_page_version(kb_dir, changed):
+    from publication_read_inputs import publish_fixture
+
+    from ultrakb.application.pages import delete_page
+    from ultrakb.application.views import published_scope
+
+    target = kb_dir / "wiki/concepts/first.md"
+    target.write_text("First body.\n")
+    (kb_dir / "wiki/concepts/second.md").write_text("See [[concepts/first]].\n")
+    publish_fixture(kb_dir)
+    opened = delete_page(kb_dir, "concepts/first", dry_run=True)
+    assert opened["status"] == "dry_run"
+    assert opened["backlinks"] == ["concepts/second"]
+    assert opened["publication_id"] == published_scope(kb_dir).publication_id
+
+    save_page(kb_dir, f"concepts/{changed}", "A concurrent edit.\n")
+    current = published_scope(kb_dir)
+    before = target.read_bytes()
+    stale = delete_page(
+        kb_dir,
+        "concepts/first",
+        publication_id=opened["publication_id"],
+        version=opened["version"],
+    )
+    assert stale["status"] == "conflict"
+    assert target.read_bytes() == before
+    assert published_scope(kb_dir).publication_id == current.publication_id
+
+    wrong_hash = delete_page(
+        kb_dir,
+        "concepts/first",
+        publication_id=current.publication_id,
+        version="a different manual baseline",
+    )
+    assert wrong_hash["status"] == "conflict"
+    assert target.read_bytes() == before
+
+    confirmed = delete_page(kb_dir, "concepts/first", dry_run=True)
+    deleted = delete_page(
+        kb_dir,
+        "concepts/first",
+        version=confirmed["version"],
+        publication_id=confirmed["publication_id"],
+    )
+    assert deleted["status"] == "deleted"
+    assert not target.exists()
+    assert published_scope(kb_dir).publication_id != current.publication_id
+
+
+def test_page_deletion_rejects_an_old_generation_without_writing(kb_dir):
+    import shutil
+
+    from publication_read_inputs import publish_fixture
+
+    from ultrakb.application.pages import delete_page
+
+    target = kb_dir / "wiki/concepts/first.md"
+    target.write_text("Retain this page.\n")
+    publish_fixture(kb_dir)
+    opened = delete_page(kb_dir, "concepts/first", dry_run=True)
+    previous = kb_dir.with_name(kb_dir.name + "-previous")
+    kb_dir.rename(previous)
+    shutil.copytree(previous, kb_dir)
+
+    result = delete_page(
+        kb_dir,
+        "concepts/first",
+        version=opened["version"],
+        publication_id=opened["publication_id"],
+    )
+    assert result["status"] == "conflict"
+    assert target.read_text() == "Retain this page.\n"
+
+
+def test_page_deletion_rechecks_public_identity_after_waiting_for_a_writer(kb_dir):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError
+
+    from publication_read_inputs import publish_fixture
+
+    from ultrakb.application.pages import delete_page
+    from ultrakb.locks import kb_ingest_lock
+
+    target = kb_dir / "wiki/concepts/first.md"
+    target.write_text("Retain this page.\n")
+    (kb_dir / "wiki/concepts/second.md").write_text("Other page.\n")
+    publish_fixture(kb_dir)
+    opened = delete_page(kb_dir, "concepts/first", dry_run=True)
+    entered = threading.Event()
+
+    def delete():
+        entered.set()
+        return delete_page(
+            kb_dir,
+            "concepts/first",
+            version=opened["version"],
+            publication_id=opened["publication_id"],
+        )
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with kb_ingest_lock(kb_dir / ".ultrakb"):
+            pending = pool.submit(delete)
+            assert entered.wait(3)
+            with pytest.raises(TimeoutError):
+                pending.result(0.1)
+            save_page(kb_dir, "concepts/second", "Concurrent public knowledge.\n")
+        assert pending.result(3)["status"] == "conflict"
+    assert target.read_text() == "Retain this page.\n"

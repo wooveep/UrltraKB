@@ -59,6 +59,8 @@ def mixed(kb_dir, tmp_path):
 def test_aggregate_last_two_legacy_dependencies_and_new_history(
     kb_dir, mixed, keep_raw, keep_empty
 ):
+    from ultrakb.published_knowledge import read_publication
+
     identities, outside = mixed
     review = preview_batch_removal(kb_dir, identities, keep_raw=keep_raw, keep_empty=keep_empty)
     assert "wiki/concepts/legacy-shared.md" in review.legacy_empty
@@ -70,13 +72,22 @@ def test_aggregate_last_two_legacy_dependencies_and_new_history(
         assert "wiki/concepts/legacy-shared.md" not in single.legacy_deleted
         assert "raw/shared-old.md" not in single.legacy_deleted
     before = file_versions(kb_dir, [kb_dir / ".ultrakb/knowledge/legacy/revisions"])
+    historical_bytes = {path: (kb_dir / path).read_bytes() for path in before}
+    old_public = read_publication(kb_dir)
     result = execute_batch_removal(review, confirmed_groups=("source", "legacy"))
     assert result.status == "completed", result
     assert all(item.status == "completed" for item in result.items)
     assert not HashRegistry(kb_dir / ".ultrakb/hashes.json").all_entries()
     assert (kb_dir / "raw/shared-old.md").exists() is keep_raw
     assert (kb_dir / "wiki/concepts/legacy-shared.md").exists() is keep_empty
-    assert before == file_versions(kb_dir, [kb_dir / ".ultrakb/knowledge/legacy/revisions"])
+    assert all((kb_dir / path).read_bytes() == body for path, body in historical_bytes.items())
+    current = read_publication(kb_dir)
+    assert current.publication_id != old_public.publication_id
+    assert current.knowledge_revision_id != old_public.knowledge_revision_id
+    assert (old_public.wiki_dir / "concepts/legacy-shared.md").exists()
+    assert (current.wiki_dir / "concepts/legacy-shared.md").exists() is keep_empty
+    assert not (current.wiki_dir / "summaries/old-a.md").exists()
+    assert not (current.wiki_dir / "summaries/old-b.md").exists()
     assert all((outside / f"{name}.md").exists() for name in ("old-a", "old-b", "甲", "乙"))
     assert all(
         read_source(kb_dir, identity.value).removed

@@ -100,7 +100,7 @@ def _run_compile_with_retry(
 
     def check_start():
         policy.check()
-        if executor and executor.calls >= policy.max_calls:
+        if executor and policy.max_calls is not None and executor.calls >= policy.max_calls:
             raise ModelBudgetExceeded("Model request budget exhausted before compilation")
 
     report(f"  {label}...")
@@ -348,8 +348,6 @@ def _add_single_file_locked(
                 ):
                     registry.remove_by_hash(existing_hash)
             registry.add(result.file_hash, meta)
-
-    def append_ingest_log() -> None:
         append_log(scope.wiki_dir, "ingest", file_path.name)
 
     from ultrakb.add_coordinator import AddMutationPlan, run_add_mutation
@@ -363,7 +361,6 @@ def _add_single_file_locked(
         },
         touched_paths=_snapshot_add_paths(kb_dir, doc_name, final_raw, final_source, scope=scope),
         body=commit_body,
-        post_commit_hooks=[append_ingest_log],
         hardlink_dirs={
             scope.wiki_dir / "concepts",
             scope.wiki_dir / "entities",

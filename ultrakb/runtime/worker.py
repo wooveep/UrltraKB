@@ -271,7 +271,12 @@ def _execute(
             with context.begin(root):
                 context.on_event({"stage": "saving"})
                 saved = save_page(
-                    root, request.path, request.body, version=request.version, scope=scope
+                    root,
+                    request.path,
+                    request.body,
+                    version=request.version,
+                    scope=scope,
+                    publication_id=request.publication_id,
                 )
                 return UnitResult(
                     "completed" if saved.status == "saved" else "failed",

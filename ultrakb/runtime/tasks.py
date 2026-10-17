@@ -294,6 +294,8 @@ class TaskManager:
                     except (KnowledgeBaseRemoved, UnsupportedCatalogWriter):
                         pass  # Never write to a replacement KB; still stop the old worker.
             self._update(task, stop_requested=True)
+            if attempt := self._active.get(task_id):
+                self._send_stop(task, attempt)
             if task_id not in self._active and task.view.state not in TERMINAL:
                 self._update(task, state="stopped", stage="stopped")
                 self._discard_inputs(task_id)
@@ -397,14 +399,18 @@ class TaskManager:
             current_source=self._request_source(request),
         )
 
-    def _control(self, task: _Task, attempt: _Attempt) -> None:
-        if task.view.stop_requested and not attempt.stop_sent:
+    def _send_stop(self, task: _Task, attempt: _Attempt) -> None:
+        if not attempt.stop_sent:
             try:
                 attempt.control.send("stop")
             except (OSError, EOFError):
                 pass
             attempt.stop_sent = True
             self._update(task, state="stopping", stage="stopping")
+
+    def _control(self, task: _Task, attempt: _Attempt) -> None:
+        if task.view.stop_requested:
+            self._send_stop(task, attempt)
         if attempt.eof:
             return
         for _ in range(32):
@@ -442,7 +448,8 @@ class TaskManager:
                 if message.get("truncated"):
                     self._update(task, persist=False, text_truncated=True)
 
-    def _progress(self, task: _Task, attempt: _Attempt) -> None:
+    def _progress(self, task: _Task, attempt: _Attempt) -> dict | None:
+        latest_usage = None
         for _ in range(128):
             try:
                 event = attempt.events.get_nowait()
@@ -455,6 +462,16 @@ class TaskManager:
             truncated = task.view.text_truncated or event["sequence"] != attempt.last_sequence + 1
             attempt.last_sequence = event["sequence"]
             data = event["data"]
+            if data.get("event") == "compile_work":
+                self._update(task, persist=False, compile_work=data["data"])
+                continue
+            if data.get("event") in {"model_usage", "model_usage_progress"}:
+                # These are complete snapshots. Drain the backlog once, then
+                # project its latest receipt outside the scheduler/UI lock.
+                latest_usage = data["data"]
+                if truncated != task.view.text_truncated:
+                    self._update(task, persist=False, text_truncated=truncated)
+                continue
             stage = data.get("stage", task.view.stage)
             text = task.view.text
             usage = task.view.usage
@@ -483,13 +500,6 @@ class TaskManager:
                 from ultrakb.agent.token_usage import TokenUsage
 
                 usage = TokenUsage.from_dict(data["data"]).to_dict()
-            if data.get("event") == "model_usage":
-                from ultrakb.llm_usage import merge_usage_receipts
-
-                model_usage = merge_usage_receipts(
-                    Path(task.view.kb_dir),
-                    [*(result.model_usage for result in task.view.results), data["data"]],
-                )
             if data.get("event") == "delta":
                 text += data["data"]["text"]
                 if len(text) > 1_000_000:
@@ -508,8 +518,9 @@ class TaskManager:
                 source_count=source_count,
                 unit_count=unit_count,
             )
+        return latest_usage
 
-    def _finish(self, task: _Task, attempt: _Attempt) -> None:
+    def _finish(self, task: _Task, attempt: _Attempt, *, model_usage=None) -> None:
         attempt.process.join()
         exitcode = attempt.process.exitcode
         attempt.control.close()
@@ -535,16 +546,13 @@ class TaskManager:
         self._discard_inputs(task.view.id, attempt.identity.unit_id)
         receipt = read_receipt(self.receipt_dir, attempt.identity)
         if receipt is None or attempt.unconfirmed:
-            from ultrakb.llm_usage_execution import task_usage_receipt
-
             self._update(
                 task,
                 state="interrupted",
                 stage="unconfirmed",
                 error="Worker result could not be confirmed; remaining units were not started",
                 text=attempt.result.output if attempt.result else task.view.text,
-                model_usage=task_usage_receipt(Path(task.view.kb_dir), task.view.id)
-                or task.view.model_usage,
+                model_usage=model_usage or task.view.model_usage,
             )
             return
         result = receipt
@@ -564,9 +572,6 @@ class TaskManager:
                 for i, request in enumerate(task.requests)
             )
         results = (*task.view.results, result)
-        from ultrakb.llm_usage import merge_usage_receipts
-        from ultrakb.llm_usage_execution import task_usage_receipt
-
         self._update(
             task,
             results=results,
@@ -580,8 +585,7 @@ class TaskManager:
             ),
             error=result.error or task.view.error,
             text=result.output or task.view.text,
-            model_usage=task_usage_receipt(Path(task.view.kb_dir), task.view.id)
-            or merge_usage_receipts(Path(task.view.kb_dir), [item.model_usage for item in results]),
+            model_usage=model_usage,
             text_truncated=task.view.text_truncated
             or (
                 attempt.terminal_sequence is not None
@@ -631,16 +635,27 @@ class TaskManager:
             self._pending.append(task.view.id)
 
     def _run(self) -> None:
-        with self._condition:
-            while True:
+        from ultrakb.mutation import RecoveryRequired
+
+        while True:
+            usage_updates = []
+            finished = []
+            with self._condition:
                 for task_id, attempt in list(self._active.items()):
                     task = self._tasks[task_id]
                     self._control(task, attempt)
-                    self._progress(task, attempt)
+                    latest_usage = self._progress(task, attempt)
                     if not attempt.process.is_alive():
                         self._control(task, attempt)
-                        self._progress(task, attempt)
-                        self._finish(task, attempt)
+                        final_usage = self._progress(task, attempt)
+                        if final_usage is not None:
+                            latest_usage = final_usage
+                        # Retain the final progress snapshot before confirming
+                        # this child's result on the next scheduler iteration.
+                        if latest_usage is None:
+                            finished.append((task, attempt))
+                    if latest_usage is not None:
+                        usage_updates.append((task, attempt, latest_usage))
                 for _ in range(len(self._pending)):
                     if len(self._active) >= self.max_workers:
                         break
@@ -673,4 +688,57 @@ class TaskManager:
                             "Temporary task directory cleanup failed"
                         )
                     return
+            for task, attempt, latest_usage in usage_updates:
+                from ultrakb.lifecycle import expected_generation, read_lifecycle
+                from ultrakb.llm_usage import merge_usage_receipts
+                from ultrakb.usage_projection import merge_progress
+
+                merge = (
+                    merge_progress
+                    if not latest_usage["current"].get("request_ids_complete", True)
+                    else merge_usage_receipts
+                )
+                root = Path(task.view.kb_dir)
+                try:
+                    with (
+                        expected_generation(root, attempt.identity.generation),
+                        read_lifecycle(root),
+                    ):
+                        model_usage = merge(
+                            root,
+                            [*(result.model_usage for result in task.view.results), latest_usage],
+                        )
+                except (FileNotFoundError, ValueError, RecoveryRequired):
+                    continue  # Late callbacks cannot write a replacement KB's projection.
+                with self._condition:
+                    if self._active.get(task.view.id) is attempt:
+                        self._update(task, persist=False, model_usage=model_usage)
+            for task, attempt in finished:
+                from ultrakb.lifecycle import expected_generation, read_lifecycle
+                from ultrakb.llm_usage import merge_usage_receipts
+                from ultrakb.llm_usage_execution import task_usage_receipt
+
+                # The terminal audit may scan the complete ledger. Status reads
+                # and stop requests must remain available while it reconciles.
+                root = Path(task.view.kb_dir)
+                receipt = read_receipt(self.receipt_dir, attempt.identity)
+                receipts = [
+                    *(result.model_usage for result in task.view.results),
+                    receipt.model_usage if receipt else None,
+                ]
+                try:
+                    with (
+                        expected_generation(root, attempt.identity.generation),
+                        read_lifecycle(root),
+                    ):
+                        model_usage = task_usage_receipt(root, task.view.id)
+                        if model_usage is None and any(receipts):
+                            model_usage = merge_usage_receipts(root, receipts)
+                except (FileNotFoundError, ValueError, RecoveryRequired):
+                    model_usage = None
+                model_usage = model_usage or task.view.model_usage
+                with self._condition:
+                    if self._active.get(task.view.id) is attempt:
+                        self._finish(task, attempt, model_usage=model_usage)
+            with self._condition:
                 self._condition.wait(0.025)

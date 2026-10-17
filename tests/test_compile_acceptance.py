@@ -207,7 +207,7 @@ def test_legacy_task_children_inherit_request_bytes_and_paid_counts(kb_dir):
     first = CompletionExecutor(bindings, ModelCallPolicy(max_calls=5, retries=0))
     first.budget.restore(2, {"compile": 2})
     journal = TaskJournal(kb_dir, first)
-    assert journal.record.compiler_request_version == 2
+    assert journal.record.compiler_request_version == 3
     path = task_path(kb_dir, journal.record.task_id)
     legacy = json.loads(path.read_text())
     legacy.pop("compiler_request_version")

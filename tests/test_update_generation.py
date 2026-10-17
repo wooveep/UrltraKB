@@ -238,3 +238,114 @@ def test_old_page_partition_does_not_force_a_redundant_metadata_conflict(kb_dir)
     result = patch.apply(json.dumps(merged.response), current=page.read_text())
     assert result["description"] == "Models A and B rules"
     assert page.read_text() == old
+
+
+@pytest.mark.asyncio
+async def test_short_update_partitions_complete_current_and_linked_originals_and_reuses_results(
+    kb_dir, monkeypatch
+):
+    from litellm import ModelResponse
+
+    from ultrakb.agent.page_updates import PageUpdate, UnchangedPage
+    from ultrakb.agent.source_windows import CompileSourceWindows
+    from ultrakb.agent.update_generation import generate_page_update
+    from ultrakb.application.execution import ExecutionContext
+    from ultrakb.config import LlmCredentialBundle
+    from ultrakb.llm_execution import CompletionExecutor, ModelCallPolicy, RoleBindings
+    from ultrakb.locks import atomic_write_text, kb_ingest_lock
+
+    wiki = kb_dir / "wiki"
+    current = "\n\n".join(f"Rule {i}: retain its independent condition." for i in range(240))
+    prior = "The prior source condition remains relevant.\n\nRetain its exception.\n"
+    atomic_write_text(wiki / "sources/manual.md", current)
+    atomic_write_text(wiki / "sources/prior.md", prior)
+    page = wiki / "concepts/rules.md"
+    old = "---\nsources: [sources/prior.md]\n---\n# Rules\n\nA prior rule.\n"
+    atomic_write_text(page, old)
+    reader = CompileSourceWindows(wiki, "manual", kb_dir=kb_dir)
+    originals = reader.prepare({"name": "rules"}, "concepts/rules.md", long=False)
+    patch = PageUpdate(old)
+    observed = []
+
+    async def complete(**kwargs):
+        assert len(json.dumps(kwargs["messages"], ensure_ascii=False).encode()) < 40000
+        assert not any(
+            isinstance(message["content"], str)
+            and message["content"].startswith("Current original:")
+            for message in kwargs["messages"]
+        )
+        rendered = next(
+            block["text"]
+            for message in kwargs["messages"]
+            if isinstance(message["content"], list)
+            for block in message["content"]
+            if "Original source windows (bounded, frozen):\n" in block.get("text", "")
+        )
+        batch, _ = json.JSONDecoder().raw_decode(
+            rendered.split("Original source windows (bounded, frozen):\n", 1)[1]
+        )
+        editable = next(
+            message["content"].partition("\n")[2]
+            for message in kwargs["messages"]
+            if isinstance(message["content"], str)
+            and message["content"].startswith("Temporary editable page blocks:\n")
+        )
+        observed.append((batch, json.JSONDecoder().raw_decode(editable)[0]["blocks"]))
+        return ModelResponse(
+            model="unused",
+            choices=[
+                {
+                    "index": 0,
+                    "finish_reason": "stop",
+                    "message": {
+                        "role": "assistant",
+                        "content": json.dumps(
+                            {
+                                "status": "unchanged",
+                                "base_sha256": patch.digest,
+                                "reason": "The supplied conditions are already represented.",
+                            }
+                        ),
+                    },
+                }
+            ],
+            usage={"prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20},
+        )
+
+    monkeypatch.setattr("litellm.acompletion", complete)
+    context = ExecutionContext(
+        executor=CompletionExecutor(
+            RoleBindings("unused", LlmCredentialBundle(api_key="local-test-key")),
+            ModelCallPolicy(max_calls=30, retries=0),
+        )
+    )
+    options = dict(
+        patch=patch,
+        originals=originals,
+        windows=reader,
+        page_path=page,
+        model="unused",
+        bundle=None,
+        system_message={"role": "system", "content": "Compile source facts."},
+        current_original=reader.current_original_message(),
+        known_targets_message={"role": "user", "content": "rules"},
+        task_message={"role": "user", "content": "Update all necessary conditions as JSON."},
+        fits=lambda messages: len(json.dumps(messages, ensure_ascii=False).encode()) < 40000,
+    )
+    with kb_ingest_lock(kb_dir / ".ultrakb"), context.begin(kb_dir):
+        result = await generate_page_update(**options)
+        assert isinstance(result, UnchangedPage)
+        assert len(observed) > 1
+        for block in patch.blocks:
+            covered = [
+                window
+                for batch, blocks in observed
+                if any(candidate["id"] == block for candidate in blocks)
+                for window in batch
+            ]
+            for path, expected in (("sources/manual.md", current), ("sources/prior.md", prior)):
+                assert "".join(w["content"] for w in covered if w["path"] == path) == expected
+        before_resume = len(observed)
+        await generate_page_update(**options)
+        assert len(observed) == before_resume
+    assert page.read_text() == old

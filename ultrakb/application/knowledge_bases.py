@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from ultrakb.config import load_config, register_kb, save_config
-from ultrakb.knowledge_scope import KnowledgeScope, resolve_scope
-from ultrakb.locks import atomic_write_json, atomic_write_text, kb_ingest_lock, kb_read_lock
+from ultrakb.knowledge_scope import KnowledgeScope, reading_scope, resolve_scope
+from ultrakb.locks import atomic_write_json, atomic_write_text, kb_ingest_lock
 from ultrakb.schema import AGENTS_MD, INDEX_SEED
 
 
@@ -48,6 +48,9 @@ def open_kb(kb_dir: Path) -> Path:
             raise ValueError(f"Knowledge base is not initialized; create it explicitly: {root}")
         validate_runtime_config(load_config(root / ".ultrakb/config.yaml"), allow_inherited=True)
         validate_runtime_config(resolve_effective_config(root)[0])
+        from ultrakb.published_knowledge import initialize_publication
+
+        initialize_publication(root)
         register_kb(root)
     return root
 
@@ -120,6 +123,11 @@ def _creation(kb_dir: Path, *, require_empty: bool) -> Iterator[None]:
         if not (kb_dir / ".env").exists():
             files.append(kb_dir / ".env")
         targets = [path for path in directories if not path.exists()] + files
+        targets += [
+            state / name
+            for name in ("published", "knowledge", "catalog")
+            if not (state / name).exists()
+        ]
         if any(
             path.is_symlink() or not path.resolve().is_relative_to(kb_dir)
             for path in directories + files
@@ -273,8 +281,10 @@ def initialize_kb(
 
 def get_kb_list(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> dict[str, Any]:
     """Return a structured inventory of the knowledge base (REST ``/list``)."""
-    with kb_read_lock(kb_dir / ".ultrakb"):
-        ultrakb_dir = kb_dir / ".ultrakb"
+    selected = resolve_scope(kb_dir, scope)
+    with reading_scope(selected):
+        metadata_root = selected.publication.metadata_dir if selected.publication else kb_dir
+        ultrakb_dir = metadata_root / ".ultrakb"
         hashes_file = ultrakb_dir / "hashes.json"
         hashes = json.loads(hashes_file.read_text(encoding="utf-8")) if hashes_file.exists() else {}
 
@@ -297,7 +307,13 @@ def get_kb_list(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> dict[st
         admitted = source_inventory(kb_dir, scope=scope)
         from ultrakb.source_catalog import list_sources
 
-        mapped = {source.legacy_hash for source in list_sources(kb_dir) if source.legacy_hash}
+        if selected.publication is not None:
+            from ultrakb.application.published_sources import sources
+
+            known_sources = sources(selected)
+        else:
+            known_sources = list_sources(kb_dir)
+        mapped = {source.legacy_hash for source in known_sources if source.legacy_hash}
         documents = [item for item in documents if item["hash"] not in mapped]
         documents.extend(admitted)
 
@@ -307,6 +323,7 @@ def get_kb_list(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> dict[st
         entities_dir = wiki / "entities"
         reports_dir = wiki / "reports"
         return {
+            "publication_id": selected.publication_id,
             "documents": documents,
             "document_count": len(documents),
             "summaries": sorted(p.stem for p in summaries_dir.glob("*.md"))
@@ -326,11 +343,19 @@ def get_kb_list(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> dict[st
 
 def get_kb_status(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> dict[str, Any]:
     """Return structured status for the knowledge base (REST ``/status``)."""
-    with kb_read_lock(kb_dir / ".ultrakb"):
+    selected = resolve_scope(kb_dir, scope)
+    with reading_scope(selected):
         from ultrakb.application.refresh import refresh_status
 
-        selected = resolve_scope(kb_dir, scope)
-        pending = {selected.view_id: refresh_status(kb_dir, scope=selected)["needs_refresh"]}
+        reasons = (
+            {
+                name: [reason.model_dump(mode="json") for reason in values]
+                for name, values in selected.publication.head.needs_refresh.items()
+            }
+            if selected.publication is not None
+            else refresh_status(kb_dir, scope=selected)["needs_refresh"]
+        )
+        pending = {selected.view_id: reasons}
         wiki_dir = resolve_scope(kb_dir, scope).wiki_dir
         subdirs = ["sources", "summaries", "concepts", "entities", "reports"]
         directories = {}
@@ -338,7 +363,7 @@ def get_kb_status(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> dict[
             path = wiki_dir / subdir
             directories[subdir] = len(list(path.glob("*.md"))) if path.exists() else 0
 
-        raw_dir = kb_dir / "raw"
+        raw_dir = (selected.publication.metadata_dir if selected.publication else kb_dir) / "raw"
         raw_count = len([f for f in raw_dir.iterdir() if f.is_file()]) if raw_dir.exists() else 0
 
         from ultrakb.schema import PAGE_CONTENT_DIRS
@@ -350,6 +375,7 @@ def get_kb_status(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> dict[
             list((wiki_dir / "reports").glob("*.md")) if (wiki_dir / "reports").exists() else []
         )
         return {
+            "publication_id": selected.publication_id,
             "directories": directories,
             "needs_refresh": {view: reasons for view, reasons in pending.items() if reasons},
             "raw_count": raw_count,

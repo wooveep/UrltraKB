@@ -261,7 +261,8 @@ def index_long_document(
         col = client.collection()
         retained_ids = {item["doc_id"] for item in col.list_documents()}
 
-        # Add PDF (retry up to 3 times — PageIndex TOC accuracy is stochastic)
+        # Retry stochastic proposals only. Exhausted local body recovery carries
+        # local_recovery_exhausted through the cause chain and must escape here.
         max_retries = 3
         doc_id = None
         for attempt in range(1, max_retries + 1):

@@ -14,7 +14,15 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Callable, Mapping
 
-from ultrakb.llm_usage import _SCOPE, UsageScope, active_scope, begin_request, finish_request
+from ultrakb.execution_timing import ObservationStart, record_phase_event, start_observation
+from ultrakb.llm_usage import (
+    _SCOPE,
+    UsageScope,
+    active_scope,
+    begin_request,
+    finish_request,
+    usage_scope_lifecycle,
+)
 
 
 @dataclass
@@ -33,6 +41,8 @@ class ModelCall:
     response_status: int | None = None
     native_response_status: str | None = None
     cleanup_deadline: float | None = None
+    send_starts: dict[str, ObservationStart] = field(default_factory=dict)
+    response_ids: set[str] = field(default_factory=set)
 
     def observe_images(self, request):
         import json
@@ -53,6 +63,10 @@ class ModelCall:
                 raise
 
     def sending(self):
+        with usage_scope_lifecycle(self.scope):
+            return self._sending()
+
+    def _sending(self):
         if self.before_send is not None:
             try:
                 self.before_send(len(self.sent_ids))
@@ -67,9 +81,25 @@ class ModelCall:
         )
         self.sent_ids.append(identity)
         finish_request(identity, scope=self.scope, terminal=False, send_status="sent")
+        self.send_starts[identity] = start_observation()
+        record_phase_event(
+            "send",
+            stage=self.stage,
+            work_id=self.stage.split(".", 1)[-1],
+            scope=self.scope,
+            logical_call_id=self.metadata.get("logical_call_id"),
+            request_attempt_id=identity,
+            at=self.send_starts[identity],
+        )
         return identity
 
     def finish(self, response=None, *, state="completed"):
+        if self.sent_ids:
+            self.response_event(
+                self.sent_ids[-1],
+                state,
+                response_observed=response is not None or self.response_status is not None,
+            )
         # A consumed HTTP response is authoritative. SDKs can synthesize zero
         # usage when the provider omitted it; that must remain unknown here.
         finish_request(
@@ -81,6 +111,7 @@ class ModelCall:
         )
 
     def received(self, identity, response):
+        received = start_observation()
         self.response_status = response.status_code
         raw = _response(response)
         if isinstance(raw, dict) and raw.get("object") == "response":
@@ -111,6 +142,29 @@ class ModelCall:
             scope=self.scope,
             observation="transport",
             terminal=response.is_stream_consumed,
+        )
+        if response.is_stream_consumed:
+            self.response_event(
+                identity,
+                "completed" if response.is_success else "failed",
+                at=received,
+                response_observed=True,
+            )
+
+    def response_event(self, identity, state, *, at=None, response_observed=False):
+        if identity in self.response_ids or identity not in self.send_starts:
+            return
+        self.response_ids.add(identity)
+        record_phase_event(
+            "response" if response_observed else "request_settled",
+            stage=self.stage,
+            work_id=self.stage.split(".", 1)[-1],
+            scope=self.scope,
+            logical_call_id=self.metadata.get("logical_call_id"),
+            request_attempt_id=identity,
+            started=self.send_starts[identity],
+            outcome=state,
+            at=at,
         )
 
 
@@ -200,6 +254,7 @@ def install_send_observer():
             try:
                 response = sync_send(client, request, *args, **kwargs)
             except BaseException as exc:
+                call.response_event(identity, _failure_state(exc))
                 finish_request(
                     identity, state=_failure_state(exc), scope=call.scope, observation="transport"
                 )
@@ -248,6 +303,7 @@ def install_send_observer():
                 )
                 raise
             except BaseException as exc:
+                call.response_event(identity, _failure_state(exc))
                 finish_request(
                     identity, state=_failure_state(exc), scope=call.scope, observation="transport"
                 )
@@ -298,7 +354,8 @@ def observe_model_call(
     )
     token = _CALL.set(call)
     try:
-        yield call
+        with usage_scope_lifecycle(scope):
+            yield call
     except BaseException as exc:
         call.finish(state=_failure_state(exc))
         if call.send_error is not None:

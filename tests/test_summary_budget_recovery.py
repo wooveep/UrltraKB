@@ -102,7 +102,9 @@ async def test_received_repair_survives_restart_before_validation(kb_dir):
     checkpoints.prepare_summary_delivery()
     system = {"role": "system", "content": "Retain the source conditions."}
     window = next(reader.iter_document_windows(fits=lambda _: True))
-    messages = summary_messages(system, "manual", window, structured=True)
+    messages = summary_messages(
+        system, "manual", window, structured=True, request_format=checkpoints.request_version
+    )
     sections = tuple(s["id"] for s in window_sections(window))
     signature = digest(messages)
     checkpoints.claim_repair("summary:1", signature)

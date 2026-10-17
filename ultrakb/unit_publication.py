@@ -519,7 +519,7 @@ def commit_unit_revision(
         kb_dir,
         [directory, live, head_path, state_path, attempt_path],
         operation="publish-unit-revision",
-    ):
+    ) as snapshot:
         copy_tree(view.scope.wiki_dir, directory / "wiki")
         if manifest.index_ref:
             from ultrakb.index_packages import copy_index_package
@@ -540,7 +540,11 @@ def commit_unit_revision(
         write_record(attempt_path, completed)
         check_stop()
         check_import_target(kb_dir, admission.source, unit, completed, view)
-    from ultrakb.compile_checkpoints import cleanup_published_checkpoints
+        from ultrakb.compile_checkpoints import document_checkpoints
 
-    cleanup_published_checkpoints(kb_dir, state.view_id, unit.doc_name)
+        checkpoints = document_checkpoints(kb_dir, state.view_id, unit.doc_name)
+        if checkpoints:
+            snapshot.schedule_cleanup(
+                [manifest.parent for manifest in (checkpoints.path, *checkpoints.ancestors)]
+            )
     return completed

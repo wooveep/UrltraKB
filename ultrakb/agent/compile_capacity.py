@@ -8,6 +8,7 @@ from ultrakb.model_tokenizer import TokenMeasure
 class CompileCapacity:
     def __init__(self, executor, measure):
         self.executor, self.measure = executor, measure
+        self.last_failure: dict | None = None
         if executor.compile_capacity is None:
             executor.compile_capacity = measure
 
@@ -31,7 +32,32 @@ class CompileCapacity:
             raise ContextCapacityError("Compile capacity is unknown; configure this connection")
         from ultrakb.request_budget import fits_request
 
-        return fits_request(self.measure, payload)
+        admitted = fits_request(self.measure, payload)
+        if not admitted:
+            self.last_failure = self.diagnostic(messages, options, payload=payload)
+            from ultrakb.llm_usage import active_scope
+
+            if (scope := active_scope()) and scope.on_event:
+                try:
+                    scope.on_event({"event": "compile_capacity", "data": self.last_failure})
+                except Exception:
+                    import logging
+
+                    logging.getLogger(__name__).debug(
+                        "Compile capacity diagnostic delivery failed", exc_info=True
+                    )
+        return admitted
+
+    def diagnostic(self, messages, options=None, *, payload=None):
+        """Measure frozen SDK input, without exposing prompt text or credentials."""
+        from ultrakb.agent.capacity_diagnostics import request_diagnostic
+        from ultrakb.model_tokenizer import ContextCapacityError
+
+        if self.measure is None:
+            raise ContextCapacityError("Compile capacity is unknown; configure this connection")
+        return request_diagnostic(
+            self.payload(messages, options) if payload is None else payload, self.measure
+        )
 
 
 def compile_capacity(kb_dir, model, bundle):

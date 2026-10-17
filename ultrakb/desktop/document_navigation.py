@@ -1,7 +1,7 @@
 """Visible, cancellable reading requests, independent of removal confirmation state."""
 
 
-def load_document(panel, identity, label, operation, callback):
+def load_document(panel, identity, label, operation, callback, *, snapshot=False):
     window = panel.window
     generation = getattr(panel, "_navigation_generation", 0) + 1
     panel._navigation_generation = generation
@@ -32,6 +32,7 @@ def load_document(panel, identity, label, operation, callback):
         operation,
         loaded,
         kb=panel.kb,
+        snapshot=snapshot,
         obsolete=obsolete,
         on_wait=lambda: notice(f"正在等待知识库完成当前写入，随后{label}；可以继续浏览其他页面。"),
     )

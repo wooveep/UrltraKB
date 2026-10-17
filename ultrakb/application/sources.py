@@ -73,10 +73,11 @@ def _snapshot_source(kb_dir: Path, scope: KnowledgeScope, unit_id: str):
     manifest = KnowledgeRevision.model_validate_json((directory / "manifest.json").read_text())
     if manifest.view_id != scope.view_id or manifest.knowledge_revision_id != directory.name:
         raise ValueError("Knowledge snapshot belongs to another view")
+    catalog = scope.publication.metadata_dir if scope.publication is not None else kb_dir
     matching = [
         identity
         for identity in manifest.input_revisions
-        if read_record(kb_dir, "unit-revisions", identity, UnitRevision).unit_id == unit_id
+        if read_record(catalog, "unit-revisions", identity, UnitRevision).unit_id == unit_id
     ]
     if len(matching) > 1:
         raise ValueError("Snapshot contains multiple revisions of one unit")
@@ -122,6 +123,10 @@ def source_inventory(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> li
     root = kb_dir.resolve()
     if scope is not None:
         scope = resolve_scope(root, scope)
+    if scope is not None and scope.publication is not None:
+        from ultrakb.application.published_sources import source_inventory as published_inventory
+
+        return published_inventory(scope)
     with kb_read_lock(root / ".ultrakb"):
         documents = []
         for source in list_sources(root):
@@ -266,7 +271,7 @@ def unit_inventory(kb_dir, units, view_id, *, scope=None):
             state = UnitPublication.model_validate_json(
                 (actual[0] / "publication.json").read_text()
             )
-        elif scope and state is None:
+        elif scope and scope.view_id != "legacy" and state is None:
             continue
         target = read_record(
             kb_dir,
@@ -324,6 +329,18 @@ def read_admitted_source(
     root = kb_dir.resolve()
     if scope is not None:
         scope = resolve_scope(root, scope)
+    if scope is not None and scope.publication is not None:
+        from ultrakb.application.published_sources import read_source as read_published_source
+
+        return read_published_source(
+            scope,
+            identifier,
+            source_revision_id=source_revision_id,
+            unit_id=unit_id,
+            pages=page_range,
+            chars=char_range,
+            blocks=block_range,
+        )
     with kb_read_lock(root / ".ultrakb"):
         sources = list_sources(root)
         source = next((source for source in sources if source.source_id == identifier), None)

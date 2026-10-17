@@ -6,7 +6,7 @@ ConDB。自动会话记忆和检索路由仍由后续任务接入。
 
 | 目录 | 分发名 / 导入名 | 本地版本 | 上游提交 | 许可证 |
 | --- | --- | --- | --- | --- |
-| PageIndex | pageindex / pageindex | 0.3.0.dev3+urltrakb.14 | 9ad54122bbd519cec8913198e2d63cff92781c1e | MIT |
+| PageIndex | pageindex / pageindex | 0.3.0.dev3+urltrakb.17 | 9ad54122bbd519cec8913198e2d63cff92781c1e | MIT |
 | ChatIndex | ictree / ctree | 0.1.0+urltrakb.3 | 7df2c9208db6f113f85a6c09295bec7f0f2114e7 | Apache-2.0 |
 | ConDB | pageindex-condb / contextdb | 1.0+urltrakb.6 | 62da030426b3eee96a77b464e7007cdf8530c42e | Apache-2.0 |
 | LiteLLM | litellm / litellm | 1.87.2+urltrakb.3 | 1296275dc52d9f4e05696380735037fbb841fcc3 | MIT |
@@ -117,7 +117,11 @@ LiteLLM `.2` 验证（2026-10-06）：开发与独立 wheel 环境分别通过 2
 
 编译通过 `ultrakb/llm_execution.py`，在 KB 租约取得后由 `ExecutionContext` 冻结角色模型、凭据和政策。默认所有角色继承 `model`；可选 `conversation_model`、`retrieval_model` 只覆盖模型名，共享同一凭据与端点。运行中编辑配置只影响新任务。API key 在快照中缺失时，API key 认证路径在发送前失败，不能读取之后加入的环境或 SDK 全局 key；订阅登录、工作负载身份和本地 Ollama 保留 SDK 自有认证路径。
 
-KB 的 `model_policy` 可设置 `max_calls`（默认 1000）、`concurrency`（5）、`retries`（2）、`backoff`（0.25 秒）及可选 `deadline_seconds`。计数跨角色、修复和重试共用。文档索引同时遵守已有 `concurrency` / `IndexConfig.max_concurrency`，实际并发不会超过任一限制。普通 completion 的网络重试只有执行器负责，首次发送就关闭 SDK 自动重试；没有可观察 HTTPX 发送的失败不自动重试，也不声称传输观测完整。取消或过期后保留已花费的用量，丢弃迟到结果。
+KB 的 `model_policy` 可设置 `max_calls`（默认 `null`，无固定总上限）、`concurrency`（5）、`retries`（2）、`backoff`（0.25 秒）及可选 `deadline_seconds`。计数跨角色、修复和重试共用。文档索引同时遵守已有 `concurrency` / `IndexConfig.max_concurrency`，实际并发不会超过任一限制。普通 completion 的网络重试只有执行器负责，首次发送就关闭 SDK 自动重试；没有可观察 HTTPX 发送的失败不自动重试，也不声称传输观测完整。取消或过期后保留已花费的用量，丢弃迟到结果。
+
+PageIndex `.17` 保留原始编号、父范围及逐分片定位恢复，并增加独立节点校验和摘要的
+有界批处理。`IndexConfig.node_batch_size` 默认 8，可设为 1 恢复逐节点；该调度设置不进入
+内容身份。逐节点回执和精确已付费响应继续复用，目录续写保持串行。
 
 容量、调用次数、上下文配额、文件接入、转换与调度的清单见
 [默认容量与执行限制](default-limits.md)。发送预算与已处理资料数量分别展示，

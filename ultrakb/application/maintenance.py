@@ -18,6 +18,7 @@ from ultrakb.lint import fix_broken_links, run_structural_lint
 from ultrakb.locks import LockCancelled, async_kb_lock, atomic_write_text, kb_read_lock
 from ultrakb.log import append_log
 from ultrakb.mutation import RecoveryRequired, mutation_scope
+from ultrakb.published_knowledge import knowledge_operation
 
 
 @dataclass(frozen=True)
@@ -101,7 +102,10 @@ async def check_knowledge(
         if options.semantic:
             pending.append("semantic_lint")
         pending.append("report")
-        with context.begin(root) as captured_bundle:
+        with (
+            context.begin(root) as captured_bundle,
+            knowledge_operation(root, operation="maintain-knowledge"),
+        ):
             active_bundle = bundle if bundle is not None else captured_bundle
             try:
                 if options.fix:

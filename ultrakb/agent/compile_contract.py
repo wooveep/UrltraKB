@@ -4,7 +4,7 @@ import json
 from functools import lru_cache
 from pathlib import Path
 
-REQUEST_VERSION = 2
+REQUEST_VERSION = 3
 ACCEPTANCE_VERSION = "explicit-delivery-v1"
 
 

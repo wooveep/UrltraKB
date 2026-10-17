@@ -36,6 +36,14 @@ def task_text(task, *, include_budget=True):
         lines.append(f"重试来源：{task.retry_of}（独立的新任务）")
     if task.current_source:
         lines.append(f"当前资料：{task.current_source}")
+    if work := task.compile_work:
+        stage = {"summary": "全文摘要", "planning": "规划", "links": "链接", "repair": "纠错"}.get(
+            work["stage"], str(work["stage"])
+        )
+        lines.append(
+            f"{stage}工作：已完成 {work['completed']} · 待处理 {work['pending']} · "
+            f"处理中 {work['in_flight']} · 分裂 {work['splits']} · 纠错 {work['repairs']}"
+        )
     from ultrakb.ingest_result import describe_units
     from ultrakb.llm_usage import describe_model_usage, is_model_budget_description
 

@@ -74,6 +74,7 @@ def build_index(parsed: ParsedDocument, model: str = None, opt=None) -> dict:
     """Main entry point: ParsedDocument -> tree structure dict.
     Routes to the appropriate strategy and runs enhancement."""
     from ..llm import llm_client_scope
+    from .node_batches import node_batch_scope
     from ..config import IndexConfig, llm_params_scope, max_concurrency_scope, usage_observer_scope
     from .utils import (
         add_node_text,
@@ -93,6 +94,7 @@ def build_index(parsed: ParsedDocument, model: str = None, opt=None) -> dict:
     with max_concurrency_scope(getattr(opt, "max_concurrency", None)), \
          llm_params_scope(getattr(opt, "llm_params", None)), \
          usage_observer_scope(getattr(opt, "usage_observer", None)), \
+         node_batch_scope(getattr(opt, "node_batch_size", 8)), \
          llm_client_scope(opt.llm_client, required=opt.require_llm_client):
         nodes = parsed.nodes
         policy = None
@@ -107,7 +109,11 @@ def build_index(parsed: ParsedDocument, model: str = None, opt=None) -> dict:
 
         runtime = opt.llm_client
         retained = getattr(runtime, "stage_result", None)
-        structure = retained("navigation") if retained else None
+        navigation_key = "navigation"
+        if strategy == "content_based" and policy is None:
+            from .physical_sections import PHYSICAL_NAVIGATION_POLICY
+            navigation_key += ":" + PHYSICAL_NAVIGATION_POLICY
+        structure = retained(navigation_key) if retained else None
         if structure is None:
             if strategy == "level_based":
                 structure = build_tree_from_levels(nodes)
@@ -123,7 +129,7 @@ def build_index(parsed: ParsedDocument, model: str = None, opt=None) -> dict:
                 structure = _run_async(_content_based_pipeline(index_pages, opt, **({"policy": policy} if policy else {})))
 
             if retained:
-                retained("navigation", structure)
+                retained(navigation_key, structure)
         if strategy != "level_based":
             page_list = [(n.content, n.tokens) for n in nodes]
 

@@ -24,6 +24,7 @@ class SavePage(ViewSelection):
     path: str
     body: str = field(repr=False)
     version: str
+    publication_id: str | None = None
 
     def __post_init__(self) -> None:
         super().__post_init__()

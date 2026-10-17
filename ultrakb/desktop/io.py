@@ -45,12 +45,17 @@ class LocalIO(QObject):
         creating=False,
         deleting=False,
         repair=False,
+        snapshot=False,
         cancelled=lambda: False,
         obsolete=lambda: False,
         on_wait=None,
     ):
         if self._stop.is_set():
             return
+        if snapshot and (
+            kb is None or exclusive or global_settings or creating or deleting or repair
+        ):
+            raise ValueError("Snapshot reads require only a knowledge-base lifecycle lease")
         self._sequence += 1
         sequence = self._sequence
         self._callbacks[sequence] = callback
@@ -103,7 +108,11 @@ class LocalIO(QObject):
                         )
                     ):
                         raise ValueError("请选择已有的知识库目录")
-                    if not deleting:
+                    if snapshot:
+                        from ultrakb.lifecycle import read_lifecycle
+
+                        scope.enter_context(read_lifecycle(kb, **wait_options))
+                    elif not deleting:
                         lease = (
                             kb_repair_lock(kb / ".ultrakb", **wait_options)
                             if repair
@@ -120,7 +129,20 @@ class LocalIO(QObject):
                     )
                 return operation()
 
-        self._operations[sequence] = (run, obsolete)
+        def stale():
+            if obsolete() or (snapshot and cancelled()):
+                return True
+            if snapshot and kb is not None:
+                from ultrakb.lifecycle import current_generation
+                from ultrakb.mutation import RecoveryRequired
+
+                try:
+                    return current_generation(kb) != generation
+                except (OSError, ValueError, RecoveryRequired):
+                    return True
+            return False
+
+        self._operations[sequence] = (run, stale)
         self._attempt(sequence)
 
     def _attempt(self, sequence):

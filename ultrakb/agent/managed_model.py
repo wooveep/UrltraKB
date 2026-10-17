@@ -16,6 +16,7 @@ from agents.retry import ModelRetryBackoffSettings, ModelRetrySettings
 
 from ultrakb.llm_execution import CompletionExecutor, ModelRequest
 from ultrakb.llm_usage import finish_request, normalize_usage
+from ultrakb.model_timing import ModelSlot
 
 
 class _ReceiptModel(LitellmModel):
@@ -264,7 +265,7 @@ class ManagedAgentModel(Model):
         from ultrakb.application.execution import activity
 
         with activity("answering"):
-            async with self.executor.slot():
+            async with ModelSlot(self.executor, request, logical):
                 with self.executor.attempt("answer", request, logical) as observed:
                     inner = _ReceiptModel(self.executor, observed)
                     try:
@@ -298,7 +299,7 @@ class ManagedAgentModel(Model):
         from ultrakb.application.execution import activity
 
         with activity("answering"):
-            async with self.executor.slot():
+            async with ModelSlot(self.executor, request, logical):
                 with self.executor.attempt("answer", request, logical) as observed:
                     inner = _ReceiptModel(self.executor, observed)
                     stream = inner.stream_response(*args, **kwargs)

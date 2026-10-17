@@ -149,3 +149,18 @@ def test_valid_hidden_text_and_blank_page_are_preserved(tmp_path):
     parts = recognize_pdf(path)
     assert "Correct hidden OCR text" in parts[0][1]
     assert parts[1] == ("page[2]", "")
+
+
+@pytest.mark.parametrize("oversized_name", ["x" * 100000, "名" * 100000], ids=["ascii", "unicode"])
+def test_page_repair_keeps_a_bounded_local_reason_from_large_diagnostics(oversized_name):
+    from ultrakb.agent.page_response import page_repair_message
+
+    detail = "entity: API: page_duplicate_field: Duplicate field: " + oversized_name
+    detail += " END_OF_COMPLETE_LOCAL_DIAGNOSTIC"
+    correction = page_repair_message("page_duplicate_field", detail)["content"]
+    assert "entity: API" in correction
+    assert "Duplicate field:" in correction
+    assert "page_duplicate_field" in correction
+    assert "Every JSON object member must occur exactly once" in correction
+    assert "END_OF_COMPLETE_LOCAL_DIAGNOSTIC" not in correction
+    assert len(correction.encode("utf-8")) < 2000

@@ -13,7 +13,7 @@ import math
 import threading
 import time
 import uuid
-from contextlib import asynccontextmanager, contextmanager
+from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field, replace
 from typing import Any, Callable, Iterator, Mapping
@@ -24,6 +24,7 @@ from ultrakb.config import LlmCredentialBundle
 from ultrakb.llm_usage import UsageScope, active_scope
 from ultrakb.llm_usage_transport import observe_model_call
 from ultrakb.locks import LockCancelled
+from ultrakb.model_timing import ModelSlot
 from ultrakb.model_tokenizer import ContextCapacityError, TokenMeasure
 
 ROLES = frozenset(
@@ -181,7 +182,7 @@ class RoleBindings:
 
 @dataclass(frozen=True)
 class ModelCallPolicy:
-    max_calls: int = 1000
+    max_calls: int | None = None  # None lets document work determine the total sends.
     concurrency: int = 5
     retries: int = 2
     backoff: float = 0.25
@@ -194,6 +195,8 @@ class ModelCallPolicy:
     compile_repair_calls: int = 1
 
     def __post_init__(self):
+        if self.max_calls is not None and (type(self.max_calls) is not int or self.max_calls < 0):
+            raise ValueError("max_calls must be None or an integer >= 0")
         if type(self.retrieval_tokens) is not int or self.retrieval_tokens not in (
             1024,
             2048,
@@ -207,7 +210,6 @@ class ModelCallPolicy:
         if type(self.retrieval_repairs) is not int or not 0 <= self.retrieval_repairs <= 2:
             raise ValueError("retrieval_repairs must be between 0 and 2 per question")
         for name, minimum in (
-            ("max_calls", 0),
             ("concurrency", 1),
             ("retries", 0),
             ("compile_reserve_calls", 2),
@@ -481,7 +483,7 @@ class CompletionExecutor:
         """Reserve one logical repair; actual sends still use reserve/transport accounting."""
         self.policy.check()
         with self._guard:
-            if self.calls >= self.policy.max_calls:
+            if self.policy.max_calls is not None and self.calls >= self.policy.max_calls:
                 raise ModelBudgetExceeded("Model request budget exhausted")
             repairs = self.request_cache.get("retrieval_repairs", 0)
             if (
@@ -491,17 +493,6 @@ class CompletionExecutor:
                 return False
             self.request_cache["retrieval_repairs"] = repairs + 1
             return True
-
-    @asynccontextmanager
-    async def slot(self):
-        while not self._slots.acquire(blocking=False):
-            self.policy.check()
-            await asyncio.sleep(0.01)
-        try:
-            self.policy.check()
-            yield
-        finally:
-            self._slots.release()
 
     @contextmanager
     def activate(self) -> Iterator[CompletionExecutor]:
@@ -621,10 +612,8 @@ class CompletionExecutor:
         from ultrakb.request_budget import PreparedRequest
 
         prepared = PreparedRequest.capture(self._kwargs(role, request))
-        while not self._slots.acquire(timeout=0.05):
-            self.policy.check()
-        try:
-            logical_id = uuid.uuid4().hex
+        logical_id = uuid.uuid4().hex
+        with ModelSlot(self, request, logical_id):
             for retry in range(self.policy.retries + 1):
                 self.policy.check()
                 try:
@@ -645,8 +634,6 @@ class CompletionExecutor:
                     self.policy.check()
                     time.sleep(min(0.05, max(0, until - time.monotonic())))
             raise AssertionError("Unreachable retry state")
-        finally:
-            self._slots.release()
 
     async def wait_response(self, awaitable, *, on_response=None):
         async def receive():
@@ -676,11 +663,8 @@ class CompletionExecutor:
         from ultrakb.request_budget import PreparedRequest
 
         prepared = PreparedRequest.capture(self._kwargs(role, request))
-        while not self._slots.acquire(blocking=False):
-            self.policy.check()
-            await asyncio.sleep(0.01)
-        try:
-            logical_id = uuid.uuid4().hex
+        logical_id = uuid.uuid4().hex
+        async with ModelSlot(self, request, logical_id):
             for retry in range(self.policy.retries + 1):
                 self.policy.check()
                 try:
@@ -704,8 +688,6 @@ class CompletionExecutor:
                     self.policy.check()
                     await asyncio.sleep(min(0.05, max(0, until - time.monotonic())))
             raise AssertionError("Unreachable retry state")
-        finally:
-            self._slots.release()
 
 
 _ACTIVE: ContextVar[CompletionExecutor | None] = ContextVar("ultrakb_model_executor", default=None)

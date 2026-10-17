@@ -13,7 +13,7 @@ import hashlib
 import json
 import os
 import tempfile
-import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
@@ -57,7 +57,14 @@ def peak_period(instant: datetime) -> bool:
 
 
 class LiveLLM:
-    def __init__(self, budget: TestRunBudget, *, env_path: Path = ROOT / ".env", profile="bounded"):
+    def __init__(
+        self,
+        budget: TestRunBudget,
+        *,
+        env_path: Path = ROOT / ".env",
+        profile="bounded",
+        response_cache: Path | None = None,
+    ):
         import litellm
 
         global _SDK_FUNCTIONS
@@ -81,10 +88,10 @@ class LiveLLM:
         self.calls = []
         self.adjustments = []
         self.receipts = []
+        self.timings = []
         self.reused = 0
-        self._cache_path = budget.path.with_suffix(".responses.json")
+        self._cache_path = response_cache or budget.path.with_suffix(".responses.json")
         self._cache = json.loads(self._cache_path.read_text()) if self._cache_path.exists() else {}
-        self._lock = threading.RLock()
         self._http = httpx.Client(timeout=90, trust_env=False)
         from live_proxy import DeepSeekProxy
 
@@ -167,7 +174,7 @@ class LiveLLM:
             "Authorization": f"Bearer {self._key}",
         }
         self._check_frozen_credentials(headers)
-        with self._request_lock(fingerprint), self._lock:
+        with self._request_lock(fingerprint):
             self.requests.append(self._public_request(kwargs))
             if cached := self._cached_response(fingerprint):
                 self.reused += 1
@@ -181,6 +188,7 @@ class LiveLLM:
                 fingerprint=fingerprint,
             )
             period = peak_period(datetime.now(ZoneInfo("Asia/Shanghai")))
+            started = time.monotonic()
             try:
                 with admitted_transport(self._http, self.budget, identifier, fingerprint):
                     response = self._http.post(
@@ -202,6 +210,8 @@ class LiveLLM:
             except Exception as error:
                 self.budget.uncertain(identifier, type(error).__name__)
                 raise
+            finally:
+                self.timings.append({"start": started, "end": time.monotonic()})
 
     def completion(self, **kwargs):
         self.calls.append(self._public_request(kwargs))

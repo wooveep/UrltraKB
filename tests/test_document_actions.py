@@ -60,3 +60,30 @@ def test_source_replacement_retains_reading_and_marks_knowledge_pending(tmp_path
     assert changed.actions["read"].allowed and changed.actions["retry"].allowed
     assert not changed.actions["recompile"].allowed
     assert "知识待更新" in changed.status
+
+
+@pytest.mark.parametrize("reading", ["default", "live", "published"])
+def test_document_inventory_retains_an_unstarted_workbook_sheet(kb_dir, reading):
+    from focus_fixtures import partial_workbook
+
+    from ultrakb.application.views import published_scope
+    from ultrakb.config import LlmCredentialBundle
+    from ultrakb.knowledge_scope import legacy_scope
+
+    source = partial_workbook(
+        kb_dir, kb_dir / "raw/partial.xlsx", bundle=LlmCredentialBundle(api_key="unused-fixture")
+    )
+    scope = (
+        published_scope(kb_dir)
+        if reading == "published"
+        else legacy_scope(kb_dir)
+        if reading == "live"
+        else None
+    )
+    rows = {row.identity.value: row for row in document_inventory(kb_dir, scope=scope)}
+    assert {unit["name"]: unit["status"] for unit in rows[source].document["units"]} == {
+        "Alpha": "completed",
+        "Beta": "failed",
+        "Gamma": "pending",
+    }
+    assert rows[source].actions["retry"].allowed

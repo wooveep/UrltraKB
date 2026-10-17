@@ -109,6 +109,9 @@ def test_legacy_read_is_unknown_and_does_not_change_catalog(kb_dir, monkeypatch)
         "f" * 64, {"name": "old.docx", "doc_name": "old", "type": "docx"}
     )
     register_kb_alias("old", kb_dir)
+    from publication_read_inputs import publish_fixture
+
+    publish_fixture(kb_dir)
 
     def forbidden(**kwargs):
         raise AssertionError("Reading legacy data must not call a model")

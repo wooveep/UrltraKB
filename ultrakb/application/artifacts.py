@@ -12,7 +12,7 @@ from typing import BinaryIO
 from ultrakb.application.execution import ExecutionContext
 from ultrakb.application.file_state import contained_paths
 from ultrakb.config import _is_kb_dir
-from ultrakb.knowledge_scope import KnowledgeScope, resolve_scope
+from ultrakb.knowledge_scope import KnowledgeScope, reading_scope, resolve_scope
 from ultrakb.locks import atomic_write_text, kb_ingest_lock, kb_read_lock
 from ultrakb.mutation import mutation_scope
 
@@ -149,8 +149,12 @@ def export_artifact(kb_dir: Path, relative: str, destination: Path) -> Path:
 def read_graph(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> dict:
     from ultrakb.visualize import build_graph
 
-    with kb_read_lock(kb_dir / ".ultrakb"):
-        return build_graph(resolve_scope(kb_dir, scope).wiki_dir)
+    selected = resolve_scope(kb_dir, scope)
+    with reading_scope(selected):
+        graph = build_graph(selected.wiki_dir)
+        if selected.publication_id is not None:
+            graph["publication_id"] = selected.publication_id
+        return graph
 
 
 def graph_html(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> str:

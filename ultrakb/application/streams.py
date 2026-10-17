@@ -36,8 +36,17 @@ async def answer_events(
         while True:
             event = await events.get()
             if event.get("event") == "operation_finished":
-                yield {"event": "result", "data": task.result()}
+                result = task.result()
+                if result.model_usage is not None:
+                    # The use case already audited its terminal request set.
+                    # Failed/stopped results retain this same complete receipt.
+                    yield {"event": "model_usage", "data": result.model_usage}
+                yield {"event": "result", "data": result}
                 return
+            if event.get("event") == "model_usage_progress":
+                # Keep the public answer-stream event name while ordinary
+                # updates retain their bounded, explicitly incomplete ID set.
+                event = {**event, "event": "model_usage"}
             yield event
     finally:
         stopped = True

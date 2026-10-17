@@ -81,6 +81,27 @@ def test_summary_prompt_identity_is_unchanged_for_retained_checkpoints():
     ) == ("8c89be3d755be20da539c73b890cc0c21b10c7ec038517ffefbac48a677db954")
 
 
+def test_new_reference_summary_explicitly_requests_json_for_json_mode():
+    from ultrakb.agent.document_summary import SYSTEM_TEMPLATE, summary_messages
+    from ultrakb.compile_checkpoints import digest
+
+    messages = summary_messages(
+        {"role": "system", "content": SYSTEM_TEMPLATE.format(language="en")},
+        "manual",
+        {"content": "Close the inlet.", "supplementary_context": []},
+        structured=True,
+    )
+    assert "json" in "\n".join(m["content"] for m in messages).lower()
+    retained = summary_messages(
+        {"role": "system", "content": SYSTEM_TEMPLATE.format(language="en")},
+        "manual",
+        {"content": "Close the inlet.", "supplementary_context": []},
+        structured=True,
+        request_format=2,
+    )
+    assert digest(retained) == "bd5a31ad3e6ff9f81f88f0e15bf83cc5daefc4f27dd8f1cb2ae435121556b21c"
+
+
 def test_repair_uses_safe_field_diagnostics_and_ignores_untrusted_detail():
     from ultrakb.agent.page_response import PageResponseError, page_repair_message, parse_summary
 

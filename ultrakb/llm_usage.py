@@ -67,6 +67,7 @@ class UsageScope:
     attempt_id: str | None = None
     root_import_id: str | None = None
     on_event: Callable[[dict], None] | None = None
+    generation: str | None = None
 
 
 _SCOPE: ContextVar[UsageScope | None] = ContextVar("ultrakb_import_usage", default=None)
@@ -74,6 +75,22 @@ _SCOPE: ContextVar[UsageScope | None] = ContextVar("ultrakb_import_usage", defau
 
 def active_scope() -> UsageScope | None:
     return _SCOPE.get()
+
+
+@contextmanager
+def usage_scope_lifecycle(scope: UsageScope | None) -> Iterator[None]:
+    """Bind a retained callback to its captured directory lifetime.
+
+    Legacy manually constructed scopes have no captured identity. Production
+    scopes capture one while import_usage_execution holds its lifecycle lease.
+    """
+    if scope is None or scope.generation is None:
+        yield
+        return
+    from ultrakb.lifecycle import expected_generation, read_lifecycle
+
+    with expected_generation(scope.kb_dir, scope.generation), read_lifecycle(scope.kb_dir):
+        yield
 
 
 @contextmanager
@@ -160,7 +177,7 @@ def begin_request(
     values = {
         name: getattr(scope, name)
         for name in UsageScope.__dataclass_fields__
-        if name not in {"kb_dir", "on_event"}
+        if name not in {"kb_dir", "on_event", "generation"}
     }
     record = UsageRequest(
         **values,
@@ -170,8 +187,13 @@ def begin_request(
         stage=stage,
         started_at=_now(),
     )
-    with atomic_record_lock(scope.kb_dir / ".ultrakb/usage/ledger.lock"):
-        atomic_write_json(_path(scope.kb_dir, identity), record.model_dump(mode="json"))
+    with (
+        usage_scope_lifecycle(scope),
+        atomic_record_lock(scope.kb_dir / ".ultrakb/usage/ledger.lock"),
+    ):
+        from ultrakb.usage_projection import write_request
+
+        write_request(scope.kb_dir, record)
     return identity
 
 
@@ -186,9 +208,38 @@ def finish_request(
     send_status: str | None = None,
     business_state: str | None = None,
 ) -> None:
+    from ultrakb.lifecycle import KnowledgeBaseRemoved
+
     scope = scope or _SCOPE.get()
     if identity is None or scope is None:
         return
+    try:
+        with usage_scope_lifecycle(scope):
+            _finish_request(
+                identity,
+                response,
+                state=state,
+                scope=scope,
+                observation=observation,
+                terminal=terminal,
+                send_status=send_status,
+                business_state=business_state,
+            )
+    except KnowledgeBaseRemoved:
+        return  # Late paid receipts cannot mutate a removed or recreated KB.
+
+
+def _finish_request(
+    identity: str,
+    response: Any,
+    *,
+    state: str,
+    scope: UsageScope,
+    observation: str | None,
+    terminal: bool,
+    send_status: str | None,
+    business_state: str | None,
+) -> None:
     path = _path(scope.kb_dir, identity)
     with atomic_record_lock(scope.kb_dir / ".ultrakb/usage/ledger.lock"):
         record = UsageRequest.model_validate_json(path.read_text("utf-8"))
@@ -208,9 +259,13 @@ def finish_request(
                 updates[key] = value
         if terminal and record.ended_at is None:
             updates.update(state=state, ended_at=_now())
-        if observation is not None:
+        if observation is not None and record.observation != "transport":
             updates["observation"] = observation
-        if send_status is not None:
+        if (
+            send_status is not None
+            and record.send_status != "sent"
+            and (send_status != "unknown" or record.send_status == "unknown")
+        ):
             updates["send_status"] = send_status
         if business_state is not None and record.business_state != "cancelled":
             updates["business_state"] = business_state
@@ -225,13 +280,21 @@ def finish_request(
             else "unknown"
         )
         saved = UsageRequest.model_validate(merged)
-        atomic_write_json(path, saved.model_dump(mode="json"))
+        from ultrakb.usage_projection import write_request
+
+        write_request(scope.kb_dir, saved)
     if scope.on_event:
         try:
+            from ultrakb.usage_projection import progress_receipt
+
             scope.on_event(
                 {
-                    "event": "model_usage",
-                    "data": usage_receipt(scope.kb_dir, source_id=scope.source_id),
+                    "event": "model_usage_progress",
+                    "data": progress_receipt(
+                        scope.kb_dir,
+                        execution_ids=[scope.execution_id],
+                        source_ids=[scope.source_id] if scope.source_id else [],
+                    ),
                 }
             )
         except Exception:
@@ -256,9 +319,31 @@ def aggregate_usage(
     root_import_id=None,
     unit_id=None,
 ) -> dict:
+    return _aggregate_usage(
+        read_requests(kb_dir),
+        request_ids=request_ids,
+        execution_ids=execution_ids,
+        source_id=source_id,
+        root_import_id=root_import_id,
+        unit_id=unit_id,
+    )
+
+
+def _aggregate_usage(
+    records,
+    *,
+    request_ids=None,
+    execution_ids=None,
+    source_id=None,
+    root_import_id=None,
+    unit_id=None,
+) -> dict:
+    """Project filters from one coherent ledger snapshot without more disk reads."""
+    request_ids = set(request_ids) if request_ids is not None else None
+    execution_ids = set(execution_ids) if execution_ids is not None else None
     records = [
         r
-        for r in read_requests(kb_dir)
+        for r in records
         if (request_ids is None or r.request_attempt_id in request_ids)
         and (execution_ids is None or r.execution_id in execution_ids)
         and (source_id is None or r.source_id == source_id)
@@ -327,7 +412,8 @@ def usage_receipt(kb_dir: Path, *, source_id=None, request_ids=None, unit_id=Non
 
     scope = _SCOPE.get()
     executions = [scope.execution_id] if scope and scope.kb_dir == kb_dir.resolve() else []
-    current = aggregate_usage(kb_dir, execution_ids=executions, request_ids=request_ids)
+    records = read_requests(kb_dir)
+    current = _aggregate_usage(records, execution_ids=executions, request_ids=request_ids)
     path = kb_dir / ".ultrakb/usage/sources" / f"{source_id}.json"
     historical = (
         SourceUsageHistory.model_validate_json(path.read_text("utf-8")).history_status
@@ -340,7 +426,7 @@ def usage_receipt(kb_dir: Path, *, source_id=None, request_ids=None, unit_id=Non
         "source_ids": [source_id] if source_id else [],
         "ledger": str(kb_dir / ".ultrakb/usage"),
         "current": current,
-        "cumulative": aggregate_usage(kb_dir, source_id=source_id, unit_id=unit_id)
+        "cumulative": _aggregate_usage(records, source_id=source_id, unit_id=unit_id)
         if source_id
         else current,
         "history_status": historical if source_id else "execution_only",
@@ -353,19 +439,18 @@ def merge_usage_receipts(kb_dir: Path, receipts) -> dict | None:
     receipts = [receipt for receipt in receipts if receipt]
     if not receipts:
         return None
+    records = read_requests(kb_dir)
     ids = {identity for receipt in receipts for identity in receipt["current"]["request_ids"]}
     source_ids = {identity for receipt in receipts for identity in receipt.get("source_ids", [])}
-    historical_ids = {
-        r.request_attempt_id for r in read_requests(kb_dir) if r.source_id in source_ids
-    }
+    historical_ids = {r.request_attempt_id for r in records if r.source_id in source_ids}
     executions = {identity for receipt in receipts for identity in receipt["execution_ids"]}
     return {
         "execution_ids": sorted(executions),
         "model_tasks": model_task_receipts(kb_dir, executions),
         "source_ids": sorted(source_ids),
         "ledger": str(kb_dir / ".ultrakb/usage"),
-        "current": aggregate_usage(kb_dir, request_ids=ids),
-        "cumulative": aggregate_usage(kb_dir, request_ids=historical_ids | ids),
+        "current": _aggregate_usage(records, request_ids=ids),
+        "cumulative": _aggregate_usage(records, request_ids=historical_ids | ids),
         "history_status": "recorded"
         if all(r["history_status"] == "recorded" for r in receipts)
         else "execution_only"
@@ -391,8 +476,14 @@ def describe_model_budget(receipt: dict | None) -> tuple[str, ...]:
     return (
         _BUDGET_NOTICE,
         *(
-            f"模型调用预算：已发送 {task['actual_sends']} 次 · 上限 {task['limit']} 次 · "
-            f"剩余 {max(0, task['limit'] - task['actual_sends'])} 次；任务：{task['task_id']}"
+            f"模型调用预算：已发送 {task['actual_sends']} 次 · "
+            + (
+                "按实际工作量执行，无固定上限"
+                if task["limit"] is None
+                else f"上限 {task['limit']} 次 · "
+                f"剩余 {max(0, task['limit'] - task['actual_sends'])} 次"
+            )
+            + f"；任务：{task['task_id']}"
             for task in tasks
         ),
     )

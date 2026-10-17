@@ -27,7 +27,9 @@ def _full_windows(reader):
     return result
 
 
-async def _reconcile_page(kb_dir, view, page, identities, retained, config, bundle, readers):
+async def _reconcile_page(
+    kb_dir, view, page, identities, retained, config, bundle, readers, *, link_registry=None
+):
     from ultrakb.agent.compiler import _SYSTEM_TEMPLATE, _format_known_targets
     from ultrakb.agent.page_figures import START
     from ultrakb.agent.page_originals import PageOriginalContext
@@ -72,7 +74,7 @@ async def _reconcile_page(kb_dir, view, page, identities, retained, config, bund
     parts = frontmatter.split(original)
     if parts is None:
         raise ValueError("Shared page has no valid frontmatter")
-    targets = list_existing_wiki_targets(wiki)
+    targets = set(link_registry.paths) if link_registry else list_existing_wiki_targets(wiki)
     figures = reader.page_figures(evidence, long=True)
     patch = PageUpdate(
         original,
@@ -105,6 +107,7 @@ async def _reconcile_page(kb_dir, view, page, identities, retained, config, bund
             ),
         },
         current_original=None,
+        link_registry=link_registry,
         known_targets_message={
             "role": "user",
             "content": "Existing wiki targets:\n" + _format_known_targets(targets),

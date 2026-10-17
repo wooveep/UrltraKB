@@ -45,6 +45,8 @@ class MarkdownView(QTextBrowser):
         self._source_images = {}
         self._chrome = None
         self._fluid = fluid
+        self._ready_callback = None
+        self._ready_check = None
         self.rendered.connect(self._apply_rendered)
         font = text_font(18)
         self.document().setDefaultFont(font)
@@ -59,6 +61,8 @@ class MarkdownView(QTextBrowser):
         scale: float | None = None,
         anchor: str = "",
         preserve: bool = False,
+        on_ready=None,
+        is_current=None,
     ) -> None:
         if self._closed:
             return
@@ -69,11 +73,12 @@ class MarkdownView(QTextBrowser):
         self._source, self._base, self._dark, self._scale = source, base, dark, scale
         self._has_source, self._anchor = True, anchor
         self._preserve_position = preserve
+        self._ready_callback = on_ready
+        self._ready_check = is_current
         self._apply_presentation()
         cache = Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.CacheLocation))
         renderer = Renderer(cache / "rendering")
         self._renderer = renderer
-        self.document().setBaseUrl(QUrl.fromLocalFile(str(base) + "/"))
         future = self._pool.submit(render_markdown, source, renderer, dark=dark, scale=scale)
         self._futures.append(future)
 
@@ -93,10 +98,13 @@ class MarkdownView(QTextBrowser):
     def _apply_rendered(self, generation: int, value: RenderedMarkdown) -> None:
         if generation != self._generation or self._closed:
             return
+        if self._ready_check is not None and not self._ready_check():
+            return
         previous = self.verticalScrollBar().value()
         self._display_images.clear()
         self._inline_images.clear()
         self._source_images.clear()
+        self.document().setBaseUrl(QUrl.fromLocalFile(str(self._base) + "/"))
         self.setHtml(value.html)
         self._reader_chrome()
         for token, block in value.objects:
@@ -139,6 +147,9 @@ class MarkdownView(QTextBrowser):
             self.verticalScrollBar().setValue(previous)
         if self._anchor:
             QTimer.singleShot(0, lambda: self.scrollToAnchor(heading_anchor(self._anchor)))
+        callback, self._ready_callback = self._ready_callback, None
+        if callback is not None:
+            callback()
 
     def _apply_presentation(self):
         font = self.document().defaultFont()
@@ -260,6 +271,8 @@ class MarkdownView(QTextBrowser):
         """Replace temporary text and revoke any older asynchronous rendering."""
         self._generation += 1
         self._has_source, self._anchor = False, ""
+        self._ready_callback = None
+        self._ready_check = None
         if self._renderer:
             self._renderer.close()
         for future in self._futures:

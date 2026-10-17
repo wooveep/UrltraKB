@@ -84,6 +84,7 @@ def normalize_plan(
                         "brief",
                         "evidence_units",
                         "reading_locations",
+                        "aliases",
                     }:
                         raise ValueError(
                             f"{location} must be a page object with name/title/type/brief"
@@ -108,6 +109,10 @@ def normalize_plan(
                 if not isinstance(title, str) or not title.strip():
                     raise ValueError(f"{location}.title must be a nonempty string")
                 value: dict = {"name": slug, "title": title.strip()}
+                if "aliases" in item:
+                    from ultrakb.frontmatter import alias_values
+
+                    value["aliases"] = alias_values(item["aliases"])
                 if "reading_locations" in item:
                     from ultrakb.agent.source_windows import validate_reading_locations
 
@@ -176,13 +181,13 @@ def parse_compile_plan(
 def plan_repair_message(error: CompilePlanError, raw: str) -> str:
     """The same pure correction is sent after one invalid plan, at most once."""
     if error.code == "page_update_originals_unread":
-        return error.detail + "\nPrevious plan:\n" + raw[:8000]
+        return error.detail + "\nPrevious plan:\n" + raw
     return (
         "The previous JSON plan failed validation: "
         + error.detail
         + "\nReturn a corrected JSON plan with concepts and entities objects, each with "
         "create/update/related arrays. Use supported types and existing targets. "
-        "Preserve valid proposals. Previous output:\n" + raw[:8000]
+        "Preserve valid proposals. Previous output:\n" + raw
     )
 
 
@@ -212,11 +217,34 @@ def request_compile_plan(
         if attempt and checkpoints:
             checkpoints.claim_repair("plan", request_digest)
         raw = request(correction)
+        if checkpoints:
+            checkpoints.record_received_response(
+                "plan",
+                request_digest,
+                raw,
+                stage="compile.concepts-plan",
+                response_protocol="compile-plan-json",
+                expected_sections=(),
+                code="response_received",
+                attempt=attempt,
+            )
         try:
             plan = parse_compile_plan(
                 raw, parse, validate_updates=validate_updates, repaired=bool(attempt), **options
             )
         except CompilePlanError as error:
+            if checkpoints:
+                checkpoints.record_invalid_response(
+                    "plan",
+                    request_digest,
+                    raw,
+                    stage="compile.concepts-plan",
+                    response_protocol="compile-plan-json",
+                    expected_sections=(),
+                    code=error.code,
+                    detail=error.detail,
+                    attempt=attempt,
+                )
             if attempt:
                 if checkpoints:
                     checkpoints.record_failure("plan", request_digest, error.code)

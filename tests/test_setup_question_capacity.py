@@ -110,11 +110,13 @@ def test_retesting_unchanged_deepseek_prepares_capacity_for_the_actual_question(
     from ultrakb.application.connection_templates import CONNECTION_TEMPLATES
     from ultrakb.application.conversations import ask_question
     from ultrakb.application.knowledge_bases import initialize_kb
+    from ultrakb.application.query_views import resolve_query_views
     from ultrakb.config_state import capture_config
     from ultrakb.desktop.io import LocalIO
     from ultrakb.desktop.setup_connection import ConnectionSetup
     from ultrakb.locks import atomic_write_text, kb_ingest_lock
     from ultrakb.model_tokenizer import question_measure
+    from ultrakb.mutation import mutation_scope
 
     monkeypatch.setattr(config, "GLOBAL_CONFIG_DIR", tmp_path / "profile")
     monkeypatch.setattr(config, "GLOBAL_CONFIG_PATH", tmp_path / "profile/global.yaml")
@@ -139,7 +141,13 @@ def test_retesting_unchanged_deepseek_prepares_capacity_for_the_actual_question(
         settings["model_policy"] = {"max_calls": 4, "retries": 0, "backoff": 0}
         settings["role_generation"] = {"answer": {"max_tokens": 32, "reasoning_effort": "none"}}
         config.save_config(kb / ".ultrakb/config.yaml", settings)
-        atomic_write_text(kb / "wiki/sources/original.md", "The retained original states 42.")
+        source_path = kb / "wiki/sources/original.md"
+        with (
+            kb_ingest_lock(kb / ".ultrakb"),
+            mutation_scope(kb, [source_path], operation="verify-question-original"),
+        ):
+            atomic_write_text(source_path, "The retained original states 42.")
+        assert resolve_query_views(kb).has_evidence
         io = LocalIO()
         panel = ConnectionSetup(io, kb)
         try:
