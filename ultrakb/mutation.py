@@ -508,6 +508,7 @@ def mutation_scope(
     lock_path: Path | None = None,
     delegated_lease: DelegatedWriteLease | None = None,
     hardlink_dirs: set[Path] | None = None,
+    checkpoint: bool = False,
 ):
     """Commit a protected multi-file change, retaining evidence if rollback fails.
 
@@ -515,6 +516,8 @@ def mutation_scope(
     shared-state lock when transacting global settings. Journal paths and
     recovery targets remain contained within the supplied root. Post-commit
     cleanup is best effort; it can never undo a committed result.
+    A computation checkpoint commits independently, only on private paths that
+    cannot be restored by an enclosing publication transaction.
     SDK child tasks may receive an explicit revocable lease from that owner;
     copied contexts alone never confer general lock reentrancy.
     """
@@ -530,18 +533,26 @@ def mutation_scope(
         publication_transaction,
         publish_committed,
         recover_before_mutation,
+        validate_checkpoint_paths,
     )
 
     if lock_path is None:
         recover_before_mutation(kb_dir, delegated_lease=delegated_lease)
+    if checkpoint:
+        validate_checkpoint_paths(kb_dir, paths)
     snapshot = snapshot_paths(kb_dir, paths, operation=operation, hardlink_dirs=hardlink_dirs)
-    with publication_transaction(snapshot) as outer:
+    from contextlib import nullcontext
+
+    with nullcontext(False) if checkpoint else publication_transaction(snapshot) as outer:
         try:
             yield snapshot
             if outer and lock_path is None:
                 prepare_publication(snapshot)
             snapshot.mark_committed()
         except BaseException as exc:
+            if checkpoint and snapshot.committed_on_disk():
+                snapshot.discard_best_effort()
+                raise
             if snapshot.publication is not None and snapshot.committed_on_disk():
                 from ultrakb.published_knowledge import PublicationPending
 

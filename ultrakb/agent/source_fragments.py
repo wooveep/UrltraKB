@@ -8,6 +8,50 @@ from ultrakb.agent.page_response import PageResponseError
 from ultrakb.content_blocks import markdown_layout
 
 
+def selection_windows(reader, windows):
+    """Adapt document windows only when subdivision needs native selection coordinates."""
+    import hashlib
+
+    result = []
+    for window in windows:
+        if "native_location" in window:
+            result.append(window)
+            continue
+        selected, location = reader._document_selection(window["path"])
+        offset = window["selection_offset"]
+        if (
+            selected["content"][offset : offset + len(window["content"])] != window["content"]
+            or hashlib.sha256(reader._read(window["path"])).hexdigest() != window["sha256"]
+        ):
+            raise PageResponseError(
+                "page_evidence_changed", "Document window differs from its source"
+            )
+        result.append(
+            {**window, "native_location": location, "selection_length": len(selected["content"])}
+        )
+    return result
+
+
+def fragment_selections(windows):
+    """Coalesce only contiguous frozen scopes; a partial batch never reopens its source."""
+    groups = defaultdict(list)
+    for window in windows:
+        groups[selection_key(window)].append(window)
+    for values in groups.values():
+        original, start, stop = None, 0, 0
+        for window in sorted(values, key=lambda w: w["selection_offset"]):
+            offset = window["selection_offset"]
+            end = offset + len(window["content"])
+            if original is not None and offset > stop:
+                yield original, start, stop
+                original = None
+            if original is None:
+                original, start = window, offset
+            stop = max(stop, end)
+        if original is not None:
+            yield original, start, stop
+
+
 @dataclass(frozen=True)
 class FragmentLayout:
     protected: tuple[tuple[int, int, str], ...]
@@ -43,30 +87,52 @@ def fragment_layouts(windows):
         grouped[selection_key(window)].append(window)
     result = {}
     for key, values in grouped.items():
-        text = "".join(window["content"] for window in values)
-        tokens, offsets = markdown_layout(text)
+        # All offsets are in the native selection, including partial batches.
+        # Parse disjoint runs separately rather than treating an unread gap as text.
         protected, tables = [], []
-        for token in tokens:
-            if token.map and token.type in {"fence", "code_block"}:
-                protected.append((offsets[token.map[0]], offsets[token.map[1]], "excerpt"))
-            elif token.map and token.type == "table_open":
-                start, end = offsets[token.map[0]], offsets[token.map[1]]
-                head = next(
-                    part
-                    for part in tokens
-                    if part.type == "thead_open"
-                    and part.map
-                    and token.map[0] <= part.map[0] < part.map[1] <= token.map[1]
-                )
-                header_end = offsets[min(head.map[1] + 1, token.map[1])]
-                tables.append((start, header_end, end, text[start:header_end]))
-                protected.append((start, header_end, "table_header"))
-            elif token.map and token.type == "tr_open":
-                protected.append((offsets[token.map[0]], offsets[token.map[1]], "table_row"))
-        result[key] = FragmentLayout(
-            tuple(sorted(protected, key=lambda part: (part[0], -part[1]))), tuple(tables)
-        )
+        for _, start, stop in fragment_selections(values):
+            fragments = sorted(
+                (w for w in values if start <= w["selection_offset"] < stop),
+                key=lambda w: w["selection_offset"],
+            )
+            parts, cursor = [], start
+            for window in fragments:
+                parts.append(window["content"][max(0, cursor - window["selection_offset"]) :])
+                cursor = max(cursor, window["selection_offset"] + len(window["content"]))
+            text = "".join(parts)
+            layout = _layout(text, start)
+            protected.extend(layout.protected)
+            tables.extend(layout.tables)
+        result[key] = FragmentLayout(tuple(protected), tuple(tables))
     return result
+
+
+def _layout(text, start):
+    tokens, offsets = markdown_layout(text)
+    offsets = [offset + start for offset in offsets]
+    protected, tables = [], []
+    for token in tokens:
+        if token.map and token.type in {"fence", "code_block"}:
+            protected.append((offsets[token.map[0]], offsets[token.map[1]], "excerpt"))
+        elif token.map and token.type == "table_open":
+            start, end = offsets[token.map[0]], offsets[token.map[1]]
+            head = next(
+                part
+                for part in tokens
+                if part.type == "thead_open"
+                and part.map
+                and token.map[0] <= part.map[0] < part.map[1] <= token.map[1]
+            )
+            header_end = offsets[min(head.map[1] + 1, token.map[1])]
+            # offsets are global to the selection, text is local to this run.
+            base = offsets[0]
+            tables.append((start, header_end, end, text[start - base : header_end - base]))
+            protected.append((start, header_end, "table_header"))
+        elif token.map and token.type == "tr_open":
+            protected.append((offsets[token.map[0]], offsets[token.map[1]], "table_row"))
+    return FragmentLayout(
+        tuple(sorted(protected, key=lambda part: (part[0], -part[1]))), tuple(tables)
+    )
 
 
 def iter_fragments(reader, original, *, budget, layout, start=0, stop=None):
@@ -74,27 +140,44 @@ def iter_fragments(reader, original, *, budget, layout, start=0, stop=None):
     location = {k: v for k, v in original["native_location"].items() if k != "offset"}
     offset = start
     length = original["selection_length"] if stop is None else stop
-    while offset < length:
+
+    def read(offset, count, *, exact=False):
         iterator = reader.iter_selection(
             original["path"],
             {**location, "offset": offset},
-            budget=min(budget, length - offset),
+            budget=count,
             allow_suffix=offset > 0,
+            **({"content_budget": True} if exact else {}),
         )
-        window = next(iterator)
-        iterator.close()
+        try:
+            return next(iterator)
+        finally:
+            iterator.close()
+
+    while offset < length:
+        count = min(budget, length - offset)
+        try:
+            window = read(offset, count)
+        except PageResponseError as error:
+            if error.code != "page_invalid_continuation" or not original["path"].endswith(
+                ".content.json"
+            ):
+                raise
+            window = read(offset, count, exact=True)
+        if not window["content"] and original["path"].endswith(".content.json"):
+            # Historical native projection counted its metadata against the text
+            # budget. A short final tail can fit the complete request but produce
+            # no reader output. Keep successful old slices and repair only this tail.
+            window = read(offset, count, exact=True)
         end = offset + len(window["content"])
         if protected := layout.containing(end):
-            start, stop, _ = protected
-            desired_end = start if offset < start else stop
-            iterator = reader.iter_selection(
-                original["path"],
-                {**location, "offset": offset},
-                budget=desired_end - offset,
-                allow_suffix=offset > 0,
-            )
-            window = next(iterator)
-            iterator.close()
+            protected_start, protected_stop, _ = protected
+            desired_end = protected_start if offset < protected_start else protected_stop
+            if desired_end > length:
+                raise PageResponseError(
+                    "page_invalid_continuation", "Literal crosses the frozen scope"
+                )
+            window = read(offset, desired_end - offset, exact=True)
             end = offset + len(window["content"])
         if end <= offset:
             raise PageResponseError("page_invalid_continuation", "Source fragment made no progress")
@@ -125,7 +208,7 @@ def require_splittable(window, layout, *, prefix="page_create"):
         )
 
 
-def split_fragment_batch(batch, reader, layouts):
+def split_fragment_batch(batch, reader, layouts, *, prefix="page_create"):
     """Split one failed contribution, retaining native positions and every required byte."""
     if len(batch) > 1:
         middle = len(batch) // 2
@@ -150,7 +233,7 @@ def split_fragment_batch(batch, reader, layouts):
     else:
         location = "the required fixed page context"
     raise PageResponseError(
-        "page_create_indivisible_output",
+        f"{prefix}_indivisible_output",
         f"Output cannot complete for {location}; "
         "no legal smaller source fragment; original retained",
         field_errors=tuple(

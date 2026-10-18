@@ -38,7 +38,7 @@ def capacity_error(detail="", *, field_errors=()):
 
 
 def prepare_update_requests(
-    patch, originals, windows, *, messages, fits, scoped, include_repairs=True
+    patch, originals, windows, *, messages, fits, scoped, include_repairs=True, layouts=None
 ):
     if include_repairs:
         initial_fits = fits
@@ -78,14 +78,16 @@ def prepare_update_requests(
             if groups[-1] and not fits(messages([], scoped([*groups[-1], block]))):
                 groups.append([])
             groups[-1].append(block)
-        from ultrakb.agent.create_requests import selection_key
         from ultrakb.agent.source_fragments import (
             fragment_layouts,
+            fragment_selections,
             iter_fragments,
             require_splittable,
+            selection_windows,
         )
 
-        layouts = fragment_layouts(originals.windows)
+        selections = selection_windows(windows, originals.windows)
+        layouts = fragment_layouts(selections) if layouts is None else layouts
         budget = 24000
         while any(
             not fits(messages([window], scoped(group)))
@@ -117,16 +119,14 @@ def prepare_update_requests(
                     ),
                 )
             budget //= 2
-            selections: dict[tuple[str, str], tuple[dict, dict]] = {}
-            for window in originals.windows:
-                location = {
-                    k: v for k, v in window.get("native_location", {}).items() if k != "offset"
-                }
-                selections.setdefault((window["path"], digest(location)), (window, location))
             batch_windows = []
-            for window, location in selections.values():
+            from ultrakb.agent.create_requests import selection_key
+
+            for window, start, stop in fragment_selections(selections):
                 layout = layouts[selection_key(window)]
-                for part in iter_fragments(windows, window, budget=budget, layout=layout):
+                for part in iter_fragments(
+                    windows, window, budget=budget, layout=layout, start=start, stop=stop
+                ):
                     batch_windows.append(part)
                     if not fits(messages([part], scoped(groups[0]))):
                         require_splittable(part, layout, prefix="page_update")
@@ -166,7 +166,7 @@ async def generate_page_update(
     fits=None,
     link_registry=None,
 ) -> dict | UnchangedPage:
-    from ultrakb.agent.compiler import _llm_call_page_async
+    from ultrakb.agent.compiler import TruncatedResponseError, _llm_call_page_async
 
     fits = fits or update_capacity(windows.kb_dir, model, bundle)
     checkpoints = document_checkpoints(windows.kb_dir, windows.view_id, windows.doc_name)
@@ -277,11 +277,29 @@ async def generate_page_update(
         patch.source_ranges = combined_figures.ids
 
     def for_batch(batch, editable):
+        nonlocal combined_figures
+
         if patch.source_ranges is not None:
+            from ultrakb.agent.page_figures import PageFigures
+
+            context = windows.page_figures(batch, long=evidence_long())
+            assert combined_figures is not None
+            # Coordination can split a formerly fitting source window further.
+            # Keep those actual frozen ranges for final validation and galleries.
+            combined_figures = PageFigures(
+                windows.wiki,
+                tuple({r["id"]: r for r in (*combined_figures.ranges, *context.ranges)}.values()),
+                tuple(
+                    {
+                        f.occurrence_id: f for f in (*combined_figures.figures, *context.figures)
+                    }.values()
+                ),
+            )
+            patch.source_ranges = combined_figures.ids
             return scoped(
                 all_blocks if editable.allowed_blocks is None else editable.allowed_blocks,
                 metadata=editable.allow_metadata,
-                ranges=windows.page_figures(batch, long=evidence_long()).ids,
+                ranges=context.ids,
             )
         return editable
 
@@ -331,15 +349,17 @@ async def generate_page_update(
         if page_path.read_bytes().decode("utf-8") != patch.original:
             raise PageResponseError("page_update_stale", "Captured page changed")
         request = messages(batch, editable, extra)
-        if not fits(request):
-            raise capacity_error()
         signature = digest(request)
         value = accepted(key, signature, editable, batch)
         if value is None:
+            if not fits(request):
+                raise capacity_error()
             # Historical grouping keeps its frozen signature. Missing historical
             # results still need room for the current, bounded protocol repair.
             if not all(fits([*request, repair]) for repair in update_repair_messages()):
                 raise capacity_error()
+            if executor := active_executor():
+                executor.budget.require("compile", 1 + min(1, executor.policy.compile_repair_calls))
             if checkpoints:
                 checkpoints.require_generation(key, signature)
                 if ":conflict:" in key:
@@ -432,17 +452,43 @@ async def generate_page_update(
                 patch.request(), ensure_ascii=False
             )
         conflict_key = f"{page_key}:conflict:{index}"
-        if (
-            accepted(
-                conflict_key,
-                digest(messages(selected, editable, extra)),
-                for_batch(selected, editable),
-                selected,
+        split_key = conflict_key + ":bounded-v1"
+        signature = digest(messages(selected, editable, extra))
+        split = checkpoints.load(split_key, signature) if checkpoints else None
+        from ultrakb.model_tokenizer import ContextCapacityError
+
+        try:
+            if split:
+                raise capacity_error()
+            resolved = await generate(selected, editable, conflict_key, extra)
+        except (PageResponseError, ContextCapacityError, TruncatedResponseError) as error:
+            if isinstance(error, PageResponseError) and error.code not in {
+                "page_update_capacity_exceeded",
+                "page_truncated_response",
+            }:
+                raise
+            if checkpoints and not split:
+                checkpoints.save(split_key, signature, {"bounded": True})
+            from ultrakb.agent.update_reconciliation import reconcile_update
+
+            if current_original is not None:
+                originals = bounded_short_originals(originals, windows)
+                bounded_original = True
+            resolved = await reconcile_update(
+                patch=patch,
+                conflict=conflict,
+                requests=requests,
+                proposals=proposals,
+                originals=originals,
+                windows=windows,
+                scoped=scoped,
+                messages=messages,
+                fits=fits,
+                generate=generate,
+                key=conflict_key + ":steps-v1",
+                include_current=current_original is not None,
+                checkpoints=checkpoints,
             )
-            is None
-        ) and (executor := active_executor()):
-            executor.budget.require("compile", 1 + min(1, executor.policy.compile_repair_calls))
-        resolved = await generate(selected, editable, conflict_key, extra)
         if resolved.get("status") != "unchanged":
             result.setdefault("edits", []).extend(resolved["edits"])
             if patch.source_ranges is not None:

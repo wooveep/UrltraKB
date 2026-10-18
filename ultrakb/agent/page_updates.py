@@ -220,6 +220,8 @@ class PageUpdate:
                     "content": strip_ghost_wikilinks(edit["content"], self.known_targets)[0],
                 }
             by_block.setdefault(identity, []).append(edit)
+        from ultrakb.agent.page_assembly import assemble_blocks
+
         chunks, cursor = [], 0
         for identity, (start, end) in self.blocks.items():
             changes = by_block.get(identity, [])
@@ -230,20 +232,34 @@ class PageUpdate:
                 raise PageResponseError(
                     "page_update_conflict", "Conflicting edits target one block"
                 )
-            chunks.append(self.body[cursor:start])
-            chunks.extend(e["content"] for e in changes if e["operation"] == "insert_before")
+            chunks.append((self.body[cursor:start], False))
+            chunks.extend(
+                (e["content"], True) for e in changes if e["operation"] == "insert_before"
+            )
             replacement = replacements[0] if replacements else None
             chunks.append(
-                (replacement.get("content", "") if replacement["operation"] == "replace" else "")
-                if replacement
-                else self.body[start:end]
+                (
+                    (
+                        replacement.get("content", "")
+                        if replacement["operation"] == "replace"
+                        else ""
+                    )
+                    if replacement
+                    else self.body[start:end],
+                    replacement is not None,
+                )
             )
-            chunks.extend(e["content"] for e in changes if e["operation"] == "insert_after")
+            chunks.extend((e["content"], True) for e in changes if e["operation"] == "insert_after")
             cursor = end
-        chunks.append(self.body[cursor:])
+        chunks.append((self.body[cursor:], False))
+        newline = "\r\n" if "\r\n" in self.body else "\n"
+        content = assemble_blocks(chunks, newline=newline)
+        literals = _literal_blocks([text for text, _ in chunks])
+        if literals != _literal_blocks([content]):
+            content = assemble_blocks(chunks, newline=newline, separate=True)
         page = {
             "description": obj.get("description", self.request()["description"]),
-            "content": "".join(chunks),
+            "content": content,
         }
         missing = [
             text
@@ -256,7 +272,7 @@ class PageUpdate:
                 "Preserve the recorded manual additions verbatim: "
                 + json.dumps(missing, ensure_ascii=False),
             )
-        if _literal_blocks(chunks) != _literal_blocks([page["content"]]):
+        if literals != _literal_blocks([page["content"]]):
             raise PageResponseError(
                 "page_assembly_invalid",
                 "Page assembly changed a literal block; keep complete Markdown separators",

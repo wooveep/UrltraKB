@@ -219,6 +219,26 @@ def publication_transaction(snapshot: MutationSnapshot) -> Iterator[bool]:
             _transaction.reset(token)
 
 
+def validate_checkpoint_paths(kb_dir: Path, paths: list[Path]) -> None:
+    """Independent computation must never escape or overlap a publication's preimages."""
+    root = kb_dir.resolve()
+    private = root / ".ultrakb/index-checkpoints"
+    previous = _transaction.get()
+    for path in paths:
+        target = path.resolve()
+        if target == private or not target.is_relative_to(private):
+            raise ValueError("Independent checkpoint requires private index-checkpoint paths")
+        if (
+            previous is not None
+            and previous.kb_dir == root
+            and any(
+                target.is_relative_to(parent) or parent.is_relative_to(target)
+                for parent in previous.entries
+            )
+        ):
+            raise ValueError("Independent checkpoint overlaps an enclosing mutation")
+
+
 @contextmanager
 def knowledge_operation(
     kb_dir: Path, *, operation: str, paths: tuple[Path, ...] = ()

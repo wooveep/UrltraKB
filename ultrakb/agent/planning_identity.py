@@ -203,23 +203,40 @@ def _compare(candidate, entries, *, system, fits, send, checkpoints, identity):
         "reconcile every scope/meaning decision before selecting same or different.",
         "fragment_decisions": matches,
     }
-    reduction = identity_messages(system, candidate, [decision_entry])
-    if not fits(reduction):
-        raise capacity_error(
-            f"Identity decision for {candidate['id']} against {entry['id']} cannot fit "
-            "the minimum fragment receipts. All catalog fragments and decisions are retained.",
-            fits,
-        )
-    return request_json_work(
-        reduction,
-        key="identity-reconcile:" + digest([candidate["id"], decision_entry]),
-        stage="concepts-plan-identity",
-        fits=fits,
-        send=send,
-        checkpoints=checkpoints,
-        identity=identity,
-        validate=lambda value: _matches(value, [decision_entry], candidate),
-    )
+    while True:
+        reduction = identity_messages(system, candidate, [decision_entry])
+        key = "identity-reconcile:" + digest([candidate["id"], decision_entry])
+        split_signature = digest([PROTOCOL, reduction, identity])
+        split = checkpoints.load(key + ":reduce", split_signature) if checkpoints else None
+        try:
+            if split:
+                raise ContextCapacityError("Resume the retained identity reduction")
+            return request_json_work(
+                reduction,
+                key=key,
+                stage="concepts-plan-identity",
+                fits=fits,
+                send=send,
+                checkpoints=checkpoints,
+                identity=identity,
+                validate=lambda value: _matches(value, [decision_entry], candidate),
+            )
+        except ContextCapacityError:
+            if checkpoints and not split:
+                checkpoints.save(key + ":reduce", split_signature, {"reduce": True})
+            from ultrakb.agent.identity_reconciliation import fit_identity_decisions
+
+            decision_entry = fit_identity_decisions(
+                decision_entry,
+                candidate=candidate,
+                messages=lambda entry: identity_messages(system, candidate, [entry]),
+                system=system,
+                fits=fits,
+                send=send,
+                checkpoints=checkpoints,
+                identity=identity,
+                force=True,
+            )
 
 
 def _merge_locations(first: dict, second: dict, *, resolve=None) -> dict:

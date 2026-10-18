@@ -24,6 +24,9 @@ def verify_reading(window, root, wait):
         node = item(path)
         tree.scrollToItem(node)
         QApplication.processEvents()
+        # A queued refresh can replace the tree while events are processed.
+        node = item(path)
+        tree.scrollToItem(node)
         QTest.mouseClick(
             tree.viewport(), Qt.MouseButton.LeftButton, pos=tree.visualItemRect(node).center()
         )

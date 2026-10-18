@@ -450,7 +450,7 @@ class CompileSourceWindows:
             return {key: ",".join(map(str, sorted(numbers)))}
         return {k: v for k, v in advice.items() if k != "node_ids"}
 
-    def _window(self, path: str, location: dict, remaining: int) -> dict:
+    def _window(self, path: str, location: dict, remaining: int, *, content_budget=False) -> dict:
         data = self._read(path)
         result: dict = {
             "path": path,
@@ -477,7 +477,13 @@ class CompileSourceWindows:
                 if "cells" in location:
                     selected = select_cells(selected, location["cells"])
             projected = project_evidence(
-                selected, offset=location.get("offset", 0), budget=remaining, allow_partial=True
+                selected,
+                offset=location.get("offset", 0),
+                allow_partial=True,
+                budget=remaining,
+                fits=(lambda payload: len(payload["content"]) <= remaining)
+                if content_budget
+                else None,
             )
             result.update(projected)
             result["native_location"] = location or {"chars": f"0:{len(raw['text'])}"}
@@ -545,7 +551,13 @@ class CompileSourceWindows:
         return list(self.iter_selection(path, location, budget=budget))
 
     def iter_selection(
-        self, path: str, location: dict, *, budget: int | None = None, allow_suffix: bool = False
+        self,
+        path: str,
+        location: dict,
+        *,
+        budget: int | None = None,
+        allow_suffix: bool = False,
+        content_budget: bool = False,
     ) -> Iterator[dict]:
         """Project successive windows without eagerly materializing unread suffixes."""
         from ultrakb.llm_execution import check_model_stop
@@ -556,7 +568,12 @@ class CompileSourceWindows:
         offset = location.get("offset", 0)
         while True:
             check_model_stop()
-            window = self._window(path, {**location, "offset": offset}, budget)
+            window = self._window(
+                path,
+                {**location, "offset": offset},
+                budget,
+                **({"content_budget": True} if content_budget else {}),
+            )
             end = offset + len(window["content"])
             continuation = window.get("continuation")
             length = window.get("selection_length")

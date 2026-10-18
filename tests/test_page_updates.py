@@ -190,6 +190,54 @@ def test_link_filtering_only_changes_new_edits():
     assert "New invalid and [[concepts/allowed]]." in result["content"]
 
 
+def test_adjacent_literal_replacements_keep_two_complete_code_blocks():
+    from ultrakb.agent.page_updates import PageUpdate
+    from ultrakb.content_blocks import markdown_layout
+
+    original = "# Page\n\nAlpha.\n\nBeta.\n\nRetained paragraph.\n"
+    update = PageUpdate(original)
+    result = update.apply(
+        json.dumps(
+            {
+                "base_sha256": update.digest,
+                "edits": [
+                    {"block_id": "b2", "operation": "replace", "content": "    alpha"},
+                    {"block_id": "b3", "operation": "replace", "content": "    beta"},
+                ],
+            }
+        ),
+        current=original,
+    )
+    literals = [
+        token.content
+        for token in markdown_layout(result["content"])[0]
+        if token.type in {"code_block", "fence"}
+    ]
+    assert literals == ["alpha\n", "beta\n"]
+    assert result["content"].startswith("# Page\n\n")
+    assert result["content"].endswith("Retained paragraph.\n")
+
+
+def test_unclosed_generated_fence_cannot_consume_retained_page_content():
+    from ultrakb.agent.page_response import PageResponseError
+    from ultrakb.agent.page_updates import PageUpdate
+
+    original = "# Page\n\nOld rule.\n\nRetained paragraph.\n"
+    update = PageUpdate(original)
+    with pytest.raises(PageResponseError, match="page_assembly_invalid"):
+        update.apply(
+            json.dumps(
+                {
+                    "base_sha256": update.digest,
+                    "edits": [
+                        {"block_id": "b2", "operation": "replace", "content": "```text\ncommand"},
+                    ],
+                }
+            ),
+            current=original,
+        )
+
+
 @pytest.mark.parametrize("stale", [False, True])
 def test_compiler_patch_repair_is_bounded_at_transport(kb_dir, stale):
     from test_compile_windows import _checkpoints

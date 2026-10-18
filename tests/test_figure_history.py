@@ -102,9 +102,12 @@ def test_bare_figure_reference_is_repaired_in_candidate_only(tmp_path):
 
 
 def test_moved_wiki_figures_render_in_the_real_reader(tmp_path, monkeypatch):
+    from time import monotonic
+
     monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
     from PySide6.QtCore import QUrl
     from PySide6.QtGui import QTextDocument
+    from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QApplication
 
     from ultrakb.desktop.reader import MarkdownView
@@ -132,15 +135,20 @@ def test_moved_wiki_figures_render_in_the_real_reader(tmp_path, monkeypatch):
     reader = MarkdownView()
     try:
         for page in moved.rglob("reader.md"):
-            reader.show_markdown(page.read_text(), page.parent)
-            for future in reader._futures:
-                future.result(timeout=10)
+            ready = []
+            reader.show_markdown(page.read_text(), page.parent, on_ready=lambda: ready.append(True))
+            deadline = monotonic() + 10
+            # A finished worker future can still have its Qt delivery queued.
+            # Wait for this page's actual presentation, not the previous page's images.
+            while not ready and monotonic() < deadline:
+                QTest.qWait(10)
+            assert ready, f"Reader did not present {page}"
             app.processEvents()
             assert len(reader._source_images) == 2
             for ref in image_references(page.read_text()):
                 url = reader.document().baseUrl().resolved(QUrl(ref.source))
                 picture = reader.document().resource(QTextDocument.ResourceType.ImageResource, url)
-                assert not picture.isNull() and picture.width() == 80
+                assert picture is not None and not picture.isNull() and picture.width() == 80
                 assert picture.toImage().pixelColor(0, 0).name() == "#ff0000"
     finally:
         reader.stop_rendering()

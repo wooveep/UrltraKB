@@ -153,7 +153,7 @@ def reusable_index(kb_dir, admission, revision, normalized, index_input, working
     from ultrakb.source_catalog import read_record
 
     unit = read_record(kb_dir, "units", revision.unit_id, ImportUnit)
-    with mutation_scope(kb_dir, [directory], operation="retain-complete-index"):
+    with mutation_scope(kb_dir, [directory], operation="retain-complete-index", checkpoint=True):
         import shutil
 
         if directory.exists():
