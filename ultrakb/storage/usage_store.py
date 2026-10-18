@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ultrakb.llm_usage import UsageRequest
-from ultrakb.llm_usage_models import UsageAggregate
+from ultrakb.llm_usage_models import UsageAggregate, UsageReceipt
 
 from .coordination import storage_stage
 from .database import DatabaseIdentity
@@ -118,6 +118,19 @@ class RequestPage:
 class UsageStore:
     def __init__(self, root: Path, identity: DatabaseIdentity):
         self.root, self.identity = root.resolve(), identity
+
+    def receipt(self, *, execution_id: str) -> dict:
+        from .database import database_path
+
+        total = self.summary(execution_id=execution_id)
+        return UsageReceipt(
+            execution_ids=[execution_id],
+            source_ids=[],
+            ledger=str(database_path(self.root)),
+            current=UsageAggregate.model_validate(total),
+            cumulative=UsageAggregate.model_validate(total),
+            history_status="execution_only",
+        ).model_dump(mode="json")
 
     def begin(
         self,

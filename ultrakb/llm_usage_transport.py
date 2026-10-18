@@ -12,7 +12,7 @@ import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from typing import Callable, Mapping
+from typing import Any, Callable, Mapping
 
 from ultrakb.execution_timing import ObservationStart, record_phase_event, start_observation
 from ultrakb.llm_usage import (
@@ -44,6 +44,7 @@ class ModelCall:
     send_starts: dict[str, ObservationStart] = field(default_factory=dict)
     response_ids: set[str] = field(default_factory=set)
     retained_responses: set[str] = field(default_factory=set)
+    body_receipts: list[Any] = field(default_factory=list)
 
     def observe_images(self, request):
         import json
@@ -103,6 +104,8 @@ class ModelCall:
         return identity
 
     def finish(self, response=None, *, state="completed"):
+        for body in self.body_receipts:
+            body.finish(complete=False)
         identity = self.sent_ids[-1] if self.sent_ids else self.first_id
         if (
             response is not None
@@ -144,16 +147,17 @@ class ModelCall:
             business_state=state,
         )
 
-    def received(self, identity, response):
+    def received(self, identity, response, *, complete=True):
         try:
-            return self._received(identity, response)
+            return self._received(identity, response, complete=complete)
         except BaseException as error:
             if self.scope is not None and self.scope.storage is not None:
                 self.send_error = self.scope.storage.failure or error
             raise
 
-    def _received(self, identity, response):
+    def _received(self, identity, response, *, complete=True):
         received = start_observation()
+        state = "completed" if response.is_success and complete else "failed"
         self.response_status = response.status_code
         raw = _response(response)
         if isinstance(raw, dict) and raw.get("object") == "response":
@@ -182,13 +186,13 @@ class ModelCall:
                 identity,
                 response.content,
                 observed_response=raw,
-                state="completed" if response.is_success else "failed",
+                state=state,
                 observation="transport",
             )
         finish_request(
             identity,
             raw,
-            state="completed" if response.is_success else "failed",
+            state=state,
             scope=self.scope,
             observation="transport",
             terminal=response.is_stream_consumed,
@@ -196,7 +200,7 @@ class ModelCall:
         if response.is_stream_consumed:
             self.response_event(
                 identity,
-                "completed" if response.is_success else "failed",
+                state,
                 at=received,
                 response_observed=True,
             )
@@ -320,6 +324,9 @@ def install_send_observer():
                 )
                 raise
             call.received(identity, response)
+            from ultrakb.llm_usage_stream import observe_response_stream
+
+            observe_response_stream(call, identity, response)
             return response
 
         async def asend(client, request, *args, **kwargs):
@@ -337,6 +344,9 @@ def install_send_observer():
             async def receive():
                 response = await async_send(client, request, *args, **kwargs)
                 call.received(identity, response)
+                from ultrakb.llm_usage_stream import observe_response_stream
+
+                observe_response_stream(call, identity, response)
                 return response
 
             pending = asyncio.create_task(receive())

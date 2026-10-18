@@ -47,6 +47,20 @@ def citation_targets(markdown):
 
 
 def _source_identity(root, view, path):
+    if view.scope.knowledge is not None:
+        from ultrakb.storage.catalog_store import CatalogStore
+
+        native = view.native_inputs.get(path)
+        if native is None:
+            return "reference", path, _doc_name(path), None, None
+        unit = next(
+            unit
+            for unit in view.scope.knowledge.input_units()
+            if unit.unit_revision_id == native[0]
+        )
+        source = CatalogStore(root, view.scope.knowledge.identity).revision(unit.source_revision_id)
+        name = next(file.path for file in source.files if file.kind == "main")
+        return "source", source.source_id, name, source.revision_id, unit.unit_id
     from ultrakb.source_catalog import read_source, read_source_revision
     from ultrakb.state import HashRegistry
     from ultrakb.unit_publication import list_source_units
@@ -75,6 +89,33 @@ def _source_identity(root, view, path):
     return "reference", path, doc_name, None, None
 
 
+def _stored_publication(view):
+    bound = view.scope.knowledge
+    if bound is None:
+        return {}
+    return {
+        "storage_identity": {
+            "kb_id": bound.identity.kb_id,
+            "generation": bound.identity.generation,
+        },
+        "publication_id": bound.publication_id,
+    }
+
+
+def _same_input_read(view, read, path, revision):
+    if read.get("path") == path:
+        return True
+    if view.scope.knowledge is not None:
+        target = view.native_inputs.get(path)
+        observed = view.native_inputs.get(read.get("path"))
+        return target is not None and observed is not None and target[0] == observed[0]
+    return bool(
+        revision
+        and read.get("source_revision_id") == revision
+        and _doc_name(read.get("path", "")) == _doc_name(path)
+    )
+
+
 def capture_answer_citations(answer, selection, returned_reads):
     """Only the final Markdown selects citations; activity logs and focus are not inputs."""
     root, references = selection.kb_dir, []
@@ -93,20 +134,14 @@ def capture_answer_citations(answer, selection, returned_reads):
                     read
                     for read in returned_reads
                     if read.get("digest") == view.files.get(read.get("path"))
-                    and (
-                        read.get("path") == path
-                        or (
-                            revision
-                            and read.get("source_revision_id") == revision
-                            and _doc_name(read.get("path", "")) == _doc_name(path)
-                        )
-                    )
+                    and _same_input_read(view, read, path, revision)
                 ]
                 if not page.startswith("sources/") and not matches:
                     continue
                 base = view.native_file_roots.get(path, view.scope.wiki_dir)
                 file = base / path
-                contained_paths(root, [file])
+                if view.scope.knowledge is None:
+                    contained_paths(root, [file])
                 read_selected_file(view, path)
                 references.append(
                     {
@@ -124,6 +159,7 @@ def capture_answer_citations(answer, selection, returned_reads):
                         "digest": view.files[path],
                         "returned": bool(matches),
                         "locations": [read.get("location", {}) for read in matches],
+                        **_stored_publication(view),
                     }
                 )
                 found = True
@@ -141,6 +177,7 @@ def capture_answer_citations(answer, selection, returned_reads):
                         "stored_path": str((base / page).relative_to(root)),
                         "stored_root": str(base.relative_to(root)),
                         "digest": view.files[page],
+                        **_stored_publication(view),
                     }
                 )
                 found = True
@@ -226,6 +263,27 @@ def answer_citations(answer):
 
 def read_answer_reference(kb_dir: Path, reference, *, historical_unknown=False):
     root = kb_dir.resolve()
+    if reference.get("storage_identity") is not None:
+        from ultrakb.application.views import storage_scope
+        from ultrakb.knowledge_scope import read_wiki_bytes
+        from ultrakb.storage.database import DatabaseIdentity
+
+        try:
+            identity = DatabaseIdentity(**reference["storage_identity"])
+        except (TypeError, KeyError) as error:
+            raise ValueError("Invalid answer storage identity") from error
+        if not isinstance(reference.get("publication_id"), str):
+            raise ValueError("A retained answer requires its exact publication identity")
+        scope = storage_scope(
+            root, identity, publication_id=reference["publication_id"], view_id=reference["view_id"]
+        )
+        data = read_wiki_bytes(scope, reference["path"])
+        if hashlib.sha256(data).hexdigest() != reference["digest"]:
+            raise ValueError("The bound answer source differs from its recorded digest")
+        from .reading_assets import capture_reading_assets
+
+        content, note, _ = _reference_content(data, root / "wiki" / reference["path"], reference)
+        return content, note, capture_reading_assets(scope, reference["path"], content)
     with kb_read_lock(root / ".ultrakb"):
         raw_path = reference.get("stored_path")
         if raw_path is None and historical_unknown:
@@ -255,25 +313,27 @@ def read_answer_reference(kb_dir: Path, reference, *, historical_unknown=False):
         data = path.read_bytes()
         if hashlib.sha256(data).hexdigest() != reference["digest"]:
             raise ValueError("生成时依据已改变或缺失；不会替换为另一修订。请在资料页核对原件。")
-        if path.name.endswith(".content.json"):
-            from ultrakb.text_source import read_text_selection
+        return _reference_content(data, path, reference)
 
-            content = read_text_selection(json.loads(data))["content"]
-        elif path.suffix == ".json":
-            from ultrakb.source_pages import read_page_selection
 
-            content = read_page_selection(json.loads(data))["content"]
-        else:
-            content = data.decode("utf-8")
-        note = "生成时原文版本；" + (
-            "有本次原文读取记录（读取不表示覆盖全文或核实所有结论）。"
-            if reference["returned"]
-            else "仅为正文引用，未找到本次原文读取记录。"
-        )
-        if not reference["path"].startswith("sources/"):
-            note = "生成时保留的摘要或知识页面；生成内容不能代替原文核实。"
-        if reference.get("locations"):
-            note += "\n本次返回的阅读位置：" + json.dumps(
-                reference["locations"], ensure_ascii=False
-            )
-        return content, note, path.parent
+def _reference_content(data, path, reference):
+    if path.name.endswith(".content.json"):
+        from ultrakb.text_source import read_text_selection
+
+        content = read_text_selection(json.loads(data))["content"]
+    elif path.suffix == ".json":
+        from ultrakb.source_pages import read_page_selection
+
+        content = read_page_selection(json.loads(data))["content"]
+    else:
+        content = data.decode("utf-8")
+    note = "生成时原文版本；" + (
+        "有本次原文读取记录（读取不表示覆盖全文或核实所有结论）。"
+        if reference["returned"]
+        else "仅为正文引用，未找到本次原文读取记录。"
+    )
+    if not reference["path"].startswith("sources/"):
+        note = "生成时保留的摘要或知识页面；生成内容不能代替原文核实。"
+    if reference.get("locations"):
+        note += "\n本次返回的阅读位置：" + json.dumps(reference["locations"], ensure_ascii=False)
+    return content, note, path.parent

@@ -7,6 +7,7 @@ synchronization plans and publication receipts bind in one guarded commit.
 import hashlib
 import json
 import uuid
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -285,12 +286,30 @@ class KnowledgeStore:
         )
 
     def prepare_changes(
-        self, base: BoundKnowledge, changes: dict[str, bytes | None]
+        self,
+        base: BoundKnowledge,
+        changes: dict[str, bytes | None],
+        *,
+        page_inputs: dict[str, tuple[str, ...]] | None = None,
     ) -> PreparedRevision:
         """Keep a fixed revision's inputs and reuse its verified immutable assets."""
         if base.root != self.root or base.identity != self.identity:
             raise ValueError("Changes require a baseline from this exact database")
         basis = base.page_input_revisions()
+        if page_inputs is not None:
+            if not isinstance(page_inputs, dict):
+                raise ValueError("Changed page inputs must be a mapping")
+            allowed = {unit.unit_revision_id for unit in base.input_units()}
+            for path, units in page_inputs.items():
+                if (
+                    path not in changes
+                    or changes[path] is None
+                    or not path.endswith(".md")
+                    or not isinstance(units, tuple)
+                    or any(not isinstance(unit, str) or unit not in allowed for unit in units)
+                ):
+                    raise ValueError("Changed page inputs must belong to this exact baseline")
+            basis.update(page_inputs)
         return self._prepare_revision(
             changes,
             expected=base.publication_id,
@@ -301,7 +320,8 @@ class KnowledgeStore:
                 path: basis.get(path, ())
                 for path in base.files()
                 if path.endswith(".md") and (path not in changes or changes[path] is not None)
-            },
+            }
+            | (page_inputs or {}),
             base=base,
         )
 
@@ -511,11 +531,21 @@ class KnowledgeStore:
                     raise ValueError("Revision changed during sealed validation")
             return prepared
 
-    def publish(self, prepared: PreparedRevision, *, edit_id: str | None = None) -> Publication:
+    def publish(
+        self,
+        prepared: PreparedRevision,
+        *,
+        edit_id: str | None = None,
+        check_cancelled: Callable[[], None] = lambda: None,
+    ) -> Publication:
+        def cancelled():
+            check_cancelled()
+            return False
+
         with (
             storage_stage(self.root, self.identity) as db,
-            projection_lock(self.root),
-            file_write_lock(self.root / ".ultrakb/ingest.lock"),
+            projection_lock(self.root, cancelled=cancelled),
+            file_write_lock(self.root / ".ultrakb/ingest.lock", cancelled=cancelled),
             db.transaction() as connection,
         ):
             record = connection.execute(
@@ -561,6 +591,9 @@ class KnowledgeStore:
             require_import_claim(
                 connection, self.identity, prepared.revision_id, prepared.import_attempt_id
             )
+            # The callback only checks an in-memory stop/deadline signal. Do not
+            # accept late preparation after cancellation, or run I/O in this commit.
+            check_cancelled()
             activate_sync_plan(db, prepared.revision_id, prepared.sync_plan_id)
             connection.execute(
                 "INSERT INTO ukb_publications VALUES (?, ?, ?, ?)",

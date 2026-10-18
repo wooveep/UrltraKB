@@ -72,6 +72,7 @@ def begin_storage_execution(root: Path, context: ExecutionContext) -> Iterator[L
                 resume=previous.execution_id if previous else None,
             )
             context.storage_execution = execution
+            context._storage_result = "completed"
             usage = StoredModelUsage(root, identity, execution, on_event=context.on_event)
             state = "completed"
             failure = None
@@ -99,7 +100,9 @@ def begin_storage_execution(root: Path, context: ExecutionContext) -> Iterator[L
                     finally:
                         store.finish(
                             execution.execution_id,
-                            state="failed" if state == "completed" and usage.failure else state,
+                            state=("failed" if usage.failure else context._storage_result)
+                            if state == "completed"
+                            else state,
                             work_settled=True,
                         )
                 except Exception:

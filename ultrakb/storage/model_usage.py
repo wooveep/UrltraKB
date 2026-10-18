@@ -184,7 +184,7 @@ class StoredModelUsage:
                 self.on_event(
                     {
                         "event": "model_usage_progress",
-                        "data": self.usage.summary(execution_id=self.execution.execution_id),
+                        "data": self.usage.receipt(execution_id=self.execution.execution_id),
                     }
                 )
             except Exception:

@@ -9,6 +9,25 @@ from ultrakb.locks import atomic_write_text, kb_ingest_lock
 from ultrakb.mutation import mutation_scope
 
 
+def exploration_slug(question: str, *, unique: bool) -> str:
+    import hashlib
+    import re
+
+    slug = re.sub(r"[^a-z0-9]+", "-", question.lower()).strip("-")[:60]
+    return (
+        hashlib.sha256(question.encode("utf-8")).hexdigest()[:12] if not slug and unique else slug
+    )
+
+
+def exploration_markdown(question: str, answer: str, known: set[str]) -> str:
+    import json
+
+    from ultrakb.lint import strip_ghost_wikilinks
+
+    cleaned_answer, _ = strip_ghost_wikilinks(answer, known)
+    return f"---\nquery: {json.dumps(question, ensure_ascii=False)}\n---\n\n{cleaned_answer}\n"
+
+
 def save_exploration(
     kb_dir: Path,
     question: str,
@@ -26,10 +45,7 @@ def save_exploration(
     policy, including its empty CJK slug.
     """
     scope = resolve_scope(kb_dir, scope, writable=True)
-    import hashlib
-    import re
-
-    from ultrakb.lint import list_existing_wiki_targets, strip_ghost_wikilinks
+    from ultrakb.lint import list_existing_wiki_targets
 
     if not answer:
         return None
@@ -45,13 +61,7 @@ def save_exploration(
         # encourages [[wikilinks]] but the agent's view of "which pages
         # exist" can drift from disk reality.
         known = list_existing_wiki_targets(scope.wiki_dir)
-        cleaned_answer, _ = strip_ghost_wikilinks(answer, known)
-
-        slug = re.sub(r"[^a-z0-9]+", "-", question.lower()).strip("-")[:60]
-        if not slug and unique:
-            # CJK / punctuation-only questions collapse to an empty slug.
-            # Fall back to a short hash so each question gets its own file.
-            slug = hashlib.sha256(question.encode("utf-8")).hexdigest()[:12]
+        slug = exploration_slug(question, unique=unique)
         explore_path = explore_dir / f"{slug}.md"
         # Uniquify to avoid clobbering an existing exploration with a colliding slug.
         counter = 1
@@ -59,13 +69,9 @@ def save_exploration(
             explore_path = explore_dir / f"{slug}-{counter}.md"
             counter += 1
 
-        # Escape the question for YAML frontmatter: wrap in double quotes and
-        # escape backslashes and double quotes so questions containing `"` don't
-        # produce invalid YAML.
-        escaped = question.replace("\\", "\\\\").replace('"', '\\"')
         with mutation_scope(kb_dir, [explore_path], operation="save-answer"):
             atomic_write_text(
                 explore_path,
-                f'---\nquery: "{escaped}"\n---\n\n{cleaned_answer}\n',
+                exploration_markdown(question, answer, known),
             )
     return explore_path

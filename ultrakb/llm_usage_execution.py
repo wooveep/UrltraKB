@@ -201,10 +201,24 @@ def track_import_usage(function):
             bound.arguments.get("on_event"),
         )
 
+    def stored(args, kwargs):
+        selected = signature.bind(*args, **kwargs).arguments.get("scope")
+        existing = _SCOPE.get()
+        knowledge = getattr(selected, "knowledge", None)
+        if (
+            existing is not None
+            and existing.storage is not None
+            and (knowledge is None or knowledge.identity != existing.storage.identity)
+        ):
+            raise ValueError("New-store application calls require their bound knowledge identity")
+        return knowledge is not None
+
     if inspect.iscoroutinefunction(function):
 
         @wraps(function)
         async def async_run(*args, **kwargs):
+            if stored(args, kwargs):
+                return await function(*args, **kwargs)
             root, source_id, context, on_event = enter(args, kwargs)
             if not (root / ".ultrakb/config.yaml").is_file():
                 return await function(*args, **kwargs)
@@ -232,6 +246,8 @@ def track_import_usage(function):
 
     @wraps(function)
     def run(*args, **kwargs):
+        if stored(args, kwargs):
+            return function(*args, **kwargs)
         root, source_id, context, on_event = enter(args, kwargs)
         if not (root / ".ultrakb/config.yaml").is_file():
             return function(*args, **kwargs)

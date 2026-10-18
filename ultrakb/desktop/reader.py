@@ -6,10 +6,11 @@ import html
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from PySide6.QtCore import QStandardPaths, QTimer, QUrl, Signal
+from PySide6.QtCore import QByteArray, QStandardPaths, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import (
     QFont,
     QFontMetricsF,
+    QPixmap,
     QTextCharFormat,
     QTextCursor,
     QTextDocument,
@@ -17,6 +18,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QTextBrowser
 
+from ultrakb.application.reading_assets import ReadingAssets
 from ultrakb.desktop.fonts import MONO, SANS, text_font
 from ultrakb.rendering.markdown import RenderedMarkdown, heading_anchor, render_markdown
 from ultrakb.rendering.renderer import Renderer
@@ -35,6 +37,8 @@ class MarkdownView(QTextBrowser):
         self._futures = []
         self._source = ""
         self._base = Path.cwd()
+        self._snapshot_assets: ReadingAssets | None = None
+        self._generated_images: set[str] = set()
         self._dark = False
         self._scale = 1.0
         self._closed = False
@@ -55,7 +59,7 @@ class MarkdownView(QTextBrowser):
     def show_markdown(
         self,
         source: str,
-        base: Path,
+        base: Path | ReadingAssets,
         *,
         dark: bool | None = None,
         scale: float | None = None,
@@ -70,7 +74,13 @@ class MarkdownView(QTextBrowser):
         generation = self._generation
         dark = self._dark if dark is None else dark
         scale = self._scale if scale is None else scale
-        self._source, self._base, self._dark, self._scale = source, base, dark, scale
+        self._snapshot_assets = base if isinstance(base, ReadingAssets) else None
+        self._source, self._base, self._dark, self._scale = (
+            source,
+            base.directory if isinstance(base, ReadingAssets) else base,
+            dark,
+            scale,
+        )
         self._has_source, self._anchor = True, anchor
         self._preserve_position = preserve
         self._ready_callback = on_ready
@@ -104,7 +114,16 @@ class MarkdownView(QTextBrowser):
         self._display_images.clear()
         self._inline_images.clear()
         self._source_images.clear()
-        self.document().setBaseUrl(QUrl.fromLocalFile(str(self._base) + "/"))
+        self._generated_images = {
+            QUrl.fromLocalFile(block.image).toString()
+            for _, block in value.objects
+            if block.image is not None and not block.error
+        }
+        self.document().setBaseUrl(
+            QUrl(self._snapshot_assets.base_url)
+            if self._snapshot_assets is not None
+            else QUrl.fromLocalFile(str(self._base) + "/")
+        )
         self.setHtml(value.html)
         self._reader_chrome()
         for token, block in value.objects:
@@ -229,7 +248,7 @@ class MarkdownView(QTextBrowser):
             dimensions = self._display_images.get(format_.name())
             if dimensions is None:
                 url = document.baseUrl().resolved(QUrl(format_.name()))
-                if not url.isLocalFile():
+                if not url.isLocalFile() and self._snapshot_assets is None:
                     continue
                 picture = document.resource(QTextDocument.ResourceType.ImageResource, url)
                 if picture is None or picture.isNull() or picture.width() <= 0:
@@ -260,12 +279,28 @@ class MarkdownView(QTextBrowser):
             if self._has_source:
                 self._fit_source_images()
 
+    def loadResource(self, resource_type, url):
+        if self._snapshot_assets is not None:
+            if url.toString() in self._generated_images:
+                return super().loadResource(resource_type, url)
+            data = self._snapshot_assets.image(url.toString())
+            if resource_type == QTextDocument.ResourceType.ImageResource.value:
+                image = QPixmap()
+                if data is None:
+                    image = QPixmap(1, 1)
+                    image.fill(Qt.GlobalColor.transparent)
+                else:
+                    image.loadFromData(data)
+                return image
+            return QByteArray(b" ")  # None asks Qt to load a file itself.
+        return super().loadResource(resource_type, url)
+
     def set_presentation(self, *, dark: bool, scale: float):
         changed = (dark, scale) != (self._dark, self._scale)
         self._dark, self._scale = dark, scale
         self._apply_presentation()
         if changed and self._has_source:
-            self.show_markdown(self._source, self._base, preserve=True)
+            self.show_markdown(self._source, self._snapshot_assets or self._base, preserve=True)
 
     def show_temporary(self, text: str | None) -> None:
         """Replace temporary text and revoke any older asynchronous rendering."""

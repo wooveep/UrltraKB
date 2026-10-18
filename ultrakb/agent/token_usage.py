@@ -70,9 +70,17 @@ def execution_usage(fallback: dict | None = None) -> dict | None:
     scope = active_scope()
     if scope is None:
         return fallback
-    total = aggregate_usage(scope.kb_dir, execution_ids=[scope.execution_id])
+    total = (
+        scope.storage.usage.summary(execution_id=scope.execution_id)
+        if scope.storage is not None
+        else aggregate_usage(scope.kb_dir, execution_ids=[scope.execution_id])
+    )
     if not total["requests"]:
         return fallback
+    return aggregate_token_usage(total)
+
+
+def aggregate_token_usage(total: dict) -> dict:
     unknown = total["unknown_fields"]
     cached = None if unknown["cached_input"] else total["cached_input"]
     input_total = None if unknown["input_total"] else total["input_total"]

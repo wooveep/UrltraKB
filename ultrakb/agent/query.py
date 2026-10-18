@@ -44,9 +44,12 @@ def build_query_agent(
     model: str,
     language: str = "en",
     bundle: "LlmCredentialBundle | None" = None,
+    *,
+    schema_md: str | None = None,
 ) -> Agent:
     """Build and return the Q&A agent."""
-    schema_md = get_agents_md(Path(wiki_root))
+    if schema_md is None:
+        schema_md = get_agents_md(Path(wiki_root))
     instructions = _QUERY_INSTRUCTIONS_TEMPLATE.format(schema_md=schema_md)
     instructions += f"\n\nIMPORTANT: Answer in {language} language."
 

@@ -9,6 +9,13 @@ from ultrakb.knowledge_scope import KnowledgeScope, resolve_scope
 from ultrakb.locks import atomic_write_text, kb_ingest_lock
 
 
+def appended_log(content: str | None, operation: str, description: str) -> str:
+    date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return (content if content is not None else "# Operations Log\n\n") + (
+        f"## [{date_str}] {operation} | {description}\n\n"
+    )
+
+
 def append_log(
     wiki_dir: Path, operation: str, description: str, *, scope: KnowledgeScope | None = None
 ) -> None:
@@ -25,14 +32,9 @@ def append_log(
             return
         root = scope.kb_dir
     log_path = wiki_dir / "log.md"
-    date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    entry = f"## [{date_str}] {operation} | {description}\n\n"
-
     with kb_ingest_lock(root / ".ultrakb"):
         from ultrakb.mutation import mutation_scope
 
-        content = (
-            log_path.read_text(encoding="utf-8") if log_path.exists() else "# Operations Log\n\n"
-        )
+        content = log_path.read_text(encoding="utf-8") if log_path.exists() else None
         with mutation_scope(root, [log_path], operation="append-operation-log"):
-            atomic_write_text(log_path, content + entry)
+            atomic_write_text(log_path, appended_log(content, operation, description))

@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from threading import RLock
 from time import monotonic
-from typing import TYPE_CHECKING, Any, Callable, Iterator
+from typing import TYPE_CHECKING, Any, Callable, Iterator, Literal
 from uuid import uuid4
 
 from ultrakb.config import LlmCredentialBundle
@@ -40,6 +40,9 @@ class ExecutionContext:
     storage_identity: DatabaseIdentity | None = field(default=None, repr=False)
     storage_execution: Execution | None = field(default=None, init=False)
     _storage_running: bool = field(default=False, init=False, repr=False)
+    _storage_result: Literal["completed", "failed", "cancelled"] = field(
+        default="completed", init=False, repr=False
+    )
     activity_attempt_id: str = field(default_factory=lambda: uuid4().hex)
     _activity_task_id: str = field(default_factory=lambda: uuid4().hex, repr=False)
     _event_guard: RLock = field(default_factory=RLock, repr=False)

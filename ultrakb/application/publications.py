@@ -1,6 +1,7 @@
 """Shared development use case for committing an import and projecting its Wiki."""
 
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -71,13 +72,17 @@ def publish_import_result(
 
 
 def publish_knowledge_changes(
-    base: BoundKnowledge, changes: dict[str, bytes | None]
+    base: BoundKnowledge,
+    changes: dict[str, bytes | None],
+    *,
+    page_inputs: dict[str, tuple[str, ...]] | None = None,
+    check_cancelled: Callable[[], None] = lambda: None,
 ) -> PublicationOutcome:
     """Commit an explicitly based manual edit before attempting worktree I/O."""
     knowledge = KnowledgeStore(base.root, base.identity)
-    prepared = knowledge.prepare_changes(base, changes)
+    prepared = knowledge.prepare_changes(base, changes, page_inputs=page_inputs)
     try:
-        publication = knowledge.publish(prepared)
+        publication = knowledge.publish(prepared, check_cancelled=check_cancelled)
     except (PublicationConflict, ProjectionConflict) as error:
         return PublicationOutcome(
             "needs_review",

@@ -541,3 +541,43 @@ configuration, projection and size regressions pass 115 tests (35 live tests
 deselected). Full mypy (480 modules), ruff, format and diff checks pass. No live
 model service was called. Public ask/continue, full compiler integration, remaining
 writers and P6-P8 acceptance still remain; issue #164 stays open.
+
+### Public questions with fixed evidence and streamed receipts
+
+The existing shared `ask_question` use case now supports an explicitly bound
+development `storage_scope`. It captures configuration once, builds the real
+Agents SDK reader against the selected immutable publication, and holds no
+whole-question ingest or reclaim lease. A gated actual HTTP wait allows an
+unrelated orphan to be collected and settings and knowledge to change while the
+answer still reads its original evidence. Saving against a changed head retains
+the answer candidate and reports the conflict without another model send.
+
+Consumed SSE bytes now pass unchanged through the actual HTTPX/LiteLLM streaming
+path and are independently retained on completion, close or SDK cleanup. Partial
+provider usage merges known nested details without turning missing breakdowns
+into zero. Failed response acceptance leaves a repair packet and stops retries.
+Results and progress use the same validated UsageReceipt schema and indexed
+counters; an observational read failure cannot undo a saved answer.
+
+Question logs and optional uniquely named saved answers publish together before
+worktree synchronization. Save preparation runs in a worker, cancellation waits
+for that worker, and final acceptance checks the stop signal. Cancellation before
+commit keeps the previous publication; cancellation after commit preserves the
+saved result. Projection pauses and failures remain separate from master success,
+as do execution cleanup and usage observation failures.
+
+Answer references carry their exact database identity, publication and content
+digest. Old reference reads capture only explicitly referenced image bytes from
+that publication. The actual Qt reader displays the old pixels after a newer
+publication, rejects unbound file images, and still renders generated formula
+images. Source-read attribution distinguishes processing revisions even when
+they share an original. Saved answers retain the complete source basis needed
+after their original citing page is deleted.
+
+Fifteen new application/Qt cases cover these behaviors using real temporary
+SQLite/CAS and SDK requests to a controlled loopback provider. The related
+question, execution, reading, editing, projection, citation, adapter and size
+regressions pass 138 tests (59 live tests deselected). Full mypy (483 modules),
+ruff, format and diff checks pass. No live model service was called. Public
+continue, full compiler integration, other writers and P6-P8 acceptance remain
+unfinished; the default creation path is unchanged and issue #164 remains open.
