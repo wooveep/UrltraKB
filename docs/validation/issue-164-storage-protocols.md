@@ -22,6 +22,16 @@ run an integrity scan/checkpoint.
 Active databases must already be in WAL mode; opening does not silently repair
 their journal mode. Only explicit sealed archive reads use `immutable=1`, and
 they reject a nonempty WAL. Restore explicitly establishes active WAL mode.
+Active connections disable SQLite's last-close checkpoint using
+`SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE`. The development format therefore also requires
+bindings exposing `setconfig`/`getconfig` (available in the tested Python 3.12
+runtime); an unavailable binding is rejected before storage creation. This gate
+must also be checked in each frozen/worker target before public enablement.
+Creation and restore explicitly establish persistent WAL/SHM coordination files.
+An active store missing either sidecar is refused for explicit recovery before
+opening SQLite, so a rejected format cannot create these files as a side effect.
+Recreating missing sidecars is reserved for an explicit maintenance operation,
+not ordinary reading; that application repair entry point remains outstanding.
 
 `CatalogStore.admit` gives each source its own identity and retains the original
 file as an immutable CAS Blob. The input manifest contains logical relative

@@ -12,7 +12,12 @@ from pathlib import Path
 from ultrakb.locks import _fsync_directory, atomic_write_json, durable_unlink
 from ultrakb.storage.blobs import blob_path
 from ultrakb.storage.coordination import storage_stage, try_reclamation
-from ultrakb.storage.database import DatabaseIdentity, database_path, open_database
+from ultrakb.storage.database import (
+    DatabaseIdentity,
+    _activate_database,
+    database_path,
+    open_database,
+)
 
 
 @dataclass(frozen=True)
@@ -235,9 +240,9 @@ class Maintenance:
                     db.connection.backup(snapshot)
                     snapshot.execute("PRAGMA synchronous = FULL")
                     _prune_snapshot_orphans(snapshot)
-                    snapshot.execute("PRAGMA journal_mode = WAL")
                 finally:
                     snapshot.close()
+            _activate_database(temporary, identity)
             for digest, _ in refs:
                 _copy_verified(blob_path(backup, digest), blob_path(temporary, digest), digest)
             with open_database(temporary, expected=identity) as db:

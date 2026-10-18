@@ -93,3 +93,59 @@ def test_unconfirmed_blob_retry_must_reestablish_durability(tmp_path, monkeypatc
         assert db.connection.execute("SELECT count(*) FROM ukb_blobs").fetchone()[0] == 0
         blob = put_blob(db, b"Retained bytes from an unconfirmed rename")
         assert read_bytes(db, blob.digest) == b"Retained bytes from an unconfirmed rename"
+
+
+def test_last_client_close_does_not_checkpoint_the_active_wal(tmp_path):
+    from ultrakb.storage.database import create_database, database_path, open_database
+
+    identity = create_database(tmp_path)
+    wal = database_path(tmp_path).with_name("kb.sqlite-wal")
+    with open_database(tmp_path, expected=identity) as db:
+        with db.transaction() as connection:
+            connection.execute("CREATE TABLE accepted (value TEXT NOT NULL)")
+            connection.execute("INSERT INTO accepted VALUES ('durable in WAL')")
+        retained_size = wal.stat().st_size
+        assert retained_size > 0
+    assert wal.exists() and wal.stat().st_size == retained_size
+    with open_database(tmp_path, expected=identity, read_only=True) as db:
+        assert db.connection.execute("SELECT value FROM accepted").fetchone()[0] == "durable in WAL"
+
+
+def test_unsupported_store_with_missing_sidecars_is_rejected_without_creating_them(tmp_path):
+    from ultrakb.storage.database import (
+        StorageFormatError,
+        create_database,
+        database_path,
+        open_database,
+    )
+
+    create_database(tmp_path)
+    connection = sqlite3.connect(database_path(tmp_path))
+    connection.execute("UPDATE ukb_meta SET required_capabilities = '[\"unknown\"]'")
+    connection.commit()
+    connection.close()
+    before = set((tmp_path / ".ultrakb").iterdir())
+    with pytest.raises(StorageFormatError):
+        with open_database(tmp_path):
+            pytest.fail("Unsupported capabilities were accepted")
+    assert set((tmp_path / ".ultrakb").iterdir()) == before
+
+
+def test_live_wal_capability_changes_are_not_hidden_by_the_format_probe(tmp_path):
+    from ultrakb.storage.database import (
+        StorageFormatError,
+        create_database,
+        database_path,
+        open_database,
+    )
+
+    create_database(tmp_path)
+    writer = sqlite3.connect(database_path(tmp_path))
+    try:
+        writer.execute("UPDATE ukb_meta SET required_capabilities = '[\"unknown\"]'")
+        writer.commit()
+        with pytest.raises(StorageFormatError):
+            with open_database(tmp_path, read_only=True):
+                pytest.fail("The active WAL was ignored during capability validation")
+    finally:
+        writer.close()

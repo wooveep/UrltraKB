@@ -62,7 +62,28 @@ def require_sqlite() -> str:
             f"SQLite {sqlite3.sqlite_version} lacks a verified WAL-reset fix; "
             "use a supported runtime before creating or writing a knowledge base"
         )
+    probe = sqlite3.connect(":memory:")
+    try:
+        _preserve_wal(probe)
+    finally:
+        probe.close()
     return sqlite3.sqlite_version
+
+
+def _preserve_wal(connection: sqlite3.Connection) -> None:
+    flag = getattr(sqlite3, "SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE", None)
+    configure = getattr(connection, "setconfig", None)
+    inspect = getattr(connection, "getconfig", None)
+    if flag is None or not callable(configure) or not callable(inspect):
+        raise UnsupportedSQLite("SQLite bindings must support disabling last-close checkpoints")
+    try:
+        configure(flag, True)
+        if inspect(flag) is not True:
+            raise UnsupportedSQLite("The SQLite runtime cannot preserve WAL on client close")
+    except sqlite3.Error as error:
+        raise UnsupportedSQLite(
+            "The SQLite runtime cannot control client-close checkpoints"
+        ) from error
 
 
 def database_path(root: Path) -> Path:
@@ -164,19 +185,40 @@ def _create_database(root: Path, *, generation: str | None) -> DatabaseIdentity:
         for statement in SCHEMA:
             connection.execute(statement)
         connection.commit()
-        connection.execute("PRAGMA journal_mode = WAL")
         connection.close()
         # The destination cannot already exist: creation is serialized externally.
         target = database_path(root)
         if target.exists():
             raise StorageFormatError("Storage appeared during creation")
         os.replace(temporary, target)
+        _activate_database(root, identity)
         _fsync_directory(state)
         _fsync_directory(root)
     finally:
         connection.close()
         temporary.unlink(missing_ok=True)
     return identity
+
+
+def _activate_database(root: Path, identity: DatabaseIdentity) -> None:
+    """Explicitly finalize only a newly created or validated private restore."""
+    path = database_path(root)
+    connection = sqlite3.connect(f"{path.as_uri()}?mode=rw", uri=True, isolation_level=None)
+    try:
+        _preserve_wal(connection)
+        _validate(connection, identity)
+        connection.execute("PRAGMA synchronous = FULL")
+        if connection.execute("PRAGMA journal_mode = WAL").fetchone()[0] != "wal":
+            raise StorageFormatError("The new active database could not enter WAL mode")
+        # Attach the WAL index so normal reads never need to create sidecars
+        # before they know whether the active storage format is supported.
+        connection.execute("SELECT kb_id FROM ukb_meta WHERE singleton = 1").fetchone()
+    finally:
+        connection.close()
+    for file in (path, Path(str(path) + "-wal"), Path(str(path) + "-shm")):
+        with file.open("r+b") as handle:
+            os.fsync(handle.fileno())
+    _fsync_directory(path.parent)
 
 
 class Database:
@@ -234,6 +276,11 @@ def open_database(
     if path.is_symlink() or path.parent.is_symlink() or not path.is_file():
         raise StorageFormatError("No supported v2 storage; creation is explicit")
     wal = Path(str(path) + "-wal")
+    shm = Path(str(path) + "-shm")
+    if wal.is_symlink() or shm.is_symlink():
+        raise StorageFormatError("SQLite coordination files cannot follow symbolic links")
+    if not sealed_archive and (not wal.is_file() or not shm.is_file()):
+        raise StorageFormatError("Active WAL coordination is missing; explicit recovery is needed")
     if sealed_archive and wal.exists() and wal.stat().st_size:
         raise StorageFormatError("An active WAL database cannot be opened as a sealed archive")
     readonly_options = "mode=ro&immutable=1" if sealed_archive else "mode=ro"
@@ -243,6 +290,8 @@ def open_database(
             f"{path.as_uri()}?{readonly_options}", uri=True, isolation_level=None
         )
         try:
+            if not sealed_archive:
+                _preserve_wal(probe)
             identity = _validate(probe, expected)
             if not sealed_archive and probe.execute("PRAGMA journal_mode").fetchone()[0] != "wal":
                 raise StorageFormatError("Active storage requires WAL; explicit recovery is needed")
@@ -258,6 +307,8 @@ def open_database(
     except sqlite3.DatabaseError as error:
         raise StorageFormatError("Knowledge-base storage cannot be opened safely") from error
     try:
+        if not sealed_archive:
+            _preserve_wal(connection)
         _validate(connection, identity)
         connection.execute("PRAGMA foreign_keys = ON")
         connection.execute(f"PRAGMA busy_timeout = {BUSY_TIMEOUT_MS}")
