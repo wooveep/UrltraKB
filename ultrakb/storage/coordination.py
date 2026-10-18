@@ -16,7 +16,7 @@ def storage_stage(
     import time
 
     root = root.resolve()
-    with read_lifecycle(root, cancelled=cancelled):
+    with read_lifecycle(root, cancelled=cancelled, database_identity=expected):
         lease = _Lease(root / ".ultrakb/locks/reclaim.lock", False)
         try:
             while not lease.try_acquire():
@@ -40,7 +40,7 @@ def require_stage(db: Database) -> None:
 def try_reclamation(root: Path, expected: DatabaseIdentity) -> Iterator[Database | None]:
     """Never wait for or upgrade a reader; a busy result performs no deletion."""
     root = root.resolve()
-    with read_lifecycle(root):
+    with read_lifecycle(root, database_identity=expected):
         lease = _Lease(root / ".ultrakb/locks/reclaim.lock", True)
         try:
             if file_lock_held(lease.path):

@@ -172,13 +172,25 @@ def _validate(root: Path, generation: str) -> None:
         raise KnowledgeBaseRemoved(f"Knowledge base was deleted: {root}")
 
 
-@contextmanager
-def read_lifecycle(kb_dir: Path, *, cancelled=None, on_wait=None, deadline=None):
-    root = kb_dir.resolve()
-    if not file_write_lock_held(_paths(root)[0]):
+def _validate_format(root: Path, database_identity=None) -> None:
+    if database_identity is None:
         from ultrakb.kb_format import validate_existing_format
 
         validate_existing_format(root)
+    else:
+        from ultrakb.storage.database import open_database
+
+        with open_database(root, expected=database_identity, read_only=True):
+            pass
+
+
+@contextmanager
+def read_lifecycle(
+    kb_dir: Path, *, cancelled=None, on_wait=None, deadline=None, database_identity=None
+):
+    root = kb_dir.resolve()
+    if database_identity is not None or not file_write_lock_held(_paths(root)[0]):
+        _validate_format(root, database_identity)
     generation = _generation(root)
     lease = _Lease(_paths(root)[0], False)
     notified = False
@@ -195,6 +207,8 @@ def read_lifecycle(kb_dir: Path, *, cancelled=None, on_wait=None, deadline=None)
         if not file_write_lock_held(_paths(root)[0]):
             _validate(root, generation)
             token = _expected.set((root, generation))
+        if database_identity is not None:
+            _validate_format(root, database_identity)
         _check_wait(cancelled, deadline)
         yield
     finally:
@@ -204,12 +218,12 @@ def read_lifecycle(kb_dir: Path, *, cancelled=None, on_wait=None, deadline=None)
 
 
 @asynccontextmanager
-async def async_read_lifecycle(kb_dir: Path, *, cancelled=None, on_wait=None, deadline=None):
+async def async_read_lifecycle(
+    kb_dir: Path, *, cancelled=None, on_wait=None, deadline=None, database_identity=None
+):
     root = kb_dir.resolve()
-    if not file_write_lock_held(_paths(root)[0]):
-        from ultrakb.kb_format import validate_existing_format
-
-        validate_existing_format(root)
+    if database_identity is not None or not file_write_lock_held(_paths(root)[0]):
+        _validate_format(root, database_identity)
     generation = _generation(root)
     lease = _Lease(_paths(root)[0], False)
     notified = False
@@ -226,6 +240,8 @@ async def async_read_lifecycle(kb_dir: Path, *, cancelled=None, on_wait=None, de
         if not file_write_lock_held(_paths(root)[0]):
             _validate(root, generation)
             token = _expected.set((root, generation))
+        if database_identity is not None:
+            _validate_format(root, database_identity)
         _check_wait(cancelled, deadline)
         yield
     finally:

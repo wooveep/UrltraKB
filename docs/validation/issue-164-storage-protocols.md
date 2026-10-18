@@ -344,3 +344,41 @@ These are development protocols, not full P4/P5 or issue acceptance: production
 page writers, public resolvers, compiler, configuration and question adapters
 still require joint integration, and P7 must retire unused plans and intermediate
 roots while retaining all unfinished recovery chains.
+
+### Prepared execution configuration and stage leases
+
+The development `application.execution_configuration` captures a new store's
+settings under its own short configuration lock and the existing external
+lifecycle lease. It validates the explicit database identity both before and
+after lease acquisition, even when management already owns an exclusive
+lifecycle lease. This does not add a legacy-format reader or enable public v2
+creation. Storage stages and conversation locks now carry that explicit identity,
+so configured v2 test stores use the same lifecycle/reclaim ordering as empty
+ones. No SQL snapshot or reclaim lease spans configuration-only or model waits.
+
+The existing snapshot contents are shared through `config_snapshot`: effective
+and raw settings, credential origins, in-memory credentials/environment, the SDK
+model table and tokenizer asset identity. A parent execution keeps its activated
+recipe while a fresh capture reads current settings. Capture refuses unfinished
+settings journals without migrating or repairing files. Only explicit
+`prepare_storage_config` recovers the settings pair and prepares retired capacity
+templates. Both preparation and capture initialize the SDK's lazy environment
+before resolving credentials, so a private endpoint cannot inherit an official
+service's capacity merely because it is the process's first operation.
+
+Settings merge patches retain the existing validation and crash-safe two-file
+mutation protocol, under configuration coordination. They do not take the ingest
+lock. The model-wait witness pauses the real ChatIndex SDK at its provider
+boundary, concurrently changes settings, admits/reads a managed source and runs
+explicit GC. These operations complete; the pending round still uses its original
+settings and a later execution captures the new values. Fault tests additionally
+cover settings-pair rollback, explicit preparation, fresh-process dotenv ordering,
+unsupported schema refusal and both lifecycle identity paths. The user's prior
+six-line configuration change remains separate and uncommitted.
+
+Full mypy (472 modules) and ruff pass. The pre-review configuration/storage/lock
+regressions passed 205 tests with one live test deselected; seven configuration
+tests, including the two review regressions, pass after the corrections. No
+live model service was called. The existing public `ExecutionContext`, question
+and import adapters still need to select the joint v2 path; this entry point alone
+does not satisfy the issue's actual ask/continue acceptance matrix.

@@ -12,7 +12,7 @@ import os
 import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -91,20 +91,31 @@ def execution_environment(kb_dir: Path) -> dict[str, str]:
     return captured["environment"] if captured else dict(os.environ)
 
 
+@contextmanager
+def live_configuration() -> Iterator[None]:
+    """Settings management and fresh capture read live files outside a parent recipe."""
+    token = _ACTIVE.set(None)
+    try:
+        yield
+    finally:
+        _ACTIVE.reset(token)
+
+
 def capture_config(kb_dir: Path, **wait_options) -> ConfigSnapshot:
     """Capture settings after KB recovery while holding execution permission.
 
     Global saves use their existing lock. Before/after byte comparisons also
     reject a racing external edit instead of mixing files from two versions.
     """
-    from dotenv import dotenv_values
-
     from ultrakb import config
     from ultrakb.locks import kb_ingest_lock_held
 
     kb_dir = kb_dir.resolve()
     if not kb_ingest_lock_held(kb_dir / ".ultrakb"):
         raise RuntimeError("Configuration is fixed only after acquiring execution permission")
+    from ultrakb.config_snapshot import initialize_sdk_environment, read_snapshot
+
+    initialize_sdk_environment()
     from ultrakb.capacity_migration import migrate_settings
 
     credentials = config.resolve_credential_bundle(kb_dir)
@@ -116,71 +127,4 @@ def capture_config(kb_dir: Path, **wait_options) -> ConfigSnapshot:
         if global_credentials.base_url == credentials.base_url:
             migrate_settings(None, base_url=global_credentials.base_url)
     migrate_settings(kb_dir, base_url=credentials.base_url)
-    paths = (
-        kb_dir / ".ultrakb/config.yaml",
-        kb_dir / ".env",
-        config.GLOBAL_CONFIG_PATH,
-        config.GLOBAL_CONFIG_DIR / ".env",
-    )
-
-    def read_versions() -> list[bytes | None]:
-        return [path.read_bytes() if path.exists() else None for path in paths]
-
-    with config._with_global_config_lock(**wait_options):
-        for _ in range(3):
-            before = read_versions()
-            effective, sources = config.resolve_effective_config(kb_dir)
-            config.validate_runtime_config(effective)
-            raw = config.load_config(paths[0])
-            config.validate_runtime_config(raw, allow_inherited=True)
-            environment = dict(os.environ)
-            for key, value in dotenv_values(paths[3]).items():
-                if value and not environment.get(key):
-                    environment[key] = value
-            for key, value in dotenv_values(paths[1]).items():
-                if value:
-                    environment[key] = value
-            bundle = config.resolve_credential_bundle(kb_dir)
-            _, credential_sources = config.resolve_connection_credentials(
-                kb_dir, model=effective["model"]
-            )
-            from ultrakb.model_tokenizer import tokenizer_asset
-
-            asset = tokenizer_asset(effective)
-            if read_versions() != before:
-                continue
-            if bundle.api_key:
-                provider = str(effective["model"]).split("/")[0].upper()
-                if "/" not in str(effective["model"]):
-                    provider = "OPENAI"
-                environment[f"{provider}_API_KEY"] = bundle.api_key
-                environment.setdefault("OPENAI_API_KEY", bundle.api_key)
-            from litellm.litellm_core_utils.get_model_cost_map import get_model_cost_map_source_info
-
-            model_table = get_model_cost_map_source_info()
-            if model_table["source"] == "local":
-                # Entrypoints can set this flag after the SDK has loaded its
-                # table. The isolated child must reproduce the table actually
-                # captured here, including its provenance, without changing
-                # the caller's environment or an existing task's recipe.
-                environment["LITELLM_LOCAL_MODEL_COST_MAP"] = (
-                    "true" if model_table["is_env_forced"] else "false"
-                )
-            return ConfigSnapshot(
-                kb_dir=str(kb_dir),
-                _payload=json.dumps(
-                    {
-                        "effective": effective,
-                        "sources": sources,
-                        "raw": raw,
-                        "credentials": asdict(bundle),
-                        "credential_sources": credential_sources,
-                        "global_config_dir": str(config.GLOBAL_CONFIG_DIR),
-                        "environment": environment,
-                        "model_table": model_table,
-                        "tokenizer_asset": asset,
-                    },
-                    ensure_ascii=False,
-                ),
-            )
-    raise ValueError("Settings changed during capture; try starting the task again")
+    return read_snapshot(kb_dir, **wait_options)

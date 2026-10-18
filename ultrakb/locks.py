@@ -402,11 +402,14 @@ def session_lock(
     *,
     cancelled: Callable[[], bool] | None = None,
     on_wait: Callable[[], None] | None = None,
+    database_identity=None,
 ) -> Iterator[None]:
     """Conversation identity survives deletion; acquire this before the KB lock."""
     from ultrakb.lifecycle import read_lifecycle
 
-    with read_lifecycle(kb_dir, cancelled=cancelled, on_wait=on_wait):
+    with read_lifecycle(
+        kb_dir, cancelled=cancelled, on_wait=on_wait, database_identity=database_identity
+    ):
         lease = _session_lease(kb_dir, session_id)
         notified = False
         try:
@@ -431,10 +434,13 @@ async def async_session_lock(
     *,
     cancelled: Callable[[], bool] | None = None,
     on_wait: Callable[[], None] | None = None,
+    database_identity=None,
 ) -> AsyncIterator[None]:
     from ultrakb.lifecycle import async_read_lifecycle
 
-    async with async_read_lifecycle(kb_dir, cancelled=cancelled, on_wait=on_wait):
+    async with async_read_lifecycle(
+        kb_dir, cancelled=cancelled, on_wait=on_wait, database_identity=database_identity
+    ):
         lease = _session_lease(kb_dir, session_id)
         notified = False
         try:

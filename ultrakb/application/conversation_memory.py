@@ -133,7 +133,12 @@ class ConversationMemory:
             return False
 
         self.check_cancelled()
-        with session_lock(self.store.root, self.session_id, cancelled=cancelled):
+        with session_lock(
+            self.store.root,
+            self.session_id,
+            cancelled=cancelled,
+            database_identity=self.store.identity,
+        ):
             self.check_cancelled()
             state = self.state()
             if state.pending_turns == 0:
