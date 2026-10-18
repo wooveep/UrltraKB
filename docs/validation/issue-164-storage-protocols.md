@@ -54,8 +54,21 @@ checkpoint is independently committed. `session_codec` saves every SDK snapshot
 field except `turns`, retaining exact conversation/policy/prefix identities.
 Restore loads the authoritative prefix, validates identities, message roles and
 content, and calls the actual SDK `CTree.restore_state`. This does not change
-ChatIndex algorithms. Current retrieval projection bindings, catch-up batching
-and preparation's recall gating still need to be connected to this store.
+ChatIndex algorithms. The development application `ConversationMemory` now
+checkpoints every accepted update, constructs at most one final retrieval tree
+per catch-up and atomically binds it to the exact checkpoint. Current computation
+and searchable projection roots are distinct; a failed tree commit returns the
+old tree's real coverage, and the next call reuses accepted computation. A failed
+last checkpoint reloads the preceding durable prefix before export. Preparation
+checks the existing 8,000-token threshold, recall budget and candidates outside
+the six recent turns before indexing. An unchanged complete prefix performs no
+encoding or tree write. Model waits hold the session/lifecycle lease without a
+storage stage; cancellation is checked while waiting for the session lock and
+after checkpoint Blob synchronization. All original roles remain restorable;
+automatic analysis/export uses only users. The 16 focused SDK/session tests
+include SQL trigger failures, stage-budget continuation and cancellation races.
+Production question/session adapters still need joint integration. Intermediate
+checkpoint retirement and full long-session cost measurements remain outstanding.
 
 `Maintenance.preview` reports a bounded candidate window and protected Blob
 totals. Explicit `collect` rechecks current references under a nonblocking

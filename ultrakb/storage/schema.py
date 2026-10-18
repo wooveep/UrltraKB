@@ -116,6 +116,7 @@ SCHEMA = (
         model TEXT NOT NULL,
         language TEXT NOT NULL,
         revision INTEGER NOT NULL CHECK (revision >= 0),
+        turn_count INTEGER NOT NULL CHECK (turn_count >= 0),
         deleted INTEGER NOT NULL CHECK (deleted IN (0, 1))
     )""",
         """CREATE TABLE ukb_turns (
@@ -137,13 +138,26 @@ SCHEMA = (
         turn_count INTEGER NOT NULL CHECK (turn_count >= 0),
         prefix_digest TEXT NOT NULL,
         state_digest TEXT NOT NULL REFERENCES ukb_blobs(digest),
+        UNIQUE (session_id, policy_key, checkpoint_id),
         UNIQUE (session_id, policy_key, prefix_digest)
     )""",
         """CREATE TABLE ukb_session_heads (
         session_id TEXT NOT NULL REFERENCES ukb_conversations(session_id),
         policy_key TEXT NOT NULL,
-        checkpoint_id TEXT NOT NULL REFERENCES ukb_conversation_checkpoints(checkpoint_id),
-        PRIMARY KEY (session_id, policy_key)
+        checkpoint_id TEXT NOT NULL,
+        PRIMARY KEY (session_id, policy_key),
+        FOREIGN KEY (session_id, policy_key, checkpoint_id)
+            REFERENCES ukb_conversation_checkpoints(session_id, policy_key, checkpoint_id)
+    )""",
+        """CREATE TABLE ukb_session_projections (
+        session_id TEXT NOT NULL,
+        policy_key TEXT NOT NULL,
+        checkpoint_id TEXT NOT NULL,
+        tree_id TEXT NOT NULL UNIQUE REFERENCES ukb_tree_builds(tree_id),
+        input_fingerprint TEXT NOT NULL,
+        PRIMARY KEY (session_id, policy_key),
+        FOREIGN KEY (session_id, policy_key, checkpoint_id)
+            REFERENCES ukb_conversation_checkpoints(session_id, policy_key, checkpoint_id)
     )""",
         """CREATE TABLE ukb_knowledge_revisions (
         revision_id TEXT PRIMARY KEY,
