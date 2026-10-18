@@ -213,8 +213,8 @@ class PendingStore:
             raise ValueError("A bounded diagnostic code is required")
         if publication_id is not None:
             TypeAdapter(RecordId).validate_python(publication_id)
-        if status == "completed" and work.kind == "import" and publication_id is None:
-            raise ValueError("A completed import must refer to an accepted publication")
+        if status == "completed" and work.kind == "import":
+            raise ValueError("Import success must be committed in its publication transaction")
         timestamp = datetime.now(timezone.utc).isoformat()
         with storage_stage(self.root, self.identity) as db, db.transaction() as connection:
             current = self._job(connection, work.intent_id)

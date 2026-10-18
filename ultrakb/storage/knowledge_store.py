@@ -1,7 +1,7 @@
 """Immutable revision manifests and short, version-checked publication commits.
 
-This is a development storage boundary. Ready navigation and synchronization
-plans bind atomically; complete source/attempt guards still need integration.
+This is a development storage boundary. Import success, ready navigation,
+synchronization plans and publication receipts bind in one guarded commit.
 """
 
 import hashlib
@@ -24,6 +24,14 @@ from ultrakb.storage.navigation_store import (
     prepare_navigation,
     require_navigation,
     resolve_inputs,
+)
+from ultrakb.storage.pending_store import PendingWork
+from ultrakb.storage.publication_guards import (
+    capture_import_claim,
+    claim_identity,
+    finish_import_claim,
+    import_claim,
+    require_import_claim,
 )
 from ultrakb.storage.tree_store import TreeStore
 from ultrakb.storage.wiki_paths import validate_file_tree
@@ -53,6 +61,7 @@ class PreparedRevision:
     manifest_digest: str
     navigation_fingerprint: str
     sync_plan_id: str
+    import_attempt_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -60,6 +69,15 @@ class Publication:
     publication_id: str
     revision_id: str
     view_id: str
+
+
+@dataclass(frozen=True)
+class PublicationReceipt:
+    publication_id: str
+    revision_id: str
+    generation: str
+    attempt_id: str | None
+    published_at: str
 
 
 def _manifest(entries):
@@ -162,6 +180,7 @@ class KnowledgeStore:
         view_id: str = "legacy",
         index_revisions: tuple[str, ...] = (),
         unit_revisions: tuple[str, ...] = (),
+        import_work: PendingWork | None = None,
     ) -> PreparedRevision:
         if (
             not isinstance(view_id, str)
@@ -186,7 +205,14 @@ class KnowledgeStore:
             TypeAdapter(RecordId).validate_python(index_id)
         revision_id, publication_id, plan_id = (uuid.uuid4().hex for _ in range(3))
         with storage_stage(self.root, self.identity) as db:
+            claim = (
+                capture_import_claim(db.connection, self.identity, import_work)
+                if import_work is not None
+                else None
+            )
             inputs = resolve_inputs(db, unit_revisions, index_revisions)
+            if claim is not None and not any(unit_id == claim[5] for unit_id, _ in inputs):
+                raise ValueError("The published manifest must include the claimed processing unit")
             entries = []
             for path, payload in sorted(files.items()):
                 blob = put_blob(db, payload)
@@ -202,6 +228,7 @@ class KnowledgeStore:
                         "inputs": inputs,
                         "navigation": navigation.input_fingerprint,
                         "sync_plan": plan_id,
+                        "import_claim": claim,
                     }
                 ),
             )
@@ -213,6 +240,7 @@ class KnowledgeStore:
                 manifest.digest,
                 navigation.input_fingerprint,
                 plan_id,
+                import_work.attempt_id if import_work is not None else None,
             )
             with db.transaction() as connection:
                 connection.execute(
@@ -228,6 +256,11 @@ class KnowledgeStore:
                 )
                 retain_blob(connection, "knowledge-revision", revision_id, "manifest", manifest)
                 bind_navigation(connection, revision_id, navigation)
+                if claim is not None:
+                    connection.execute(
+                        "INSERT INTO ukb_revision_import VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        (revision_id, *claim),
+                    )
             prepare_sync_plan(db, plan_id, revision_id, view_id, entries)
             for start in range(0, len(inputs), 63):
                 input_batch = inputs[start : start + 63]
@@ -286,6 +319,7 @@ class KnowledgeStore:
                     "inputs": retained_inputs,
                     "navigation": ready_navigation.input_fingerprint,
                     "sync_plan": plan_id,
+                    "import_claim": import_claim(db.connection, revision_id),
                 }
             )
             if hashlib.sha256(sealed_manifest).hexdigest() != prepared.manifest_digest:
@@ -337,12 +371,22 @@ class KnowledgeStore:
                 raise ValueError("Publication requires its exact synchronization plan")
             require_navigation(db, prepared.revision_id)
             if record[-1] == "published":
+                receipt = connection.execute(
+                    "SELECT attempt_id FROM ukb_publication_receipts WHERE publication_id = ? "
+                    "AND revision_id = ?",
+                    (prepared.publication_id, prepared.revision_id),
+                ).fetchone()
+                if receipt != (prepared.import_attempt_id,):
+                    raise RecoveryRequired("Publication requires its exact committed receipt")
                 return Publication(prepared.publication_id, prepared.revision_id, prepared.view_id)
             head = connection.execute(
                 "SELECT publication_id FROM ukb_heads WHERE view_id = ?", (prepared.view_id,)
             ).fetchone()
             if (head[0] if head else None) != prepared.expected_publication:
                 raise PublicationConflict("Knowledge changed; recompute or review the candidate")
+            require_import_claim(
+                connection, self.identity, prepared.revision_id, prepared.import_attempt_id
+            )
             activate_sync_plan(db, prepared.revision_id, prepared.sync_plan_id)
             connection.execute(
                 "INSERT INTO ukb_publications VALUES (?, ?, ?, ?)",
@@ -362,6 +406,17 @@ class KnowledgeStore:
                 "UPDATE ukb_knowledge_revisions SET state = 'published' WHERE revision_id = ?",
                 (prepared.revision_id,),
             )
+            connection.execute(
+                "INSERT INTO ukb_publication_receipts VALUES (?, ?, ?, ?, "
+                "strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+                (
+                    prepared.publication_id,
+                    prepared.revision_id,
+                    self.identity.generation,
+                    prepared.import_attempt_id,
+                ),
+            )
+            finish_import_claim(connection, prepared.revision_id, prepared.publication_id)
             if edit_id is not None:
                 from .wiki_edit_store import finish_edit
 
@@ -369,6 +424,35 @@ class KnowledgeStore:
                     connection, prepared.view_id, edit_id, prepared.publication_id, "accepted"
                 )
         return Publication(prepared.publication_id, prepared.revision_id, prepared.view_id)
+
+    def committed_import(self, work: PendingWork, *, view_id="legacy") -> PreparedRevision | None:
+        """Recover the same committed outcome without preparing another candidate."""
+        claimed = claim_identity(self.identity, work)
+        with storage_stage(self.root, self.identity, read_only=True) as db:
+            row = db.connection.execute(
+                "SELECT r.revision_id, r.publication_id, r.view_id, r.expected_publication, "
+                "r.manifest_digest, r.navigation_fingerprint, s.plan_id, c.attempt_id "
+                "FROM ukb_publication_receipts c JOIN ukb_knowledge_revisions r "
+                "ON r.revision_id = c.revision_id AND r.publication_id = c.publication_id "
+                "JOIN ukb_revision_sync s ON s.revision_id = r.revision_id "
+                "WHERE c.attempt_id = ? AND c.generation = ? AND r.view_id = ? "
+                "AND r.state = 'published'",
+                (work.attempt_id, self.identity.generation, view_id),
+            ).fetchone()
+            if row is None or import_claim(db.connection, row[0]) != claimed:
+                return None
+            return PreparedRevision(*row)
+
+    def receipt(self, publication_id: str) -> PublicationReceipt:
+        with storage_stage(self.root, self.identity, read_only=True) as db:
+            row = db.connection.execute(
+                "SELECT publication_id, revision_id, generation, attempt_id, published_at "
+                "FROM ukb_publication_receipts WHERE publication_id = ?",
+                (publication_id,),
+            ).fetchone()
+            if row is None:
+                raise FileNotFoundError("This publication has no committed receipt")
+            return PublicationReceipt(*row)
 
     def bind(self, publication_id: str | None = None, *, view_id: str = "legacy") -> BoundKnowledge:
         with storage_stage(self.root, self.identity, read_only=True) as db:

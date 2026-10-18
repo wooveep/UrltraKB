@@ -38,9 +38,14 @@ def test_pending_retry_preserves_sibling_publication_and_prior_attempt(tmp_path)
     assert running.intent_id == sales_job.intent_id
     knowledge = KnowledgeStore(root, identity)
     publication = knowledge.publish(
-        knowledge.prepare_revision({"sales.md": b"Sales"}, expected=None)
+        knowledge.prepare_revision(
+            {"sales.md": b"Sales"},
+            expected=None,
+            import_work=running,
+            unit_revisions=(sales.unit_revision_id,),
+        )
     )
-    assert pending.finish(running, status="completed", publication_id=publication.publication_id)
+    assert pending.job(sales_job.intent_id).status == "completed"
     failed = pending.start(pending.claim())
     assert failed.intent_id == costs_job.intent_id
     assert pending.finish(failed, status="failed", error_code="index_failed")

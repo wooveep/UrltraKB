@@ -382,3 +382,38 @@ tests, including the two review regressions, pass after the corrections. No
 live model service was called. The existing public `ExecutionContext`, question
 and import adapters still need to select the joint v2 path; this entry point alone
 does not satisfy the issue's actual ask/continue acceptance matrix.
+
+### Guarded import publication and recoverable application results
+
+Development schema 7 binds each import candidate to its exact intent, attempt,
+dispatch, database generation, source revision, processing-unit revision and root
+import. Its canonical revision manifest includes this immutable claim. Preparation
+requires the claimed unit in the complete input inventory; final publication
+rechecks the current source and unit target, dispatch and attempt state, group
+cancellation and generation under the same short transaction as the expected head.
+An unrelated retained input may remain historical without invalidating its source.
+
+Import success, immutable publication receipt, head and synchronization-plan
+activation now commit together. A failed receipt insert rolls all of them back,
+leaving the sealed candidate available for retry. Separate pending-work completion
+cannot mark an import successful. Database triggers reject success without its
+receipt, later result reassignment and mutable attempt identities. Discovery work
+and unsuccessful attempts retain their independent completion protocol.
+
+The joint-development `application.publications.publish_import_result` returns a
+retained candidate and `needs_review` reason for target or head conflicts. After
+master commit, worktree I/O and SQLite failures report a published result with
+pending synchronization. Entry and conflict recovery look up the attempt's exact
+committed receipt, so response loss and two concurrently prepared candidates return
+the original success; replay cannot rewind a newer head or activate its old plan.
+Mismatched dispatch, view or generation cannot adopt that prior success.
+
+The 15 import-publication witnesses cover changed source/unit, cancellation,
+retried dispatch, transaction rollback/retry, worktree and coordination failures,
+receipt immutability, lost response, concurrent reentry and complete claim checks.
+Together with storage, projection/edit, lock, module-size and application-boundary
+regressions, 125 tests pass (two live tests deselected). Full mypy (475 modules)
+passes. Standards and Spec review findings have regression witnesses and fixes.
+No live model service was called. This remains a P4 integration seam: the compiler,
+all production writers/readers and execution gateway still need joint integration,
+and issue #164 remains open pending its complete acceptance matrices.
