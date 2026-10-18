@@ -195,8 +195,7 @@ def restrict_query_agent(agent, selection: QuerySelection):
 
         source = require_reader(sources, doc_name, "get_text_content")
         view = _selected(selection)
-        path = f"sources/{doc_name}.content.json"
-        raw = json.loads(read_selected_file(view, path))
+        raw = json.loads(read_selected_file(view, source["path"]))
         selected = read_text_selection(raw, chars)
         payload = _original_payload(selected, offset)
         payload["source_context"] = original_context(
@@ -217,8 +216,7 @@ def restrict_query_agent(agent, selection: QuerySelection):
 
         source = require_reader(sources, doc_name, "get_block_content")
         view = _selected(selection)
-        path = f"sources/{doc_name}.content.json"
-        raw = json.loads(read_selected_file(view, path))
+        raw = json.loads(read_selected_file(view, source["path"]))
         selected = read_block_selection(raw, blocks)
         payload = _original_payload(selected, offset)
         payload["source_context"] = original_context(
@@ -237,8 +235,7 @@ def restrict_query_agent(agent, selection: QuerySelection):
 
         source = require_reader(sources, doc_name, "get_cell_content")
         view = _selected(selection)
-        path = f"sources/{doc_name}.content.json"
-        raw = json.loads(read_selected_file(view, path))
+        raw = json.loads(read_selected_file(view, source["path"]))
         full = read_text_selection(raw)
         selected = select_cells(full, cells)
         payload = _original_payload(selected, offset)

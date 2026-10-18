@@ -65,6 +65,18 @@ def publication_originals(kb_dir, view_id, inputs, dependencies, wiki, pages) ->
 
 
 def page_evidence(scope: KnowledgeScope, page: str) -> dict:
+    if scope.knowledge is not None:
+        units = scope.knowledge.input_units(page=page)
+        if native := scope.reading_view.native_inputs.get(page):
+            units = tuple(
+                unit for unit in scope.knowledge.input_units() if unit.unit_revision_id == native[0]
+            )
+        return {
+            "validity": "current",
+            "knowledge_revision_id": scope.knowledge.publication.revision_id,
+            "source_revision_ids": tuple(sorted({unit.source_revision_id for unit in units})),
+            "refresh_reasons": (),
+        }
     if scope.publication is not None:
         public = scope.publication
         dependencies = public.manifest.page_dependencies.get(page, ())

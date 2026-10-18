@@ -82,6 +82,13 @@ def original_paths(view: QueryView, path: str, data: bytes | None = None) -> tup
     from ultrakb.application.query_views import read_selected_file
 
     pending = [(path, data)]
+    bound_units = None
+    if view.scope.knowledge is not None:
+        bound_units = {
+            unit.unit_revision_id for unit in view.scope.knowledge.input_units(page=path)
+        }
+        if path in view.native_inputs:
+            bound_units.add(view.native_inputs[path][0])
     seen: set[str] = set()
     originals = []
     while pending:
@@ -92,6 +99,12 @@ def original_paths(view: QueryView, path: str, data: bytes | None = None) -> tup
         if name not in view.files:
             continue
         if name.startswith("sources/") and name.endswith((".md", ".json")):
+            if (
+                bound_units is not None
+                and name in view.native_inputs
+                and view.native_inputs[name][0] not in bound_units
+            ):
+                continue
             originals.append(name)
             continue
         if not name.endswith(".md"):
@@ -104,7 +117,13 @@ def original_paths(view: QueryView, path: str, data: bytes | None = None) -> tup
             if not isinstance(pointer, str):
                 raise ValueError("Invalid summary original-source pointer")
             links = [pointer, *links]
-        pending.extend((link, None) for link in links)
+        for link in links:
+            paths = ()
+            if view.scope.knowledge is not None:
+                from ultrakb.application.storage_selection import page_source_paths
+
+                paths = page_source_paths(view, path, link)
+            pending.extend((path, None) for path in (paths or (link,)))
     return tuple(sorted(set(originals)))
 
 

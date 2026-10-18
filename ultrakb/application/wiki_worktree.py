@@ -64,12 +64,18 @@ def accept_external_edit(
                     files[path] = current.read(path)
             elif path in draft.files:
                 files[path] = draft.files[path]
+        basis = current.page_input_revisions()
         prepared = knowledge.prepare_revision(
             files,
             expected=current.publication_id,
             view_id=view_id,
             unit_revisions=current.unit_revisions(),
             index_revisions=current.index_revisions(),
+            page_inputs={
+                path: basis.get(path, ())
+                for path in files
+                if path in master and path.endswith(".md")
+            },
         )
         try:
             result = knowledge.publish(prepared, edit_id=edit_id)

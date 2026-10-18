@@ -21,6 +21,7 @@ def native_source(view: QueryView, path: str, *, data: bytes | None = None) -> d
     """Validate the retained representation; file extensions alone confer no capability."""
     name = PurePosixPath(path).name
     doc = name.removesuffix(".content.json").removesuffix(".json").removesuffix(".md")
+    doc = view.source_selectors.get(path, doc)
     if data is None:
         data = read_selected_file(view, path)
     actions = {}
@@ -83,6 +84,7 @@ def native_source(view: QueryView, path: str, *, data: bytes | None = None) -> d
         "readers": actions,
         "reading_action": {"tool": preferred, "arguments": actions[preferred]},
         "source_revision_id": view.source_revisions_by_path.get(path),
+        **({"unit_revision_id": view.native_inputs[path][0]} if path in view.native_inputs else {}),
         "content_digest": view.files[path],
         **view.retained_source_status.get(path, {}),
     }
@@ -90,9 +92,11 @@ def native_source(view: QueryView, path: str, *, data: bytes | None = None) -> d
 
 def source_capabilities(view: QueryView) -> dict[str, dict]:
     result = {}
-    for path in sorted(view.files):
-        if PurePosixPath(path).parent.as_posix() != "sources" or not path.endswith(
-            (".md", ".json")
+    paths = view.native_source_paths if view.scope.knowledge is not None else sorted(view.files)
+    for path in paths:
+        if view.scope.knowledge is None and (
+            PurePosixPath(path).parent.as_posix() != "sources"
+            or not path.endswith((".md", ".json"))
         ):
             continue
         stem = path.removesuffix(".md")
@@ -101,6 +105,8 @@ def source_capabilities(view: QueryView) -> dict[str, dict]:
         ):
             continue
         value = native_source(view, path)
+        if value["doc_name"] in result:
+            raise ValueError("Source reading selectors must identify exactly one source")
         result[value["doc_name"]] = value
     return result
 

@@ -6,7 +6,13 @@ from pathlib import Path
 from ultrakb import frontmatter
 from ultrakb.application.knowledge import KnowledgeEntry, list_knowledge
 from ultrakb.application.pages import Page, read_page
-from ultrakb.knowledge_scope import KnowledgeScope, reading_scope, resolve_scope
+from ultrakb.knowledge_scope import (
+    KnowledgeScope,
+    read_wiki_bytes,
+    reading_scope,
+    resolve_scope,
+    wiki_page_paths,
+)
 from ultrakb.lint import _extract_wikilinks, _normalize_target
 
 
@@ -39,11 +45,19 @@ def read_knowledge_context(
     *,
     view_id: str = "legacy",
     publication_id: str | None = None,
+    scope: KnowledgeScope | None = None,
 ) -> KnowledgeContext:
     """Prepare a whole refresh before replacing any part of the displayed knowledge."""
     from ultrakb.application.views import published_scope
 
-    scope = published_scope(kb_dir, view_id, publication_id=publication_id)
+    if scope is None:
+        scope = published_scope(kb_dir, view_id, publication_id=publication_id)
+    else:
+        scope = resolve_scope(kb_dir, scope)
+        if scope.view_id != view_id or (
+            publication_id is not None and publication_id != scope.publication_id
+        ):
+            raise ValueError("Knowledge refresh requires one explicitly selected publication")
     with reading_scope(scope):
         entries = list_knowledge(kb_dir, scope=scope)
         if path is None:
@@ -66,13 +80,11 @@ def read_knowledge_image(kb_dir: Path, path: str, *, scope: KnowledgeScope) -> t
         ".webp": "image/webp",
         ".bmp": "image/bmp",
     }
-    target = (selected.wiki_dir / path).resolve()
-    if Path(path).is_absolute() or not target.is_relative_to(selected.wiki_dir):
-        raise ValueError("Invalid image path")
-    if target.suffix.lower() not in media_types:
+    suffix = Path(path).suffix.lower()
+    if suffix not in media_types:
         raise ValueError("Unsupported knowledge image format")
     with reading_scope(selected):
-        return target.read_bytes(), media_types[target.suffix.lower()]
+        return read_wiki_bytes(selected, path), media_types[suffix]
 
 
 def read_page_context(
@@ -81,11 +93,10 @@ def read_page_context(
     scope = resolve_scope(kb_dir, scope)
     with reading_scope(scope):
         page = read_page(kb_dir, path, scope=scope)
-        wiki = (scope.wiki_dir).resolve()
         known = {
-            p.relative_to(wiki).with_suffix("").as_posix(): p
-            for p in wiki.rglob("*.md")
-            if p.is_file() and p.resolve().is_relative_to(wiki)
+            Path(path).with_suffix("").as_posix(): path
+            for path in wiki_page_paths(scope)
+            if path.endswith(".md")
         }
         index: dict[str, set[str]] = {}
         for target in known:
@@ -109,21 +120,42 @@ def read_page_context(
         source_values = frontmatter.parse(page.content).get("sources", [])
         if isinstance(source_values, str):
             source_values = [source_values]
-        sources = (
-            tuple(reference(raw, source=True) for raw in source_values if isinstance(raw, str))
-            if isinstance(source_values, list)
-            else ()
-        )
+        source_refs = []
+        for raw in source_values if isinstance(source_values, list) else ():
+            if not isinstance(raw, str):
+                continue
+            resolved = ()
+            if scope.knowledge is not None:
+                from .storage_selection import page_source_paths
+
+                resolved = page_source_paths(
+                    scope.reading_view, page.path + ".md", raw, native=False
+                )
+            if resolved:
+                source_refs.extend(
+                    Reference(raw, Path(path).with_suffix("").as_posix(), raw.partition("#")[2])
+                    for path in resolved
+                )
+            else:
+                fallback = reference(raw, source=True)
+                if (
+                    scope.knowledge is not None
+                    and fallback.path is not None
+                    and fallback.path + ".md" in scope.reading_view.native_inputs
+                ):
+                    fallback = Reference(raw, None, fallback.anchor)
+                source_refs.append(fallback)
+        sources = tuple(source_refs)
         outlinks = tuple(reference(raw) for raw in sorted(set(_extract_wikilinks(page.body))))
         backlinks = []
         problems = []
         for target, file in sorted(known.items()):
             if target == page.path or target.split("/")[0] == "sources":
                 continue
-            if file.name in {"AGENTS.md", "SCHEMA.md", "log.md"}:
+            if Path(file).name in {"AGENTS.md", "SCHEMA.md", "log.md"}:
                 continue
             try:
-                content = file.read_text(encoding="utf-8")
+                content = read_wiki_bytes(scope, file).decode("utf-8")
             except (OSError, UnicodeError) as exc:
                 problems.append(f"无法读取 {target}（{type(exc).__name__}）")
                 continue

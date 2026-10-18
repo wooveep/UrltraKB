@@ -10,9 +10,10 @@ from ultrakb.source_records import RecordId
 
 from .catalog_store import CatalogStore
 from .index_store import IndexStore
+from .knowledge_inputs import source_paths, source_selector
 from .tree_store import TreeRevision, TreeStore, retain_tree
 
-NAVIGATION_POLICY = "ultrakb-knowledge-forest-v2"
+NAVIGATION_POLICY = "ultrakb-knowledge-forest-v3"
 
 
 class RecoveryRequired(ValueError):
@@ -60,7 +61,9 @@ def resolve_inputs(db, unit_revisions, index_revisions):
     return inputs
 
 
-def prepare_navigation(root, identity, revision_id, publication_id, files, inputs) -> TreeRevision:
+def prepare_navigation(
+    root, identity, revision_id, publication_id, files, inputs, *, primary_units
+) -> TreeRevision:
     # No execution model or endpoint participates in this deterministic identity.
     encoded = json.dumps(
         {
@@ -69,6 +72,7 @@ def prepare_navigation(root, identity, revision_id, publication_id, files, input
             "publication": publication_id,
             "files": files,
             "inputs": inputs,
+            "primary_units": sorted(primary_units),
         },
         ensure_ascii=False,
         sort_keys=True,
@@ -79,11 +83,13 @@ def prepare_navigation(root, identity, revision_id, publication_id, files, input
     documents = {}
     for unit_revision_id, index_id in inputs:
         unit = catalog.unit_revision(unit_revision_id)
+        retained = unit_revision_id not in primary_units
         processing = catalog.processing(unit.processing_id)
         file = next(file for file in processing.files if file.path == processing.source_path)
         reference = {
-            "doc_name": unit.doc_name,
-            "path": file.path,
+            "doc_name": source_selector(unit, retained=retained),
+            "path": source_paths(unit, processing, retained=retained)[-1][0],
+            "processing_path": file.path,
             "content_digest": file.digest,
             "source_id": unit.source_id,
             "source_revision_id": unit.source_revision_id,

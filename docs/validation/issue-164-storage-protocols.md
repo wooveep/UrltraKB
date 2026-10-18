@@ -417,3 +417,43 @@ passes. Standards and Spec review findings have regression witnesses and fixes.
 No live model service was called. This remains a P4 integration seam: the compiler,
 all production writers/readers and execution gateway still need joint integration,
 and issue #164 remains open pending its complete acceptance matrices.
+
+### Fixed publication readers and retained page inputs
+
+Development schema 8 records immutable per-page processing-unit revisions in the
+revision manifest. Unchanged Markdown inherits its previous inputs even when a
+source is processed again; explicitly changed pages can select a new basis. Those
+retained inputs participate in navigation and reference closure. Manual external
+edit acceptance preserves the input basis of existing pages. A publication can
+therefore expose the new source while its older generated page still reads its
+original body, native locations and images.
+
+The explicit development `storage_scope` binds the shared application readers to
+one publication. Page, image, catalog, backlink and query reads use that immutable
+inventory and CAS, including after the editable worktree changes or becomes an
+unrelated symlink. Source declarations resolve against the originating page's
+inputs, with exact names preceding an unambiguous normalized alias. Retained
+sources use version-scoped logical paths and selectors that cannot collide with
+legal document names. Preparation rejects conflicting native source paths before
+the head can change. Actual text, block and cell tools execute the capability's
+bound path rather than reconstructing it from a displayed name.
+
+Public navigation reads borrow the ready shared ConDB tree. They do not create a
+private database or rebuild navigation for a different execution model. Missing
+or mismatched navigation returns `recovery_required` with an explicit repair
+action before any model request. The full SDK query holds its actual storage
+stage; the surrounding application reading scope holds only the lifecycle lease.
+An unrelated orphan can be collected between reads, and the ingest lock does not
+block a fixed page read. Legacy page-context enumeration retains its existing
+Markdown-only behavior without hashing every unrelated attachment.
+
+The 17 new application witnesses include real SDK retrieval and real FunctionTool
+execution against retained text/block sources. Provider responses are injected
+only at the request boundary; no live model service was called. Standards and Spec
+reviews reproduced and verified fixes for retained-source routing, ambiguous names,
+native alias collisions and explicit navigation recovery. The related storage,
+reading, query, application-boundary and module-size regressions pass 183 tests
+(24 live tests deselected). Full mypy (477 modules), ruff, format and diff checks
+pass. This is still joint-development integration: application writers, compiler,
+execution gateway, public ask/continue and the remaining P6-P8 gates are unfinished.
+Issue #164 remains open.

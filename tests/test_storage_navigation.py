@@ -144,6 +144,6 @@ def test_short_source_navigation_keeps_each_publications_exact_processing_input(
             assert reference["processing_id"] == processing.processing_id
             assert reference["native_location"] == {"chars": f"0:{len(text)}"}
             assert (
-                catalog.read_processed(reference["processing_id"], reference["path"])
+                catalog.read_processed(reference["processing_id"], reference["processing_path"])
                 == text.encode()
             )

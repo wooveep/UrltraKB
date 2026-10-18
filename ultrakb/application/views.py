@@ -6,6 +6,15 @@ from ultrakb.knowledge_scope import KnowledgeScope, live_scope
 from ultrakb.locks import kb_ingest_lock, kb_read_lock
 
 
+def storage_scope(kb_dir, identity, *, publication_id=None, view_id="legacy") -> KnowledgeScope:
+    """Joint-development selection; no implicit format switch or worktree snapshot."""
+    from ultrakb.storage.knowledge_store import KnowledgeStore
+
+    root = kb_dir.expanduser().resolve()
+    bound = KnowledgeStore(root, identity).bind(publication_id, view_id=view_id)
+    return KnowledgeScope(root, root / "wiki", view_id, knowledge=bound)
+
+
 def published_scope(
     kb_dir: Path, view_id: str = "legacy", *, publication_id: str | None = None
 ) -> KnowledgeScope:

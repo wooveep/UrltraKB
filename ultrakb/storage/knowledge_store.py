@@ -18,6 +18,11 @@ from ultrakb.source_records import RecordId
 from ultrakb.storage.blobs import Blob, put_blob, read_bytes, retain_blob
 from ultrakb.storage.coordination import storage_stage
 from ultrakb.storage.database import DatabaseIdentity
+from ultrakb.storage.knowledge_inputs import (
+    navigation_inputs,
+    prepare_page_inputs,
+    validate_source_paths,
+)
 from ultrakb.storage.navigation_store import (
     RecoveryRequired,
     bind_navigation,
@@ -146,6 +151,7 @@ class BoundKnowledge:
 
     def unit_revisions(self) -> tuple[str, ...]:
         with storage_stage(self.root, self.identity, read_only=True) as db:
+            self._require_publication(db)
             return tuple(
                 row[0]
                 for row in db.connection.execute(
@@ -158,14 +164,99 @@ class BoundKnowledge:
     @contextmanager
     def navigation(self):
         with storage_stage(self.root, self.identity, read_only=True) as db:
+            self._require_publication(db)
             revision = require_navigation(db, self.publication.revision_id)
             with TreeStore(self.root, self.identity).open(revision.tree_id) as bound:
                 yield bound
+
+    def navigation_revision(self):
+        with storage_stage(self.root, self.identity, read_only=True) as db:
+            self._require_publication(db)
+            return require_navigation(db, self.publication.revision_id)
+
+    def _require_publication(self, db):
+        if (
+            db.connection.execute(
+                "SELECT 1 FROM ukb_publications WHERE publication_id = ? AND revision_id = ? "
+                "AND view_id = ?",
+                (self.publication_id, self.publication.revision_id, self.publication.view_id),
+            ).fetchone()
+            is None
+        ):
+            raise FileNotFoundError("This exact knowledge publication is unavailable")
+
+    def page_input_revisions(self):
+        with storage_stage(self.root, self.identity, read_only=True) as db:
+            self._require_publication(db)
+            result = {}
+            for path, unit in db.connection.execute(
+                "SELECT path, unit_revision_id FROM ukb_revision_page_inputs "
+                "WHERE revision_id = ? ORDER BY path, unit_revision_id",
+                (self.publication.revision_id,),
+            ).fetchall():
+                result.setdefault(path, []).append(unit)
+            return {path: tuple(units) for path, units in result.items()}
 
     def compile_workspace(self, *, required_attachments: tuple[str, ...] = ()):
         from .compile_workspace import materialize_baseline
 
         return materialize_baseline(self, required_attachments)
+
+    def input_units(self, *, page: str | None = None):
+        from .catalog_store import CatalogStore
+
+        with storage_stage(self.root, self.identity, read_only=True) as db:
+            self._require_publication(db)
+            if page is None:
+                rows = db.connection.execute(
+                    "SELECT unit_revision_id FROM ukb_revision_inputs WHERE revision_id = ? "
+                    "UNION SELECT unit_revision_id FROM ukb_revision_page_inputs "
+                    "WHERE revision_id = ?",
+                    (self.publication.revision_id, self.publication.revision_id),
+                ).fetchall()
+            else:
+                _path(page)
+                rows = db.connection.execute(
+                    "SELECT unit_revision_id FROM ukb_revision_page_inputs "
+                    "WHERE revision_id = ? AND path = ? ORDER BY unit_revision_id",
+                    (self.publication.revision_id, page),
+                ).fetchall()
+            return tuple(CatalogStore._unit_revision(db, row[0]) for row in rows)
+
+    def _source_unit(self, db, unit_revision_id):
+        from .catalog_store import CatalogStore
+
+        row = db.connection.execute(
+            "SELECT 1 FROM ukb_publications p WHERE p.publication_id = ? AND p.revision_id = ? "
+            "AND p.view_id = ? AND (EXISTS (SELECT 1 FROM ukb_revision_inputs i "
+            "WHERE i.revision_id = p.revision_id AND i.unit_revision_id = ?) "
+            "OR EXISTS (SELECT 1 FROM ukb_revision_page_inputs i "
+            "WHERE i.revision_id = p.revision_id AND i.unit_revision_id = ?))",
+            (
+                self.publication_id,
+                self.publication.revision_id,
+                self.publication.view_id,
+                unit_revision_id,
+                unit_revision_id,
+            ),
+        ).fetchone()
+        if row is None:
+            raise ValueError("Source input is outside this publication")
+        return CatalogStore._unit_revision(db, unit_revision_id)
+
+    def read_source(self, unit_revision_id: str, path: str) -> bytes:
+        from .catalog_store import CatalogStore
+
+        with storage_stage(self.root, self.identity, read_only=True) as db:
+            unit = self._source_unit(db, unit_revision_id)
+            return CatalogStore(self.root, self.identity).read_processed(unit.processing_id, path)
+
+    def read_original(self, unit_revision_id: str) -> bytes:
+        from .catalog_store import CatalogStore
+
+        with storage_stage(self.root, self.identity, read_only=True) as db:
+            unit = self._source_unit(db, unit_revision_id)
+            return CatalogStore(self.root, self.identity).read_original(unit.source_revision_id)
 
 
 class KnowledgeStore:
@@ -181,6 +272,7 @@ class KnowledgeStore:
         index_revisions: tuple[str, ...] = (),
         unit_revisions: tuple[str, ...] = (),
         import_work: PendingWork | None = None,
+        page_inputs: dict[str, tuple[str, ...]] | None = None,
     ) -> PreparedRevision:
         if (
             not isinstance(view_id, str)
@@ -217,8 +309,16 @@ class KnowledgeStore:
             for path, payload in sorted(files.items()):
                 blob = put_blob(db, payload)
                 entries.append([path, blob.digest, blob.byte_count])
+            page_rows = prepare_page_inputs(db, entries, inputs, expected, view_id, page_inputs)
+            validate_source_paths(db, entries, inputs, page_rows)
             navigation = prepare_navigation(
-                self.root, self.identity, revision_id, publication_id, entries, inputs
+                self.root,
+                self.identity,
+                revision_id,
+                publication_id,
+                entries,
+                navigation_inputs(inputs, page_rows),
+                primary_units=tuple(unit for unit, _ in inputs),
             )
             manifest = put_blob(
                 db,
@@ -229,6 +329,7 @@ class KnowledgeStore:
                         "navigation": navigation.input_fingerprint,
                         "sync_plan": plan_id,
                         "import_claim": claim,
+                        "page_inputs": page_rows,
                     }
                 ),
             )
@@ -291,6 +392,13 @@ class KnowledgeStore:
                             f"file:{path}",
                             Blob(digest, byte_count),
                         )
+            for batch in _batches(page_rows):
+                with db.transaction() as connection:
+                    for path, unit in batch:
+                        connection.execute(
+                            "INSERT INTO ukb_revision_page_inputs VALUES (?, ?, ?)",
+                            (revision_id, path, unit),
+                        )
             with db.transaction() as connection:
                 connection.execute(
                     "UPDATE ukb_knowledge_revisions SET state = 'sealed' "
@@ -320,6 +428,11 @@ class KnowledgeStore:
                     "navigation": ready_navigation.input_fingerprint,
                     "sync_plan": plan_id,
                     "import_claim": import_claim(db.connection, revision_id),
+                    "page_inputs": db.connection.execute(
+                        "SELECT path, unit_revision_id FROM ukb_revision_page_inputs "
+                        "WHERE revision_id = ? ORDER BY path, unit_revision_id",
+                        (revision_id,),
+                    ).fetchall(),
                 }
             )
             if hashlib.sha256(sealed_manifest).hexdigest() != prepared.manifest_digest:
@@ -500,7 +613,20 @@ class KnowledgeStore:
                 (record[0],),
             ).fetchall()
             tree = prepare_navigation(
-                self.root, self.identity, record[0], publication_id, files, inputs
+                self.root,
+                self.identity,
+                record[0],
+                publication_id,
+                files,
+                navigation_inputs(
+                    inputs,
+                    db.connection.execute(
+                        "SELECT path, unit_revision_id FROM ukb_revision_page_inputs "
+                        "WHERE revision_id = ? ORDER BY path, unit_revision_id",
+                        (record[0],),
+                    ).fetchall(),
+                ),
+                primary_units=tuple(unit for unit, _ in inputs),
             )
             if tree.input_fingerprint != record[1]:
                 raise RecoveryRequired("Knowledge navigation policy or committed inputs changed")

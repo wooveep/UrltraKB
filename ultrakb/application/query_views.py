@@ -22,6 +22,10 @@ class QueryView:
     source_revisions_by_path: dict[str, str] = field(default_factory=dict)
     retained_source_status: dict[str, dict] = field(default_factory=dict)
     native_file_roots: dict[str, Path] = field(default_factory=dict)
+    native_inputs: dict[str, tuple[str, str]] = field(default_factory=dict)
+    native_source_paths: tuple[str, ...] = ()
+    source_selectors: dict[str, str] = field(default_factory=dict)
+    source_paths_by_unit: dict[str, tuple[str, str]] = field(default_factory=dict)
 
     @property
     def view_id(self) -> str:
@@ -55,6 +59,8 @@ class QuerySelection:
 
 
 def _pin_view(kb_dir: Path, scope: KnowledgeScope | None = None) -> QueryView | None:
+    if scope is not None and scope.knowledge is not None:
+        return scope.reading_view
     public = scope.publication if scope is not None else None
     head = public.head if public is not None else read_head(kb_dir)
     catalog = public.metadata_dir if public is not None else kb_dir
@@ -236,6 +242,17 @@ def read_selected_file(view: QueryView, path: str) -> bytes:
     """Read and verify the exact bytes bound to this request, including catalog inputs."""
     import hashlib
 
+    if view.scope.knowledge is not None:
+        if path not in view.files:
+            raise ValueError("Document or image is outside this reading snapshot")
+        if path in view.native_inputs:
+            unit, original = view.native_inputs[path]
+            data = view.scope.knowledge.read_source(unit, original)
+        else:
+            data = view.scope.knowledge.read(path)
+        if hashlib.sha256(data).hexdigest() != view.files[path]:
+            raise ValueError("Evidence does not match its publication manifest")
+        return data
     root = view.native_file_roots.get(path, view.scope.wiki_dir).resolve()
     target = (root / path).resolve()
     if Path(path).is_absolute() or not target.is_relative_to(root):
@@ -279,6 +296,18 @@ def read_query_page(
 
 def selection_current(selection: QuerySelection) -> bool:
     """A finished answer must not claim verification against a changed knowledge head."""
+    if any(view.scope.knowledge is not None for view in selection.views):
+        from ultrakb.storage.knowledge_store import KnowledgeStore
+
+        for view in selection.views:
+            bound = view.scope.knowledge
+            if bound is None:
+                return False
+            if KnowledgeStore(bound.root, bound.identity).bind(
+                view_id=view.view_id
+            ).publication_id != (bound.publication_id):
+                return False
+        return True
     public_views = [view for view in selection.views if view.scope.publication is not None]
     if public_views:
         from ultrakb.mutation import RecoveryRequired

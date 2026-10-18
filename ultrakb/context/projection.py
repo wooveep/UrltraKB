@@ -134,6 +134,9 @@ def knowledge_forest(selection: QuerySelection) -> dict:
 def ensure_projection(selection: QuerySelection, model_identity: dict) -> ProjectionIdentity:
     if len(selection.views) != 1:
         raise ValueError("Knowledge retrieval requires one bound collection")
+    if bound := selection.views[0].scope.knowledge:
+        revision = bound.navigation_revision()
+        return ProjectionIdentity(revision.input_fingerprint, revision.tree_id)
     key = fingerprint(
         {**selection_identity(selection), "retrieval": "beam-v1", "models": model_identity}
     )

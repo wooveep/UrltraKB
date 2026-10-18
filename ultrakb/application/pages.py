@@ -46,19 +46,17 @@ def read_page(kb_dir: Path, path: str, *, scope: KnowledgeScope | None = None) -
         raise FileNotFoundError(f"Knowledge base not found: {kb_dir}")
     scope = resolve_scope(kb_dir, scope)
     with reading_scope(scope):
-        wiki = scope.wiki_dir
         rel = path if path.endswith(".md") else f"{path}.md"
-        target = (wiki / rel).resolve()
-        if not wiki.is_relative_to(kb_dir) or not target.is_relative_to(wiki):
-            raise ValueError("Invalid page path.")
-        content = target.read_text(encoding="utf-8")
+        from ultrakb.knowledge_scope import read_wiki_bytes
+
+        content = read_wiki_bytes(scope, rel).decode("utf-8")
         from ultrakb.knowledge_evidence import page_evidence
 
-        evidence = page_evidence(scope, target.relative_to(wiki).as_posix())
+        evidence = page_evidence(scope, rel)
         evidence["publication_id"] = scope.publication_id
     parts = frontmatter.split(content)
     return Page(
-        target.relative_to(wiki).with_suffix("").as_posix(),
+        Path(rel).with_suffix("").as_posix(),
         content,
         parts[1] if parts else content,
         hashlib.sha256(content.encode("utf-8")).hexdigest(),

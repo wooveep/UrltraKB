@@ -4,7 +4,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ultrakb import frontmatter
-from ultrakb.knowledge_scope import KnowledgeScope, reading_scope, resolve_scope
+from ultrakb.knowledge_scope import (
+    KnowledgeScope,
+    read_wiki_bytes,
+    reading_scope,
+    resolve_scope,
+    wiki_page_paths,
+)
 from ultrakb.schema import PAGE_CONTENT_DIRS
 
 KNOWLEDGE_LABELS = {
@@ -44,6 +50,36 @@ def list_knowledge(
     wiki = scope.wiki_dir
     entries = []
     with reading_scope(scope):
+        if scope.knowledge is not None:
+            from datetime import datetime
+
+            from ultrakb.storage.knowledge_store import KnowledgeStore
+
+            receipt = KnowledgeStore(scope.kb_dir, scope.knowledge.identity).receipt(
+                scope.knowledge.publication_id
+            )
+            published_at = datetime.fromisoformat(receipt.published_at).timestamp()
+            for logical in wiki_page_paths(scope):
+                section = logical.split("/", 1)[0]
+                if section not in (*PAGE_CONTENT_DIRS, "explorations") or not logical.endswith(
+                    ".md"
+                ):
+                    continue
+                if any(part.startswith(".") for part in logical.split("/")):
+                    continue
+                content = read_wiki_bytes(scope, logical).decode("utf-8")
+                metadata = frontmatter.parse(content) or {}
+                description = metadata.get("description", "")
+                entries.append(
+                    KnowledgeEntry(
+                        logical,
+                        page_title(content, Path(logical).stem),
+                        section,
+                        description if isinstance(description, str) else "",
+                        published_at,
+                    )
+                )
+            return tuple(sorted(entries, key=lambda entry: entry.path))
         for section in (*PAGE_CONTENT_DIRS, "explorations"):
             for path in (wiki / section).rglob("*.md"):
                 if not path.resolve().is_relative_to(wiki) or any(

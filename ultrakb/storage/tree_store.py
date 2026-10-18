@@ -37,6 +37,10 @@ class BoundTree:
     def children(self, node_id):
         return self._client.get_children(self.revision.tree_id, node_id)
 
+    def node(self, node_id):
+        node = self._client.storage.get_node(self.revision.tree_id, node_id)
+        return node.to_dict() if node is not None else None
+
     def query(self, question, **options):
         return self._client.query(self.revision.tree_id, question, **options)
 

@@ -68,24 +68,7 @@ class KnowledgeRetrieval:
             if isinstance(cached, RetrievalFailure):
                 raise cached
             if cached is None:
-                with open_runtime(self.selection.views[0].scope.kb_dir) as db:
-                    result = ConDB(storage=db).query(
-                        projection.tree_id,
-                        question,
-                        llm=ConDBLLMAdapter(self.executor, "knowledge_retrieval"),
-                        strategy="beam",
-                        beam_size=3,
-                        select_k=6,
-                        max_turns=8,
-                        cache_enabled=False,  # Request results have their own cache below.
-                    )
-                    refs = []
-                    for identity in result.node_ids:
-                        node = db.get_node(projection.tree_id, identity)
-                        if node and (
-                            reference := json.loads(node.attrs_json or "{}").get("source_ref")
-                        ):
-                            refs.append(reference)
+                refs = self._query_refs(projection, question)
                 self.executor.policy.check()
                 self.executor.request_cache[key] = refs
             else:
@@ -177,6 +160,23 @@ class KnowledgeRetrieval:
         except Exception as error:
             raise_if_terminal(error)
             from ultrakb.llm_execution import AnswerReserveReached
+            from ultrakb.storage.navigation_store import RecoveryRequired
+
+            if isinstance(error, RecoveryRequired):
+                return {
+                    "status": "recovery_required",
+                    "reason_code": error.code,
+                    "hits": [],
+                    "coverage": "unavailable",
+                    "cache_hit": False,
+                    "consumed_sends": self.executor.calls - before,
+                    "repair_action": {
+                        "operation": "repair_navigation",
+                        "publication_id": self.selection.views[0].scope.publication_id,
+                    },
+                    "diagnostics": [str(error)],
+                    "stage_sends": self.executor.stage_calls,
+                }
 
             if key and isinstance(error, RetrievalFailure) and cached is None:
                 error.consumed_sends = self.executor.calls - before
@@ -209,6 +209,38 @@ class KnowledgeRetrieval:
                 ],
                 "stage_sends": self.executor.stage_calls,
             }
+
+    def _query_refs(self, projection, question):
+        options = {
+            "llm": ConDBLLMAdapter(self.executor, "knowledge_retrieval"),
+            "strategy": "beam",
+            "beam_size": 3,
+            "select_k": 6,
+            "max_turns": 8,
+            "cache_enabled": False,  # Request results have their own cache.
+        }
+        bound = self.selection.views[0].scope.knowledge
+        if bound is not None:
+            with bound.navigation() as tree:
+                if tree.revision.tree_id != projection.tree_id:
+                    from ultrakb.storage.navigation_store import RecoveryRequired
+
+                    raise RecoveryRequired("Retrieval requires this publication's exact navigation")
+                result = tree.query(question, **options)
+                refs = []
+                for identity in result.node_ids:
+                    node = tree.node(identity)
+                    if node and (reference := (node.get("attrs") or {}).get("source_ref")):
+                        refs.append(reference)
+                return refs
+        with open_runtime(self.selection.views[0].scope.kb_dir) as db:
+            result = ConDB(storage=db).query(projection.tree_id, question, **options)
+            refs = []
+            for identity in result.node_ids:
+                node = db.get_node(projection.tree_id, identity)
+                if node and (reference := json.loads(node.attrs_json or "{}").get("source_ref")):
+                    refs.append(reference)
+            return refs
 
     def _read(
         self, reference: dict, *, data: bytes | None = None, token_budget: int | None = None

@@ -3,6 +3,7 @@
 from contextdb.core.schema import SCHEMA as CONDB_SCHEMA
 
 from .execution_schema import EXECUTION_SCHEMA
+from .knowledge_inputs import PAGE_INPUT_SCHEMA
 from .projection_schema import PROJECTION_SCHEMA
 from .publication_schema import PUBLICATION_SCHEMA
 from .tree_schema import TREE_SCHEMA
@@ -199,4 +200,5 @@ SCHEMA = (
     + TREE_SCHEMA
     + PROJECTION_SCHEMA
     + PUBLICATION_SCHEMA
+    + PAGE_INPUT_SCHEMA
 )
