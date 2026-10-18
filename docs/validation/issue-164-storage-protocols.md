@@ -822,3 +822,27 @@ cases; mypy (495 modules), ruff, format and diff checks pass. No live model serv
 was called. Compiler and remaining generator integration, full task observability
 and maintenance, adapter activation and the overall issue closure gate remain
 outstanding.
+
+### Full offline workspace regression after graph integration
+
+At implementation commit `6c243198`, the current workspace passes **3,620 tests**,
+with 14 platform/optional skips and 745 live tests deselected (516.80 seconds).
+The offline harness rejects non-loopback traffic and real-model fixtures.
+Full-repository ruff and format checks pass (987 formatted files), as does mypy
+for all 495 source modules. This run includes the original uncommitted compiler
+recovery/config-capture changes. Their edit bodies are preserved and none of
+their seven tracked files is included in the three artifact/graph implementation
+commits. This is workspace regression evidence, not a clean-release or live-model
+acceptance claim.
+
+The next compiler integration must preserve the complete recovery contract.
+`compile_short_doc` requires a controlled writable compiler view, while a bound
+main-store publication is read-only. `document_checkpoints` currently returns
+no checkpoints for a new-store execution because it has no legacy `model_task`.
+Passing only a temporary Markdown copy would therefore omit accepted plans,
+raw response recovery, repair/conflict allowances and immutable page bases.
+Those responsibilities and exact work/request identities must use the main
+store before enabling the actual compiler path. Managed admission/indexing,
+remaining generators, full task observations, maintenance/restore roots and the
+three entrypoint adapters still require joint integration and final acceptance.
+Issue 164 remains open.
