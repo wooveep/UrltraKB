@@ -327,7 +327,16 @@ def build_chat_agent(
     scope = resolve_scope(kb_dir, scope)
     wiki_root = str(scope.wiki_dir)
     kb_root = str(kb_dir)
-    base = build_query_agent(wiki_root, model, language=language, bundle=bundle)
+    schema_options = {}
+    if scope.knowledge is not None:
+        from ultrakb.schema import AGENTS_MD
+
+        schema_options["schema_md"] = (
+            scope.knowledge.read("AGENTS.md").decode("utf-8")
+            if "AGENTS.md" in scope.reading_view.files
+            else AGENTS_MD
+        )
+    base = build_query_agent(wiki_root, model, language=language, bundle=bundle, **schema_options)
 
     @function_tool
     def write_file(path: str, content: str) -> str:

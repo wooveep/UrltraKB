@@ -581,3 +581,54 @@ regressions pass 138 tests (59 live tests deselected). Full mypy (483 modules),
 ruff, format and diff checks pass. No live model service was called. Public
 continue, full compiler integration, other writers and P6-P8 acceptance remain
 unfinished; the default creation path is unchanged and issue #164 remains open.
+
+### Continuation, accepted answers and user-only recall
+
+The shared `continue_conversation` use case now has an explicit development
+main-store path. Its parent holds execution and lifecycle protection while the
+actual worker acquires the real session lock. Synchronous ChatIndex work and
+async Agents requests run on that worker, without borrowing a connection or a
+session lock from another thread. Cancellation signals the executor and waits
+for the worker and its SDK cleanup; a committed result is latched before the
+worker event loop shuts down.
+
+Development schema 10 records immutable user submissions, execution attempts,
+accepted answer candidates and committed turn metadata. Complete original user
+and assistant messages remain the authoritative CTree-compatible turn payload.
+An accepted full answer and its citations are retained in their own transaction
+before the atomic turn/result commit. A failed turn transaction can therefore
+resume the same submission from its candidate without another model send.
+Duplicate completed submissions return the original answer and references, and
+reject changed user text or submission order. Current-run receipt binding keeps
+an earlier success from hiding a new validation failure.
+
+Both answer acceptance and final turn acceptance check the actual execution's
+generation and active state inside SQL. Persisted stop wins even before the
+in-memory signal changes; restored stores reject original execution tokens.
+Completion cannot be assigned through the failure-finalization API: schema
+constraints require the exact submission's turn and result, and completed
+receipts are immutable. Raw provider receipts and usage survive failed or
+cancelled turn commits. Known terminal `not_sent` attempts can retry; a paid,
+unknown or still in-flight attempt without a safely accepted complete answer is
+blocked for recovery rather than automatically resent. Full SDK/tool-state
+replay for that latter case is still pending.
+
+Recent-user capacity allocation is shared with the existing policy. Preparation
+retains the 8,000-token threshold and six-recent-turn rule, checks recall capacity
+and older candidates before indexing, and never inserts earlier assistant text
+as user intent. Real ChatIndex catch-up commits each accepted prefix and builds
+one final ConDB projection. Recall opens that shared ready tree and validates
+selected exchange identities before rereading bounded original user excerpts.
+Budget-limited computation reports its real computed/retrievable prefix and
+pending turns; successful recall does not conceal incomplete indexing.
+
+Twenty new application and crash-boundary cases cover these behaviors, including
+actual model waits concurrent with GC, settings updates and another publication,
+queued cancellation/deletion, SQL failures, lost acknowledgements and restore.
+The related question, session, memory, storage, reading, adapter and size
+regressions pass 172 tests (29 live tests deselected). Both review axes verified
+the corrected boundaries; full mypy (487 modules), ruff, format and diff checks
+pass. All provider responses were controlled locally; no live model service was
+called. Session management/export, model write tools, remaining compiler and
+writer integrations and the full P6-P8 gates still remain. No default activation
+or issue closure has occurred.

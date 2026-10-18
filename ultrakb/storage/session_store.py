@@ -8,6 +8,8 @@ from pathlib import Path
 
 from ctree.state import prefix_digest, validate_turns
 
+from ultrakb.locks import LockCancelled
+from ultrakb.mutation import RecoveryRequired
 from ultrakb.storage.blobs import put_blob, read_bytes, retain_blob
 from ultrakb.storage.coordination import storage_stage
 from ultrakb.storage.database import DatabaseIdentity
@@ -118,6 +120,153 @@ class SessionStore:
             raise FileNotFoundError("Conversation was removed or never committed")
         return row[0]
 
+    def _execution_state(self, connection, execution_id):
+        execution = connection.execute(
+            "SELECT generation, state FROM ukb_executions WHERE execution_id = ?", (execution_id,)
+        ).fetchone()
+        if execution is None or execution[0] != self.identity.generation:
+            raise SessionConflict("The conversation execution belongs to another generation")
+        return execution[1]
+
+    def _require_active_execution(self, connection, execution_id):
+        state = self._execution_state(connection, execution_id)
+        if state in {"stopping", "cancelled"}:
+            raise LockCancelled("The conversation execution was stopped")
+        if state != "started":
+            raise SessionConflict("A terminated execution cannot accept a late answer")
+
+    def start_submission(
+        self, session_id, submission_id, message, *, execution_id, publication_id, order=None
+    ):
+        if (
+            not isinstance(submission_id, str)
+            or not submission_id
+            or not isinstance(message, str)
+            or not message.strip()
+            or order is not None
+            and (type(order) is not int or order < 0)
+        ):
+            raise ValueError("Conversation submissions require original text and a stable identity")
+        _bounded_metadata(session_id, submission_id, execution_id, publication_id, order)
+        owner = hashlib.sha256(json.dumps((session_id, submission_id)).encode()).hexdigest()
+        with storage_stage(self.root, self.identity) as db:
+            content = put_blob(db, message.encode("utf-8"))
+            with db.transaction() as connection:
+                self._current(db, session_id)
+                self._require_active_execution(connection, execution_id)
+                existing = connection.execute(
+                    "SELECT message_digest, submission_order FROM ukb_conversation_submissions "
+                    "WHERE session_id = ? AND submission_id = ?",
+                    (session_id, submission_id),
+                ).fetchone()
+                if existing and existing != (content.digest, order):
+                    raise ValueError("Conversation submission identity mismatch")
+                if not existing:
+                    count = connection.execute(
+                        "SELECT turn_count FROM ukb_conversations WHERE session_id = ?",
+                        (session_id,),
+                    ).fetchone()[0]
+                    connection.execute(
+                        "INSERT INTO ukb_conversation_submissions VALUES (?, ?, ?, ?, ?)",
+                        (session_id, submission_id, content.digest, count, order),
+                    )
+                    retain_blob(connection, "conversation-submission", owner, "user", content)
+                completed = connection.execute(
+                    "SELECT ordinal FROM ukb_turns WHERE session_id = ? AND attempt_id = ?",
+                    (session_id, submission_id),
+                ).fetchone()
+                connection.execute(
+                    "INSERT INTO ukb_conversation_runs VALUES (?, ?, ?, ?, ?, ?, NULL)",
+                    (
+                        execution_id,
+                        session_id,
+                        submission_id,
+                        publication_id,
+                        "reused" if completed else "started",
+                        completed[0] if completed else None,
+                    ),
+                )
+
+    def completed_submission(self, session_id, submission_id, message, *, execution_id):
+        with storage_stage(self.root, self.identity, read_only=True) as db:
+            self._execution_state(db.connection, execution_id)
+            row = db.connection.execute(
+                "SELECT t.ordinal, t.payload_digest, r.result_digest FROM ukb_turns t "
+                "LEFT JOIN ukb_turn_results r ON r.session_id = t.session_id "
+                "AND r.ordinal = t.ordinal "
+                "JOIN ukb_conversation_runs run ON run.session_id = t.session_id "
+                "AND run.submission_id = t.attempt_id AND run.ordinal = t.ordinal "
+                "WHERE t.session_id = ? AND t.attempt_id = ? AND run.execution_id = ? "
+                "AND run.state IN ('completed', 'reused')",
+                (session_id, submission_id, execution_id),
+            ).fetchone()
+            if row is None:
+                return None
+            original = json.loads(read_bytes(db, row[1]))
+            messages = {m["role"]: m["content"] for m in original["messages"]}
+            if messages["user"] != message:
+                raise ValueError("Conversation submission identity mismatch")
+            metadata = json.loads(read_bytes(db, row[2])) if row[2] else {}
+            return {"answer": messages["assistant"], "ordinal": row[0], "metadata": metadata}
+
+    def finish_submission(self, execution_id, state, *, error_code=None):
+        if state not in {"failed", "stopped", "blocked"}:
+            raise ValueError("Conversation execution requires an actual terminal result")
+        with storage_stage(self.root, self.identity) as db, db.transaction() as connection:
+            self._execution_state(connection, execution_id)
+            connection.execute(
+                "UPDATE ukb_conversation_runs SET state = ?, error_code = ? "
+                "WHERE execution_id = ? AND state = 'started'",
+                (state, error_code, execution_id),
+            )
+
+    def recover_submission(
+        self, session_id, submission_id, message, *, execution_id, check_cancelled
+    ):
+        """Accept a retained complete answer; never resend an unconfirmed paid attempt."""
+        with storage_stage(self.root, self.identity, read_only=True) as db:
+            self._require_active_execution(db.connection, execution_id)
+            candidate = db.connection.execute(
+                "SELECT a.execution_id, a.turn_id, a.input_revision, a.payload_digest, "
+                "a.result_digest FROM ukb_conversation_answers a JOIN ukb_conversation_runs r "
+                "ON r.execution_id = a.execution_id JOIN ukb_executions e "
+                "ON e.execution_id = r.execution_id WHERE r.session_id = ? AND r.submission_id = ? "
+                "AND r.execution_id != ? ORDER BY e.sequence DESC LIMIT 1",
+                (session_id, submission_id, execution_id),
+            ).fetchone()
+            if candidate is None:
+                pending = db.connection.execute(
+                    "SELECT 1 FROM ukb_conversation_runs r JOIN ukb_usage_counters c "
+                    "ON c.bucket = 'execution' AND c.identity = r.execution_id "
+                    "AND c.stage_code = '' "
+                    "WHERE r.session_id = ? AND r.submission_id = ? AND r.execution_id != ? "
+                    "AND (c.actual_sends > 0 OR c.send_unknown > 0 OR c.in_flight_requests > 0) "
+                    "LIMIT 1",
+                    (session_id, submission_id, execution_id),
+                ).fetchone()
+                if pending:
+                    raise RecoveryRequired("The earlier paid conversation attempt needs recovery")
+                return False
+            turn = json.loads(read_bytes(db, candidate[3]))
+            metadata = json.loads(read_bytes(db, candidate[4]))
+            messages = {m["role"]: m["content"] for m in turn["messages"]}
+            if messages["user"] != message:
+                raise ValueError("Conversation submission identity mismatch")
+        self.append_exchange(
+            session_id,
+            candidate[1],
+            message,
+            messages["assistant"],
+            system=messages.get("system"),
+            attempt_id=submission_id,
+            expected_revision=candidate[2],
+            check_cancelled=check_cancelled,
+            metadata=metadata,
+            execution_id=execution_id,
+            reused_from=candidate[0],
+        )
+        return True
+
     def append_exchange(
         self,
         session_id: str,
@@ -127,6 +276,11 @@ class SessionStore:
         *,
         system: str | None = None,
         attempt_id: str | None = None,
+        expected_revision: int | None = None,
+        check_cancelled=None,
+        metadata: dict | None = None,
+        execution_id: str | None = None,
+        reused_from: str | None = None,
     ) -> int:
         if (
             not isinstance(turn_id, str)
@@ -145,7 +299,11 @@ class SessionStore:
             {"role": "assistant", "content": assistant},
         ]
         with storage_stage(self.root, self.identity) as db:
+            if execution_id is not None:
+                self._execution_state(db.connection, execution_id)
             revision = self._current(db, session_id)
+            if expected_revision is not None and revision != expected_revision:
+                raise SessionConflict("Conversation changed before turn acceptance")
             existing = db.connection.execute(
                 "SELECT ordinal, payload_digest FROM ukb_turns "
                 "WHERE session_id = ? AND turn_id = ?",
@@ -161,9 +319,67 @@ class SessionStore:
             ).fetchone()[0]
             turn = {"turn_id": turn_id, "ordinal": ordinal, "messages": messages}
             content = put_blob(db, json.dumps(turn, ensure_ascii=False, sort_keys=True).encode())
+            result = (
+                put_blob(db, json.dumps(metadata, ensure_ascii=False, sort_keys=True).encode())
+                if metadata is not None
+                else None
+            )
+            if execution_id is not None:
+                if result is None:
+                    raise ValueError("A complete application turn requires its answer metadata")
+                # Independent acceptance is the paid computation's recovery point.
+                # The later atomic turn commit can fail without losing this answer.
+                with db.transaction() as connection:
+                    if self._current(db, session_id) != revision:
+                        raise SessionConflict("Conversation changed before answer acceptance")
+                    self._require_active_execution(connection, execution_id)
+                    run = connection.execute(
+                        "SELECT session_id, submission_id, state FROM ukb_conversation_runs "
+                        "WHERE execution_id = ?",
+                        (execution_id,),
+                    ).fetchone()
+                    if run != (session_id, attempt_id, "started"):
+                        raise SessionConflict(
+                            "Answer acceptance requires its exact active submission"
+                        )
+                    if reused_from is not None:
+                        original = connection.execute(
+                            "SELECT a.turn_id, a.input_revision, a.ordinal, a.payload_digest, "
+                            "a.result_digest FROM ukb_conversation_answers a "
+                            "JOIN ukb_conversation_runs r "
+                            "ON r.execution_id = a.execution_id WHERE a.execution_id = ? "
+                            "AND r.session_id = ? AND r.submission_id = ?",
+                            (reused_from, session_id, attempt_id),
+                        ).fetchone()
+                        if original != (turn_id, revision, ordinal, content.digest, result.digest):
+                            raise SessionConflict(
+                                "Answer reuse must match the exact retained computation"
+                            )
+                    if check_cancelled:
+                        check_cancelled()
+                    connection.execute(
+                        "INSERT INTO ukb_conversation_answers VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            execution_id,
+                            turn_id,
+                            revision,
+                            ordinal,
+                            content.digest,
+                            result.digest,
+                            reused_from,
+                        ),
+                    )
+                    retain_blob(
+                        connection, "conversation-answer", execution_id, "original", content
+                    )
+                    retain_blob(connection, "conversation-answer", execution_id, "result", result)
             with db.transaction() as connection:
                 if self._current(db, session_id) != revision:
                     raise ValueError("Conversation changed before this exchange was committed")
+                if check_cancelled:
+                    check_cancelled()
+                if execution_id is not None:
+                    self._require_active_execution(connection, execution_id)
                 connection.execute(
                     "INSERT INTO ukb_turns VALUES (?, ?, ?, ?, ?)",
                     (session_id, ordinal, turn_id, attempt_id or turn_id, content.digest),
@@ -171,6 +387,31 @@ class SessionStore:
                 retain_blob(
                     connection, "conversation-turn", f"{session_id}:{ordinal}", "original", content
                 )
+                if result is not None:
+                    connection.execute(
+                        "INSERT INTO ukb_turn_results VALUES (?, ?, ?)",
+                        (session_id, ordinal, result.digest),
+                    )
+                    retain_blob(
+                        connection, "conversation-turn", f"{session_id}:{ordinal}", "result", result
+                    )
+                if (
+                    execution_id is not None
+                    and connection.execute(
+                        "UPDATE ukb_conversation_runs SET state = ?, ordinal = ? "
+                        "WHERE execution_id = ? AND session_id = ? AND submission_id = ? "
+                        "AND state = 'started'",
+                        (
+                            "reused" if reused_from else "completed",
+                            ordinal,
+                            execution_id,
+                            session_id,
+                            attempt_id,
+                        ),
+                    ).rowcount
+                    != 1
+                ):
+                    raise SessionConflict("The accepted turn must finish its exact active attempt")
                 connection.execute(
                     "UPDATE ukb_conversations SET revision = revision + 1, "
                     "turn_count = turn_count + 1 "

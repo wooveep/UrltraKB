@@ -20,12 +20,17 @@ class StreamTransport:
             def do_POST(self):
                 payload = self.rfile.read(int(self.headers["Content-Length"]))
                 index = len(owner.requests)
+                request = json.loads(payload)
                 with owner.received:
-                    owner.requests.append(json.loads(payload))
+                    owner.requests.append(request)
                     owner.received.notify_all()
                 if owner.gate is not None:
                     owner.gate.wait(5)
-                response = owner.responses[index]
+                response = (
+                    owner.responses(request, index)
+                    if callable(owner.responses)
+                    else owner.responses[index]
+                )
                 base = {
                     "id": f"chatcmpl-script-{index}",
                     "object": "chat.completion.chunk",
@@ -70,18 +75,40 @@ class StreamTransport:
                     chunks = chunks[:2] + [
                         {**base, "choices": [], "usage": usage} for usage in owner.usage_events
                     ]
+                streaming = request.get("stream", False)
                 body = (
-                    b"".join(f"data: {json.dumps(chunk)}\n\n".encode() for chunk in chunks)
-                    + b"data: [DONE]\n\n"
+                    (
+                        b"".join(f"data: {json.dumps(chunk)}\n\n".encode() for chunk in chunks)
+                        + b"data: [DONE]\n\n"
+                    )
+                    if streaming
+                    else json.dumps(
+                        {
+                            **base,
+                            "object": "chat.completion",
+                            "choices": [
+                                {
+                                    "index": 0,
+                                    "message": {"role": "assistant", **response},
+                                    "finish_reason": "tool_calls"
+                                    if "tool_calls" in response
+                                    else "stop",
+                                }
+                            ],
+                            "usage": chunks[-1]["usage"],
+                        }
+                    ).encode()
                 )
                 owner.bodies.append(body)
                 self.send_response(200)
-                self.send_header("Content-Type", "text/event-stream")
+                self.send_header(
+                    "Content-Type", "text/event-stream" if streaming else "application/json"
+                )
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 try:
-                    first, rest = body.split(b"\n\n", 1)
-                    self.wfile.write(first + b"\n\n")
+                    first, rest = body.split(b"\n\n", 1) if streaming else (body, b"")
+                    self.wfile.write(first + (b"\n\n" if streaming else b""))
                     self.wfile.flush()
                     if owner.body_gate is not None:
                         owner.body_gate.wait(5)

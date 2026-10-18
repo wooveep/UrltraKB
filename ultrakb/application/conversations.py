@@ -101,7 +101,8 @@ def _with_image_receipt(operation):
                 )
         return replace(
             result,
-            image_coverage=after.snapshot() if after is not None and after is not before else (),
+            image_coverage=(after.snapshot() if after is not None and after is not before else ())
+            or result.image_coverage,
         )
 
     return run
@@ -336,6 +337,19 @@ async def continue_conversation(
     scope = resolve_scope(kb_dir, scope)
     root = _validate_question(kb_dir, message, scope=scope)
     context = context or ExecutionContext()
+    if scope.knowledge is not None:
+        from .storage_conversations import continue_stored_conversation
+
+        return await continue_stored_conversation(
+            scope,
+            message,
+            session_id=session_id,
+            new_session_id=new_session_id,
+            attempt_id=attempt_id,
+            submission_order=submission_order,
+            context=context,
+            focus=focus,
+        )
     session = ChatSession.new(root, "", "", identity=new_session_id, view_id=scope.view_id)
     identity = session_id or session.id
     async with async_session_lock(

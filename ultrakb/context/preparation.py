@@ -6,6 +6,7 @@ import json
 from dataclasses import asdict, dataclass, field
 
 from ultrakb.agent.chat_session import ChatSession
+from ultrakb.conversation_turns import ConversationTurn
 from ultrakb.llm_execution import CompletionExecutor
 from ultrakb.model_tokenizer import ContextCapacityError
 
@@ -59,6 +60,10 @@ class PreparedConversationInput:
 
 
 def recent_input(session: ChatSession, question: str) -> PreparedConversationInput:
+    return _recent_input(session.turns, question)
+
+
+def _recent_input(turns: list[ConversationTurn], question: str) -> PreparedConversationInput:
     return PreparedConversationInput(
         question,
         tuple(
@@ -71,23 +76,24 @@ def recent_input(session: ChatSession, question: str) -> PreparedConversationInp
                 0,
                 len(t.user_text),
             )
-            for t in session.turns[-6:]
+            for t in turns[-6:]
         ),
     )
 
 
-def prepare_conversation_input(
-    session: ChatSession, question: str, executor: CompletionExecutor, *, agent=None, selection=None
-) -> PreparedConversationInput:
+def prepare_recent_input(
+    turns: list[ConversationTurn], question: str, executor: CompletionExecutor, *, agent=None
+) -> tuple[PreparedConversationInput, int]:
+    """Allocate the existing recent-user policy before deciding whether to index."""
     measure = executor.question_capacity
     if measure is None:
         raise ContextCapacityError("Conversation context requires captured model capacity")
     measure.require_current(question)
-    prepared = recent_input(session, question)
+    prepared = _recent_input(turns, question)
     diagnostics: dict = {
         "status": "recent_only",
-        "committed_turns": session.turn_count,
-        "committed_user_tokens": sum(measure.count(t.user_text) for t in session.turns),
+        "committed_turns": len(turns),
+        "committed_user_tokens": sum(measure.count(t.user_text) for t in turns),
         "tokenizer_fingerprint": measure.fingerprint,
         "notes": [],
     }
@@ -115,6 +121,18 @@ def prepare_conversation_input(
         diagnostics["notes"].append(f"recent_omitted_for_capacity: {omitted.turn_id}")
     diagnostics["recent_turns"] = len(recent)
     diagnostics["recent_tokens"] = measure.payload_tokens([asdict(t) for t in recent])
+    recall_allowance = min(2000, max(0, allowance - diagnostics["recent_tokens"]))
+    return PreparedConversationInput(question, tuple(recent), (), diagnostics), recall_allowance
+
+
+def prepare_conversation_input(
+    session: ChatSession, question: str, executor: CompletionExecutor, *, agent=None, selection=None
+) -> PreparedConversationInput:
+    prepared, recall_allowance = prepare_recent_input(
+        session.turns, question, executor, agent=agent
+    )
+    diagnostics = prepared.diagnostics
+    recent = prepared.recent
     recalled = []
     if diagnostics["committed_user_tokens"] >= RECALL_THRESHOLD_TOKENS:
         from ultrakb.context.conversation import ConversationMemory
@@ -123,7 +141,6 @@ def prepare_conversation_input(
         memory = ConversationMemory(session, executor)
         state = memory.catch_up()
         diagnostics["index"] = {**asdict(state), "diagnostics": list(state.diagnostics)}
-        recall_allowance = min(2000, max(0, allowance - diagnostics["recent_tokens"]))
         items, recall = recall_users(
             memory, state, question, selection, {t.turn_id for t in recent}, budget=recall_allowance
         )
