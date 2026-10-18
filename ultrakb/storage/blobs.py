@@ -41,6 +41,8 @@ def _prepare_directory(root: Path, target: Path) -> None:
 
 def put_blob(db: Database, payload: bytes) -> Blob:
     require_stage(db)
+    if db.read_only:
+        raise PermissionError("Read-only storage cannot accept Blob content")
     if db.connection.in_transaction:
         raise RuntimeError("Blob I/O must precede the reference transaction")
     blob = Blob(hashlib.sha256(payload).hexdigest(), len(payload))
@@ -53,7 +55,9 @@ def put_blob(db: Database, payload: bytes) -> Blob:
     if row or path.exists():
         if read_bytes(db, blob.digest, registered=bool(row)) != payload:
             raise ValueError("CAS content does not match its digest")
-    else:
+    if not row:
+        # An unregistered final name may survive an interrupted directory sync.
+        # Validate it above, then re-establish file and directory durability.
         _prepare_directory(db.root, path)
         atomic_write_bytes(path, payload)
     # A crash before this commit leaves only a recoverable orphan, never a ref.

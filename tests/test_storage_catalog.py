@@ -25,3 +25,15 @@ def test_distinct_sources_share_bytes_and_survive_external_deletion(tmp_path):
         b"# Retained original\n\nOne shared payload.\n"
     )
     assert reopened.read_original(right.revision_id) == reopened.read_original(left.revision_id)
+
+
+def test_original_filename_does_not_collide_with_manifest_identity(tmp_path):
+    from ultrakb.storage.catalog_store import CatalogStore
+    from ultrakb.storage.database import create_database
+
+    root = tmp_path / "kb"
+    catalog = CatalogStore(root, create_database(root))
+    source = tmp_path / "manifest"
+    source.write_text("A legitimate original file without an extension.")
+    revision = catalog.admit(source, source_key="original")
+    assert catalog.read_original(revision.revision_id) == source.read_bytes()

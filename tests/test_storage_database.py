@@ -56,3 +56,40 @@ def test_unsafe_runtime_is_rejected_before_creating_state(tmp_path, monkeypatch,
     with pytest.raises(UnsupportedSQLite):
         create_database(tmp_path)
     assert not (tmp_path / ".ultrakb").exists()
+
+
+def test_read_only_stage_cannot_create_orphan_payloads(tmp_path):
+    import hashlib
+
+    from ultrakb.storage.blobs import blob_path, put_blob
+    from ultrakb.storage.coordination import storage_stage
+    from ultrakb.storage.database import create_database
+
+    identity = create_database(tmp_path)
+    payload = b"A read-only reader must not write CAS content."
+    with storage_stage(tmp_path, identity, read_only=True) as db:
+        with pytest.raises((RuntimeError, PermissionError)):
+            put_blob(db, payload)
+    assert not blob_path(tmp_path, hashlib.sha256(payload).hexdigest()).exists()
+
+
+def test_unconfirmed_blob_retry_must_reestablish_durability(tmp_path, monkeypatch):
+    from ultrakb.storage.blobs import put_blob, read_bytes
+    from ultrakb.storage.coordination import storage_stage
+    from ultrakb.storage.database import create_database
+
+    identity = create_database(tmp_path)
+
+    def failed_directory_sync(path):
+        raise OSError("Directory synchronization did not complete")
+
+    with storage_stage(tmp_path, identity) as db:
+        with monkeypatch.context() as failed:
+            failed.setattr("ultrakb.locks._fsync_directory", failed_directory_sync)
+            with pytest.raises(OSError, match="synchronization"):
+                put_blob(db, b"Retained bytes from an unconfirmed rename")
+            with pytest.raises(OSError, match="synchronization"):
+                put_blob(db, b"Retained bytes from an unconfirmed rename")
+        assert db.connection.execute("SELECT count(*) FROM ukb_blobs").fetchone()[0] == 0
+        blob = put_blob(db, b"Retained bytes from an unconfirmed rename")
+        assert read_bytes(db, blob.digest) == b"Retained bytes from an unconfirmed rename"

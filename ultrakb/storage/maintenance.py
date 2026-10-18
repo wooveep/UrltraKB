@@ -69,8 +69,10 @@ def _copy_verified(source: Path, target: Path, digest: str):
         raise ValueError("Backup Blob failed digest verification")
 
 
-def _verify_snapshot(root: Path, *, expected=None):
-    with open_database(root, expected=expected, read_only=True) as db:
+def _verify_snapshot(root: Path, *, expected=None, sealed_archive=False, verify_blobs=True):
+    with open_database(
+        root, expected=expected, read_only=True, sealed_archive=sealed_archive
+    ) as db:
         if db.connection.execute("PRAGMA integrity_check").fetchall() != [("ok",)]:
             raise ValueError("Backup database failed integrity verification")
         if db.connection.execute("PRAGMA foreign_key_check").fetchone():
@@ -79,7 +81,31 @@ def _verify_snapshot(root: Path, *, expected=None):
             "SELECT DISTINCT b.digest, b.byte_count FROM ukb_blob_refs r "
             "JOIN ukb_blobs b ON b.digest = r.digest ORDER BY b.digest"
         ).fetchall()
+        if verify_blobs:
+            for digest, byte_count in refs:
+                path = blob_path(root, digest)
+                hasher = hashlib.sha256()
+                size = 0
+                with path.open("rb") as reader:
+                    while chunk := reader.read(1024 * 1024):
+                        hasher.update(chunk)
+                        size += len(chunk)
+                if size != byte_count or hasher.hexdigest() != digest:
+                    raise ValueError("Backup Blob failed reference-closure validation")
         return db.identity, refs
+
+
+def _prune_snapshot_orphans(connection):
+    """An export omits orphan files, so it must also omit their metadata.
+
+    Only a private exported/restored snapshot calls this; the live store and
+    all its durable references are unchanged. SQL deletion remains bounded.
+    """
+    while connection.execute(
+        "DELETE FROM ukb_blobs WHERE digest IN (SELECT b.digest FROM ukb_blobs b "
+        "WHERE NOT EXISTS (SELECT 1 FROM ukb_blob_refs r WHERE r.digest = b.digest) LIMIT 128)"
+    ).rowcount:
+        pass
 
 
 def _publish_directory(temporary: Path, destination: Path):
@@ -151,16 +177,19 @@ class Maintenance:
                 snapshot = sqlite3.connect(state / "kb.sqlite", isolation_level=None)
                 try:
                     db.connection.backup(snapshot)
-                    snapshot.execute("PRAGMA journal_mode = DELETE")
                     snapshot.execute("PRAGMA synchronous = FULL")
+                    _prune_snapshot_orphans(snapshot)
+                    snapshot.execute("PRAGMA journal_mode = DELETE")
                 finally:
                     snapshot.close()
-                _, refs = _verify_snapshot(temporary, expected=self.identity)
+                _, refs = _verify_snapshot(
+                    temporary, expected=self.identity, sealed_archive=True, verify_blobs=False
+                )
                 for digest, _ in refs:
                     _copy_verified(
                         blob_path(self.root, digest), blob_path(temporary, digest), digest
                     )
-                _verify_snapshot(temporary, expected=self.identity)
+                _verify_snapshot(temporary, expected=self.identity, sealed_archive=True)
                 atomic_write_json(
                     temporary / "backup.json",
                     {
@@ -190,7 +219,7 @@ class Maintenance:
 
     @staticmethod
     def restore(backup: Path, destination: Path) -> DatabaseIdentity:
-        identity, refs = _verify_snapshot(backup)
+        identity, refs = _verify_snapshot(backup, sealed_archive=True)
         destination = destination.resolve()
         if destination.exists():
             raise FileExistsError(destination)
@@ -198,10 +227,15 @@ class Maintenance:
         temporary = Path(tempfile.mkdtemp(prefix=".ultrakb-restore-", dir=destination.parent))
         try:
             (temporary / ".ultrakb").mkdir()
-            with open_database(backup, expected=identity, read_only=True) as db:
+            with open_database(
+                backup, expected=identity, read_only=True, sealed_archive=True
+            ) as db:
                 snapshot = sqlite3.connect(database_path(temporary), isolation_level=None)
                 try:
                     db.connection.backup(snapshot)
+                    snapshot.execute("PRAGMA synchronous = FULL")
+                    _prune_snapshot_orphans(snapshot)
+                    snapshot.execute("PRAGMA journal_mode = WAL")
                 finally:
                     snapshot.close()
             for digest, _ in refs:

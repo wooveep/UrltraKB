@@ -100,3 +100,38 @@ def test_interrupted_retirement_rejects_new_references_and_resumes(tmp_path, mon
     catalog = CatalogStore(root, identity)
     admitted = catalog.admit(source, source_key="manual")
     assert catalog.read_original(admitted.revision_id) == source.read_bytes()
+
+
+def test_restored_backup_allows_readmission_of_previously_unreferenced_bytes(tmp_path):
+    from ultrakb.storage.blobs import put_blob
+    from ultrakb.storage.catalog_store import CatalogStore
+    from ultrakb.storage.coordination import storage_stage
+    from ultrakb.storage.database import create_database
+    from ultrakb.storage.maintenance import Maintenance
+
+    root = tmp_path / "kb"
+    identity = create_database(root)
+    payload = b"An interrupted admission left these bytes without a business reference."
+    with storage_stage(root, identity) as db:
+        put_blob(db, payload)
+    backup, restored = tmp_path / "backup", tmp_path / "restored"
+    Maintenance(root, identity).backup(backup)
+    new_identity = Maintenance.restore(backup, restored)
+    source = tmp_path / "original.md"
+    source.write_bytes(payload)
+    catalog = CatalogStore(restored, new_identity)
+    revision = catalog.admit(source, source_key="readmitted")
+    assert catalog.read_original(revision.revision_id) == payload
+
+
+def test_restored_active_database_uses_wal(tmp_path):
+    from ultrakb.storage.database import create_database, open_database
+    from ultrakb.storage.maintenance import Maintenance
+
+    root = tmp_path / "kb"
+    identity = create_database(root)
+    backup, restored = tmp_path / "backup", tmp_path / "restored"
+    Maintenance(root, identity).backup(backup)
+    new_identity = Maintenance.restore(backup, restored)
+    with open_database(restored, expected=new_identity, read_only=True) as db:
+        assert db.connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"

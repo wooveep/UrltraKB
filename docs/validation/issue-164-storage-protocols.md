@@ -19,6 +19,9 @@ by their creating thread. Durable transactions are top-level, use `FULL`
 synchronization and reject nesting, including nesting through another connection
 in the same execution context. Opening and closing never initialize schema or
 run an integrity scan/checkpoint.
+Active databases must already be in WAL mode; opening does not silently repair
+their journal mode. Only explicit sealed archive reads use `immutable=1`, and
+they reject a nonempty WAL. Restore explicitly establishes active WAL mode.
 
 `CatalogStore.admit` gives each source its own identity and retains the original
 file as an immutable CAS Blob. The input manifest contains logical relative
@@ -59,6 +62,9 @@ that configuration, working-copy differences and external receipts are absent;
 these development backups are not advertised as complete application recovery
 packages. Application task interruption and lifecycle rebinding remain work for
 the integration stage.
+The exported snapshot drops unreferenced Blob metadata in bounded batches,
+matching the orphan files it omits; the live database is unchanged. Reference
+closure verification checks both content digests and byte counts.
 
 ## Physical records and owners
 
@@ -101,6 +107,9 @@ synchronize its containing directories before committing references. Wiki and
 CAS files are never hard-linked. This work does not weaken existing atomic
 copy/write behavior. The private compile-materialization helper and its separate
 temporary durability rules are still outstanding.
+An existing unregistered CAS pathname can represent an interrupted directory
+sync. Reuse durably rewrites it before registering metadata. Read-only stages
+reject content acceptance before any filesystem mutation.
 
 ## Development calibration
 

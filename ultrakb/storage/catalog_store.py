@@ -81,7 +81,9 @@ class CatalogStore:
                     (revision_id, source_id, ordinal, manifest.digest),
                 )
                 retain_blob(connection, "source-revision", revision_id, "manifest", manifest)
-                retain_blob(connection, "source-revision", revision_id, original.path, content)
+                retain_blob(
+                    connection, "source-revision", revision_id, f"file:{original.path}", content
+                )
             return SourceRevision(source_id, revision_id, ordinal, (original,))
 
     def revision(self, revision_id: str) -> SourceRevision:
@@ -101,10 +103,6 @@ class CatalogStore:
         if not isinstance(values, list) or not values:
             raise ValueError("Invalid retained input manifest")
         files = tuple(InputFile(**value) for value in values)
-        for file in files:
-            path = PurePosixPath(file.path)
-            if path.is_absolute() or ".." in path.parts or "\\" in file.path:
-                raise ValueError("Retained input paths must be relative")
         if sum(file.kind == "main" for file in files) != 1:
             raise ValueError("Input manifest must contain one main file")
         return SourceRevision(row[0], revision_id, row[1], files)

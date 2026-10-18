@@ -220,23 +220,37 @@ class Database:
 
 @contextmanager
 def open_database(
-    root: Path, *, expected: DatabaseIdentity | None = None, read_only: bool = False
+    root: Path,
+    *,
+    expected: DatabaseIdentity | None = None,
+    read_only: bool = False,
+    sealed_archive: bool = False,
 ) -> Iterator[Database]:
     require_sqlite()
+    if sealed_archive and not read_only:
+        raise ValueError("Sealed archives can only be opened read-only")
     root = root.resolve()
     path = database_path(root)
     if path.is_symlink() or path.parent.is_symlink() or not path.is_file():
         raise StorageFormatError("No supported v2 storage; creation is explicit")
+    wal = Path(str(path) + "-wal")
+    if sealed_archive and wal.exists() and wal.stat().st_size:
+        raise StorageFormatError("An active WAL database cannot be opened as a sealed archive")
+    readonly_options = "mode=ro&immutable=1" if sealed_archive else "mode=ro"
     # Validation is read-only and precedes any writer PRAGMA or schema changes.
     try:
-        probe = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True, isolation_level=None)
+        probe = sqlite3.connect(
+            f"{path.as_uri()}?{readonly_options}", uri=True, isolation_level=None
+        )
         try:
             identity = _validate(probe, expected)
+            if not sealed_archive and probe.execute("PRAGMA journal_mode").fetchone()[0] != "wal":
+                raise StorageFormatError("Active storage requires WAL; explicit recovery is needed")
         finally:
             probe.close()
-        mode = "ro" if read_only else "rw"
+        mode = readonly_options if read_only else "mode=rw"
         connection = sqlite3.connect(
-            f"{path.as_uri()}?mode={mode}",
+            f"{path.as_uri()}?{mode}",
             uri=True,
             isolation_level=None,
             timeout=BUSY_TIMEOUT_MS / 1000,
