@@ -3,6 +3,7 @@
 import hashlib
 from dataclasses import dataclass
 from pathlib import Path
+from typing import BinaryIO
 
 from ultrakb.locks import PrivateMaterialization, _fsync_directory, atomic_write_bytes
 from ultrakb.storage.coordination import require_stage
@@ -83,6 +84,28 @@ def read_bytes(db: Database, digest: str, *, registered: bool = True) -> bytes:
     if hashlib.sha256(payload).hexdigest() != digest or row and len(payload) != row[0]:
         raise ValueError("CAS content failed integrity validation")
     return payload
+
+
+def copy_blob(db: Database, digest: str, output: BinaryIO) -> None:
+    """Stream one accepted original under its caller's read/reclaim stage."""
+    require_stage(db)
+    if db.connection.in_transaction:
+        raise RuntimeError("Blob export must run outside SQL transactions")
+    row = db.connection.execute(
+        "SELECT byte_count, state FROM ukb_blobs WHERE digest = ?", (digest,)
+    ).fetchone()
+    if row is None or row[1] != "live":
+        raise ValueError("Blob is missing or unavailable")
+    path, hasher, size = blob_path(db.root, digest), hashlib.sha256(), 0
+    with path.open("rb") as reader:
+        while chunk := reader.read(1024 * 1024):
+            size += len(chunk)
+            if size > row[0]:
+                raise ValueError("Blob failed integrity validation")
+            hasher.update(chunk)
+            output.write(chunk)
+    if size != row[0] or hasher.hexdigest() != digest:
+        raise ValueError("Blob failed integrity validation")
 
 
 def retain_blob(connection, owner_kind: str, owner_id: str, slot: str, blob: Blob) -> None:

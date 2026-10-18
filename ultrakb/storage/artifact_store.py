@@ -20,7 +20,7 @@ from ultrakb.source_records import RecordId
 from .blobs import put_blob, read_bytes, retain_blob
 from .coordination import storage_stage
 from .execution_store import now, require_active_execution
-from .wiki_paths import wiki_path
+from .wiki_paths import page_after, wiki_path
 
 
 def artifact_path(value):
@@ -67,6 +67,21 @@ class ArtifactProjection:
     error_code: str | None = None
 
 
+@dataclass(frozen=True)
+class ArtifactEntry:
+    path: str
+    revision_id: str
+    digest: str
+    byte_count: int
+
+
+@dataclass(frozen=True)
+class ArtifactFiles:
+    files: tuple[ArtifactEntry, ...]
+    next_after: str | None
+    epoch: int
+
+
 class ArtifactStore:
     def __init__(self, root, identity):
         self.root, self.identity = root.resolve(), identity
@@ -84,6 +99,25 @@ class ArtifactStore:
             raise RecoveryRequired("Artifact state is unavailable")
         return row[0]
 
+    @staticmethod
+    def _path_available(db, path):
+        # The ingest lease excludes other head writers. These indexed reads run
+        # before BEGIN, without scanning unrelated names or holding a SQL writer.
+        parent = path.rpartition("/")[0]
+        while parent:
+            if db.connection.execute(
+                "SELECT 1 FROM ukb_artifact_heads WHERE path = ?", (parent,)
+            ).fetchone():
+                return False
+            parent = parent.rpartition("/")[0]
+        return (
+            db.connection.execute(
+                "SELECT 1 FROM ukb_artifact_heads WHERE path >= ? AND path < ? LIMIT 1",
+                (path + "/", path + "0"),
+            ).fetchone()
+            is None
+        )
+
     def read(self, path, *, epoch=None, revision_id=None):
         artifact_path(path)
         if epoch is not None and revision_id is not None:
@@ -93,25 +127,69 @@ class ArtifactStore:
         if epoch is not None:
             _epoch(epoch)
         with storage_stage(self.root, self.identity, read_only=True) as db:
-            if revision_id is not None:
-                row = db.connection.execute(
-                    "SELECT digest FROM ukb_artifact_revisions WHERE revision_id = ? AND path = ?",
-                    (revision_id, path),
-                ).fetchone()
-                if row is None:
-                    raise FileNotFoundError(path)
-                return read_bytes(db, row[0])
+            selected = self._entry(db, path, epoch=epoch, revision_id=revision_id)
+            return read_bytes(db, selected.digest)
+
+    def entry(self, path, *, epoch=None):
+        artifact_path(path)
+        if epoch is not None:
+            _epoch(epoch)
+        with storage_stage(self.root, self.identity, read_only=True) as db:
+            return self._entry(db, path, epoch=epoch)
+
+    def _entry(self, db, path, *, epoch, revision_id=None):
+        if revision_id is not None:
+            row = db.connection.execute(
+                "SELECT path, revision_id, digest, byte_count FROM ukb_artifact_revisions "
+                "WHERE revision_id = ? AND path = ?",
+                (revision_id, path),
+            ).fetchone()
+        else:
             current = self._current(db)
             if epoch is not None and epoch > current:
                 raise ValueError("Artifact epoch has not been accepted")
             row = db.connection.execute(
-                "SELECT digest FROM ukb_artifact_revisions WHERE path = ? "
-                "AND state = 'accepted' AND epoch <= ? ORDER BY epoch DESC LIMIT 1",
+                "SELECT path, revision_id, digest, byte_count FROM ukb_artifact_revisions "
+                "WHERE path = ? AND state = 'accepted' AND epoch <= ? "
+                "ORDER BY epoch DESC LIMIT 1",
                 (path, current if epoch is None else epoch),
             ).fetchone()
-            if row is None:
-                raise FileNotFoundError(path)
-            return read_bytes(db, row[0])
+        if row is None:
+            raise FileNotFoundError(path)
+        return ArtifactEntry(*row)
+
+    def files(self, *, prefix="output/", epoch=None, after=None, limit=63):
+        if prefix != "output/":
+            if not prefix.endswith("/"):
+                raise ValueError("Select an artifact directory prefix")
+            artifact_path(prefix[:-1])
+        if type(limit) is not int or not 1 <= limit <= 128:
+            raise ValueError("Artifact page size must be between 1 and 128")
+        lower, exclusive = page_after(prefix, after)
+        if epoch is not None:
+            _epoch(epoch)
+        with storage_stage(self.root, self.identity, read_only=True) as db:
+            current = self._current(db)
+            selected = current if epoch is None else epoch
+            if selected > current:
+                raise ValueError("Artifact epoch has not been accepted")
+            # Limit candidate names first. Newly accepted names may have no
+            # version in this snapshot; they still advance the bounded cursor.
+            rows = db.connection.execute(
+                "SELECT h.path, r.revision_id, r.digest, r.byte_count "
+                "FROM ukb_artifact_heads h LEFT JOIN ukb_artifact_revisions r "
+                "ON r.revision_id = (SELECT revision_id FROM ukb_artifact_revisions v "
+                "WHERE v.path = h.path AND v.state = 'accepted' AND v.epoch <= ? "
+                "ORDER BY v.epoch DESC LIMIT 1) "
+                "WHERE h.path >= ? AND h.path < ? AND h.path > ? "
+                "ORDER BY h.path LIMIT ?",
+                (selected, lower, prefix[:-1] + "0", exclusive, limit + 1),
+            ).fetchall()
+            return ArtifactFiles(
+                tuple(ArtifactEntry(*row) for row in rows[:limit] if row[1] is not None),
+                rows[limit - 1][0] if len(rows) > limit else None,
+                selected,
+            )
 
     @staticmethod
     def _committed(db, revision_id, fingerprint):
@@ -162,47 +240,68 @@ class ArtifactStore:
                 return committed
             require_active_execution(db.connection, self.identity, execution_id)
             content = put_blob(db, payload)
-            with (
-                file_write_lock(self.root / ".ultrakb/ingest.lock", cancelled=cancelled),
-                db.transaction() as connection,
-            ):
-                committed = self._committed(db, revision_id, fingerprint)
-                if committed is not None:
-                    return committed
-                require_active_execution(connection, self.identity, execution_id)
-                check_cancelled()
-                current = self._current(db)
-                accepted = current == expected_epoch
-                epoch = current + 1 if accepted else None
-                connection.execute(
-                    "INSERT INTO ukb_artifact_revisions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (
+            with file_write_lock(self.root / ".ultrakb/ingest.lock", cancelled=cancelled):
+                available = self._path_available(db, path)
+                with db.transaction() as connection:
+                    return self._accept(
+                        db,
+                        connection,
                         revision_id,
-                        path,
-                        content.digest,
-                        content.byte_count,
-                        execution_id,
-                        evidence_publication_id,
-                        expected_epoch,
-                        "accepted" if accepted else "conflict",
-                        epoch,
+                        fingerprint,
+                        content,
                         timestamp,
-                    ),
-                )
-                retain_blob(connection, "artifact-revision", revision_id, "content", content)
-                if accepted:
-                    connection.execute(
-                        "UPDATE ukb_artifact_state SET epoch = ? WHERE slot = 1", (epoch,)
+                        available=available,
+                        check_cancelled=check_cancelled,
                     )
-                    connection.execute(
-                        "INSERT INTO ukb_artifact_heads(path, revision_id, applied_digest) "
-                        "VALUES (?, ?, NULL) ON CONFLICT(path) "
-                        "DO UPDATE SET revision_id = excluded.revision_id",
-                        (path, revision_id),
-                    )
-            return ArtifactRevision(
-                "saved" if accepted else "conflict", revision_id, path, content.digest, epoch
+
+    def _accept(
+        self,
+        db,
+        connection,
+        revision_id,
+        fingerprint,
+        content,
+        timestamp,
+        *,
+        available,
+        check_cancelled,
+    ):
+        path, _, expected_epoch, execution_id, evidence_publication_id = fingerprint
+        committed = self._committed(db, revision_id, fingerprint)
+        if committed is not None:
+            return committed
+        require_active_execution(connection, self.identity, execution_id)
+        check_cancelled()
+        current = self._current(db)
+        accepted = current == expected_epoch and available
+        epoch = current + 1 if accepted else None
+        connection.execute(
+            "INSERT INTO ukb_artifact_revisions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                revision_id,
+                path,
+                content.digest,
+                content.byte_count,
+                execution_id,
+                evidence_publication_id,
+                expected_epoch,
+                "accepted" if accepted else "conflict",
+                epoch,
+                timestamp,
+            ),
+        )
+        retain_blob(connection, "artifact-revision", revision_id, "content", content)
+        if accepted:
+            connection.execute("UPDATE ukb_artifact_state SET epoch = ? WHERE slot = 1", (epoch,))
+            connection.execute(
+                "INSERT INTO ukb_artifact_heads(path, revision_id, applied_digest) "
+                "VALUES (?, ?, NULL) ON CONFLICT(path) "
+                "DO UPDATE SET revision_id = excluded.revision_id",
+                (path, revision_id),
             )
+        return ArtifactRevision(
+            "saved" if accepted else "conflict", revision_id, path, content.digest, epoch
+        )
 
     def sync(self, path, *, revision_id=None, check_cancelled=lambda: None):
         artifact_path(path)

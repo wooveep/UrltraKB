@@ -140,6 +140,37 @@ class BoundKnowledge:
                 ).fetchall()
             )
 
+    def file_page(self, *, prefix, after=None, limit=63):
+        """Read bounded manifest names, without opening the manifest or file bodies."""
+        if not isinstance(prefix, str) or not prefix.endswith("/"):
+            raise ValueError("Select a logical knowledge directory")
+        _path(prefix[:-1])
+        if type(limit) is not int or not 1 <= limit <= 128:
+            raise ValueError("Knowledge page size must be between 1 and 128")
+        from .wiki_paths import page_after
+
+        lower, exclusive = page_after(prefix, after)
+        with storage_stage(self.root, self.identity, read_only=True) as db:
+            self._require_publication(db)
+            rows = db.connection.execute(
+                "SELECT path FROM ukb_revision_files WHERE revision_id = ? "
+                "AND path >= ? AND path < ? AND path > ? ORDER BY path LIMIT ?",
+                (self.publication.revision_id, lower, prefix[:-1] + "0", exclusive, limit),
+            ).fetchall()
+            return tuple(row[0] for row in rows)
+
+    def file_digest(self, path):
+        _path(path)
+        with storage_stage(self.root, self.identity, read_only=True) as db:
+            self._require_publication(db)
+            row = db.connection.execute(
+                "SELECT digest FROM ukb_revision_files WHERE revision_id = ? AND path = ?",
+                (self.publication.revision_id, path),
+            ).fetchone()
+            if row is None:
+                raise FileNotFoundError(path)
+            return row[0]
+
     def index_revisions(self) -> tuple[str, ...]:
         with storage_stage(self.root, self.identity, read_only=True) as db:
             rows = db.connection.execute(

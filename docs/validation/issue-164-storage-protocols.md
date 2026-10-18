@@ -752,3 +752,39 @@ storage, application, conversation, citation, legacy tool, mutation and size
 regressions pass 267 tests (33 live tests deselected), including six native Qt
 cases. Full mypy (493 modules), ruff, format and diff checks pass. No live model
 service was called.
+
+### Fixed artifact catalog selections and complete exports
+
+The development artifact catalog now reads bounded master metadata instead of
+walking editable output directories. Each page exposes its output epoch and
+knowledge publication, carries an advancing cursor even across hidden or newer
+names, and keeps Skill/deck packages grouped. Directory cursors skip their
+descendants by an indexed range; a hidden final file uses an exact file cursor
+so similarly named visible siblings remain reachable. File/directory name
+collisions retain a conflict candidate instead of accepting an impossible
+working-copy tree.
+
+Shared artifact reads, selected file enumeration, archives and collision-free
+exports accept the selected epoch explicitly. Default exports capture a fresh
+epoch once. Output bytes come from that accepted history; reports and exploration
+notes come from the exact selected knowledge publication. Working-copy edits,
+missing copies, unknown files and filesystem symlinks cannot alter the selected
+contents. Export targets reject other main stores even before those stores have
+configuration or a materialized wiki.
+
+Explicit complete archives page their selected names and hold the shared reclaim
+lease throughout actual reading, with no ingest lease or SQL transaction across
+ZIP I/O. Verified CAS copying uses one-MiB chunks, checking length and SHA before
+reporting success; failed file exports remove their partial target. This allows
+complete binary attachments without a whole-body export allocation. A 70-file
+archive witness updates a later selected file and adds another while copying:
+the archive retains exactly the original version and GC reports busy until the
+actual read finishes.
+
+Ten new local storage cases cover these boundaries. Both review axes verified
+the fixes. Related regressions pass 277 tests (33 live tests deselected),
+including six native Qt cases; mypy (494 modules), ruff, format and diff checks
+pass. No live model service was called. The public factory and adapters remain
+on the prior format until joint integration and P6-P8 acceptance are complete.
+Full generator writers, compiler integration and maintained output retirement
+remain outstanding; this batch does not close issue #164.

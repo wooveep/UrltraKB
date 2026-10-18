@@ -24,3 +24,14 @@ def validate_file_tree(paths) -> None:
         wiki_path(path)
         if any(parent.as_posix() in files for parent in PurePosixPath(path).parents):
             raise ValueError("A Wiki path cannot be both a file and a directory")
+
+
+def page_after(prefix: str, after: str | None) -> tuple[str, str]:
+    """Inclusive directory bound and exclusive file cursor for indexed pages."""
+    if after is None:
+        return prefix, prefix
+    directory = after.endswith("/")
+    wiki_path(after[:-1] if directory else after)
+    if not after.startswith(prefix):
+        raise ValueError("File cursor belongs to another directory")
+    return (after[:-1] + "0", prefix) if directory else (prefix, after)
