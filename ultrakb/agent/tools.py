@@ -246,6 +246,10 @@ def write_kb_file(
         return "Access denied: path must be a file under wiki/explorations/ or output/."
     root = Path(kb_root).resolve()
     scope = resolve_scope(root, scope)
+    if scope.knowledge is not None:
+        from ultrakb.application.storage_model_outputs import write_storage_model_output
+
+        return write_storage_model_output(scope, path, content)
     if (root / path).is_symlink():
         return "Access denied: output target is a symbolic link."
     full_path = (root / path).resolve()

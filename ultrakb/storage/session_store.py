@@ -8,12 +8,11 @@ from pathlib import Path
 
 from ctree.state import prefix_digest, validate_turns
 
-from ultrakb.locks import LockCancelled
 from ultrakb.mutation import RecoveryRequired
 from ultrakb.storage.blobs import put_blob, read_bytes, retain_blob
 from ultrakb.storage.coordination import storage_stage
 from ultrakb.storage.database import DatabaseIdentity
-from ultrakb.storage.execution_store import now
+from ultrakb.storage.execution_store import execution_state, now, require_active_execution
 from ultrakb.storage.session_codec import encode_checkpoint, restore_checkpoint
 from ultrakb.storage.tree_store import TreeStore, retain_tree
 
@@ -128,19 +127,16 @@ class SessionStore:
         return row[0]
 
     def _execution_state(self, connection, execution_id):
-        execution = connection.execute(
-            "SELECT generation, state FROM ukb_executions WHERE execution_id = ?", (execution_id,)
-        ).fetchone()
-        if execution is None or execution[0] != self.identity.generation:
-            raise SessionConflict("The conversation execution belongs to another generation")
-        return execution[1]
+        try:
+            return execution_state(connection, self.identity, execution_id)
+        except ValueError as error:
+            raise SessionConflict(str(error)) from error
 
     def _require_active_execution(self, connection, execution_id):
-        state = self._execution_state(connection, execution_id)
-        if state in {"stopping", "cancelled"}:
-            raise LockCancelled("The conversation execution was stopped")
-        if state != "started":
-            raise SessionConflict("A terminated execution cannot accept a late answer")
+        try:
+            require_active_execution(connection, self.identity, execution_id)
+        except ValueError as error:
+            raise SessionConflict(str(error)) from error
 
     def start_submission(
         self, session_id, submission_id, message, *, execution_id, publication_id, order=None

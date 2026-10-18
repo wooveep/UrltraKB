@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
+from ultrakb.locks import LockCancelled
+
 from .coordination import storage_stage
 from .database import DatabaseIdentity
 
@@ -23,6 +25,23 @@ def _clock_id():
 
 def now():
     return datetime.now(timezone.utc).isoformat()
+
+
+def execution_state(connection, identity, execution_id):
+    row = connection.execute(
+        "SELECT generation, state FROM ukb_executions WHERE execution_id = ?", (execution_id,)
+    ).fetchone()
+    if row is None or row[0] != identity.generation:
+        raise ValueError("The execution belongs to another generation")
+    return row[1]
+
+
+def require_active_execution(connection, identity, execution_id):
+    state = execution_state(connection, identity, execution_id)
+    if state in {"stopping", "cancelled"}:
+        raise LockCancelled("The execution was stopped")
+    if state != "started":
+        raise ValueError("A terminated execution cannot accept late results")
 
 
 def _label(value, *, limit=256):

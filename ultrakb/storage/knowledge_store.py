@@ -19,6 +19,7 @@ from ultrakb.source_records import RecordId
 from ultrakb.storage.blobs import Blob, put_blob, read_bytes, retain_blob
 from ultrakb.storage.coordination import storage_stage
 from ultrakb.storage.database import DatabaseIdentity
+from ultrakb.storage.execution_store import require_active_execution
 from ultrakb.storage.knowledge_inputs import (
     navigation_inputs,
     prepare_page_inputs,
@@ -537,6 +538,7 @@ class KnowledgeStore:
         *,
         edit_id: str | None = None,
         check_cancelled: Callable[[], None] = lambda: None,
+        execution_id: str | None = None,
     ) -> Publication:
         def cancelled():
             check_cancelled()
@@ -591,6 +593,8 @@ class KnowledgeStore:
             require_import_claim(
                 connection, self.identity, prepared.revision_id, prepared.import_attempt_id
             )
+            if execution_id is not None:
+                require_active_execution(connection, self.identity, execution_id)
             # The callback only checks an in-memory stop/deadline signal. Do not
             # accept late preparation after cancellation, or run I/O in this commit.
             check_cancelled()
@@ -631,6 +635,36 @@ class KnowledgeStore:
                     connection, prepared.view_id, edit_id, prepared.publication_id, "accepted"
                 )
         return Publication(prepared.publication_id, prepared.revision_id, prepared.view_id)
+
+    def committed_publication(self, prepared: PreparedRevision) -> Publication | None:
+        """Confirm an exact durable result after an acknowledgement was lost."""
+        with storage_stage(self.root, self.identity, read_only=True) as db:
+            row = db.connection.execute(
+                "SELECT p.publication_id, p.revision_id, p.view_id FROM ukb_publications p "
+                "JOIN ukb_knowledge_revisions r ON r.revision_id = p.revision_id "
+                "AND r.publication_id = p.publication_id AND r.view_id = p.view_id "
+                "JOIN ukb_publication_receipts c ON c.publication_id = p.publication_id "
+                "AND c.revision_id = p.revision_id AND c.generation = p.generation "
+                "JOIN ukb_revision_sync s ON s.revision_id = r.revision_id "
+                "WHERE r.revision_id = ? AND r.publication_id = ? AND r.view_id = ? "
+                "AND r.expected_publication IS ? AND r.manifest_digest = ? "
+                "AND r.navigation_fingerprint = ? AND r.state = 'published' "
+                "AND s.plan_id = ? AND c.attempt_id IS ?",
+                (
+                    prepared.revision_id,
+                    prepared.publication_id,
+                    prepared.view_id,
+                    prepared.expected_publication,
+                    prepared.manifest_digest,
+                    prepared.navigation_fingerprint,
+                    prepared.sync_plan_id,
+                    prepared.import_attempt_id,
+                ),
+            ).fetchone()
+            if row is None:
+                return None
+            require_navigation(db, prepared.revision_id)
+            return Publication(*row)
 
     def committed_import(self, work: PendingWork, *, view_id="legacy") -> PreparedRevision | None:
         """Recover the same committed outcome without preparing another candidate."""

@@ -2,7 +2,7 @@
 
 import asyncio
 import sqlite3
-from contextlib import aclosing
+from contextlib import AsyncExitStack, aclosing
 from dataclasses import asdict, replace
 from uuid import uuid4
 
@@ -124,6 +124,11 @@ async def _continue(
     executor = context.executor
     config = context.snapshot.values()["effective"]
     parts, count, diagnostics, trace = [], 0, None, []
+    from ultrakb.model_outputs import ModelOutputs
+
+    from .storage_model_outputs import storage_model_output_scope
+
+    outputs, writes = ModelOutputs(), None
     registered = False
     stage = "prepare context"
 
@@ -216,7 +221,16 @@ async def _continue(
                 selection=selection,
                 readers_bound=True,
             )
-            async with aclosing(stream):
+            async with AsyncExitStack() as stack:
+                writes = stack.enter_context(
+                    storage_model_output_scope(
+                        scope,
+                        outputs,
+                        check_cancelled=context.check_stop,
+                        execution_id=execution_id,
+                    )
+                )
+                await stack.enter_async_context(aclosing(stream))
                 async for event in stream:
                     if event["event"] == "final":
                         final = event["data"]
@@ -224,18 +238,21 @@ async def _continue(
                         from ultrakb.storage.session_result import reference_trace
 
                         complete_trace(trace, final["answer"])
+                        writes.settle()
                         completed = AnswerResult(
                             "completed",
                             final["answer"],
                             session_id=identity,
                             turn_count=count + 1,
-                            changes=(f"saved turn: {identity}",),
+                            resources=outputs.resources,
+                            changes=(*outputs.changes, f"saved turn: {identity}"),
                             context=diagnostics,
                             usage=final.get("usage"),
                             answer_outcome=final.get("answer_outcome"),
                             citations=final.get("citations"),
                             image_coverage=executor.image_deliveries.snapshot(),
                             unfinished=tuple(final.get("unfinished", ())),
+                            **writes.publication_fields(),
                         )
                         metadata = {
                             "schema": 1,
@@ -285,6 +302,12 @@ async def _continue(
         if completed is not None:
             return completed
         failed = _failed(error, "".join(parts), identity, count, stage, diagnostics)
+        failed = replace(
+            failed,
+            resources=outputs.resources,
+            changes=outputs.changes,
+            **(writes.publication_fields() if writes else {}),
+        )
         if not registered:
             return failed
         try:

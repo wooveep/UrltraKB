@@ -674,3 +674,35 @@ modules), ruff, format and diff checks pass.
 Session export, model write tools, the full compiler and writer integration and
 P6-P8 acceptance remain outstanding. This batch does not activate the new format
 by default or satisfy the overall issue closure gate.
+
+### Independent model note publications
+
+The explicit main-store continuation path now installs a revocable writer for
+the actual `write_file` tool's `wiki/explorations/` notes. Each note publishes
+independently through the same immutable revision and projection protocol. The
+writer advances its private expected publication after success while evidence
+readers retain the question's original publication. A concurrent publication
+keeps the candidate for review and latches the conflict, so the SDK cannot hide
+it behind later final text. Previously accepted resources and their exact last
+publication remain reported even if a later write conflicts or the turn fails.
+
+The final publication transaction and original-turn acceptance share execution
+generation/active-state validation. A durable stop therefore wins even before
+the in-memory stop signal changes. Actual writer settlement revokes copied tool
+contexts before accepting the final turn. No writer, ingest lock or reclaim
+lease spans the following model wait. A failed turn can adopt its independently
+accepted complete answer without sending again or repeating accepted notes.
+
+An exact committed-publication lookup resolves a lost acknowledgement using the
+original revision, manifest, navigation, projection plan and receipt identities.
+It neither reruns the model nor treats another publication as success. Storage
+confirmation failures latch recovery instead of permitting a false completed
+turn. Output-directory artifacts, full SDK/tool replay and the other writer
+integrations remain pending; these note capabilities still require an explicit
+development scope and do not complete issue #164.
+
+Nine new loopback/SQLite/CAS cases cover these boundaries. Both review axes
+verified the batch. Related storage, question/session, adapter, citation, legacy
+tool, mutation and module-size regressions pass 252 tests (33 live tests
+deselected), including six native Qt cases. Full mypy (491 modules), ruff,
+format and diff checks pass. No live model service was called.

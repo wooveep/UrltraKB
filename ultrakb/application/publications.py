@@ -77,12 +77,15 @@ def publish_knowledge_changes(
     *,
     page_inputs: dict[str, tuple[str, ...]] | None = None,
     check_cancelled: Callable[[], None] = lambda: None,
+    execution_id: str | None = None,
 ) -> PublicationOutcome:
     """Commit an explicitly based manual edit before attempting worktree I/O."""
     knowledge = KnowledgeStore(base.root, base.identity)
     prepared = knowledge.prepare_changes(base, changes, page_inputs=page_inputs)
     try:
-        publication = knowledge.publish(prepared, check_cancelled=check_cancelled)
+        publication = knowledge.publish(
+            prepared, check_cancelled=check_cancelled, execution_id=execution_id
+        )
     except (PublicationConflict, ProjectionConflict) as error:
         return PublicationOutcome(
             "needs_review",
@@ -93,6 +96,11 @@ def publish_knowledge_changes(
             if isinstance(error, PublicationConflict)
             else "worktree_baseline_changed",
         )
+    except Exception:
+        committed = knowledge.committed_publication(prepared)
+        if committed is None:
+            raise
+        publication = committed
     projection = sync_publication(base.root, base.identity, prepared)
     return PublicationOutcome("published", publication, projection, prepared.revision_id)
 
