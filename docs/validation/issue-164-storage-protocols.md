@@ -46,8 +46,9 @@ the exact sealed object ready. `publish` checks the expected publication and
 atomically advances the public head. `bind` returns immutable publication reads;
 later publications do not change their content or images. Published history is
 retained. Every candidate prebuilds and retains ready deterministic navigation,
-including an explicit empty tree. Source-target, import-attempt and projection-plan
-bindings required for production publication remain outstanding.
+including an explicit empty tree. The exact sealed Wiki synchronization plan
+activates in the same short publication transaction. Source-target and
+import-attempt bindings required for production publication remain outstanding.
 
 `SessionStore` retains complete immutable exchanges. Each accepted CTree
 checkpoint is independently committed. `session_codec` saves every SDK snapshot
@@ -65,7 +66,7 @@ the six recent turns before indexing. An unchanged complete prefix performs no
 encoding or tree write. Model waits hold the session/lifecycle lease without a
 storage stage; cancellation is checked while waiting for the session lock and
 after checkpoint Blob synchronization. All original roles remain restorable;
-automatic analysis/export uses only users. The 16 focused SDK/session tests
+automatic analysis/export uses only users. The 17 focused SDK/session tests
 include SQL trigger failures, stage-budget continuation and cancellation races.
 Production question/session adapters still need joint integration. Intermediate
 checkpoint retirement and full long-session cost measurements remain outstanding.
@@ -237,8 +238,8 @@ issue, in particular:
   incremental usage audit, stages, tasks and paginated task details.
 - Joint writer/reader/session/configuration integration through shared
   application use cases; fixed source/image resolvers and generation checks.
-- Persistent Wiki projection plans, application edit preconditions and external
-  editing pause/accept/discard; full Markdown/necessary-attachment preparation.
+- Joint application writer/reader adoption of persistent Wiki projection and
+  external editing protocols; full Markdown/necessary-attachment preparation.
 - Demand-driven ChatIndex catch-up with one final projection, distinct computed
   and searchable prefixes, and both roots protected by maintenance.
 - Full recovery/retention/backup coverage and the issue's fault/performance
@@ -297,3 +298,49 @@ p95/maximum 4.957/9.789 ms. No timeout, failure or remaining orphan tree occurre
 This calibrates protocol bounds on synthetic local data; representative
 1k/5k/20k ledgers, ranking latency, end-to-end overhead and the other issue
 performance gates still require validation.
+
+### Recoverable Wiki projections and controlled external editing
+
+Development schema 6 seals complete per-file synchronization plans before
+publication. Final activation checks the captured projection generation and last
+applied epoch under projection and KB coordination, then commits with the public
+head. File replacement and its receipt are separate: an I/O failure leaves the
+complete new publication readable and the worktree pending. Retries restore file
+and directory durability before confirming a replacement or deletion; matching
+bytes alone cannot establish that an interrupted directory sync succeeded.
+
+The schema owns sync-plan headers, immutable items, the revision-to-plan binding,
+the active projection pointer and last-applied file receipts. Each plan batch
+has at most 42 items / 126 insert-reference rows and 256 KiB encoded metadata,
+with a 64 KiB item limit. Activation is constant row work. Sync bounds each call
+by item count and observed-file plus target I/O bytes. Old plans cannot roll back
+the active target. Pending former active targets, unconfirmed new paths and
+explicit discard baselines remain referenced across subsequent publications.
+Recovery verifies the path, view, digest and generation before recognizing these
+known intermediate states; arbitrary differences remain conflicts. Sealed items
+cannot be updated or removed outside retirement. Managed deletions run before
+new files, pruning only empty directories; skipped intermediate file/directory
+changes also preserve the latest projection and unknown contents.
+
+`application.wiki_worktree` provides the joint-development begin/accept/discard
+use cases. Beginning an external edit durably pauses the entire projection and
+retains its last confirmed per-file baseline, which can trail the master head.
+Restart resumes the same pause. Master publication may continue while paused.
+Accept uses a three-way comparison with that baseline and current master:
+disjoint changes merge, competing changes keep the draft paused. Discard needs
+explicit confirmation that external writes stopped, and unknown files remain
+until individually selected. A sealed resumption plan activates atomically with
+ending the pause. Its unfinished authorization survives newer publications.
+No PID, editor exit or timeout silently resumes writes. Direct writes outside
+this protocol still have a hash-to-replace race; the interface does not promise
+atomic coordination with arbitrary external programs.
+
+The 18 projection/edit tests and 107 related storage, lock, module-size and
+application-boundary regressions pass. Full ruff and focused mypy pass. Standards
+and Spec reviews exercised interrupted directory sync, SQL confirmation failure,
+superseded targets, unconfirmed creation/deletion, discard continuation and
+multi-generation file/directory changes; their verified findings were fixed.
+These are development protocols, not full P4/P5 or issue acceptance: production
+page writers, public resolvers, compiler, configuration and question adapters
+still require joint integration, and P7 must retire unused plans and intermediate
+roots while retaining all unfinished recovery chains.

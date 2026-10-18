@@ -1,7 +1,7 @@
 """Immutable revision manifests and short, version-checked publication commits.
 
-This is a development storage boundary. The application adapter integration
-additionally needs its ready navigation, import-attempt and Wiki sync bindings.
+This is a development storage boundary. Ready navigation and synchronization
+plans bind atomically; complete source/attempt guards still need integration.
 """
 
 import hashlib
@@ -9,10 +9,11 @@ import json
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 from pydantic import TypeAdapter
 
+from ultrakb.locks import file_write_lock
 from ultrakb.source_records import RecordId
 from ultrakb.storage.blobs import Blob, put_blob, read_bytes, retain_blob
 from ultrakb.storage.coordination import storage_stage
@@ -25,6 +26,14 @@ from ultrakb.storage.navigation_store import (
     resolve_inputs,
 )
 from ultrakb.storage.tree_store import TreeStore
+from ultrakb.storage.wiki_paths import validate_file_tree
+from ultrakb.storage.wiki_paths import wiki_path as _path
+from ultrakb.storage.wiki_projection import (
+    activate_sync_plan,
+    prepare_sync_plan,
+    projection_lock,
+    require_sync_plan,
+)
 
 MAX_BATCH_ROWS = 128
 MAX_BATCH_BYTES = 256 * 1024
@@ -43,6 +52,7 @@ class PreparedRevision:
     expected_publication: str | None
     manifest_digest: str
     navigation_fingerprint: str
+    sync_plan_id: str
 
 
 @dataclass(frozen=True)
@@ -52,20 +62,6 @@ class Publication:
     view_id: str
 
 
-def _path(value):
-    if (
-        not isinstance(value, str)
-        or not value
-        or "\\" in value
-        or ":" in value
-        or PurePosixPath(value).is_absolute()
-        or any(part in {"", ".", ".."} for part in value.split("/"))
-        or value.split("/", 1)[0] == ".ultrakb"
-    ):
-        raise ValueError("Wiki paths must be logical relative paths")
-    return value
-
-
 def _manifest(entries):
     return json.dumps(entries, ensure_ascii=False, separators=(",", ":")).encode()
 
@@ -73,15 +69,16 @@ def _manifest(entries):
 def _batches(entries):
     batch, byte_count = [], 0
     for entry in entries:
-        size = len(_manifest(entry))
+        size = len(_manifest(entry)) + 512
         if size > MAX_ITEM_BYTES:
             raise ValueError("Revision entry exceeds the item limit")
         # Every file inserts one manifest row and one reference row.
-        if batch and (2 * len(batch) >= MAX_BATCH_ROWS or byte_count + size > MAX_BATCH_BYTES):
+        cost = 2 * size
+        if batch and (2 * len(batch) >= MAX_BATCH_ROWS or byte_count + cost > MAX_BATCH_BYTES):
             yield batch
             batch, byte_count = [], 0
         batch.append(entry)
-        byte_count += size
+        byte_count += cost
     if batch:
         yield batch
 
@@ -129,6 +126,17 @@ class BoundKnowledge:
             ).fetchall()
             return tuple(row[0] for row in rows)
 
+    def unit_revisions(self) -> tuple[str, ...]:
+        with storage_stage(self.root, self.identity, read_only=True) as db:
+            return tuple(
+                row[0]
+                for row in db.connection.execute(
+                    "SELECT unit_revision_id FROM ukb_revision_inputs "
+                    "WHERE revision_id = ? ORDER BY unit_revision_id",
+                    (self.publication.revision_id,),
+                ).fetchall()
+            )
+
     @contextmanager
     def navigation(self):
         with storage_stage(self.root, self.identity, read_only=True) as db:
@@ -163,17 +171,20 @@ class KnowledgeStore:
             and (not isinstance(expected, str) or not expected)
         ):
             raise ValueError("A revision requires a view and complete file manifest")
+        if len(view_id.encode()) + len((expected or "").encode()) > 63 * 1024:
+            raise ValueError("Revision metadata exceeds the encoded storage item limit")
         for path, payload in files.items():
             _path(path)
             if not isinstance(payload, bytes):
                 raise ValueError("Revision content must be immutable bytes")
+        validate_file_tree(files)
         if not isinstance(index_revisions, tuple) or len(set(index_revisions)) != len(
             index_revisions
         ):
             raise ValueError("A revision requires distinct immutable index identities")
         for index_id in index_revisions:
             TypeAdapter(RecordId).validate_python(index_id)
-        revision_id, publication_id = uuid.uuid4().hex, uuid.uuid4().hex
+        revision_id, publication_id, plan_id = (uuid.uuid4().hex for _ in range(3))
         with storage_stage(self.root, self.identity) as db:
             inputs = resolve_inputs(db, unit_revisions, index_revisions)
             entries = []
@@ -190,6 +201,7 @@ class KnowledgeStore:
                         "files": entries,
                         "inputs": inputs,
                         "navigation": navigation.input_fingerprint,
+                        "sync_plan": plan_id,
                     }
                 ),
             )
@@ -200,6 +212,7 @@ class KnowledgeStore:
                 expected,
                 manifest.digest,
                 navigation.input_fingerprint,
+                plan_id,
             )
             with db.transaction() as connection:
                 connection.execute(
@@ -215,6 +228,7 @@ class KnowledgeStore:
                 )
                 retain_blob(connection, "knowledge-revision", revision_id, "manifest", manifest)
                 bind_navigation(connection, revision_id, navigation)
+            prepare_sync_plan(db, plan_id, revision_id, view_id, entries)
             for start in range(0, len(inputs), 63):
                 input_batch = inputs[start : start + 63]
                 with db.transaction() as connection:
@@ -265,11 +279,13 @@ class KnowledgeStore:
                 (revision_id,),
             ).fetchall()
             ready_navigation = require_navigation(db, revision_id)
+            require_sync_plan(db, revision_id, plan_id)
             sealed_manifest = _manifest(
                 {
                     "files": persisted,
                     "inputs": retained_inputs,
                     "navigation": ready_navigation.input_fingerprint,
+                    "sync_plan": plan_id,
                 }
             )
             if hashlib.sha256(sealed_manifest).hexdigest() != prepared.manifest_digest:
@@ -287,29 +303,47 @@ class KnowledgeStore:
                     raise ValueError("Revision changed during sealed validation")
             return prepared
 
-    def publish(self, prepared: PreparedRevision) -> Publication:
-        with storage_stage(self.root, self.identity) as db, db.transaction() as connection:
+    def publish(self, prepared: PreparedRevision, *, edit_id: str | None = None) -> Publication:
+        with (
+            storage_stage(self.root, self.identity) as db,
+            projection_lock(self.root),
+            file_write_lock(self.root / ".ultrakb/ingest.lock"),
+            db.transaction() as connection,
+        ):
             record = connection.execute(
                 "SELECT publication_id, view_id, expected_publication, manifest_digest, "
                 "navigation_fingerprint, state "
                 "FROM ukb_knowledge_revisions WHERE revision_id = ?",
                 (prepared.revision_id,),
             ).fetchone()
-            if record != (
-                prepared.publication_id,
-                prepared.view_id,
-                prepared.expected_publication,
-                prepared.manifest_digest,
-                prepared.navigation_fingerprint,
-                "ready",
+            if (
+                record is None
+                or record[:-1]
+                != (
+                    prepared.publication_id,
+                    prepared.view_id,
+                    prepared.expected_publication,
+                    prepared.manifest_digest,
+                    prepared.navigation_fingerprint,
+                )
+                or record[-1] not in {"ready", "published"}
             ):
                 raise ValueError("Only the exact validated revision can be published")
+            plan = connection.execute(
+                "SELECT plan_id FROM ukb_revision_sync WHERE revision_id = ?",
+                (prepared.revision_id,),
+            ).fetchone()
+            if plan != (prepared.sync_plan_id,):
+                raise ValueError("Publication requires its exact synchronization plan")
             require_navigation(db, prepared.revision_id)
+            if record[-1] == "published":
+                return Publication(prepared.publication_id, prepared.revision_id, prepared.view_id)
             head = connection.execute(
                 "SELECT publication_id FROM ukb_heads WHERE view_id = ?", (prepared.view_id,)
             ).fetchone()
             if (head[0] if head else None) != prepared.expected_publication:
                 raise PublicationConflict("Knowledge changed; recompute or review the candidate")
+            activate_sync_plan(db, prepared.revision_id, prepared.sync_plan_id)
             connection.execute(
                 "INSERT INTO ukb_publications VALUES (?, ?, ?, ?)",
                 (
@@ -328,6 +362,12 @@ class KnowledgeStore:
                 "UPDATE ukb_knowledge_revisions SET state = 'published' WHERE revision_id = ?",
                 (prepared.revision_id,),
             )
+            if edit_id is not None:
+                from .wiki_edit_store import finish_edit
+
+                finish_edit(
+                    connection, prepared.view_id, edit_id, prepared.publication_id, "accepted"
+                )
         return Publication(prepared.publication_id, prepared.revision_id, prepared.view_id)
 
     def bind(self, publication_id: str | None = None, *, view_id: str = "legacy") -> BoundKnowledge:

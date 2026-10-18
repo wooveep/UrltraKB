@@ -574,6 +574,50 @@ def durable_unlink(path: Path, *, missing_ok: bool = False) -> None:
         _fsync_directory(path.parent)
 
 
+def sync_file_and_parents(path: Path, *, ancestor: Path) -> None:
+    """Confirm a possibly interrupted replace/unlink before its durable receipt.
+
+    Finding the desired bytes, or finding no file after deletion, does not prove
+    that a previous directory sync succeeded. Flush the current file when present
+    and all existing directories through the controlled ancestor on every retry.
+    """
+    relative = path.relative_to(ancestor)
+    if not relative.parts or ".." in relative.parts:
+        raise ValueError("Durability confirmation requires a strict contained path")
+    if path.exists():
+        if path.is_dir():
+            _fsync_directory(path)
+        else:
+            with path.open("rb") as reader:
+                os.fsync(reader.fileno())
+    for directory in path.parents:
+        if directory.is_dir():
+            _fsync_directory(directory)
+        if directory == ancestor:
+            break
+
+
+def prune_empty_parents(path: Path, *, stop: Path) -> None:
+    """Remove only empty parents of a managed deletion, retaining unknown files."""
+    import errno
+
+    relative = path.relative_to(stop)
+    if not relative.parts or ".." in relative.parts:
+        raise ValueError("Empty-directory pruning requires a strict contained path")
+    for directory in path.parents:
+        if directory == stop:
+            break
+        try:
+            directory.rmdir()
+        except FileNotFoundError:
+            continue
+        except OSError as error:
+            if error.errno in {errno.ENOTEMPTY, errno.EEXIST, errno.ENOTDIR}:
+                break
+            raise
+        _fsync_directory(directory.parent)
+
+
 def atomic_write_json(
     path: Path,
     data: object,
