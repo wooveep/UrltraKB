@@ -57,6 +57,7 @@ def _path(value):
         not isinstance(value, str)
         or not value
         or "\\" in value
+        or ":" in value
         or PurePosixPath(value).is_absolute()
         or any(part in {"", ".", ".."} for part in value.split("/"))
         or value.split("/", 1)[0] == ".ultrakb"
@@ -134,6 +135,11 @@ class BoundKnowledge:
             revision = require_navigation(db, self.publication.revision_id)
             with TreeStore(self.root, self.identity).open(revision.tree_id) as bound:
                 yield bound
+
+    def compile_workspace(self, *, required_attachments: tuple[str, ...] = ()):
+        from .compile_workspace import materialize_baseline
+
+        return materialize_baseline(self, required_attachments)
 
 
 class KnowledgeStore:

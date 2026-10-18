@@ -496,6 +496,68 @@ def atomic_write_bytes(path: Path, content: bytes) -> None:
         tmp_path.unlink(missing_ok=True)
 
 
+class PrivateMaterialization:
+    """Fresh disposable input only; durable files continue using atomic writes.
+
+    Targets are always inside a new TemporaryDirectory created here. A caller
+    cannot select an existing wiki or CAS directory or reuse a dirty baseline.
+    """
+
+    def __init__(self):
+        self._temporary = tempfile.TemporaryDirectory(prefix="ultrakb-compile-")
+        self._owner = _owner()
+        self._active = True
+        self.bytes_copied = 0
+
+    @property
+    def directory(self) -> Path:
+        return Path(self._temporary.name)
+
+    def copy(self, source: Path, relative: str, *, digest: str, byte_count: int) -> None:
+        if not self._active or self._owner != _owner():
+            raise RuntimeError("Private materialization is closed or owned by another execution")
+        if (
+            not isinstance(relative, str)
+            or not relative
+            or "\\" in relative
+            or ":" in relative
+            or relative.startswith("/")
+            or any(part in {"", ".", ".."} for part in relative.split("/"))
+        ):
+            raise ValueError("Private materialization requires a logical relative path")
+        target = self.directory.joinpath(*relative.split("/"))
+        for parent in (self.directory, *target.parents):
+            if parent == self.directory.parent:
+                break
+            if parent.is_symlink():
+                raise ValueError("Private materialization cannot follow target symlinks")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        hasher, size, created = hashlib.sha256(), 0, False
+        try:
+            with source.open("rb") as reader, target.open("xb") as writer:
+                created = True
+                while chunk := reader.read(1024 * 1024):
+                    writer.write(chunk)
+                    hasher.update(chunk)
+                    size += len(chunk)
+            if size != byte_count or hasher.hexdigest() != digest:
+                raise ValueError("Private materialization failed content integrity validation")
+        except BaseException:
+            if created:
+                target.unlink(missing_ok=True)
+            raise
+        self.bytes_copied += size
+
+    def __enter__(self):
+        if not self._active:
+            raise RuntimeError("Private materialization cannot be reused")
+        return self
+
+    def __exit__(self, *args):
+        self._active = False
+        self._temporary.cleanup()
+
+
 def atomic_write_text(path: Path, content: str, *, encoding: str = "utf-8") -> None:
     """Atomically replace *path* with text *content*."""
     atomic_write_bytes(path, content.encode(encoding))

@@ -4,7 +4,7 @@ import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
-from ultrakb.locks import _fsync_directory, atomic_write_bytes
+from ultrakb.locks import PrivateMaterialization, _fsync_directory, atomic_write_bytes
 from ultrakb.storage.coordination import require_stage
 from ultrakb.storage.database import Database
 
@@ -101,3 +101,19 @@ def retain_blob(connection, owner_kind: str, owner_id: str, slot: str, blob: Blo
         ).fetchone()
         if not existing or existing[0] != blob.digest:
             raise ValueError("A retained reference slot cannot change its accepted content")
+
+
+def materialize_private(db: Database, blob: Blob, workspace: PrivateMaterialization, path: str):
+    """Stream and validate once into a fresh private input, without durable copying."""
+    require_stage(db)
+    if db.connection.in_transaction:
+        raise RuntimeError("Private materialization must happen outside SQL transactions")
+    row = db.connection.execute(
+        "SELECT byte_count, state FROM ukb_blobs WHERE digest = ?",
+        (blob.digest,),
+    ).fetchone()
+    if row != (blob.byte_count, "live"):
+        raise ValueError("The exact retained Blob is unavailable for materialization")
+    workspace.copy(
+        blob_path(db.root, blob.digest), path, digest=blob.digest, byte_count=blob.byte_count
+    )

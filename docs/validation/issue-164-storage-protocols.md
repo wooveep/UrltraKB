@@ -117,8 +117,17 @@ current production model-wait optimization is claimed by these witnesses.
 CAS writes validate bytes, synchronize the payload, atomically rename it and
 synchronize its containing directories before committing references. Wiki and
 CAS files are never hard-linked. This work does not weaken existing atomic
-copy/write behavior. The private compile-materialization helper and its separate
-temporary durability rules are still outstanding.
+copy/write behavior. `BoundKnowledge.compile_workspace` materializes complete
+Markdown plus explicit required attachments through the controlled
+`locks.PrivateMaterialization` helper. Targets are fresh private temporary
+directories; streamed copies verify digest and byte count in one pass without
+fsync, index copies or whole-KB rollback snapshots. It releases the database
+connection and reclaim stage before yielding compiler input. Fixed publication
+roots retain the source Blobs. Tests verify selectors, exact old-version reads,
+independent writable files, GC during a model-wait equivalent, cleanup and a
+zero-fsync copy alongside continuing fsync for durable content. Publication
+paths reject nonportable colon names before accepting any content. Existing
+compiler/application callers still need to use this development entry point.
 An existing unregistered CAS pathname can represent an interrupted directory
 sync. Reuse durably rewrites it before registering metadata. Read-only stages
 reject content acceptance before any filesystem mutation.
