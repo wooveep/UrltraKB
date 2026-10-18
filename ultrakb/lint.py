@@ -185,6 +185,20 @@ def _extract_wikilinks(text: str) -> list[str]:
     return [link.split("|")[0].strip() for link in raw]
 
 
+def wiki_targets(paths) -> set[str]:
+    """The editable-page link whitelist, from a complete logical inventory."""
+    targets = set()
+    for path in paths:
+        parts = path.split("/")
+        if path == "index.md" or (
+            len(parts) == 2
+            and parts[0] in {"concepts", "summaries", "entities"}
+            and parts[1].endswith(".md")
+        ):
+            targets.add(path[:-3])
+    return targets
+
+
 def list_existing_wiki_targets(wiki_dir: Path) -> set[str]:
     """Return the set of currently-existing wikilink targets on disk.
 
@@ -194,19 +208,14 @@ def list_existing_wiki_targets(wiki_dir: Path) -> set[str]:
     both the compile pipeline and any other code path that writes
     LLM-generated content to the wiki (e.g. ``ultrakb query --save``).
     """
-    targets: set[str] = set()
-    concepts_dir = wiki_dir / "concepts"
-    summaries_dir = wiki_dir / "summaries"
-    if concepts_dir.is_dir():
-        targets.update(f"concepts/{p.stem}" for p in concepts_dir.glob("*.md"))
-    if summaries_dir.is_dir():
-        targets.update(f"summaries/{p.stem}" for p in summaries_dir.glob("*.md"))
-    entities_dir = wiki_dir / "entities"
-    if entities_dir.is_dir():
-        targets.update(f"entities/{p.stem}" for p in entities_dir.glob("*.md"))
+    paths = [
+        f"{section}/{path.name}"
+        for section in ("concepts", "summaries", "entities")
+        for path in (wiki_dir / section).glob("*.md")
+    ]
     if (wiki_dir / "index.md").exists():
-        targets.add("index")
-    return targets
+        paths.append("index.md")
+    return wiki_targets(paths)
 
 
 def fix_broken_links(

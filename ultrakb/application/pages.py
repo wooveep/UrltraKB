@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from ultrakb import frontmatter
 from ultrakb.knowledge_scope import KnowledgeScope, live_scope, reading_scope, resolve_scope
@@ -17,6 +17,9 @@ from ultrakb.page_ops import (
     page_link_context,
     validate_page_ref,
 )
+
+if TYPE_CHECKING:
+    from ultrakb.storage.wiki_projection import ProjectionResult
 
 
 @dataclass(frozen=True)
@@ -38,6 +41,9 @@ class PageSave:
     page: Page | None
     draft: str
     ghosts_stripped: tuple[str, ...] = ()
+    projection: ProjectionResult | None = None
+    candidate_revision_id: str | None = None
+    reason_code: str | None = None
 
 
 def read_page(kb_dir: Path, path: str, *, scope: KnowledgeScope | None = None) -> Page:
@@ -81,6 +87,14 @@ def save_page(
     section, stem = validate_page_ref(path)
     scope = resolve_scope(kb_dir, scope)
     publication_id = publication_id or scope.publication_id
+    if scope.knowledge is not None:
+        from .storage_pages import save_storage_page
+
+        assert publication_id is not None
+        with reading_scope(scope):
+            return save_storage_page(
+                scope, f"{section}/{stem}", body, version=version, publication_id=publication_id
+            )
     if scope.publication is not None:
         scope = live_scope(kb_dir, scope.view_id)
     path = f"{section}/{stem}"
@@ -133,6 +147,14 @@ def delete_page(
         raise FileNotFoundError(f"Knowledge base not found: {kb_dir}")
     scope = resolve_scope(kb_dir, scope)
     publication_id = publication_id or scope.publication_id
+    if scope.knowledge is not None:
+        from .storage_pages import delete_storage_page
+
+        assert publication_id is not None
+        with reading_scope(scope):
+            return delete_storage_page(
+                scope, path, dry_run=dry_run, version=version, publication_id=publication_id
+            )
     result = {"target": path, "backlinks": [], "publication_id": publication_id, "version": version}
 
     if dry_run:

@@ -457,3 +457,40 @@ reading, query, application-boundary and module-size regressions pass 183 tests
 pass. This is still joint-development integration: application writers, compiler,
 execution gateway, public ask/continue and the remaining P6-P8 gates are unfinished.
 Issue #164 remains open.
+
+### Application page saves and deletions
+
+An explicitly bound development `storage_scope` now routes the existing shared
+`save_page` and `delete_page` use cases through immutable revision preparation and
+the final publication protocol. The scope itself supplies a fixed internal
+publication baseline; supplied body versions and publication confirmations are
+also checked. A racing publication at final commit returns a conflict and retains
+the prepared candidate. The response keeps the caller's draft and can return the
+latest accepted page without changing an already bound reader.
+
+Saving preserves the original metadata block and treats the entire incoming text
+as body, including a legitimate opening delimiter block. Link normalization is
+shared with the existing file writer. Deletion prepares a complete private
+Markdown baseline and reuses the existing index-entry and backlink cleanup;
+unrelated pages retain their pre-existing links. Existing page input revisions
+survive manual edits, even when the publication's active source is newer.
+
+`KnowledgeStore.prepare_changes` reuses the fixed baseline's immutable files,
+active index/unit identities and per-page inputs. It validates exact database
+identity, live Blob metadata, complete manifests and references, while reading
+new content rather than rescanning unchanged assets. Review found an additional
+asset reread in synchronization-plan preparation; its replacement verifies the
+sealed complete manifest and exact slot/digest/size/live reference closure. An
+actual file-open witness now rejects any unchanged CAS image read during patch
+preparation. Later worktree synchronization still validates the files it touches.
+
+The master commit establishes success. Page results carry separate projection
+states, so failed synchronization returns saved/deleted with pending files, and
+a persistent external-edit pause preserves the draft while a new master version
+is published. Eleven new application tests cover these paths, stale baselines,
+final save/delete races, retained source inputs and asset reuse. Both review axes
+independently verified the corrected behavior. The related storage, page, lint,
+projection, import, module-size and application-boundary regressions pass 221
+tests; full mypy (478 modules), ruff, format and diff checks pass. No live model
+service was called. Saved answers, other tool writers, repair/removal, compiler,
+execution and public question adapters still require integration before P8.

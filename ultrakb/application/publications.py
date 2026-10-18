@@ -7,7 +7,13 @@ from typing import Literal
 
 from ultrakb.storage.catalog_store import CatalogConflict
 from ultrakb.storage.database import DatabaseIdentity
-from ultrakb.storage.knowledge_store import KnowledgeStore, Publication, PublicationConflict
+from ultrakb.storage.knowledge_store import (
+    BoundKnowledge,
+    KnowledgeStore,
+    PreparedRevision,
+    Publication,
+    PublicationConflict,
+)
 from ultrakb.storage.pending_store import PendingWork
 from ultrakb.storage.wiki_projection import ProjectionConflict, ProjectionResult, ProjectionStore
 
@@ -60,13 +66,39 @@ def publish_import_result(
             )
         prepared = committed
         publication = knowledge.publish(prepared)
+    projection = sync_publication(root, identity, prepared)
+    return PublicationOutcome("published", publication, projection, prepared.revision_id)
+
+
+def publish_knowledge_changes(
+    base: BoundKnowledge, changes: dict[str, bytes | None]
+) -> PublicationOutcome:
+    """Commit an explicitly based manual edit before attempting worktree I/O."""
+    knowledge = KnowledgeStore(base.root, base.identity)
+    prepared = knowledge.prepare_changes(base, changes)
     try:
-        projection = ProjectionStore(root, identity, view_id=view_id).sync(
+        publication = knowledge.publish(prepared)
+    except (PublicationConflict, ProjectionConflict) as error:
+        return PublicationOutcome(
+            "needs_review",
+            None,
+            None,
+            prepared.revision_id,
+            "knowledge_changed"
+            if isinstance(error, PublicationConflict)
+            else "worktree_baseline_changed",
+        )
+    projection = sync_publication(base.root, base.identity, prepared)
+    return PublicationOutcome("published", publication, projection, prepared.revision_id)
+
+
+def sync_publication(
+    root: Path, identity: DatabaseIdentity, prepared: PreparedRevision
+) -> ProjectionResult:
+    try:
+        return ProjectionStore(root, identity, view_id=prepared.view_id).sync(
             plan_id=prepared.sync_plan_id
         )
     except (OSError, sqlite3.Error) as error:
         # The master commit succeeded even if coordination or opening the projection failed.
-        projection = ProjectionResult(
-            "pending", prepared.sync_plan_id, error_code=type(error).__name__
-        )
-    return PublicationOutcome("published", publication, projection, prepared.revision_id)
+        return ProjectionResult("pending", prepared.sync_plan_id, error_code=type(error).__name__)

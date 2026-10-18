@@ -274,6 +274,49 @@ class KnowledgeStore:
         import_work: PendingWork | None = None,
         page_inputs: dict[str, tuple[str, ...]] | None = None,
     ) -> PreparedRevision:
+        return self._prepare_revision(
+            files,
+            expected=expected,
+            view_id=view_id,
+            index_revisions=index_revisions,
+            unit_revisions=unit_revisions,
+            import_work=import_work,
+            page_inputs=page_inputs,
+        )
+
+    def prepare_changes(
+        self, base: BoundKnowledge, changes: dict[str, bytes | None]
+    ) -> PreparedRevision:
+        """Keep a fixed revision's inputs and reuse its verified immutable assets."""
+        if base.root != self.root or base.identity != self.identity:
+            raise ValueError("Changes require a baseline from this exact database")
+        basis = base.page_input_revisions()
+        return self._prepare_revision(
+            changes,
+            expected=base.publication_id,
+            view_id=base.publication.view_id,
+            unit_revisions=base.unit_revisions(),
+            index_revisions=base.index_revisions(),
+            page_inputs={
+                path: basis.get(path, ())
+                for path in base.files()
+                if path.endswith(".md") and (path not in changes or changes[path] is not None)
+            },
+            base=base,
+        )
+
+    def _prepare_revision(
+        self,
+        files,
+        *,
+        expected: str | None,
+        view_id: str,
+        index_revisions: tuple[str, ...],
+        unit_revisions: tuple[str, ...],
+        import_work: PendingWork | None = None,
+        page_inputs: dict[str, tuple[str, ...]] | None = None,
+        base: BoundKnowledge | None = None,
+    ) -> PreparedRevision:
         if (
             not isinstance(view_id, str)
             or not view_id
@@ -286,9 +329,8 @@ class KnowledgeStore:
             raise ValueError("Revision metadata exceeds the encoded storage item limit")
         for path, payload in files.items():
             _path(path)
-            if not isinstance(payload, bytes):
+            if not isinstance(payload, bytes) and not (base is not None and payload is None):
                 raise ValueError("Revision content must be immutable bytes")
-        validate_file_tree(files)
         if not isinstance(index_revisions, tuple) or len(set(index_revisions)) != len(
             index_revisions
         ):
@@ -305,10 +347,27 @@ class KnowledgeStore:
             inputs = resolve_inputs(db, unit_revisions, index_revisions)
             if claim is not None and not any(unit_id == claim[5] for unit_id, _ in inputs):
                 raise ValueError("The published manifest must include the claimed processing unit")
-            entries = []
+            retained = {}
+            if base is not None:
+                base._require_publication(db)
+                rows = db.connection.execute(
+                    "SELECT f.path, f.digest, f.byte_count, b.byte_count, b.state "
+                    "FROM ukb_revision_files f LEFT JOIN ukb_blobs b ON b.digest = f.digest "
+                    "WHERE f.revision_id = ? ORDER BY f.path",
+                    (base.publication.revision_id,),
+                ).fetchall()
+                for path, digest, size, stored_size, state in rows:
+                    if size != stored_size or state != "live":
+                        raise RecoveryRequired("The retained immutable file is unavailable")
+                    retained[path] = [path, digest, size]
             for path, payload in sorted(files.items()):
-                blob = put_blob(db, payload)
-                entries.append([path, blob.digest, blob.byte_count])
+                if payload is None:
+                    retained.pop(path, None)
+                else:
+                    blob = put_blob(db, payload)
+                    retained[path] = [path, blob.digest, blob.byte_count]
+            validate_file_tree(retained)
+            entries = [retained[path] for path in sorted(retained)]
             page_rows = prepare_page_inputs(db, entries, inputs, expected, view_id, page_inputs)
             validate_source_paths(db, entries, inputs, page_rows)
             navigation = prepare_navigation(
@@ -437,7 +496,9 @@ class KnowledgeStore:
             )
             if hashlib.sha256(sealed_manifest).hexdigest() != prepared.manifest_digest:
                 raise ValueError("Sealed revision manifest does not match its entries")
-            for _, digest, byte_count in persisted:
+            for path, digest, byte_count in persisted:
+                if base is not None and path not in files:
+                    continue  # Reuse the verified immutable baseline; no full asset rescan.
                 if len(read_bytes(db, digest)) != byte_count:
                     raise ValueError("Sealed revision content failed validation")
             with db.transaction() as connection:

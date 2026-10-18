@@ -27,7 +27,7 @@ from ultrakb.lint import (
     list_existing_wiki_targets,
     strip_ghost_wikilinks,
 )
-from ultrakb.locks import atomic_write_text, kb_ingest_lock
+from ultrakb.locks import atomic_write_text, durable_unlink, kb_ingest_lock
 
 # Compiled page types the user may EDIT (a recompile can still regenerate them):
 # concept/entity synthesis PLUS per-document summaries. index/log/reports are
@@ -129,10 +129,6 @@ def delete_wiki_page(
         backlinks = pages_linking_to(wiki, _normalize_target(target), exclude=page)
         return {"status": "dry_run", "target": target, "backlinks": backlinks}
 
-    # Imported lazily: compiler pulls in the LLM stack, which this pure
-    # index-editing helper does not otherwise need at module import.
-    from ultrakb.agent.compiler import remove_doc_from_index
-
     with kb_ingest_lock(kb_dir / ".ultrakb"):
         # Re-check under the lock: a concurrent delete/recompile may have removed
         # the page in the window since the pre-lock is_file() gate.
@@ -141,11 +137,6 @@ def delete_wiki_page(
         # Compute backlinks INSIDE the lock so a concurrently-added inbound link
         # is still demoted (matches run_remove_for_api's plan-inside-the-lock).
         backlinks = pages_linking_to(wiki, _normalize_target(target), exclude=page)
-        # Remove the page's index.md entry (a [[link]] LINE — full removal, not
-        # link demotion). Empty doc_name leaves the Documents section alone; use
-        # the ACTUAL on-disk stem so the exact-match cleanup works on a
-        # case-insensitive FS where the ref may differ in case.
-        real_stem = _on_disk_stem(wiki / section, stem)
         # Demote now-dangling inbound [[links]] to plain text — in the backlink
         # pages AND in index.md (a [[target]] embedded in another entry's brief;
         # the page's own entry line was already removed above). Surgical restrict
@@ -162,14 +153,7 @@ def delete_wiki_page(
                 operation="delete-page",
             ),
         ):
-            page.unlink(missing_ok=True)
-            remove_doc_from_index(
-                wiki,
-                "",
-                concept_slugs_deleted=[real_stem] if section == "concepts" else [],
-                entity_slugs_deleted=[real_stem] if section == "entities" else [],
-            )
-            files_changed, ghosts_stripped = fix_broken_links(wiki, restrict_to=restrict)
+            files_changed, ghosts_stripped = delete_page_files(wiki, section, stem, backlinks)
 
     return {
         "status": "deleted",
@@ -207,6 +191,30 @@ def page_link_context(kb_dir: Path, path: str, *, scope: KnowledgeScope | None =
     return {"status": "ok", "target": target, "outlinks": sorted(out), "backlinks": backlinks}
 
 
+def delete_page_files(wiki: Path, section: str, stem: str, backlinks: list[str]) -> tuple[int, int]:
+    """Apply the existing deletion rewrites to a protected or disposable Wiki."""
+    from ultrakb.agent.compiler import remove_doc_from_index
+
+    real_stem = _on_disk_stem(wiki / section, stem)
+    durable_unlink(wiki / section / f"{stem}.md", missing_ok=True)
+    remove_doc_from_index(
+        wiki,
+        "",
+        concept_slugs_deleted=[real_stem] if section == "concepts" else [],
+        entity_slugs_deleted=[real_stem] if section == "entities" else [],
+    )
+    restrict = [wiki / f"{ref}.md" for ref in backlinks] + [wiki / "index.md"]
+    return fix_broken_links(wiki, restrict_to=restrict)
+
+
+def edited_page_content(existing: str, body: str, known_targets: set[str]) -> tuple[str, list[str]]:
+    """Keep code-managed metadata and accept the entire supplied body verbatim."""
+    parts = frontmatter.split(existing)
+    metadata = parts[0] if parts else ""
+    cleaned, ghosts = strip_ghost_wikilinks(body, known_targets)
+    return metadata + cleaned, sorted(set(ghosts))
+
+
 def edit_wiki_page(
     kb_dir: Path, path: str, content: str, *, scope: KnowledgeScope | None = None
 ) -> dict:
@@ -234,22 +242,22 @@ def edit_wiki_page(
         # the op is atomic against its own inputs (no lost-update).
         if not page.is_file():
             return {"status": "not_found", "target": target, "ghosts_stripped": []}
-        existing = frontmatter.split(_read_md(page))
-        fm_block = existing[0] if existing else ""
         # `content` IS the body: the reader strips the code-managed OKF
         # frontmatter before editing, so it is NEVER re-split here — a body that
         # legitimately opens with a '---' block must not be mistaken for
         # frontmatter and silently dropped. The existing block is re-attached.
-        cleaned_body, ghosts = strip_ghost_wikilinks(content, list_existing_wiki_targets(wiki))
+        updated, ghosts = edited_page_content(
+            _read_md(page), content, list_existing_wiki_targets(wiki)
+        )
         from ultrakb.knowledge_revisions import manual_knowledge_change
         from ultrakb.mutation import mutation_scope
 
         with manual_knowledge_change(scope), mutation_scope(kb_dir, [page], operation="edit-page"):
-            atomic_write_text(page, fm_block + cleaned_body)
+            atomic_write_text(page, updated)
 
     return {
         "status": "saved",
         "target": target,
         "ghosts_stripped": sorted(set(ghosts)),
-        "content": fm_block + cleaned_body,
+        "content": updated,
     }

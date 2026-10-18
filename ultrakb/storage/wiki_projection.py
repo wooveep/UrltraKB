@@ -150,22 +150,24 @@ def _prepare_plan(db, plan_id, revision_id, view_id, files, captured, applied, *
     ).fetchall()
     if _json((kind, revision_id, view_id, captured, rows)) != read_bytes(db, manifest.digest):
         raise ValueError("Sealed synchronization plan does not match its complete manifest")
-    expected_refs = {"manifest": manifest.digest}
-    for path, previous, _, target, _ in rows:
+    expected_refs = {"manifest": (manifest.digest, manifest.byte_count, "live")}
+    for path, previous, previous_size, target, target_size in rows:
         slot = _slot(path)
         if previous is not None:
-            read_bytes(db, previous)
-            expected_refs["expected:" + slot] = previous
+            expected_refs["expected:" + slot] = (previous, previous_size, "live")
         if target is not None:
-            read_bytes(db, target)
-            expected_refs["target:" + slot] = target
-    references = dict(
-        db.connection.execute(
-            "SELECT slot, digest FROM ukb_blob_refs "
-            "WHERE owner_kind = 'sync-plan' AND owner_id = ?",
+            expected_refs["target:" + slot] = (target, target_size, "live")
+    # These contents were validated before retaining their owning records. Verify
+    # exact reference closure without rereading every unchanged source or image.
+    references = {
+        slot: (digest, size, state)
+        for slot, digest, size, state in db.connection.execute(
+            "SELECT r.slot, r.digest, b.byte_count, b.state FROM ukb_blob_refs r "
+            "LEFT JOIN ukb_blobs b ON b.digest = r.digest "
+            "WHERE r.owner_kind = 'sync-plan' AND r.owner_id = ?",
             (plan_id,),
         ).fetchall()
-    )
+    }
     if references != expected_refs:
         raise ValueError("Synchronization plan content references are incomplete")
     with db.transaction() as connection:
