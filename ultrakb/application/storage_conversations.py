@@ -93,7 +93,7 @@ def _failed(error, answer, identity, count, stage, diagnostics=None):
     )
 
 
-def _committed_result(store, identity, attempt_id, message, execution_id):
+def _committed_result(store, identity, attempt_id, message, execution_id, scope):
     retained = store.completed_submission(identity, attempt_id, message, execution_id=execution_id)
     if retained is None:
         return None
@@ -101,6 +101,9 @@ def _committed_result(store, identity, attempt_id, message, execution_id):
     if metadata.get("schema") != 1 or not isinstance(metadata.get("result"), dict):
         raise RecoveryRequired("Committed conversation result metadata needs recovery")
     values = dict(metadata["result"])
+    from .stored_session_history import restored_answer_citations
+
+    values["citations"] = restored_answer_citations(scope, values.get("citations"))
     for key in ("resources", "changes", "unfinished", "image_coverage", "diagnostics"):
         values[key] = tuple(values.get(key, ()))
     if values.get("projection") is not None:
@@ -162,7 +165,7 @@ async def _continue(
                 order=submission_order,
             )
             registered = True
-            completed = _committed_result(store, identity, attempt_id, message, execution_id)
+            completed = _committed_result(store, identity, attempt_id, message, execution_id, scope)
             if completed is None and store.recover_submission(
                 identity,
                 attempt_id,
@@ -170,7 +173,9 @@ async def _continue(
                 execution_id=execution_id,
                 check_cancelled=context.check_stop,
             ):
-                completed = _committed_result(store, identity, attempt_id, message, execution_id)
+                completed = _committed_result(
+                    store, identity, attempt_id, message, execution_id, scope
+                )
             if completed is not None:
                 return replace(
                     completed,
@@ -216,6 +221,7 @@ async def _continue(
                     if event["event"] == "final":
                         final = event["data"]
                         from ultrakb.agent.chat_trace import complete_trace
+                        from ultrakb.storage.session_result import reference_trace
 
                         complete_trace(trace, final["answer"])
                         completed = AnswerResult(
@@ -235,7 +241,7 @@ async def _continue(
                             "schema": 1,
                             "execution_id": execution_id,
                             "evidence_publication_id": scope.knowledge.publication_id,
-                            "trace": trace,
+                            "trace": reference_trace(trace, final["answer"]),
                             "result": {
                                 key: value
                                 for key, value in asdict(completed).items()
@@ -270,7 +276,7 @@ async def _continue(
         # into a failed turn or charge another send on the next submission.
         try:
             completed = (
-                _committed_result(store, identity, attempt_id, message, execution_id)
+                _committed_result(store, identity, attempt_id, message, execution_id, scope)
                 if registered
                 else None
             )

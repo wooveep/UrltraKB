@@ -2,13 +2,17 @@
 
 CONVERSATION_SCHEMA = (
     """CREATE TABLE ukb_conversation_submissions (
+        sequence INTEGER PRIMARY KEY AUTOINCREMENT,
         session_id TEXT NOT NULL REFERENCES ukb_conversations(session_id),
         submission_id TEXT NOT NULL,
         message_digest TEXT NOT NULL REFERENCES ukb_blobs(digest),
         after_turn INTEGER NOT NULL CHECK (after_turn >= 0),
         submission_order INTEGER CHECK (submission_order >= 0),
-        PRIMARY KEY (session_id, submission_id)
+        UNIQUE (session_id, submission_id)
     )""",
+    "CREATE INDEX ukb_conversation_pending "
+    "ON ukb_conversation_submissions("
+    "session_id, after_turn, COALESCE(submission_order, sequence), sequence)",
     """CREATE TRIGGER ukb_submissions_immutable BEFORE UPDATE ON ukb_conversation_submissions
         BEGIN SELECT RAISE(ABORT, 'Conversation submissions are immutable'); END""",
     """CREATE TABLE ukb_conversation_runs (

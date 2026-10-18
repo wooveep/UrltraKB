@@ -114,15 +114,21 @@ SCHEMA = (
     )""",
         "CREATE INDEX ukb_pending_attempt_intent ON ukb_pending_attempts(intent_id, sequence)",
         """CREATE TABLE ukb_conversations (
-        session_id TEXT PRIMARY KEY,
+        sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL UNIQUE,
         title TEXT NOT NULL,
         view_id TEXT NOT NULL,
         model TEXT NOT NULL,
         language TEXT NOT NULL,
         revision INTEGER NOT NULL CHECK (revision >= 0),
         turn_count INTEGER NOT NULL CHECK (turn_count >= 0),
-        deleted INTEGER NOT NULL CHECK (deleted IN (0, 1))
+        deleted INTEGER NOT NULL CHECK (deleted IN (0, 1)),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        activity_version INTEGER NOT NULL CHECK (activity_version >= 0)
     )""",
+        "CREATE INDEX ukb_conversation_catalog "
+        "ON ukb_conversations(view_id, deleted, updated_at DESC, sequence DESC)",
         """CREATE TABLE ukb_turns (
         session_id TEXT NOT NULL REFERENCES ukb_conversations(session_id),
         ordinal INTEGER NOT NULL CHECK (ordinal >= 0),

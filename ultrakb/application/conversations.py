@@ -545,6 +545,11 @@ class ConversationView:
     usage: dict[str, int | None] | None = None
     answer_outcomes: tuple[str | None, ...] = ()
     answers: tuple = ()
+    created_at: str = ""
+    total_turns: int = 0
+    start_ordinal: int = 0
+    older_before: int | None = None
+    next_pending: str | None = None
 
     @property
     def timeline_answers(self):
@@ -571,8 +576,24 @@ class ConversationView:
 
 
 def read_conversation(
-    kb_dir: Path, session_id: str, *, view_id: str | None = None
+    kb_dir: Path,
+    session_id: str,
+    *,
+    view_id: str | None = None,
+    scope: KnowledgeScope | None = None,
+    limit: int = 63,
+    before: int | None = None,
+    pending_after: str | None = None,
 ) -> ConversationView:
+    if scope is not None and scope.knowledge is not None:
+        from .stored_session_history import read_stored_conversation
+
+        scope = resolve_scope(kb_dir, scope)
+        if view_id is not None and view_id != scope.view_id:
+            raise ValueError("Conversation scope and view do not match")
+        return read_stored_conversation(
+            scope, session_id, limit=limit, before=before, pending_after=pending_after
+        )
     from ultrakb.application.sessions import load_conversation
 
     session = load_conversation(kb_dir, session_id, view_id=view_id)

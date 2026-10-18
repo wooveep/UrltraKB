@@ -632,3 +632,45 @@ pass. All provider responses were controlled locally; no live model service was
 called. Session management/export, model write tools, remaining compiler and
 writer integrations and the full P6-P8 gates still remain. No default activation
 or issue closure has occurred.
+
+### Paged conversation history and guarded deletion
+
+The shared history, list, prefix/latest resolution and deletion use cases now
+accept the explicit development `storage_scope`. Schema 11 gives conversations
+bounded catalog ordering and an activity version distinct from the accepted
+original-turn revision. Starting a pending submission invalidates an earlier
+delete confirmation even before another answer is committed. Deletion takes the
+real session lock, checks the exact KB generation, view and confirmation version,
+then commits a tombstone. Original turns and core execution/usage records remain
+retained; reusing the deleted identity cannot revive the conversation.
+
+History reads only the selected ordinal range and its answer metadata. Pending
+original questions have their own bounded cursor in stable submission order.
+Catalog pages read metadata without loading full histories. Reads take no session
+or ingest lock and finish by checking the captured activity version, reporting a
+conflict if the history changed during capture. An actual gated HTTP request
+demonstrates that the preceding completed answer and current pending question
+remain readable while a model waits.
+
+The versioned display trace refers to its immutable final assistant original
+instead of storing that full body again. Rendering reconstructs the original
+trace, preserving tool calls and preceding narration. This is a small display
+record encoding and does not change CTree snapshots or the raw conversation
+protocol. Provider response receipts retain their independently required bytes.
+
+Ten new management cases cover pagination of 70 original turns without opening
+unselected payloads, bounded catalog cursors, ordered pending questions,
+confirmation conflicts, model-wait reads and lossless trace references. Cursor
+integers reject values outside the nonnegative SQLite int64 range. Restored
+history and completed-submission replay validate the original KB, exact
+publication, view, path and digest before rebinding only the displayed reference
+to the current runtime identity. The original provenance and CAS records remain
+unchanged; a stale reference passed directly still fails the generation gate.
+These are controlled local SDK/SQLite/CAS witnesses, with no live model service
+called. Both review axes verified the fixes. The related storage, session,
+application, adapter, citation and module-size regressions pass 203 tests
+(32 live tests deselected), including six native Qt cases. Full mypy (490
+modules), ruff, format and diff checks pass.
+Session export, model write tools, the full compiler and writer integration and
+P6-P8 acceptance remain outstanding. This batch does not activate the new format
+by default or satisfy the overall issue closure gate.

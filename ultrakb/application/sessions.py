@@ -25,15 +25,44 @@ class SessionResult:
     changes: tuple[str, ...] = ()
 
 
-def list_conversations(kb_dir: Path, *, view_id: str | None = None) -> list[dict]:
+def list_conversations(
+    kb_dir: Path,
+    *,
+    view_id: str | None = None,
+    scope: KnowledgeScope | None = None,
+    limit: int = 63,
+    after: str | None = None,
+) -> list[dict]:
     """List the selected view's conversations, newest first; default to legacy."""
     from ultrakb.agent.chat_session import list_sessions
 
+    if scope is not None and scope.knowledge is not None:
+        from ultrakb.storage.session_catalog import SessionCatalog
+
+        scope = resolve_scope(kb_dir, scope)
+        assert scope.knowledge is not None
+        if view_id is not None and view_id != scope.view_id:
+            raise ValueError("Conversation scope and view do not match")
+        return SessionCatalog(scope.kb_dir, scope.knowledge.identity).list(
+            view_id=scope.view_id, limit=limit, after=after
+        )
     with kb_read_lock(kb_dir / ".ultrakb"):
         return [item for item in list_sessions(kb_dir) if item["view_id"] == (view_id or "legacy")]
 
 
-def resolve_conversation(kb_dir: Path, query: str, *, view_id: str | None = None) -> str | None:
+def resolve_conversation(
+    kb_dir: Path, query: str, *, view_id: str | None = None, scope: KnowledgeScope | None = None
+) -> str | None:
+    if scope is not None and scope.knowledge is not None:
+        from ultrakb.storage.session_catalog import SessionCatalog
+
+        scope = resolve_scope(kb_dir, scope)
+        assert scope.knowledge is not None
+        if view_id is not None and view_id != scope.view_id:
+            raise ValueError("Conversation scope and view do not match")
+        return SessionCatalog(scope.kb_dir, scope.knowledge.identity).resolve(
+            query, view_id=scope.view_id
+        )
     sessions = list_conversations(kb_dir, view_id=view_id)
     if query == "__latest__":
         return sessions[0]["id"] if sessions else None
@@ -59,8 +88,32 @@ def delete_conversation(
     version: str | None = None,
     context: ExecutionContext | None = None,
     view_id: str | None = None,
+    scope: KnowledgeScope | None = None,
 ) -> SessionResult:
     root = kb_dir.resolve()
+    if scope is not None and scope.knowledge is not None:
+        from ultrakb.storage.session_catalog import SessionCatalog
+
+        scope = resolve_scope(root, scope)
+        assert scope.knowledge is not None
+        if view_id is not None and view_id != scope.view_id:
+            raise ValueError("Conversation scope and view do not match")
+
+        def check_cancelled():
+            if context:
+                context.check_stop()
+            return False
+
+        status = SessionCatalog(root, scope.knowledge.identity).delete(
+            session_id,
+            view_id=scope.view_id,
+            expected=version,
+            cancelled=check_cancelled,
+            on_wait=context.waiting if context else None,
+        )
+        return SessionResult(
+            status, changes=(f"deleted conversation: {session_id}",) if status == "deleted" else ()
+        )
     path = _session_path(root, session_id)
     cancelled = context.cancelled if context else None
     on_wait = context.waiting if context else None

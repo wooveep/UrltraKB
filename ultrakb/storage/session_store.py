@@ -13,6 +13,7 @@ from ultrakb.mutation import RecoveryRequired
 from ultrakb.storage.blobs import put_blob, read_bytes, retain_blob
 from ultrakb.storage.coordination import storage_stage
 from ultrakb.storage.database import DatabaseIdentity
+from ultrakb.storage.execution_store import now
 from ultrakb.storage.session_codec import encode_checkpoint, restore_checkpoint
 from ultrakb.storage.tree_store import TreeStore, retain_tree
 
@@ -37,6 +38,9 @@ class Conversation:
     language: str
     revision: int
     turns: tuple[dict, ...]
+    created_at: str = ""
+    updated_at: str = ""
+    activity_version: int = 0
 
 
 @dataclass(frozen=True)
@@ -104,10 +108,13 @@ class SessionStore:
         if not isinstance(title, str):
             raise ValueError("Conversation title must be text")
         _bounded_metadata(session_id, title, view_id, model, language)
+        timestamp = now()
         with storage_stage(self.root, self.identity) as db, db.transaction() as connection:
             connection.execute(
-                "INSERT INTO ukb_conversations VALUES (?, ?, ?, ?, ?, 0, 0, 0)",
-                (session_id, title, view_id, model, language),
+                "INSERT INTO ukb_conversations(session_id, title, view_id, model, language, "
+                "revision, turn_count, deleted, created_at, updated_at, activity_version) "
+                "VALUES (?, ?, ?, ?, ?, 0, 0, 0, ?, ?, 0)",
+                (session_id, title, view_id, model, language, timestamp, timestamp),
             )
 
     @staticmethod
@@ -149,6 +156,7 @@ class SessionStore:
             raise ValueError("Conversation submissions require original text and a stable identity")
         _bounded_metadata(session_id, submission_id, execution_id, publication_id, order)
         owner = hashlib.sha256(json.dumps((session_id, submission_id)).encode()).hexdigest()
+        timestamp = now()
         with storage_stage(self.root, self.identity) as db:
             content = put_blob(db, message.encode("utf-8"))
             with db.transaction() as connection:
@@ -167,7 +175,8 @@ class SessionStore:
                         (session_id,),
                     ).fetchone()[0]
                     connection.execute(
-                        "INSERT INTO ukb_conversation_submissions VALUES (?, ?, ?, ?, ?)",
+                        "INSERT INTO ukb_conversation_submissions(session_id, submission_id, "
+                        "message_digest, after_turn, submission_order) VALUES (?, ?, ?, ?, ?)",
                         (session_id, submission_id, content.digest, count, order),
                     )
                     retain_blob(connection, "conversation-submission", owner, "user", content)
@@ -185,6 +194,12 @@ class SessionStore:
                         "reused" if completed else "started",
                         completed[0] if completed else None,
                     ),
+                )
+                connection.execute(
+                    "UPDATE ukb_conversations SET updated_at = ?, "
+                    "activity_version = activity_version + 1 "
+                    "WHERE session_id = ?",
+                    (timestamp, session_id),
                 )
 
     def completed_submission(self, session_id, submission_id, message, *, execution_id):
@@ -294,6 +309,7 @@ class SessionStore:
         ):
             raise ValueError("A committed turn requires complete original messages")
         _bounded_metadata(session_id, turn_id, attempt_id or turn_id)
+        timestamp = now()
         messages = ([{"role": "system", "content": system}] if system is not None else []) + [
             {"role": "user", "content": user},
             {"role": "assistant", "content": assistant},
@@ -414,9 +430,10 @@ class SessionStore:
                     raise SessionConflict("The accepted turn must finish its exact active attempt")
                 connection.execute(
                     "UPDATE ukb_conversations SET revision = revision + 1, "
-                    "turn_count = turn_count + 1 "
+                    "turn_count = turn_count + 1, updated_at = ?, "
+                    "activity_version = activity_version + 1 "
                     "WHERE session_id = ?",
-                    (session_id,),
+                    (timestamp, session_id),
                 )
             return ordinal
 
@@ -446,7 +463,8 @@ class SessionStore:
     def load(self, session_id: str) -> Conversation:
         with storage_stage(self.root, self.identity, read_only=True) as db:
             row = db.connection.execute(
-                "SELECT title, view_id, model, language, revision, turn_count "
+                "SELECT title, view_id, model, language, revision, turn_count, "
+                "created_at, updated_at, activity_version "
                 "FROM ukb_conversations "
                 "WHERE session_id = ? AND deleted = 0",
                 (session_id,),
@@ -456,7 +474,9 @@ class SessionStore:
             turns = self._turns(db, session_id, row[5])
             if self._current(db, session_id) != row[4]:
                 raise SessionConflict("Conversation changed during input capture")
-            return Conversation(session_id, row[0], row[1], row[2], row[3], row[4], tuple(turns))
+            return Conversation(
+                session_id, row[0], row[1], row[2], row[3], row[4], tuple(turns), *row[6:9]
+            )
 
     def check_revision(self, session_id: str, expected: int):
         with storage_stage(self.root, self.identity, read_only=True) as db:
