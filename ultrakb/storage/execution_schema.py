@@ -74,6 +74,7 @@ EXECUTION_SCHEMA = (
         execution_id TEXT NOT NULL REFERENCES ukb_executions(execution_id),
         model_budget_id TEXT NOT NULL REFERENCES ukb_model_budgets(model_budget_id),
         logical_call_id TEXT,
+        budget_charged INTEGER NOT NULL DEFAULT 1 CHECK (budget_charged IN (0, 1)),
         source_id TEXT REFERENCES ukb_sources(source_id),
         unit_id TEXT REFERENCES ukb_import_units(unit_id),
         root_import_id TEXT REFERENCES ukb_import_groups(root_import_id),

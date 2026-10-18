@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+from dataclasses import dataclass
 from pathlib import Path
 
 from ultrakb.llm_usage import UsageRequest
@@ -20,6 +21,7 @@ _RECEIPT_FIELDS = {
     "provider_request_id",
     "ended_at",
     "observation",
+    "application_cache_hit",
 }
 
 
@@ -105,6 +107,12 @@ def _apply_delta(connection, record, stage_code, before):
                 "WHERE bucket = ? AND identity = ? AND stage_code = ?",
                 (*delta, bucket, identity, stage),
             )
+
+
+@dataclass(frozen=True)
+class RequestPage:
+    records: tuple[UsageRequest, ...]
+    next_cursor: int | None
 
 
 class UsageStore:
@@ -202,7 +210,8 @@ class UsageStore:
             for _ in range(8):
                 row = db.connection.execute(
                     "SELECT r.storage_version, r.observation_version, r.stage_code, "
-                    "r.payload_json, r.field_versions_json, e.generation "
+                    "r.payload_json, r.field_versions_json, e.generation, "
+                    "r.budget_charged, r.model_budget_id "
                     "FROM ukb_usage_requests r JOIN ukb_executions e "
                     "ON e.execution_id = r.execution_id WHERE r.request_id = ?",
                     (request_id,),
@@ -214,23 +223,43 @@ class UsageStore:
                 previous = UsageRequest.model_validate_json(row[3])
                 values = previous.model_dump()
                 versions = json.loads(row[4])
+                sent = previous.send_status == "sent" or fields.get("send_status") == "sent"
+                if previous.application_cache_hit and previous.send_status != "sent" and sent:
+                    # These zeros describe local reuse, not the late transport's usage.
+                    for key in TOKENS:
+                        values[key] = None
+                        versions.pop(key, None)
                 for key, value in fields.items():
+                    if sent and fields.get("application_cache_hit") is True and key in TOKENS:
+                        continue
                     if value is not None and (
                         values[key] is None or version > versions.get(key, -1)
                     ):
                         values[key] = value
                         versions[key] = version
-                if previous.send_status == "sent":
+                if sent:
                     values["send_status"] = "sent"
                 if previous.state != "started" and values["state"] == "started":
                     values["state"] = previous.state
                 if previous.observation == "transport":
                     values["observation"] = "transport"
+                if (
+                    previous.business_state == "cancelled"
+                    or fields.get("business_state") == "cancelled"
+                ):
+                    values["business_state"] = "cancelled"
+                if previous.application_cache_hit or fields.get("application_cache_hit") is True:
+                    values["application_cache_hit"] = True
+                    if not sent:
+                        values["send_status"] = "not_sent"
+                        for key in TOKENS:
+                            values[key] = 0
                 known = sum(values[key] is not None for key in TOKENS)
                 values["usage_status"] = (
                     "known" if known == len(TOKENS) else "partial" if known else "unknown"
                 )
                 current = UsageRequest.model_validate(values)
+                charged = int(current.send_status != "not_sent" or current.state == "started")
                 encoded = _encode(current)
                 encoded_versions = json.dumps(versions, sort_keys=True)
                 if encoded == row[3] and encoded_versions == row[4]:
@@ -239,11 +268,27 @@ class UsageStore:
                 with db.transaction() as connection:
                     changed = connection.execute(
                         "UPDATE ukb_usage_requests SET storage_version = storage_version + 1, "
-                        "observation_version = ?, payload_json = ?, field_versions_json = ? "
+                        "observation_version = ?, payload_json = ?, field_versions_json = ?, "
+                        "budget_charged = ? "
                         "WHERE request_id = ? AND storage_version = ?",
-                        (max(version, row[1]), encoded, encoded_versions, request_id, row[0]),
+                        (
+                            max(version, row[1]),
+                            encoded,
+                            encoded_versions,
+                            charged,
+                            request_id,
+                            row[0],
+                        ),
                     ).rowcount
                     if changed:
+                        # Admission holds one call until known unsent. Late proof of
+                        # a send must be counted even if its reservation was released.
+                        if charged != row[6]:
+                            connection.execute(
+                                "UPDATE ukb_model_budgets SET used = used + ? "
+                                "WHERE model_budget_id = ?",
+                                (charged - row[6], row[7]),
+                            )
                         _apply_delta(connection, current, row[2], before)
                 if changed:
                     return current
@@ -257,6 +302,21 @@ class UsageStore:
             if not row:
                 raise KeyError(request_id)
             return UsageRequest.model_validate_json(row[0])
+
+    def requests(self, *, execution_id: str, after: int = 0, limit: int = 63) -> RequestPage:
+        if type(after) is not int or after < 0 or type(limit) is not int or not 1 <= limit <= 128:
+            raise ValueError("Request details require a bounded cursor page")
+        with storage_stage(self.root, self.identity, read_only=True) as db:
+            rows = db.connection.execute(
+                "SELECT sequence, payload_json FROM ukb_usage_requests "
+                "WHERE execution_id = ? AND sequence > ? ORDER BY sequence LIMIT ?",
+                (execution_id, after, limit + 1),
+            ).fetchall()
+        page = rows[:limit]
+        return RequestPage(
+            tuple(UsageRequest.model_validate_json(row[1]) for row in page),
+            page[-1][0] if len(rows) > limit else None,
+        )
 
     def summary(self, *, execution_id: str | None = None, source_id: str | None = None) -> dict:
         if (execution_id is None) == (source_id is None):

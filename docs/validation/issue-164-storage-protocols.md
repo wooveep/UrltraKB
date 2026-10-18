@@ -494,3 +494,50 @@ projection, import, module-size and application-boundary regressions pass 221
 tests; full mypy (478 modules), ruff, format and diff checks pass. No live model
 service was called. Saved answers, other tool writers, repair/removal, compiler,
 execution and public question adapters still require integration before P8.
+
+### Durable execution at the actual model gateway
+
+An explicit development `ExecutionContext(storage_identity=...)` now captures the
+prepared configuration once and starts a main-store task, execution and model
+budget before activating the real CompletionExecutor and Agents SDK gateway.
+Its outer protection is the lifecycle lease. Short storage stages persist each
+request intent and send marker before transport, so a pure HTTP wait does not
+hold the reclaim lock or the configuration lock. The normal creation path still
+uses the existing format; this is not the P8 activation switch.
+
+Development schema 9 tracks whether each request still charges its admission
+reservation. A terminal request known not to have sent releases that reservation
+once; unknown transport remains conservative, and later actual send evidence
+charges the original budget. Actual-send counters are separate from reservations.
+Request callbacks merge per-field versions and retain cancellation regardless of
+arrival order. Evidence takes precedence over version order: actual transport
+beats an explicit SDK application-cache hit, which beats an unknown result.
+Application reuse records zero usage without inventing a network send; call-level
+SDK usage cannot replace transport usage or manufacture a missing provider bill.
+Cache-packet replay cannot erase real usage or fill its unknown breakdowns.
+
+Consumed HTTP error bodies and successful SDK fallback responses are independently
+retained before business continuation. SQL or CAS acceptance failures create a
+durable response or usage-only repair packet and stop automatic provider retries.
+Repair does not invent a response for a usage-only packet. Indexed request paging
+and incremental usage counters avoid scanning the ledger in progress callbacks.
+
+After the caller has actually settled its SDK and worker work, cleanup revokes new
+send capabilities and terminates abandoned known-unsent intents. The original
+controller can still accept late receipts; another execution cannot use its
+request identity. Stage-observation write failure preserves the primary model
+error and does not leave the settled execution running. Unconfirmed stage rows
+remain explicit gaps for later recovery, rather than supplying invented timing.
+This does not yet implement fresh-process compiler TaskJournal recovery or the
+complete non-model stage and work-item coverage required by P6.
+
+Seventeen new gateway tests exercise the real SDK against loopback HTTP errors,
+provider-boundary cache/unknown results, transport cancellation, concurrent GC and
+settings changes, SQL faults and repair, duplicate initialization, foreign
+callbacks, cleanup races and out-of-order evidence. Both review axes verified the
+fixes, including all six arrival orders of cache, actual transport and cache
+replay in independent SQLite witnesses. The related execution, usage, storage,
+configuration, projection and size regressions pass 115 tests (35 live tests
+deselected). Full mypy (480 modules), ruff, format and diff checks pass. No live
+model service was called. Public ask/continue, full compiler integration, remaining
+writers and P6-P8 acceptance still remain; issue #164 stays open.

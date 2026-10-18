@@ -43,6 +43,7 @@ class ModelCall:
     cleanup_deadline: float | None = None
     send_starts: dict[str, ObservationStart] = field(default_factory=dict)
     response_ids: set[str] = field(default_factory=set)
+    retained_responses: set[str] = field(default_factory=set)
 
     def observe_images(self, request):
         import json
@@ -79,8 +80,16 @@ class ModelCall:
             else begin_request(self.model, self.stage, scope=self.scope, **self.metadata)
             or uuid.uuid4().hex
         )
-        self.sent_ids.append(identity)
-        finish_request(identity, scope=self.scope, terminal=False, send_status="sent")
+        if self.scope is not None and self.scope.storage is not None:
+            try:
+                self.scope.storage.sending(identity)
+            except BaseException as error:
+                self.send_error = error
+                raise
+            self.sent_ids.append(identity)
+        else:
+            self.sent_ids.append(identity)
+            finish_request(identity, scope=self.scope, terminal=False, send_status="sent")
         self.send_starts[identity] = start_observation()
         record_phase_event(
             "send",
@@ -94,6 +103,31 @@ class ModelCall:
         return identity
 
     def finish(self, response=None, *, state="completed"):
+        identity = self.sent_ids[-1] if self.sent_ids else self.first_id
+        if (
+            response is not None
+            and self.scope is not None
+            and self.scope.storage is not None
+            and identity not in self.retained_responses
+        ):
+            import json
+
+            if hasattr(response, "model_dump_json"):
+                encoded = response.model_dump_json().encode()
+            else:
+                encoded = json.dumps(response).encode()
+            hidden = getattr(response, "_hidden_params", {})
+            cache_hit = (
+                not self.sent_ids and isinstance(hidden, dict) and hidden.get("cache_hit") is True
+            )
+            self.capture_response(
+                identity,
+                encoded,
+                observed_response=response if not self.sent_ids else None,
+                state=state,
+                send_status="sent" if self.sent_ids else "not_sent" if cache_hit else "unknown",
+                cache_hit=cache_hit,
+            )
         if self.sent_ids:
             self.response_event(
                 self.sent_ids[-1],
@@ -104,13 +138,21 @@ class ModelCall:
         # usage when the provider omitted it; that must remain unknown here.
         finish_request(
             self.sent_ids[-1] if self.sent_ids else self.first_id,
-            None if self.sent_ids else response,
+            None if self.sent_ids or identity in self.retained_responses else response,
             state=state,
             scope=self.scope,
             business_state=state,
         )
 
     def received(self, identity, response):
+        try:
+            return self._received(identity, response)
+        except BaseException as error:
+            if self.scope is not None and self.scope.storage is not None:
+                self.send_error = self.scope.storage.failure or error
+            raise
+
+    def _received(self, identity, response):
         received = start_observation()
         self.response_status = response.status_code
         raw = _response(response)
@@ -135,6 +177,14 @@ class ModelCall:
             if merged:
                 raw = merged
                 self.raw_usage_available = True
+        if response.is_stream_consumed:
+            self.capture_response(
+                identity,
+                response.content,
+                observed_response=raw,
+                state="completed" if response.is_success else "failed",
+                observation="transport",
+            )
         finish_request(
             identity,
             raw,
@@ -150,6 +200,16 @@ class ModelCall:
                 at=received,
                 response_observed=True,
             )
+
+    def capture_response(self, identity, content, **receipt):
+        if self.scope is None or self.scope.storage is None:
+            return
+        try:
+            self.scope.storage.capture(identity, content, **receipt)
+        except BaseException as error:
+            self.send_error = error  # SDK wrappers must not turn persistence failure into a retry.
+            raise
+        self.retained_responses.add(identity)
 
     def response_event(self, identity, state, *, at=None, response_observed=False):
         if identity in self.response_ids or identity not in self.send_starts:

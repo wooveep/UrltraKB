@@ -26,7 +26,7 @@ class ReceiptPacket(BaseModel):
     generation: str
     request_id: RecordId
     version: int = Field(ge=0, lt=2**63)
-    response_base64: str
+    response_base64: str | None
     usage: dict
 
     @field_validator("usage")
@@ -57,32 +57,46 @@ class ReceiptStore:
     def _accept(self, request_id, response, version, usage):
         with storage_stage(self.root, self.identity) as db:
             require_request_generation(db, request_id)
-            blob = put_blob(db, response)
-            with db.transaction() as connection:
-                prior = connection.execute(
-                    "SELECT response_digest FROM ukb_response_receipts WHERE request_id = ?",
-                    (request_id,),
-                ).fetchone()
-                if prior and prior[0] != blob.digest:
-                    raise ValueError(
-                        "A request attempt cannot receive two different full responses"
+            if response is not None:
+                blob = put_blob(db, response)
+                with db.transaction() as connection:
+                    prior = connection.execute(
+                        "SELECT response_digest FROM ukb_response_receipts WHERE request_id = ?",
+                        (request_id,),
+                    ).fetchone()
+                    if prior and prior[0] != blob.digest:
+                        raise ValueError(
+                            "A request attempt cannot receive two different full responses"
+                        )
+                    connection.execute(
+                        "INSERT INTO ukb_response_receipts VALUES (?, ?, 'received', NULL) "
+                        "ON CONFLICT(request_id) DO NOTHING",
+                        (request_id, blob.digest),
                     )
-                connection.execute(
-                    "INSERT INTO ukb_response_receipts VALUES (?, ?, 'received', NULL) "
-                    "ON CONFLICT(request_id) DO NOTHING",
-                    (request_id, blob.digest),
-                )
-                retain_blob(connection, "response-receipt", request_id, "response", blob)
+                    retain_blob(connection, "response-receipt", request_id, "response", blob)
             # Usage and response retention each survive failure of the other commit.
+            fields = dict(usage)
+            if response is not None:
+                fields.setdefault("send_status", "sent")
             UsageStore(self.root, self.identity).merge(
-                request_id, version=version, **{**usage, "send_status": "sent"}
+                request_id,
+                version=version,
+                **fields,
             )
 
     def capture(self, request_id: str, response: bytes, *, version: int, usage: dict):
+        if not isinstance(response, bytes):
+            raise ValueError("A response requires immutable bytes")
+        return self._capture(request_id, response, version=version, usage=usage)
+
+    def capture_usage(self, request_id: str, *, version: int, usage: dict):
+        return self._capture(request_id, None, version=version, usage=usage)
+
+    def _capture(self, request_id, response, *, version, usage):
         TypeAdapter(RecordId).validate_python(request_id)
         validate_receipt_fields(usage)
-        if type(version) is not int or not 0 <= version < 2**63 or not isinstance(response, bytes):
-            raise ValueError("A response requires immutable bytes and a valid receipt version")
+        if type(version) is not int or not 0 <= version < 2**63:
+            raise ValueError("A receipt requires a valid version")
         # Keep the actual OS lease through the fallback write, even when SQL failed.
         with storage_stage(self.root, self.identity) as db:
             require_request_generation(db, request_id)
@@ -94,7 +108,9 @@ class ReceiptStore:
                     generation=self.identity.generation,
                     request_id=request_id,
                     version=version,
-                    response_base64=base64.b64encode(response).decode("ascii"),
+                    response_base64=base64.b64encode(response).decode("ascii")
+                    if response is not None
+                    else None,
                     usage=usage,
                 )
                 path = self.pending / f"{request_id}-{uuid4().hex}.json"
@@ -125,7 +141,11 @@ class ReceiptStore:
                             self.identity.generation,
                         ):
                             raise ValueError("Pending receipt belongs to another generation")
-                        response = base64.b64decode(packet.response_base64, validate=True)
+                        response = (
+                            base64.b64decode(packet.response_base64, validate=True)
+                            if packet.response_base64 is not None
+                            else None
+                        )
                         self._accept(packet.request_id, response, packet.version, packet.usage)
                     except (ValueError, KeyError, OSError, sqlite3.Error, BlobRetiring):
                         # Unknown or malformed ownership is retained for explicit repair.

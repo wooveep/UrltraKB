@@ -20,6 +20,8 @@ from ultrakb.locks import LockCancelled
 
 if TYPE_CHECKING:
     from ultrakb.model_task import TaskJournal
+    from ultrakb.storage.database import DatabaseIdentity
+    from ultrakb.storage.execution_store import Execution
 
 
 @dataclass
@@ -35,6 +37,9 @@ class ExecutionContext:
     executor: CompletionExecutor | None = field(default=None, repr=False)
     resume_model_task_id: str | None = None
     model_task: TaskJournal | None = field(default=None, repr=False)
+    storage_identity: DatabaseIdentity | None = field(default=None, repr=False)
+    storage_execution: Execution | None = field(default=None, init=False)
+    _storage_running: bool = field(default=False, init=False, repr=False)
     activity_attempt_id: str = field(default_factory=lambda: uuid4().hex)
     _activity_task_id: str = field(default_factory=lambda: uuid4().hex, repr=False)
     _event_guard: RLock = field(default_factory=RLock, repr=False)
@@ -165,6 +170,12 @@ class ExecutionContext:
     @contextmanager
     def begin(self, kb_dir: Path) -> Iterator[LlmCredentialBundle]:
         self.check_stop()
+        if self.storage_identity is not None:
+            from .storage_execution import begin_storage_execution
+
+            with begin_storage_execution(kb_dir, self) as bundle:
+                yield bundle
+            return
         from ultrakb.kb_format import require_current_kb
 
         require_current_kb(kb_dir)

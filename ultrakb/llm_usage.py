@@ -9,12 +9,15 @@ from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterator, Literal
+from typing import TYPE_CHECKING, Any, Callable, Iterator, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from ultrakb.llm_usage_models import Identity, SourceUsageHistory
 from ultrakb.locks import atomic_record_lock, atomic_write_json
+
+if TYPE_CHECKING:
+    from ultrakb.storage.model_usage import StoredModelUsage
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +71,7 @@ class UsageScope:
     root_import_id: str | None = None
     on_event: Callable[[dict], None] | None = None
     generation: str | None = None
+    storage: StoredModelUsage | None = None
 
 
 _SCOPE: ContextVar[UsageScope | None] = ContextVar("ultrakb_import_usage", default=None)
@@ -84,6 +88,12 @@ def usage_scope_lifecycle(scope: UsageScope | None) -> Iterator[None]:
     Legacy manually constructed scopes have no captured identity. Production
     scopes capture one while import_usage_execution holds its lifecycle lease.
     """
+    if scope is not None and scope.storage is not None:
+        from ultrakb.lifecycle import read_lifecycle
+
+        with read_lifecycle(scope.kb_dir, database_identity=scope.storage.identity):
+            yield
+        return
     if scope is None or scope.generation is None:
         yield
         return
@@ -98,7 +108,7 @@ def usage_context(**fields: Any) -> Iterator[None]:
     scope = _SCOPE.get()
     token = _SCOPE.set(replace(scope, **fields)) if scope else None
     try:
-        if scope and fields.get("source_id"):
+        if scope and scope.storage is None and fields.get("source_id"):
             mark_source(scope.kb_dir, fields["source_id"])
             from ultrakb.llm_usage_execution import bind_source_execution
 
@@ -177,7 +187,7 @@ def begin_request(
     values = {
         name: getattr(scope, name)
         for name in UsageScope.__dataclass_fields__
-        if name not in {"kb_dir", "on_event", "generation"}
+        if name not in {"kb_dir", "on_event", "generation", "storage"}
     }
     record = UsageRequest(
         **values,
@@ -187,6 +197,9 @@ def begin_request(
         stage=stage,
         started_at=_now(),
     )
+    if scope.storage is not None:
+        scope.storage.begin(record)
+        return identity
     with (
         usage_scope_lifecycle(scope),
         atomic_record_lock(scope.kb_dir / ".ultrakb/usage/ledger.lock"),
@@ -215,6 +228,17 @@ def finish_request(
         return
     try:
         with usage_scope_lifecycle(scope):
+            if scope.storage is not None:
+                scope.storage.finish(
+                    identity,
+                    response,
+                    state=state,
+                    observation=observation,
+                    terminal=terminal,
+                    send_status=send_status,
+                    business_state=business_state,
+                )
+                return
             _finish_request(
                 identity,
                 response,

@@ -140,7 +140,7 @@ def record_phase_event(
 ) -> str | None:
     """Retain a new observation; reporting failure cannot replay paid work."""
     scope = scope or active_scope()
-    if scope is None:
+    if scope is None or scope.storage is not None:
         return None
     instant = at or start_observation()
     try:
@@ -150,7 +150,7 @@ def record_phase_event(
             **{
                 name: getattr(scope, name)
                 for name in UsageScope.__dataclass_fields__
-                if name not in {"kb_dir", "on_event", "generation"}
+                if name not in {"kb_dir", "on_event", "generation", "storage"}
             },
             event_id=event_id or instant.event_id,
             event=event,

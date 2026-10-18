@@ -121,6 +121,15 @@ class ExecutionStore:
                 raise KeyError(model_budget_id)
             return ModelBudget(*row)
 
+    def status(self, execution_id: str) -> str:
+        with storage_stage(self.root, self.identity, read_only=True) as db:
+            row = db.connection.execute(
+                "SELECT state FROM ukb_executions WHERE execution_id = ?", (execution_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(execution_id)
+            return row[0]
+
     def start_stage(
         self,
         execution_id: str,
@@ -217,9 +226,16 @@ class ExecutionStore:
                 ).rowcount
             )
 
-    def finish(self, execution_id: str, *, state: str) -> bool:
+    def finish(self, execution_id: str, *, state: str, work_settled: bool = False) -> bool:
+        """The controller can attest settled work despite missing stage observations.
+
+        An open stage otherwise blocks termination. This attestation belongs only
+        after actual SDK/worker cleanup, never to a timeout or a stop request.
+        """
         if state not in {"completed", "failed", "cancelled", "interrupted"}:
             raise ValueError("Invalid terminal execution state")
+        if type(work_settled) is not bool:
+            raise ValueError("Execution cleanup requires an explicit settled-work attestation")
         timestamp, monotonic, clock_id = now(), time.monotonic(), _clock_id()
         with storage_stage(self.root, self.identity) as db, db.transaction() as connection:
             row = connection.execute(
@@ -231,11 +247,14 @@ class ExecutionStore:
                 raise KeyError(execution_id)
             if row[2] not in {"started", "stopping"} or row[3] != self.identity.generation:
                 return False
-            if connection.execute(
-                "SELECT 1 FROM ukb_stage_attempts WHERE execution_id = ? AND state = 'started' "
-                "LIMIT 1",
-                (execution_id,),
-            ).fetchone():
+            if (
+                not work_settled
+                and connection.execute(
+                    "SELECT 1 FROM ukb_stage_attempts WHERE execution_id = ? AND state = 'started' "
+                    "LIMIT 1",
+                    (execution_id,),
+                ).fetchone()
+            ):
                 raise ValueError("Execution still has active stages; wait for worker cleanup")
             duration = monotonic - row[1] if row[0] == clock_id and state != "interrupted" else None
             connection.execute(
