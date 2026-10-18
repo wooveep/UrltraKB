@@ -788,3 +788,37 @@ pass. No live model service was called. The public factory and adapters remain
 on the prior format until joint integration and P6-P8 acceptance are complete.
 Full generator writers, compiler integration and maintained output retirement
 remain outstanding; this batch does not close issue #164.
+
+### Graph reads and independently accepted graph output
+
+The actual graph reader now resolves selected main-store Markdown pages rather
+than scanning the mutable wiki. Manifest queries page names without opening
+binary assets; graph construction retains the existing node/link algorithm.
+A fixed-publication witness replaces the working wiki with a symlink to unrelated
+pages and advances the knowledge head: both selected graph nodes and links still
+come from the original publication.
+
+The development graph generation path creates a distinct `generate_graph` task
+and execution with a zero model-call budget. It records actual versioned collect,
+render, artifact acceptance and projection stages. Model settings and credentials
+are unnecessary for this deterministic operation. The lifecycle remains held;
+neither an ingest lease nor a reclaim lease spans pure HTML rendering. Accepted
+HTML uses the same output-epoch and exact-request acknowledgement protocol as
+the real model writer, with that protocol shared in one application helper.
+
+Graph results distinguish retained revisions, applied copies and confirmation
+gaps. A filesystem or stage/execution receipt failure cannot erase an accepted
+HTML result or a retained conflict candidate. Conflict remains the primary
+classification while a separate confirmation flag reports failed cleanup.
+Stopping before artifact acceptance leaves no output head; stopping after
+acceptance retains the original and records a cancelled execution. Stage
+admission now shares the central active-generation check inside its existing
+transaction, atomically mapping durable stop to cancellation.
+
+Ten new local storage cases cover these boundaries, including the conflict plus
+receipt-failure combination. Both review axes verified the fixes. Related
+regressions pass 290 tests (33 live tests deselected), including six native Qt
+cases; mypy (495 modules), ruff, format and diff checks pass. No live model service
+was called. Compiler and remaining generator integration, full task observability
+and maintenance, adapter activation and the overall issue closure gate remain
+outstanding.

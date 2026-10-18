@@ -7,6 +7,7 @@ from importlib import resources
 from pathlib import Path
 
 from ultrakb import frontmatter
+from ultrakb.knowledge_scope import KnowledgeScope, read_wiki_bytes
 from ultrakb.lint import _extract_wikilinks, _normalize_target
 from ultrakb.schema import PAGE_CONTENT_DIRS
 
@@ -19,17 +20,34 @@ def _type_for_dir(sub: str) -> str:
     return _DIR_TYPE.get(sub) or (sub[:-1] if sub.endswith("s") else sub).capitalize() or sub
 
 
-def build_graph(wiki_dir: Path) -> dict:
+def _page_paths(wiki_dir, sub, scope):
+    if scope is not None and scope.knowledge is not None:
+        after = None
+        while True:
+            paths = scope.knowledge.file_page(prefix=sub + "/", after=after)
+            yield from (path for path in paths if path.endswith(".md") and path.count("/") == 1)
+            if len(paths) < 63:
+                return
+            after = paths[-1]
+    else:
+        yield from (
+            path.relative_to(wiki_dir).as_posix() for path in sorted((wiki_dir / sub).glob("*.md"))
+        )
+
+
+def build_graph(wiki_dir: Path, *, scope: KnowledgeScope | None = None) -> dict:
     """Collect nodes (pages), directed edges (wikilinks), and the set of types."""
     nodes: dict[str, dict] = {}
     texts: dict[str, str] = {}  # nid -> file text, read once and reused for edges
     for sub in PAGE_CONTENT_DIRS:
-        d = wiki_dir / sub
-        if not d.exists():
-            continue
-        for p in sorted(d.glob("*.md")):
-            nid = f"{sub}/{p.stem}"
-            text = p.read_text(encoding="utf-8")
+        for path in _page_paths(wiki_dir, sub, scope):
+            name = Path(path).stem
+            nid = f"{sub}/{name}"
+            text = (
+                read_wiki_bytes(scope, path).decode("utf-8")
+                if scope is not None
+                else (wiki_dir / path).read_text(encoding="utf-8")
+            )
             texts[nid] = text
             fm = frontmatter.parse(text)
             t = fm.get("type")
@@ -45,7 +63,7 @@ def build_graph(wiki_dir: Path) -> dict:
                 srcs.insert(0, ft.strip())
             nodes[nid] = {
                 "id": nid,
-                "label": p.stem,
+                "label": name,
                 "type": t,
                 "description": desc,
                 "sources": srcs,

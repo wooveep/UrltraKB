@@ -168,12 +168,7 @@ class ExecutionStore:
         stage_id, timestamp, monotonic = uuid4().hex, now(), time.monotonic()
         clock_id = _clock_id()
         with storage_stage(self.root, self.identity) as db, db.transaction() as connection:
-            execution = connection.execute(
-                "SELECT state, generation FROM ukb_executions WHERE execution_id = ?",
-                (execution_id,),
-            ).fetchone()
-            if execution != ("started", self.identity.generation):
-                raise ValueError("A stage requires an active execution in this generation")
+            require_active_execution(connection, self.identity, execution_id)
             if parent_stage_id is not None:
                 parent = connection.execute(
                     "SELECT execution_id, state FROM ukb_stage_attempts WHERE stage_attempt_id = ?",

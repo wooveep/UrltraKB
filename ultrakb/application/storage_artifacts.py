@@ -2,6 +2,7 @@
 
 import zipfile
 from pathlib import PurePosixPath
+from uuid import uuid4
 
 from ultrakb.knowledge_scope import resolve_scope
 from ultrakb.storage.artifact_store import ArtifactStore
@@ -9,6 +10,27 @@ from ultrakb.storage.coordination import storage_stage
 from ultrakb.storage.wiki_paths import wiki_path
 
 from .artifacts import Artifact, ArtifactPage
+
+
+def commit_artifact(
+    store, path, payload, *, expected_epoch, execution_id, evidence_publication_id, check_cancelled
+):
+    """Confirm a lost acknowledgement against this exact independently saved request."""
+    identity = uuid4().hex
+    request = {
+        "expected_epoch": expected_epoch,
+        "execution_id": execution_id,
+        "evidence_publication_id": evidence_publication_id,
+    }
+    try:
+        return store.save(
+            path, payload, **request, revision_id=identity, check_cancelled=check_cancelled
+        )
+    except Exception:
+        revision = store.committed_write(identity, path=path, payload=payload, **request)
+        if revision is None:
+            raise
+        return revision
 
 
 def artifact_catalog(root, scope, *, after, epoch, limit):

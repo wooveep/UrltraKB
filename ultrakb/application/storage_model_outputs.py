@@ -6,7 +6,6 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import asdict
 from threading import RLock
-from uuid import uuid4
 
 from ultrakb.locks import LockCancelled
 from ultrakb.mutation import RecoveryRequired
@@ -104,28 +103,19 @@ class _StorageWriter:
     def _write_artifact(self, path, content):
         from ultrakb.artifact_history import history_write_allowed
 
+        from .storage_artifacts import commit_artifact
+
         if not history_write_allowed(self.scope.kb_dir / path):
             return "Access denied: archived artifact versions are read-only."
-        identity, payload = uuid4().hex, content.encode("utf-8")
-        request = {
-            "expected_epoch": self.artifact_epoch,
-            "execution_id": self.execution_id,
-            "evidence_publication_id": self.scope.knowledge.publication_id,
-        }
-        try:
-            revision = self.artifacts.save(
-                path,
-                payload,
-                **request,
-                revision_id=identity,
-                check_cancelled=self.check_cancelled,
-            )
-        except Exception:
-            revision = self.artifacts.committed_write(
-                identity, path=path, payload=payload, **request
-            )
-            if revision is None:
-                raise
+        revision = commit_artifact(
+            self.artifacts,
+            path,
+            content.encode("utf-8"),
+            expected_epoch=self.artifact_epoch,
+            execution_id=self.execution_id,
+            evidence_publication_id=self.scope.knowledge.publication_id,
+            check_cancelled=self.check_cancelled,
+        )
         if revision.status == "conflict":
             self.artifact_outputs += ({**asdict(revision), "projection": None},)
             raise RecoveryRequired("Artifacts changed; review the retained artifact candidate")

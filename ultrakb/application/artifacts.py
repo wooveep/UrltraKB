@@ -8,7 +8,7 @@ from collections.abc import Iterator
 from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
-from typing import BinaryIO
+from typing import TYPE_CHECKING, BinaryIO
 
 from ultrakb.application.execution import ExecutionContext
 from ultrakb.application.file_state import contained_paths
@@ -16,6 +16,9 @@ from ultrakb.config import _is_kb_dir
 from ultrakb.knowledge_scope import KnowledgeScope, reading_scope, resolve_scope
 from ultrakb.locks import atomic_write_text, kb_ingest_lock, kb_read_lock
 from ultrakb.mutation import mutation_scope
+
+if TYPE_CHECKING:
+    from ultrakb.storage.artifact_store import ArtifactProjection, ArtifactRevision
 
 
 def _artifact_path(kb_dir: Path, relative: str) -> Path:
@@ -248,7 +251,7 @@ def read_graph(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> dict:
 
     selected = resolve_scope(kb_dir, scope)
     with reading_scope(selected):
-        graph = build_graph(selected.wiki_dir)
+        graph = build_graph(selected.wiki_dir, scope=selected)
         if selected.publication_id is not None:
             graph["publication_id"] = selected.publication_id
         return graph
@@ -264,6 +267,11 @@ def graph_html(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> str:
 class GraphResult:
     graph: dict
     path: Path | None = None
+    artifact_revision: ArtifactRevision | None = None
+    projection: ArtifactProjection | None = None
+    execution_id: str | None = None
+    reason_code: str | None = None
+    confirmation_pending: bool = False
 
 
 def generate_graph(
@@ -272,6 +280,10 @@ def generate_graph(
     from ultrakb.visualize import build_graph, render_html
 
     kb_dir = kb_dir.resolve()
+    if scope is not None and scope.knowledge is not None:
+        from .storage_graph import generate_stored_graph
+
+        return generate_stored_graph(kb_dir, resolve_scope(kb_dir, scope), context)
     with kb_ingest_lock(
         kb_dir / ".ultrakb",
         cancelled=context.cancelled if context else None,
