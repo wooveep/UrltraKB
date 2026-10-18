@@ -104,7 +104,14 @@ def _committed_result(store, identity, attempt_id, message, execution_id, scope)
     from .stored_session_history import restored_answer_citations
 
     values["citations"] = restored_answer_citations(scope, values.get("citations"))
-    for key in ("resources", "changes", "unfinished", "image_coverage", "diagnostics"):
+    for key in (
+        "resources",
+        "changes",
+        "unfinished",
+        "image_coverage",
+        "diagnostics",
+        "artifact_outputs",
+    ):
         values[key] = tuple(values.get(key, ()))
     if values.get("projection") is not None:
         from ultrakb.storage.wiki_projection import ProjectionResult

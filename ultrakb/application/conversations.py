@@ -53,6 +53,7 @@ class AnswerResult:
     reason_code: str | None = None
     citations: dict | None = None
     diagnostics: tuple[str, ...] = ()
+    artifact_outputs: tuple[dict, ...] = ()
 
 
 def _with_image_receipt(operation):

@@ -706,3 +706,49 @@ verified the batch. Related storage, question/session, adapter, citation, legacy
 tool, mutation and module-size regressions pass 252 tests (33 live tests
 deselected), including six native Qt cases. Full mypy (491 modules), ruff,
 format and diff checks pass. No live model service was called.
+
+### Independent generated artifact bytes and projections
+
+The same development model writer now accepts `output/` text artifacts into
+the main store and CAS before replacing their editable copies. Schema 12 adds
+immutable artifact revisions tied to the actual execution and evidence
+publication, a single expected output epoch, and per-file current/applied
+projection state. These records serve the actual `write_file` tool and shared
+`read_artifact` use case; they are not a general file repository or journal
+framework. Concurrent output writers retain a conflict candidate instead of
+overwriting a newer accepted output. The writer advances only its private output
+epoch after its own acceptance.
+
+Raw artifact reads use accepted immutable bytes, independently of missing,
+outdated or externally edited working files. An explicit revision selects the
+exact saved or conflicting original. Projection compares the last confirmed
+applied digest, preserves detected external differences, and rejects an obsolete
+revision after another head has advanced. An I/O or confirmation failure returns
+pending synchronization after master acceptance. Only an applied HTML copy
+returns the tool success phrase that emits a preview card. This retains the
+same best-effort limits against arbitrary external filesystem races as other
+digest-before-replace working-copy checks.
+Before replacement, synchronization durably activates the exact possible target
+and its validated physical baseline. These remain recognizable across newer
+heads until confirmation, including a crash before replacement or after a prior
+replacement whose SQL receipt failed. Never-activated accepted content cannot
+authorize replacing different external bytes. File and full parent-chain
+durability is checked on every retry before clearing the pending activation.
+
+Each artifact operation has an exact request identity for lost-reply recovery,
+including bytes, expected epoch, execution and evidence publication. Immutable
+receipt replay does not advance the epoch again or accept changed arguments.
+The final transaction checks the execution's durable stop and runtime generation;
+restored stores reject old execution callbacks while retaining readable original
+artifact bytes. Turn failure leaves accepted artifacts intact, and accepting the
+retained complete answer does not repeat those writes or model sends.
+
+Eleven new local SDK/storage cases cover these boundaries. Artifact directory
+browsing, archives/export, all generator entry points, output-version retirement,
+and full restored working-copy synchronization still need integration. These
+capabilities remain development-only and do not satisfy the complete issue gate.
+Both review axes verified the durability and activation recovery fixes. Related
+storage, application, conversation, citation, legacy tool, mutation and size
+regressions pass 267 tests (33 live tests deselected), including six native Qt
+cases. Full mypy (493 modules), ruff, format and diff checks pass. No live model
+service was called.

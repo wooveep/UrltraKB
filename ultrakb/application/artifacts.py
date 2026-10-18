@@ -79,7 +79,34 @@ def artifact_files(kb_dir: Path, relative: str) -> tuple[str, ...]:
         return tuple(file.relative_to(kb_dir).as_posix() for file in files)
 
 
-def read_artifact(kb_dir: Path, relative: str) -> str:
+def read_artifact(
+    kb_dir: Path,
+    relative: str,
+    *,
+    scope: KnowledgeScope | None = None,
+    revision_id: str | None = None,
+) -> str:
+    if scope is not None and scope.knowledge is not None:
+        from ultrakb.knowledge_scope import read_wiki_bytes
+        from ultrakb.storage.artifact_store import ArtifactStore
+        from ultrakb.storage.wiki_paths import wiki_path
+
+        scope = resolve_scope(kb_dir, scope)
+        assert scope.knowledge is not None
+        wiki_path(relative)
+        if relative.startswith("output/"):
+            return (
+                ArtifactStore(scope.kb_dir, scope.knowledge.identity)
+                .read(relative, revision_id=revision_id)
+                .decode("utf-8")
+            )
+        if revision_id is not None:
+            raise ValueError("Select an exact output artifact revision")
+        if relative.startswith(("wiki/explorations/", "wiki/reports/")):
+            return read_wiki_bytes(scope, relative.removeprefix("wiki/")).decode("utf-8")
+        raise ValueError("Select a generated artifact or a saved report")
+    if revision_id is not None:
+        raise ValueError("Artifact revision reads require a main-store scope")
     with kb_read_lock(kb_dir / ".ultrakb"):
         path = _artifact_path(kb_dir, relative)
         if not path.is_file():

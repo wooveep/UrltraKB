@@ -4,10 +4,13 @@ import hashlib
 import sqlite3
 from contextlib import contextmanager
 from contextvars import ContextVar
+from dataclasses import asdict
 from threading import RLock
+from uuid import uuid4
 
 from ultrakb.locks import LockCancelled
 from ultrakb.mutation import RecoveryRequired
+from ultrakb.storage.artifact_store import ArtifactStore
 from ultrakb.storage.knowledge_store import KnowledgeStore
 from ultrakb.storage.wiki_paths import wiki_path
 
@@ -22,6 +25,9 @@ class _StorageWriter:
         self.execution_id = execution_id
         self.guard, self.active, self.failure, self.latest = RLock(), True, None, None
         self.accepted = None
+        self.artifacts = ArtifactStore(scope.kb_dir, scope.knowledge.identity)
+        self.artifact_epoch = self.artifacts.epoch()
+        self.artifact_outputs = ()
 
     def settle(self):
         with self.guard:
@@ -30,9 +36,10 @@ class _StorageWriter:
                 raise self.failure
 
     def publication_fields(self):
+        fields = {"artifact_outputs": self.artifact_outputs}
         if self.latest is None:
-            return {}
-        return {
+            return fields
+        return fields | {
             "result_publication_id": self.accepted.publication.publication_id
             if self.accepted
             else None,
@@ -50,6 +57,15 @@ class _StorageWriter:
             if scope != self.scope:
                 raise ValueError("Model output belongs to another fixed knowledge scope")
             self.check_cancelled()
+            if path.startswith("output/"):
+                try:
+                    return self._write_artifact(path, content)
+                except (RecoveryRequired, LockCancelled) as error:
+                    self.failure = error
+                    raise
+                except (OSError, sqlite3.Error) as error:
+                    self.failure = RecoveryRequired("The artifact commit needs confirmation")
+                    raise self.failure from error
             relative = path.removeprefix("wiki/")
             before = self.base.files().get(relative)
             payload = content.encode("utf-8")
@@ -85,6 +101,54 @@ class _StorageWriter:
                 raise self.failure from error
             return f"Written: {path}"
 
+    def _write_artifact(self, path, content):
+        from ultrakb.artifact_history import history_write_allowed
+
+        if not history_write_allowed(self.scope.kb_dir / path):
+            return "Access denied: archived artifact versions are read-only."
+        identity, payload = uuid4().hex, content.encode("utf-8")
+        request = {
+            "expected_epoch": self.artifact_epoch,
+            "execution_id": self.execution_id,
+            "evidence_publication_id": self.scope.knowledge.publication_id,
+        }
+        try:
+            revision = self.artifacts.save(
+                path,
+                payload,
+                **request,
+                revision_id=identity,
+                check_cancelled=self.check_cancelled,
+            )
+        except Exception:
+            revision = self.artifacts.committed_write(
+                identity, path=path, payload=payload, **request
+            )
+            if revision is None:
+                raise
+        if revision.status == "conflict":
+            self.artifact_outputs += ({**asdict(revision), "projection": None},)
+            raise RecoveryRequired("Artifacts changed; review the retained artifact candidate")
+        self.artifact_epoch = revision.epoch
+        resource = str(self.scope.kb_dir / path)
+        self.outputs.resources = tuple(dict.fromkeys((*self.outputs.resources, resource)))
+        self.outputs.changes = tuple(dict.fromkeys((*self.outputs.changes, f"saved: {path}")))
+        projection = self.artifacts.sync(
+            path, revision_id=revision.revision_id, check_cancelled=self.check_cancelled
+        )
+        self.artifact_outputs += (
+            {
+                **asdict(revision),
+                "projection": projection.status,
+                "error_code": projection.error_code,
+            },
+        )
+        return (
+            f"Written: {path}"
+            if projection.status == "applied"
+            else f"Saved: {path}; file synchronization is {projection.status}."
+        )
+
 
 _writer: ContextVar[_StorageWriter | None] = ContextVar("storage_model_output_writer", default=None)
 
@@ -107,8 +171,8 @@ def write_storage_model_output(scope, path, content):
         wiki_path(path)
     except ValueError:
         return "Access denied: output requires a logical relative file path."
-    if not path.startswith("wiki/explorations/"):
-        return "Access denied: this storage writer accepts wiki/explorations/ notes."
+    if not path.startswith(("wiki/explorations/", "output/")):
+        return "Access denied: output requires wiki/explorations/ or output/ files."
     if not isinstance(content, str):
         return "Access denied: output content must be text."
     writer = _writer.get()
