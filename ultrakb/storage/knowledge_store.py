@@ -10,6 +10,9 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
+from pydantic import TypeAdapter
+
+from ultrakb.source_records import RecordId
 from ultrakb.storage.blobs import Blob, put_blob, read_bytes, retain_blob
 from ultrakb.storage.coordination import storage_stage
 from ultrakb.storage.database import DatabaseIdentity
@@ -104,13 +107,28 @@ class BoundKnowledge:
                 ).fetchall()
             )
 
+    def index_revisions(self) -> tuple[str, ...]:
+        with storage_stage(self.root, self.identity, read_only=True) as db:
+            rows = db.connection.execute(
+                "SELECT i.index_revision_id FROM ukb_publications p JOIN ukb_revision_indexes i "
+                "ON i.revision_id = p.revision_id WHERE p.publication_id = ? "
+                "AND p.revision_id = ? AND p.view_id = ? ORDER BY i.index_revision_id",
+                (self.publication_id, self.publication.revision_id, self.publication.view_id),
+            ).fetchall()
+            return tuple(row[0] for row in rows)
+
 
 class KnowledgeStore:
     def __init__(self, root: Path, identity: DatabaseIdentity):
         self.root, self.identity = root.resolve(), identity
 
     def prepare_revision(
-        self, files: dict[str, bytes], *, expected: str | None, view_id: str = "legacy"
+        self,
+        files: dict[str, bytes],
+        *,
+        expected: str | None,
+        view_id: str = "legacy",
+        index_revisions: tuple[str, ...] = (),
     ) -> PreparedRevision:
         if (
             not isinstance(view_id, str)
@@ -124,13 +142,21 @@ class KnowledgeStore:
             _path(path)
             if not isinstance(payload, bytes):
                 raise ValueError("Revision content must be immutable bytes")
+        if not isinstance(index_revisions, tuple) or len(set(index_revisions)) != len(
+            index_revisions
+        ):
+            raise ValueError("A revision requires distinct immutable index identities")
+        for index_id in index_revisions:
+            TypeAdapter(RecordId).validate_python(index_id)
         revision_id, publication_id = uuid.uuid4().hex, uuid.uuid4().hex
         with storage_stage(self.root, self.identity) as db:
             entries = []
             for path, payload in sorted(files.items()):
                 blob = put_blob(db, payload)
                 entries.append([path, blob.digest, blob.byte_count])
-            manifest = put_blob(db, _manifest(entries))
+            manifest = put_blob(
+                db, _manifest({"files": entries, "indexes": sorted(index_revisions)})
+            )
             prepared = PreparedRevision(
                 revision_id, publication_id, view_id, expected, manifest.digest
             )
@@ -140,6 +166,24 @@ class KnowledgeStore:
                     (revision_id, publication_id, view_id, expected, manifest.digest),
                 )
                 retain_blob(connection, "knowledge-revision", revision_id, "manifest", manifest)
+            for start in range(0, len(index_revisions), 63):
+                index_batch = index_revisions[start : start + 63]
+                with db.transaction() as connection:
+                    for index_id in index_batch:
+                        ready = connection.execute(
+                            "SELECT 1 FROM ukb_index_revisions i JOIN ukb_tree_builds t "
+                            "ON t.tree_id = i.tree_id WHERE i.index_revision_id = ? "
+                            "AND t.state = 'ready' AND t.protocol = 'document'",
+                            (index_id,),
+                        ).fetchone()
+                        if not ready:
+                            raise ValueError(
+                                "Knowledge requires complete accepted document indexes"
+                            )
+                        connection.execute(
+                            "INSERT INTO ukb_revision_indexes VALUES (?, ?)",
+                            (revision_id, index_id),
+                        )
             # Each batch is prepared before the short transaction begins.
             for batch in _batches(entries):
                 with db.transaction() as connection:
@@ -176,7 +220,16 @@ class KnowledgeStore:
                     (revision_id,),
                 ).fetchall()
             ]
-            if hashlib.sha256(_manifest(persisted)).hexdigest() != prepared.manifest_digest:
+            retained_indexes = [
+                row[0]
+                for row in db.connection.execute(
+                    "SELECT index_revision_id FROM ukb_revision_indexes WHERE revision_id = ? "
+                    "ORDER BY index_revision_id",
+                    (revision_id,),
+                ).fetchall()
+            ]
+            sealed_manifest = _manifest({"files": persisted, "indexes": retained_indexes})
+            if hashlib.sha256(sealed_manifest).hexdigest() != prepared.manifest_digest:
                 raise ValueError("Sealed revision manifest does not match its entries")
             for _, digest, byte_count in persisted:
                 if len(read_bytes(db, digest)) != byte_count:

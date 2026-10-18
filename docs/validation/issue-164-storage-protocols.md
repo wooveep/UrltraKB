@@ -223,3 +223,37 @@ issue, in particular:
 
 Passing these isolated foundation tests cannot substitute for those gates or
 justify closing the total specification.
+
+### Shared ConDB trees and document index revisions
+
+The development schema now embeds ConDB schema 2. Borrowed SDK connections
+preserve the owner's transactions, row factory and PRAGMAs. Entity identities
+and every entity join are scoped to their tree. Prepared actual SDK rows commit
+in batches capped at 63 items and 256 KiB, including content-reference rows.
+Large entity and node-attribute JSON lives in CAS and is resolved by the SDK;
+the complete original document, pages and source locators remain readable.
+Draft rows cannot be moved into a sealed or ready tree. Seal verification
+compares all rows, content references and the exact manifest outside SQL writes.
+
+Ready index revisions bind a unit revision and content fingerprint. Multiple
+knowledge publications retain the same accepted index without copying its tree.
+Unbound tree retirement resumes across bounded calls, deleting deepest nodes
+before entities and removing each content reference with its owning row. Real
+SDK block retrieval over a borrowed connection and large CAS content is covered
+with provider responses injected at the model boundary; no live-model claim is
+made. Ready knowledge navigation and application integration remain outstanding.
+
+The repeatable synthetic calibration is `python -m scripts.verify_shared_storage
+--nodes 5000 --directory . --output /tmp/shared-storage.json`. It creates and
+removes a fresh disposable store; it does not inspect existing KB data. On the
+same Python/SQLite runtime, the workspace filesystem is btrfs, while `/tmp` is
+tmpfs. A real document tree with 5,000 navigation nodes built in 0.526 seconds.
+Across 164 build transactions, held time p95/maximum was 2.432/5.893 ms.
+Of 500 concurrent receipt updates, 41 began during the build; their full callback
+latency p95/maximum was 59.894/192.909 ms. Overall receipt transaction wait
+p95/maximum was 0.035/189.811 ms. The WAL reached 4,449,632 bytes.
+Retirement used 160 calls, at most 87 tree rows per call, with call latency
+p95/maximum 4.957/9.789 ms. No timeout, failure or remaining orphan tree occurred.
+This calibrates protocol bounds on synthetic local data; representative
+1k/5k/20k ledgers, ranking latency, end-to-end overhead and the other issue
+performance gates still require validation.

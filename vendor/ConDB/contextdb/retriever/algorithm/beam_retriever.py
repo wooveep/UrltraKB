@@ -398,7 +398,7 @@ class BeamRetriever(BaseRetriever):
 
     def _tree_max_depth(self, tree_id: str) -> int:
         """Fetch the deepest node depth in this tree (upper bound for steps)."""
-        cursor = self.storage.conn.cursor()
+        cursor = self.storage.cursor()
         cursor.execute("SELECT MAX(depth) AS max_depth FROM nodes WHERE tree_id=?", (tree_id,))
         row = cursor.fetchone()
         return row["max_depth"] if row and row["max_depth"] is not None else 0

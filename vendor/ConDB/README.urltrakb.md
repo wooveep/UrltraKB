@@ -1,6 +1,6 @@
 # ConDB 本地源码基线
 
-分发名 `pageindex-condb`，导入名 `contextdb`，本地版本 `1.0+urltrakb.6`。固定上游及原文件摘要见 [UPSTREAM.json](UPSTREAM.json)。
+分发名 `pageindex-condb`，导入名 `contextdb`，本地版本 `1.0+urltrakb.7`。固定上游及原文件摘要见 [UPSTREAM.json](UPSTREAM.json)。
 
 本地补丁加入无损文档转换、共享原生 TreeDB、保存点事务、稳定顺序和封存只读。文档及节点的原始对象完整保留，定位字段维持各自单位，不猜测为 PDF 页。存储/转换不调用模型。查询运行时及 UltraKB 检索/会话接入另行实施。
 
@@ -10,12 +10,12 @@
 `chat` / `chat_with_cache` 通过真实 LiteLLM 1.87.2 HTTP 往返验证工具、缓存、异常及 usage；
 依赖从上游约束调整为项目固定版本，未通过降低 OpenAI 或 Agents SDK 版本绕过冲突。
 
-### 存储契约（ConDB schema 1）
+### 存储契约（ConDB schema 2）
 
 `ConDB(storage=db)` 与 `ContextTree(storage=db)` 共用原生 TreeDB，由调用者负责关闭。
 `with db.transaction():` 可组合树与业务表写入；嵌套使用 SQLite SAVEPOINT，绝不提前提交外层事务。
 `db.checkpoint()` 在无活动事务时截断 WAL 并执行完整性检查；随后 `db.close()`，再复制主文件。
-`TreeDB(path, read_only=True)` 只打开已封存 schema 1，使用 immutable/ro URI，不创建表、WAL 或迁移。
+`TreeDB(path, read_only=True)` 只打开已封存 schema 2，使用 immutable/ro URI，不创建表、WAL 或迁移。
 缺失文件、未知/旧 schema、未 checkpoint 的 WAL 显式失败。新节点路径按显式插入顺序编码，source node_id 保留。
 文档需有 doc_name、有序 structure、唯一 node_id、title 和显式定位；未知 JSON 扩展随完整 document/source 对象保留。
 
@@ -32,3 +32,14 @@
 本地 `.5` 为每次 beam 排序的 rank 参数声明实际候选 ID 枚举，供共享适配器在采信前严格验证候选身份。
 
 本地 `.6` 让会话 beam 只返回 exchange，主题仅作导航；排序输入携带已验证角色策略下的消息摘录（最多 2,000 字符）和半开轮次定位。完整消息仍保存在实体中，UltraKB 回读用户原文时在选中轮次之间分配既有 2,000 token 预算。新模板不改变文档或文件系统检索提示；现有会话投影可直接读取，无须因发行版本变化重建检查点。
+
+本地 `.7` 将实体主键改为 `(tree_id, entity_id)`，所有实体查询和删除限定本树，不迁移 schema 1。
+ConDB 用独立 `condb_schema` 记录 schema 2；独立运行的文件仍同时校验自身 user_version。
+`TreeDB.initialize_schema(connection)` 仅在调用者事务中显式建表，不提交或修改 PRAGMA。
+`TreeDB(connection=connection)` 只校验已建 schema，不关闭、提交、修改连接 row_factory 或全库设置；
+借用连接上的写入须有调用者事务，checkpoint 只允许连接拥有者执行。
+`ConDB.prepare` 在写入前完成实际 SDK 转换和编码，宿主可按行数及编码字节分批提交这些行。
+大实体和大节点属性由宿主保存在不可变 CAS，JSON 中的版本化字符串引用经宿主 content_reader 回读；
+独立 SDK 的载荷仍为完整 JSON 对象，所有检索路径均支持宿主解析。根导航属性不重复 pages，
+完整原始页文仍由 document 实体保留。输入、metadata 和节点 attrs 均要求 JSON 对象。
+UltraKB 另行管理 draft/sealed/ready 和回收状态，借用 SDK 不承担业务主库的初始化或维护。

@@ -742,16 +742,16 @@ class BlockRetrieverFilesystemSupport:
             "slot": row["slot"],
             "depth": row["depth"],
             "path": row["path"],
-            "attrs_json": row["attrs_json"],
+            "attrs_json": self.storage.resolve_json(row["attrs_json"]),
         }
         if row["attrs_json"]:
-            node["attrs"] = json.loads(row["attrs_json"])
+            node["attrs"] = json.loads(self.storage.resolve_json(row["attrs_json"]))
         if row["payload_json"]:
-            node["entity"] = {"payload": json.loads(row["payload_json"])}
+            node["entity"] = {"payload": json.loads(self.storage.resolve_json(row["payload_json"]))}
         return self._remember_fs_node(tree_id, node)
 
     _NODE_QUERY = """SELECT n.node_id, n.parent_id, n.slot, n.depth, n.path, n.attrs_json, e.payload_json
-                     FROM nodes n LEFT JOIN entities e ON n.entity_id = e.entity_id"""
+                     FROM nodes n LEFT JOIN entities e ON n.tree_id = e.tree_id AND n.entity_id = e.entity_id"""
 
     def _get_nodes_by_ids(self, tree_id: str, node_ids: list[str]) -> list[dict]:
         if not node_ids:
@@ -768,7 +768,7 @@ class BlockRetrieverFilesystemSupport:
                 seen_missing.add(node_id)
                 missing.append(node_id)
 
-        cursor = self.storage.conn.cursor()
+        cursor = self.storage.cursor()
         for i in range(0, len(missing), 500):
             chunk = missing[i:i + 500]
             placeholders = ",".join("?" for _ in chunk)
@@ -786,7 +786,7 @@ class BlockRetrieverFilesystemSupport:
         if cached is not None:
             return list(cached)
 
-        cursor = self.storage.conn.cursor()
+        cursor = self.storage.cursor()
         cursor.execute(
             f"{self._NODE_QUERY} WHERE n.tree_id = ? AND n.parent_id = ? ORDER BY n.slot",
             (tree_id, node_id),

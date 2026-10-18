@@ -27,6 +27,8 @@ class CollectionPreview:
     protected_count: int
     protected_bytes: int
     has_more: bool
+    candidate_trees: int = 0
+    protected_trees: int = 0
 
 
 @dataclass(frozen=True)
@@ -34,6 +36,8 @@ class CollectionResult:
     status: str
     deleted_count: int = 0
     deleted_bytes: int = 0
+    trees_deleted: int = 0
+    tree_rows_deleted: int = 0
 
 
 def _limits(max_items, max_bytes):
@@ -130,13 +134,28 @@ class Maintenance:
     def preview(self, *, max_items: int = 128, max_bytes: int = 64 * 1024 * 1024):
         _limits(max_items, max_bytes)
         with storage_stage(self.root, self.identity, read_only=True) as db:
-            rows, has_more = _candidates(db, max_items, max_bytes)
+            from .tree_reclamation import tree_candidates
+
+            trees = tree_candidates(db, max_items + 1)
+            tree_count = min(len(trees), max_items)
+            rows, has_more = _candidates(db, max_items - tree_count, max_bytes)
+            protected_trees = db.connection.execute(
+                "SELECT count(*) FROM ukb_tree_builds b WHERE EXISTS "
+                "(SELECT 1 FROM ukb_tree_refs r WHERE r.tree_id = b.tree_id) OR EXISTS "
+                "(SELECT 1 FROM ukb_index_revisions i WHERE i.tree_id = b.tree_id)"
+            ).fetchone()[0]
             protected = db.connection.execute(
                 "SELECT count(*), coalesce(sum(byte_count), 0) FROM ukb_blobs b WHERE EXISTS "
                 "(SELECT 1 FROM ukb_blob_refs r WHERE r.digest = b.digest)"
             ).fetchone()
             return CollectionPreview(
-                len(rows), sum(size for _, size in rows), protected[0], protected[1], has_more
+                len(rows),
+                sum(size for _, size in rows),
+                protected[0],
+                protected[1],
+                has_more or len(trees) > max_items,
+                tree_count,
+                protected_trees,
             )
 
     def collect(self, *, max_items: int = 128, max_bytes: int = 64 * 1024 * 1024):
@@ -144,8 +163,12 @@ class Maintenance:
         with try_reclamation(self.root, self.identity) as db:
             if db is None:
                 return CollectionResult("busy")
+            from .tree_reclamation import reclaim_trees
+
+            trees_deleted, tree_rows_deleted = reclaim_trees(db, max_items=max_items)
             # A preview's candidates are deliberately never accepted as deletion authority.
-            rows, _ = _candidates(db, max_items, max_bytes)
+            blob_limit = 0 if tree_rows_deleted and not trees_deleted else max_items - trees_deleted
+            rows, _ = _candidates(db, blob_limit, max_bytes)
             deleted_count = deleted_bytes = 0
             for digest, byte_count in rows:
                 with db.transaction() as connection:
@@ -166,7 +189,9 @@ class Maintenance:
                     )
                 deleted_count += 1
                 deleted_bytes += byte_count
-            return CollectionResult("completed", deleted_count, deleted_bytes)
+            return CollectionResult(
+                "completed", deleted_count, deleted_bytes, trees_deleted, tree_rows_deleted
+            )
 
     def backup(self, destination: Path) -> DatabaseIdentity:
         destination = destination.resolve()

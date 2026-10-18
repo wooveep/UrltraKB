@@ -63,7 +63,8 @@ class DocumentTreeAdapter(BaseAdapter):
         }
         return {
             "node_id": "__document__", "type": "object", "entity_id": "__document__",
-            "attrs": {k: copy.deepcopy(v) for k, v in document_json.items() if k != "structure"},
+            "attrs": {k: copy.deepcopy(v) for k, v in document_json.items()
+                      if k not in {"structure", "pages"}},
             "children": [extract(node, i) for i, node in enumerate(document_json["structure"])],
         }, entities
 

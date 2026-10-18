@@ -9,6 +9,7 @@ from typing import Any, Optional
 from contextdb.adapter.base import ChatIndexAdapter, DocumentTreeAdapter, GenericAdapter
 from contextdb.api._shared import build_strategy_retriever, namespace_entities
 from contextdb.core.storage import TreeDB
+from contextdb.core.prepared import PreparedTree, prepare_tree
 from contextdb.llm import LLMClient, LLMProtocol
 from contextdb.retriever import (
     BaseRetriever,
@@ -70,12 +71,18 @@ class ConDB:
     # ── Store ───────────────────────────────────────────────────────
 
     def store(self, data: dict, *, format: str = "pageindex", meta: dict = None) -> str:
+        return self.storage.ingest_prepared(self.prepare(data, format=format, meta=meta))
+
+    @staticmethod
+    def prepare(data: dict, *, format: str = "pageindex", meta: dict = None) -> PreparedTree:
+        """Convert and encode complete input before the host's first write batch."""
+        if not isinstance(data, dict) or meta is not None and not isinstance(meta, dict):
+            raise ValueError("Tree input and metadata must be JSON objects")
         adapter = _ADAPTERS.get(format)
         if adapter is None:
             raise ValueError(f"Unknown format: {format!r}. Use: {list(_ADAPTERS)}")
         tree, entities = adapter.convert(data)
-        tree, entities = namespace_entities(tree, entities)
-        return self.storage.ingest_tree(tree, entities=entities, meta=meta)
+        return prepare_tree(tree, entities=entities, meta=meta)
 
     # ── LLM ─────────────────────────────────────────────────────────
 
@@ -180,7 +187,7 @@ class ConDB:
         if (root and root.entity_type == "conversation"
                 and payload.get("kind") == "topic" and isinstance(payload.get("basis"), dict)):
             return "conversation"
-        cur = self.storage.conn.cursor()
+        cur = self.storage.cursor()
         cur.execute("SELECT meta_json FROM trees WHERE tree_id = ?", (tree_id,))
         row = cur.fetchone()
         if not row or not row["meta_json"]:
@@ -192,7 +199,7 @@ class ConDB:
         return "filesystem" if meta.get("source") == "filesystem" else "document"
 
     def _pick_strategy(self, tree_id: str) -> str:
-        cur = self.storage.conn.cursor()
+        cur = self.storage.cursor()
         cur.execute("SELECT COUNT(*) AS c FROM nodes WHERE tree_id = ?", (tree_id,))
         count = cur.fetchone()["c"]
         if count <= 50:
@@ -203,7 +210,7 @@ class ConDB:
 
     def tree_info(self, tree_id: str) -> dict[str, Any]:
         self._check_tree(tree_id)
-        cur = self.storage.conn.cursor()
+        cur = self.storage.cursor()
         cur.execute("SELECT * FROM trees WHERE tree_id = ?", (tree_id,))
         tree = cur.fetchone()
         cur.execute("SELECT COUNT(*) AS c, MAX(depth) AS d FROM nodes WHERE tree_id = ?", (tree_id,))
@@ -234,7 +241,7 @@ class ConDB:
     # ── Manage ──────────────────────────────────────────────────────
 
     def list_trees(self) -> list[dict[str, Any]]:
-        cur = self.storage.conn.cursor()
+        cur = self.storage.cursor()
         cur.execute("""
             SELECT t.tree_id, t.meta_json, t.created_at, COUNT(n.node_id) AS node_count
             FROM trees t LEFT JOIN nodes n ON t.tree_id = n.tree_id
@@ -251,7 +258,7 @@ class ConDB:
         ]
 
     def has_tree(self, tree_id: str) -> bool:
-        cur = self.storage.conn.cursor()
+        cur = self.storage.cursor()
         cur.execute("SELECT 1 FROM trees WHERE tree_id = ?", (tree_id,))
         return cur.fetchone() is not None
 

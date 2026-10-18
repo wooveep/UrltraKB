@@ -895,7 +895,7 @@ class BlockRetriever(BlockRetrieverFilesystemSupport, BlockRetrieverPromptCacheS
         if not missing:
             return {node_id: path_map[node_id] for node_id in node_ids if node_id in path_map}
 
-        cursor = self.storage.conn.cursor()
+        cursor = self.storage.cursor()
         chunk_size = 500
 
         for i in range(0, len(missing), chunk_size):

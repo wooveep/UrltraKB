@@ -121,14 +121,14 @@ class BlockCutter:
 
     def _get_nodes_at_depth_range(self, tree_id: str, depth_start: int, depth_end: int) -> list[dict]:
         """Get all nodes within a depth range with their entities."""
-        cursor = self.storage.conn.cursor()
+        cursor = self.storage.cursor()
         cursor.execute(
             """
             SELECT n.node_id, n.parent_id, n.slot, n.node_type, n.depth, n.path,
                    n.entity_type, n.entity_id, n.attrs_json,
                    e.payload_json
             FROM nodes n
-            LEFT JOIN entities e ON n.entity_id = e.entity_id
+            LEFT JOIN entities e ON n.tree_id = e.tree_id AND n.entity_id = e.entity_id
             WHERE n.tree_id = ? AND n.depth >= ? AND n.depth <= ?
             ORDER BY n.path
         """,
@@ -146,12 +146,12 @@ class BlockCutter:
                 "path": row["path"],
                 "entity_type": row["entity_type"],
                 "entity_id": row["entity_id"],
-                "attrs_json": row["attrs_json"],
+                "attrs_json": self.storage.resolve_json(row["attrs_json"]),
             }
             if row["payload_json"]:
-                node_dict["entity"] = {"payload": json.loads(row["payload_json"])}
+                node_dict["entity"] = {"payload": json.loads(self.storage.resolve_json(row["payload_json"]))}
             if row["attrs_json"]:
-                node_dict["attrs"] = json.loads(row["attrs_json"])
+                node_dict["attrs"] = json.loads(self.storage.resolve_json(row["attrs_json"]))
             nodes.append(node_dict)
 
         return nodes

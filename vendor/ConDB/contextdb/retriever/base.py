@@ -81,7 +81,7 @@ class ManualRetriever:
 
     def _resolve_node(self, tree_id: str, node_ref: str) -> Optional[str]:
         if hasattr(self.storage, "conn"):
-            cursor = self.storage.conn.cursor()
+            cursor = self.storage.cursor()
             cursor.execute("SELECT node_id FROM nodes WHERE tree_id = ? AND node_id = ?", (tree_id, node_ref))
             row = cursor.fetchone()
             if row:

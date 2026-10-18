@@ -193,13 +193,15 @@ def test_readonly_rejects_uncheckpointed_wal_and_malformed_schema(tmp_path):
     assert path.read_bytes() == before
 
 
-def test_reused_entity_identity_cannot_silently_replace_different_content(tmp_path):
+def test_entity_identity_is_local_to_a_tree_without_replacing_old_content(tmp_path):
     with TreeDB(str(tmp_path / "context.sqlite")) as db:
         tree = {"node_id": "root", "entity_id": "stable"}
         original = {"type": "text", "text": "original"}
         kept = db.ingest_tree(tree, {"stable": original})
-        with pytest.raises(ValueError, match="conflicting entity"):
-            db.ingest_tree(tree, {"stable": {"type": "text", "text": "changed"}})
+        changed = db.ingest_tree(tree, {"stable": {"type": "text", "text": "changed"}})
+        assert json.loads(db.get_entity(kept, "root").payload_json) == original
+        assert json.loads(db.get_entity(changed, "root").payload_json)["text"] == "changed"
+        db.delete_tree(changed)
         assert json.loads(db.get_entity(kept, "root").payload_json) == original
 
 

@@ -412,14 +412,14 @@ class LegacyBlockRetriever(BaseRetriever):
     # ---- DB helpers ----
 
     def _get_subtree_nodes(self, tree_id, node_id):
-        cursor = self.storage.conn.cursor()
+        cursor = self.storage.cursor()
         cursor.execute("SELECT path FROM nodes WHERE tree_id = ? AND node_id = ?", (tree_id, node_id))
         row = cursor.fetchone()
         if not row:
             return []
         cursor.execute(
             """SELECT n.node_id, n.parent_id, n.depth, n.path, n.attrs_json, e.payload_json
-               FROM nodes n LEFT JOIN entities e ON n.entity_id = e.entity_id
+               FROM nodes n LEFT JOIN entities e ON n.tree_id = e.tree_id AND n.entity_id = e.entity_id
                WHERE n.tree_id = ? AND n.path LIKE ? AND n.node_id != ?
                ORDER BY n.path""",
             (tree_id, row[0] + "%", node_id),
@@ -427,10 +427,10 @@ class LegacyBlockRetriever(BaseRetriever):
         return [self._row_to_node(r) for r in cursor.fetchall()]
 
     def _get_direct_children_nodes(self, tree_id, node_id):
-        cursor = self.storage.conn.cursor()
+        cursor = self.storage.cursor()
         cursor.execute(
             """SELECT n.node_id, n.parent_id, n.depth, n.path, n.attrs_json, e.payload_json
-               FROM nodes n LEFT JOIN entities e ON n.entity_id = e.entity_id
+               FROM nodes n LEFT JOIN entities e ON n.tree_id = e.tree_id AND n.entity_id = e.entity_id
                WHERE n.tree_id = ? AND n.parent_id = ?
                ORDER BY n.path""",
             (tree_id, node_id),
@@ -439,11 +439,11 @@ class LegacyBlockRetriever(BaseRetriever):
 
     def _row_to_node(self, row):
         node = {"node_id": row["node_id"], "parent_id": row["parent_id"],
-                "depth": row["depth"], "path": row["path"], "attrs_json": row["attrs_json"]}
+                "depth": row["depth"], "path": row["path"], "attrs_json": self.storage.resolve_json(row["attrs_json"])}
         if row["attrs_json"]:
-            node["attrs"] = json.loads(row["attrs_json"])
+            node["attrs"] = json.loads(self.storage.resolve_json(row["attrs_json"]))
         if row["payload_json"]:
-            node["entity"] = {"payload": json.loads(row["payload_json"])}
+            node["entity"] = {"payload": json.loads(self.storage.resolve_json(row["payload_json"]))}
         return node
 
     def _generate_content_from_nodes(self, nodes, compact_ids=None):

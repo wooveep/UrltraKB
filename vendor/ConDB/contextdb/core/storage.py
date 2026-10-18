@@ -6,10 +6,12 @@ import threading
 from contextlib import contextmanager
 from pathlib import Path
 from dataclasses import dataclass
-from typing import Any, Optional, Protocol, runtime_checkable
+from typing import Any, Callable, Optional, Protocol, runtime_checkable
 
 from contextdb.logger import get_logger
 from .json_values import validate_json
+from .schema import SCHEMA, SCHEMA_VERSION
+from .prepared import PreparedTree
 
 log = get_logger(__name__)
 
@@ -54,6 +56,7 @@ class Node:
 
 @dataclass
 class Entity:
+    tree_id: str
     entity_id: str
     entity_type: str
     payload_json: str
@@ -113,14 +116,22 @@ class TreeDB:
     LEAF = 2
     _IN_QUERY_CHUNK_SIZE = 500
 
-    SCHEMA_VERSION = 1
+    SCHEMA_VERSION = SCHEMA_VERSION
 
-    def __init__(self, db_path: str = "treedb.sqlite", *, read_only: bool = False):
+    def __init__(self, db_path: str = "treedb.sqlite", *, read_only: bool = False,
+                 connection: Optional[sqlite3.Connection] = None,
+                 content_reader: Optional[Callable[[str], str]] = None):
         self._transaction_lock = threading.RLock()
         self._savepoint_number = 0
         self._closed = False
         self.read_only = read_only
         self.db_path = str(db_path)
+        self._owns_connection = connection is None
+        self._content_reader = content_reader
+        if connection is not None:
+            self.conn = connection
+            self._validate_schema()
+            return
         if read_only:
             path = Path(db_path).resolve(strict=True)
             wal = Path(str(path) + "-wal")
@@ -146,60 +157,65 @@ class TreeDB:
         log.info(f"TreeDB opened: {db_path}")
 
     def _validate_schema(self):
+        try:
+            versions = [row[0] for row in self.cursor().execute("SELECT version FROM condb_schema")]
+        except sqlite3.OperationalError as error:
+            raise ValueError("Missing ConDB schema identity") from error
+        if versions != [self.SCHEMA_VERSION]:
+            raise ValueError("Unsupported ConDB schema identity")
         for table, record in (("trees", Tree), ("nodes", Node), ("entities", Entity)):
-            columns = {r[1] for r in self.conn.execute(f"PRAGMA table_info({table})")}
+            try:
+                columns = {r[0] for r in self.conn.execute(f"SELECT * FROM {table} LIMIT 0").description}
+            except sqlite3.OperationalError as error:
+                raise ValueError(f"Unsupported ConDB schema in {table}") from error
             if columns != set(record.__dataclass_fields__):
                 raise ValueError(f"Unsupported ConDB schema in {table}")
 
+    @staticmethod
+    def initialize_schema(connection: sqlite3.Connection):
+        """Explicit host-owned initialization; never commit or change host PRAGMAs."""
+        if not connection.in_transaction:
+            raise RuntimeError("ConDB schema initialization requires a caller transaction")
+        for statement in SCHEMA:
+            connection.execute(statement)
+
     def _init_schema(self):
+        self.conn.execute("PRAGMA journal_mode = WAL")
+        self.conn.execute("PRAGMA synchronous = FULL")
+        self.conn.execute("PRAGMA temp_store = MEMORY")
+        with self.transaction():
+            self.initialize_schema(self.conn)
+            self.conn.execute(f"PRAGMA user_version = {self.SCHEMA_VERSION}")
+
+    def cursor(self):
+        """Named rows without changing a borrowed connection's row factory."""
         cursor = self.conn.cursor()
-        cursor.execute("PRAGMA journal_mode = WAL")
-        cursor.execute("PRAGMA synchronous = NORMAL")
-        cursor.execute("PRAGMA temp_store = MEMORY")
+        cursor.row_factory = sqlite3.Row
+        return cursor
 
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS trees (
-                tree_id       TEXT PRIMARY KEY,
-                root_node_id  TEXT NOT NULL,
-                created_at    INTEGER NOT NULL,
-                updated_at    INTEGER NOT NULL,
-                meta_json     TEXT
-            )
-        """)
+    def resolve_json(self, encoded: Optional[str]) -> Optional[str]:
+        """Resolve host-retained entity or attribute JSON; standalone values stay inline."""
+        if encoded is None:
+            return None
+        value = json.loads(encoded)
+        if isinstance(value, str) and value.startswith("condb.sha256:"):
+            if self._content_reader is None:
+                raise ValueError("This tree requires its owning store's content reader")
+            digest = value.removeprefix("condb.sha256:")
+            if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+                raise ValueError("Invalid external content identity")
+            return self._content_reader(digest)
+        return encoded
 
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS nodes (
-                tree_id      TEXT NOT NULL,
-                node_id      TEXT NOT NULL,
-                parent_id    TEXT,
-                slot         TEXT,
-                node_type    INTEGER NOT NULL,
-                depth        INTEGER NOT NULL,
-                path         TEXT NOT NULL,
-                entity_type  TEXT,
-                entity_id    TEXT,
-                attrs_json   TEXT,
-                created_at   INTEGER NOT NULL,
-                updated_at   INTEGER NOT NULL,
-                PRIMARY KEY (tree_id, node_id)
-            )
-        """)
+    def _entity(self, row):
+        values = dict(row)
+        values["payload_json"] = self.resolve_json(values["payload_json"])
+        return Entity(**values)
 
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS entities (
-                entity_id    TEXT PRIMARY KEY,
-                entity_type  TEXT NOT NULL,
-                payload_json TEXT NOT NULL,
-                created_at   INTEGER NOT NULL
-            )
-        """)
-
-        cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS nodes_child_unique ON nodes(tree_id, parent_id, slot)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS nodes_path_idx ON nodes(tree_id, path)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS nodes_parent_idx ON nodes(tree_id, parent_id)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS nodes_entity_idx ON nodes(tree_id, entity_type, entity_id)")
-        cursor.execute(f"PRAGMA user_version = {self.SCHEMA_VERSION}")
-        self.conn.commit()
+    def _node(self, row):
+        values = dict(row)
+        values["attrs_json"] = self.resolve_json(values["attrs_json"])
+        return Node(**values)
 
     @contextmanager
     def transaction(self):
@@ -207,6 +223,11 @@ class TreeDB:
         if self.read_only:
             raise PermissionError("Sealed ConDB storage is read-only")
         with self._transaction_lock:
+            if not self._owns_connection:
+                if not self.conn.in_transaction:
+                    raise RuntimeError("Borrowed ConDB writes require a caller transaction")
+                yield self.conn
+                return
             self._savepoint_number += 1
             name = f"condb_{self._savepoint_number}"
             self.conn.execute(f"SAVEPOINT {name}")
@@ -228,7 +249,7 @@ class TreeDB:
         now = self._ts()
 
         with self.transaction():
-            cursor = self.conn.cursor()
+            cursor = self.cursor()
             cursor.execute(
                 "INSERT INTO trees (tree_id, root_node_id, created_at, updated_at, meta_json) VALUES (?, ?, ?, ?, ?)",
                 (tree_id, root_id, now, now, json.dumps(meta) if meta else None),
@@ -241,21 +262,21 @@ class TreeDB:
         return tree_id, root_id
 
     def get_node(self, tree_id: str, node_id: str) -> Optional[Node]:
-        cursor = self.conn.cursor()
+        cursor = self.cursor()
         cursor.execute("SELECT * FROM nodes WHERE tree_id = ? AND node_id = ?", (tree_id, node_id))
         row = cursor.fetchone()
-        return Node(**dict(row)) if row else None
+        return self._node(row) if row else None
 
     def get_children(self, tree_id: str, node_id: str) -> list[Node]:
-        cursor = self.conn.cursor()
+        cursor = self.cursor()
         cursor.execute("SELECT * FROM nodes WHERE tree_id = ? AND parent_id = ? ORDER BY path", (tree_id, node_id))
-        return [Node(**dict(row)) for row in cursor.fetchall()]
+        return [self._node(row) for row in cursor.fetchall()]
 
     def get_children_many(self, tree_id: str, node_ids: list[str]) -> dict[str, list[Node]]:
         """Fetch several sibling lists while preserving slot order within each parent."""
         unique_ids = list(dict.fromkeys(node_ids))
         result: dict[str, list[Node]] = {node_id: [] for node_id in unique_ids}
-        cursor = self.conn.cursor()
+        cursor = self.cursor()
 
         for start in range(0, len(unique_ids), self._IN_QUERY_CHUNK_SIZE):
             chunk = unique_ids[start:start + self._IN_QUERY_CHUNK_SIZE]
@@ -269,7 +290,7 @@ class TreeDB:
                 [tree_id, *chunk],
             )
             for row in cursor.fetchall():
-                node = Node(**dict(row))
+                node = self._node(row)
                 result[node.parent_id].append(node)
         return result
 
@@ -277,7 +298,7 @@ class TreeDB:
         self, tree_id: str, node_id: str, max_depth: int = 100, with_entities: bool = False
     ) -> list[dict[str, Any]]:
         log.debug(f"get_subtree: {node_id[:8]} depth={max_depth}")
-        cursor = self.conn.cursor()
+        cursor = self.cursor()
         cursor.execute("SELECT path, depth FROM nodes WHERE tree_id = ? AND node_id = ?", (tree_id, node_id))
         root_row = cursor.fetchone()
         if not root_row:
@@ -294,7 +315,7 @@ class TreeDB:
             (tree_id, node_id, tree_id, root_path + "/", root_path + "/\x7f", root_depth + max_depth),
         )
 
-        nodes = [Node(**dict(row)) for row in cursor.fetchall()]
+        nodes = [self._node(row) for row in cursor.fetchall()]
         if not with_entities:
             return [n.to_dict() for n in nodes]
 
@@ -306,9 +327,12 @@ class TreeDB:
         for start in range(0, len(entity_ids), self._IN_QUERY_CHUNK_SIZE):
             chunk = entity_ids[start:start + self._IN_QUERY_CHUNK_SIZE]
             placeholders = ",".join("?" for _ in chunk)
-            cursor.execute(f"SELECT * FROM entities WHERE entity_id IN ({placeholders})", chunk)
+            cursor.execute(
+                f"SELECT * FROM entities WHERE tree_id = ? AND entity_id IN ({placeholders})",
+                [tree_id, *chunk],
+            )
             ent_map.update(
-                (row["entity_id"], Entity(**dict(row)))
+                (row["entity_id"], self._entity(row))
                 for row in cursor.fetchall()
             )
 
@@ -321,24 +345,24 @@ class TreeDB:
         return result
 
     def get_entity(self, tree_id: str, node_id: str) -> Optional[Entity]:
-        cursor = self.conn.cursor()
+        cursor = self.cursor()
         cursor.execute(
             """
             SELECT e.*
             FROM nodes n
-            JOIN entities e ON n.entity_id = e.entity_id
+            JOIN entities e ON n.tree_id = e.tree_id AND n.entity_id = e.entity_id
             WHERE n.tree_id = ? AND n.node_id = ?
         """,
             (tree_id, node_id),
         )
         ent_row = cursor.fetchone()
-        return Entity(**dict(ent_row)) if ent_row else None
+        return self._entity(ent_row) if ent_row else None
 
     def get_entities(self, tree_id: str, node_ids: list[str]) -> dict[str, Optional[Entity]]:
         """Fetch entities for several nodes, keyed by each unique requested node ID."""
         unique_ids = list(dict.fromkeys(node_ids))
         result: dict[str, Optional[Entity]] = {node_id: None for node_id in unique_ids}
-        cursor = self.conn.cursor()
+        cursor = self.cursor()
 
         for start in range(0, len(unique_ids), self._IN_QUERY_CHUNK_SIZE):
             chunk = unique_ids[start:start + self._IN_QUERY_CHUNK_SIZE]
@@ -347,22 +371,23 @@ class TreeDB:
                 f"""
                 SELECT n.node_id AS source_node_id, e.*
                 FROM nodes n
-                JOIN entities e ON n.entity_id = e.entity_id
+                JOIN entities e ON n.tree_id = e.tree_id AND n.entity_id = e.entity_id
                 WHERE n.tree_id = ? AND n.node_id IN ({placeholders})
                 """,
                 [tree_id, *chunk],
             )
             for row in cursor.fetchall():
                 result[row["source_node_id"]] = Entity(
+                    tree_id=tree_id,
                     entity_id=row["entity_id"],
                     entity_type=row["entity_type"],
-                    payload_json=row["payload_json"],
+                    payload_json=self.resolve_json(row["payload_json"]),
                     created_at=row["created_at"],
                 )
         return result
 
     def get_root_id(self, tree_id: str) -> Optional[str]:
-        cursor = self.conn.cursor()
+        cursor = self.cursor()
         cursor.execute("SELECT root_node_id FROM trees WHERE tree_id = ?", (tree_id,))
         row = cursor.fetchone()
         return row["root_node_id"] if row else None
@@ -379,7 +404,7 @@ class TreeDB:
         validate_json(entities)
         root_id = tree_structure.get("node_id") or str(uuid.uuid4())
         now = self._ts()
-        cursor = self.conn.cursor()
+        cursor = self.cursor()
 
         with self.transaction():
             cursor.execute(
@@ -389,14 +414,17 @@ class TreeDB:
 
             for eid, payload in (entities or {}).items():
                 encoded = json.dumps(payload, allow_nan=False)
-                existing = cursor.execute("SELECT payload_json FROM entities WHERE entity_id = ?", (eid,)).fetchone()
+                existing = cursor.execute(
+                    "SELECT payload_json FROM entities WHERE tree_id = ? AND entity_id = ?",
+                    (tree_id, eid),
+                ).fetchone()
                 if existing:
                     if json.loads(existing[0]) != payload:
                         raise ValueError(f"conflicting entity identity: {eid}")
                 else:
                     cursor.execute(
-                        "INSERT INTO entities (entity_id, entity_type, payload_json, created_at) VALUES (?, ?, ?, ?)",
-                        (eid, payload.get("type", "unknown"), encoded, now),
+                        "INSERT INTO entities (tree_id, entity_id, entity_type, payload_json, created_at) VALUES (?, ?, ?, ?, ?)",
+                        (tree_id, eid, payload.get("type", "unknown"), encoded, now),
                     )
 
             def insert(
@@ -442,44 +470,36 @@ class TreeDB:
             log.info(f"ingest_tree: {tree_id[:8]}")
             return tree_id
 
-    def delete_tree(self, tree_id: str):
-        cursor = self.conn.cursor()
+    def ingest_prepared(self, prepared: PreparedTree) -> str:
+        """Standalone atomic save; hosts may instead commit prepared rows in batches."""
         with self.transaction():
-            cursor.execute(
-                "SELECT DISTINCT entity_id FROM nodes WHERE tree_id = ? AND entity_id IS NOT NULL",
-                (tree_id,),
-            )
-            entity_ids = [row["entity_id"] for row in cursor.fetchall()]
+            self.conn.execute("INSERT INTO trees VALUES (?, ?, ?, ?, ?)",
+                              (prepared.tree_id, prepared.root_id, prepared.timestamp,
+                               prepared.timestamp, prepared.meta_json))
+            self.conn.executemany("INSERT INTO entities VALUES (?, ?, ?, ?, ?)", prepared.entities)
+            self.conn.executemany("INSERT INTO nodes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                                  prepared.nodes)
+        return prepared.tree_id
 
+    def delete_tree(self, tree_id: str):
+        cursor = self.cursor()
+        with self.transaction():
             cursor.execute("DELETE FROM nodes WHERE tree_id = ?", (tree_id,))
+            cursor.execute("DELETE FROM entities WHERE tree_id = ?", (tree_id,))
             cursor.execute("DELETE FROM trees WHERE tree_id = ?", (tree_id,))
-
-            for i in range(0, len(entity_ids), 500):
-                chunk = entity_ids[i:i + 500]
-                placeholders = ",".join("?" for _ in chunk)
-                cursor.execute(
-                    f"""
-                    DELETE FROM entities
-                    WHERE entity_id IN ({placeholders})
-                      AND NOT EXISTS (
-                          SELECT 1
-                          FROM nodes
-                          WHERE nodes.entity_id = entities.entity_id
-                      )
-                    """,
-                    chunk,
-                )
 
             log.info(f"delete_tree: {tree_id[:8]}")
 
     def check_integrity(self):
-        result = [row[0] for row in self.conn.execute("PRAGMA integrity_check")]
+        result = [row[0] for row in self.cursor().execute("PRAGMA integrity_check")]
         if result != ["ok"]:
             raise ValueError(f"ConDB integrity check failed: {result}")
 
     def checkpoint(self):
         """Flush committed WAL contents before closing and copying the main file."""
         with self._transaction_lock:
+            if not self._owns_connection:
+                raise RuntimeError("Only the connection owner can checkpoint the database")
             if self.conn.in_transaction:
                 raise RuntimeError("Cannot seal a database with an active transaction")
             if not self.read_only:
@@ -490,7 +510,8 @@ class TreeDB:
 
     def close(self):
         if not self._closed:
-            self.conn.close()
+            if self._owns_connection:
+                self.conn.close()
             self._closed = True
             log.debug(f"TreeDB closed: {self.db_path}")
 

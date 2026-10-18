@@ -1843,7 +1843,7 @@ requires-dist = [
 
 [[package]]
 name = "pageindex-condb"
-version = "1.0+urltrakb.6"
+version = "1.0+urltrakb.7"
 source = { editable = "vendor/ConDB" }
 dependencies = [
     { name = "jinja2" },
