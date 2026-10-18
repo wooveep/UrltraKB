@@ -150,11 +150,16 @@ def file_write_lock(
         lease.release()
 
 
-def file_write_lock_held(path: Path) -> bool:
+def file_lock_held(path: Path, *, exclusive: bool = False) -> bool:
+    """Whether this thread and asyncio task own the requested file lease."""
     key = (path.resolve(), *_owner())
     with _LOCKS_GUARD:
         held = _HELD_LOCKS.get(key)
-        return bool(held and held[1])
+        return bool(held and (not exclusive or held[1]))
+
+
+def file_write_lock_held(path: Path) -> bool:
+    return file_lock_held(path, exclusive=True)
 
 
 class DelegatedWriteLease:
