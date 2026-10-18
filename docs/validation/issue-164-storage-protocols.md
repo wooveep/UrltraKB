@@ -174,13 +174,43 @@ These results validate the development foundation only. Both reviews retain
 the overall specification's incomplete status. No live model or complete
 three-entrypoint / packaged-runtime acceptance is claimed.
 
+### Catalog, pending work and independent execution receipts
+
+The next development batch retains complete input/sidecar manifests, accepted
+processing outputs and stable processing-unit targets. Identical source bytes
+and sidecars reuse the accepted input revision; processing fingerprints and
+worksheet keys remain independent of source content and queue ordinals.
+Persistent import intents retain the root budget and all previous attempts when
+retried, and reject changed source/unit targets before work starts.
+
+Execution records and model budgets precede requests. Receipt fields merge by
+their own observation versions, with unknown values preserved and sends never
+reverted to unsent. Indexed counter deltas commit with each request update;
+normal receipt callbacks do not scan the ledger. Accepted compile steps and
+received response bodies use independent CAS/reference commits. SQL failure or
+interrupted Blob retirement preserves a durable pending response packet, which
+explicit repair accepts without reserving another send.
+
+The focused storage suite now passes **39 tests**, including publication failure,
+repeated/late partial usage, unchanged retry budgets, interrupted retirement,
+response repair, and restored-generation rejection of old request/dispatch
+identities. `mypy ultrakb/storage` and focused ruff checks pass. Standards review
+identified the retirement fallback and shared-unlink utility correction; Spec
+review additionally identified restored callback generations and the need for
+an explicit request-to-stage-attempt binding. These corrections are included.
+
+This is still a development store: existing compiler checkpoint recovery modes,
+worker/application wiring, complete execution recovery and cross-entrypoint
+task details remain integration gates. The import discovery budget snapshot is
+durable, but discovery metering is not yet connected to this new queue.
+
 Before issue closure, implement and verify the remaining P0–P8 work from the
 issue, in particular:
 
 - ConDB borrowed connections, tree-local entities, bounded sealed tree builds
   and retirement; document/index revision and ready-navigation bindings.
-- Durable model budgets, send/response receipts, compile/index checkpoints,
-  incremental authoritative usage, stages, tasks and paginated task details.
+- Complete model-budget/receipt and compile/index-checkpoint integration,
+  incremental usage audit, stages, tasks and paginated task details.
 - Joint writer/reader/session/configuration integration through shared
   application use cases; fixed source/image resolvers and generation checks.
 - Persistent Wiki projection plans, application edit preconditions and external

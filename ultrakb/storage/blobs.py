@@ -89,7 +89,15 @@ def retain_blob(connection, owner_kind: str, owner_id: str, slot: str, blob: Blo
     """Called only by the owning business store inside its record transaction."""
     if not connection.in_transaction:
         raise RuntimeError("A reference must commit with its owning business record")
-    connection.execute(
-        "INSERT INTO ukb_blob_refs VALUES (?, ?, ?, ?)",
+    inserted = connection.execute(
+        "INSERT INTO ukb_blob_refs VALUES (?, ?, ?, ?) "
+        "ON CONFLICT(owner_kind, owner_id, slot) DO NOTHING",
         (owner_kind, owner_id, slot, blob.digest),
-    )
+    ).rowcount
+    if not inserted:
+        existing = connection.execute(
+            "SELECT digest FROM ukb_blob_refs WHERE owner_kind = ? AND owner_id = ? AND slot = ?",
+            (owner_kind, owner_id, slot),
+        ).fetchone()
+        if not existing or existing[0] != blob.digest:
+            raise ValueError("A retained reference slot cannot change its accepted content")

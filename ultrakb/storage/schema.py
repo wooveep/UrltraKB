@@ -1,5 +1,7 @@
 """Physical records with concrete owners; schema creation is explicit."""
 
+from .execution_schema import EXECUTION_SCHEMA
+
 SCHEMA = (
     """CREATE TABLE ukb_blobs (
         digest TEXT PRIMARY KEY CHECK (length(digest) = 64 AND digest NOT GLOB '*[^a-f0-9]*'),
@@ -30,9 +32,76 @@ SCHEMA = (
         source_id TEXT NOT NULL REFERENCES ukb_sources(source_id),
         ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
         manifest_digest TEXT NOT NULL REFERENCES ukb_blobs(digest),
+        state TEXT NOT NULL CHECK (state IN ('draft', 'sealed', 'ready')),
         UNIQUE (source_id, ordinal)
     )""",
-    "CREATE INDEX ukb_source_revisions_source ON ukb_source_revisions(source_id, ordinal DESC)",
+    "CREATE INDEX ukb_source_revisions_source "
+    "ON ukb_source_revisions(source_id, state, ordinal DESC)",
+    """CREATE TABLE ukb_processing_versions (
+        processing_id TEXT PRIMARY KEY,
+        source_revision_id TEXT NOT NULL REFERENCES ukb_source_revisions(revision_id),
+        fingerprint TEXT NOT NULL,
+        operation_id TEXT NOT NULL UNIQUE,
+        body_path TEXT NOT NULL,
+        manifest_digest TEXT NOT NULL REFERENCES ukb_blobs(digest),
+        decision_json TEXT NOT NULL CHECK (json_valid(decision_json)),
+        state TEXT NOT NULL CHECK (state IN ('draft', 'sealed', 'ready'))
+    )""",
+    "CREATE INDEX ukb_processing_source ON ukb_processing_versions(source_revision_id, state)",
+    """CREATE TABLE ukb_import_units (
+        unit_id TEXT PRIMARY KEY,
+        source_id TEXT NOT NULL REFERENCES ukb_sources(source_id),
+        unit_key TEXT NOT NULL,
+        doc_name TEXT NOT NULL UNIQUE,
+        target_revision_id TEXT REFERENCES ukb_unit_revisions(unit_revision_id),
+        generation INTEGER NOT NULL CHECK (generation >= 0),
+        UNIQUE (source_id, unit_key)
+    )""",
+    """CREATE TABLE ukb_unit_revisions (
+        unit_revision_id TEXT PRIMARY KEY,
+        unit_id TEXT NOT NULL REFERENCES ukb_import_units(unit_id),
+        processing_id TEXT NOT NULL REFERENCES ukb_processing_versions(processing_id),
+        generation INTEGER NOT NULL CHECK (generation > 0),
+        UNIQUE (unit_id, generation)
+    )""",
+    """CREATE TABLE ukb_import_groups (
+        root_import_id TEXT PRIMARY KEY,
+        generation TEXT NOT NULL,
+        budget_json TEXT NOT NULL CHECK (json_valid(budget_json)),
+        cancelled INTEGER NOT NULL DEFAULT 0 CHECK (cancelled IN (0, 1))
+    )""",
+    """CREATE TABLE ukb_import_intents (
+        sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+        intent_id TEXT NOT NULL UNIQUE,
+        root_import_id TEXT NOT NULL REFERENCES ukb_import_groups(root_import_id),
+        source_revision_id TEXT NOT NULL REFERENCES ukb_source_revisions(revision_id),
+        unit_revision_id TEXT REFERENCES ukb_unit_revisions(unit_revision_id),
+        work_key TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('import', 'discovery')),
+        status TEXT NOT NULL CHECK (status IN
+            ('pending', 'dispatched', 'started', 'completed', 'failed', 'blocked',
+             'interrupted', 'stopped', 'cancelled', 'stale')),
+        dispatch_id TEXT,
+        attempt_id TEXT,
+        UNIQUE (root_import_id, work_key)
+    )""",
+    "CREATE INDEX ukb_import_queue ON ukb_import_intents(status, sequence)",
+    "CREATE INDEX ukb_import_group ON ukb_import_intents(root_import_id, sequence)",
+    "CREATE INDEX ukb_import_group_status ON ukb_import_intents(root_import_id, status, sequence)",
+    """CREATE TABLE ukb_pending_attempts (
+        sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+        attempt_id TEXT NOT NULL UNIQUE,
+        intent_id TEXT NOT NULL REFERENCES ukb_import_intents(intent_id),
+        dispatch_id TEXT NOT NULL UNIQUE,
+        generation TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN
+            ('started', 'completed', 'failed', 'blocked', 'interrupted', 'stopped')),
+        publication_id TEXT REFERENCES ukb_publications(publication_id),
+        error_code TEXT,
+        started_at TEXT NOT NULL,
+        finished_at TEXT
+    )""",
+    "CREATE INDEX ukb_pending_attempt_intent ON ukb_pending_attempts(intent_id, sequence)",
     """CREATE TABLE ukb_conversations (
         session_id TEXT PRIMARY KEY,
         title TEXT NOT NULL,
@@ -100,4 +169,4 @@ SCHEMA = (
         view_id TEXT PRIMARY KEY,
         publication_id TEXT NOT NULL REFERENCES ukb_publications(publication_id)
     )""",
-)
+) + EXECUTION_SCHEMA
