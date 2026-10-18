@@ -10,6 +10,8 @@ from pathlib import Path
 from contextdb import ConDB, TreeDB
 
 from ultrakb.application.query_views import QuerySelection, read_selected_file
+from ultrakb.context.navigation_nodes import compact_navigation as _compact_navigation
+from ultrakb.context.navigation_nodes import source_nodes
 from ultrakb.lifecycle import current_generation
 from ultrakb.source_navigation import published_navigation
 
@@ -61,40 +63,6 @@ def selection_identity(selection: QuerySelection) -> dict:
     }
 
 
-def _leaf(title: str, reference: dict, native: dict) -> dict:
-    reference = {**reference, "native_location": native}
-    return {
-        "title": title,
-        "rel_path": title,
-        "is_dir": False,
-        "source_ref": reference,
-        "content": "Original source locator; reread before use.",
-    }
-
-
-def _indexed_nodes(structure: list[dict], reference: dict, kind: str) -> dict:
-    nodes = {}
-    for ordinal, node in enumerate(structure):
-        start, end = node.get("start_index"), node.get("end_index")
-        if type(start) is not int or type(end) is not int or not 1 <= start <= end:
-            raise ValueError("Published navigation has invalid native positions")
-        title = (
-            reference["doc_name"]
-            + " / "
-            + str(node.get("title", ""))
-            + " — navigation: "
-            + str(node.get("summary", ""))[:800]
-        )
-        children = _indexed_nodes(node.get("nodes", []), reference, kind)
-        key = str(node.get("node_id", ordinal))
-        nodes[key] = (
-            {"title": title, "rel_path": title, "is_dir": True, "children": children}
-            if children
-            else _leaf(title, reference, {kind: f"{start}-{end}"})
-        )
-    return nodes
-
-
 def knowledge_forest(selection: QuerySelection) -> dict:
     documents = {}
     for view in selection.views:
@@ -142,51 +110,12 @@ def knowledge_forest(selection: QuerySelection) -> dict:
                 or view.knowledge_revision_id,
                 **view.retained_source_status.get(path, {}),
             }
-            if path.endswith(".content.json"):
-                from ultrakb.text_source import read_text_selection
-
-                raw = json.loads(data)
-                source = read_text_selection(raw)
-                if source.get("block_count"):
-                    from ultrakb.block_package import read_block_selection
-
-                    nodes = _indexed_nodes(published.get("structure", []), reference, "blocks")
-                    if not nodes:
-                        nodes = {
-                            str(b["ordinal"]): _leaf(
-                                doc_name + " / " + b["content"][:400],
-                                reference,
-                                {"blocks": str(b["ordinal"])},
-                            )
-                            for b in read_block_selection(raw)["units"]
-                        }
-                else:
-                    nodes = _text_nodes(raw, reference)
-            elif path.endswith(".json"):
-                from ultrakb.source_pages import read_page_selection
-
-                raw = read_page_selection(json.loads(data))["units"]
-                nodes = _indexed_nodes(published.get("structure", []), reference, "pages")
-                if not nodes:
-                    nodes = {
-                        str(p["page"]): _leaf(
-                            doc_name
-                            + " / physical page "
-                            + str(p["page"])
-                            + " / "
-                            + p["content"][:500],
-                            reference,
-                            {"pages": str(p["page"])},
-                        )
-                        for p in raw
-                    }
-            else:
-                text = data.decode("utf-8")
-                nodes = {
-                    "source": _leaf(
-                        doc_name + " / " + text[:500], reference, {"chars": f"0:{len(text)}"}
-                    )
-                }
+            kind = (
+                "text"
+                if path.endswith(".content.json")
+                else ("pages" if path.endswith(".json") else "markdown")
+            )
+            nodes = source_nodes(data, kind, reference, published.get("structure", []))
             if nodes:
                 documents[fingerprint(reference)] = {
                     "title": doc_name,
@@ -200,47 +129,6 @@ def knowledge_forest(selection: QuerySelection) -> dict:
         "is_dir": True,
         "children": {key: _compact_navigation(doc) for key, doc in documents.items()},
     }
-
-
-def _compact_navigation(node: dict) -> dict:
-    """Keep every result locator and ancestor title, dropping unary structure only."""
-    node = dict(node)
-    if "children" in node:
-        node["children"] = {
-            key: _compact_navigation(child) for key, child in node["children"].items()
-        }
-    while node.get("is_dir") and not node.get("source_ref") and len(node.get("children", {})) == 1:
-        child = next(iter(node["children"].values()))
-        title = node["title"] + " / " + child["title"]
-        node = {**node, **child, "title": title, "rel_path": title}
-        if not child.get("children"):
-            node.pop("children", None)
-    return node
-
-
-def _text_nodes(raw: dict, reference: dict) -> dict:
-    text, nodes = raw["text"], {}
-    origins = raw.get("origins", [])
-    cells = [o for o in origins if o.get("sheet_cell")]
-    if cells:
-        for start in range(0, len(cells), 12):
-            chunk = cells[start : start + 12]
-            coordinates = [o["sheet_cell"]["cell"]["coordinate"] for o in chunk]
-            a, b = chunk[0]["normalized_span"][0], chunk[-1]["normalized_span"][1]
-            nodes[str(start)] = _leaf(
-                reference["doc_name"] + " / " + ",".join(coordinates) + " / " + text[a:b][:500],
-                reference,
-                {"cells": ",".join(coordinates)},
-            )
-    else:
-        for start in range(0, len(text), 4000):
-            end = min(len(text), start + 4000)
-            nodes[str(start)] = _leaf(
-                reference["doc_name"] + f" / chars {start}:{end} / " + text[start : start + 500],
-                reference,
-                {"chars": f"{start}:{end}"},
-            )
-    return nodes
 
 
 def ensure_projection(selection: QuerySelection, model_identity: dict) -> ProjectionIdentity:

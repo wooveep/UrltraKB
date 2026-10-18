@@ -49,6 +49,8 @@ SCHEMA = (
         body_path TEXT NOT NULL,
         manifest_digest TEXT NOT NULL REFERENCES ukb_blobs(digest),
         decision_json TEXT NOT NULL CHECK (json_valid(decision_json)),
+        source_path TEXT NOT NULL,
+        source_kind TEXT NOT NULL CHECK (source_kind IN ('markdown', 'text', 'pages')),
         state TEXT NOT NULL CHECK (state IN ('draft', 'sealed', 'ready'))
     )""",
         "CREATE INDEX ukb_processing_source ON ukb_processing_versions(source_revision_id, state)",
@@ -149,6 +151,7 @@ SCHEMA = (
         view_id TEXT NOT NULL,
         expected_publication TEXT,
         manifest_digest TEXT NOT NULL REFERENCES ukb_blobs(digest),
+        navigation_fingerprint TEXT NOT NULL,
         state TEXT NOT NULL CHECK (state IN ('draft', 'sealed', 'ready', 'published', 'retiring'))
     )""",
         """CREATE TABLE ukb_revision_files (

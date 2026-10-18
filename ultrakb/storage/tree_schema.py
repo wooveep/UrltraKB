@@ -25,20 +25,44 @@ TREE_SCHEMA = (
         unit_revision_id TEXT NOT NULL REFERENCES ukb_unit_revisions(unit_revision_id),
         tree_id TEXT NOT NULL UNIQUE REFERENCES ukb_tree_builds(tree_id),
         content_fingerprint TEXT NOT NULL,
+        UNIQUE (index_revision_id, unit_revision_id),
         UNIQUE (unit_revision_id, content_fingerprint)
     )""",
-    """CREATE TABLE ukb_revision_indexes (
+    """CREATE TABLE ukb_revision_inputs (
         revision_id TEXT NOT NULL REFERENCES ukb_knowledge_revisions(revision_id),
-        index_revision_id TEXT NOT NULL REFERENCES ukb_index_revisions(index_revision_id),
-        PRIMARY KEY (revision_id, index_revision_id)
+        unit_revision_id TEXT NOT NULL REFERENCES ukb_unit_revisions(unit_revision_id),
+        index_revision_id TEXT,
+        PRIMARY KEY (revision_id, unit_revision_id),
+        FOREIGN KEY (index_revision_id, unit_revision_id)
+            REFERENCES ukb_index_revisions(index_revision_id, unit_revision_id)
     )""",
-    """CREATE TRIGGER ukb_revision_indexes_draft BEFORE INSERT ON ukb_revision_indexes
+    """CREATE TABLE ukb_revision_navigation (
+        revision_id TEXT PRIMARY KEY REFERENCES ukb_knowledge_revisions(revision_id),
+        tree_id TEXT NOT NULL REFERENCES ukb_tree_builds(tree_id),
+        input_fingerprint TEXT NOT NULL
+    )""",
+    """CREATE TRIGGER ukb_navigation_identity BEFORE UPDATE ON ukb_revision_navigation
+        WHEN NEW.revision_id != OLD.revision_id OR NEW.input_fingerprint != OLD.input_fingerprint
+        BEGIN SELECT RAISE(ABORT, 'Navigation input identity is immutable'); END""",
+    *(
+        f"""CREATE TRIGGER ukb_navigation_ready_{operation.lower()}
+            BEFORE {operation} ON ukb_revision_navigation
+            WHEN NOT EXISTS (
+                SELECT 1 FROM ukb_knowledge_revisions r JOIN ukb_tree_builds t
+                ON t.tree_id = NEW.tree_id AND t.input_fingerprint = NEW.input_fingerprint
+                WHERE r.revision_id = NEW.revision_id
+                AND r.navigation_fingerprint = NEW.input_fingerprint
+                AND t.protocol = 'generic' AND t.state = 'ready')
+            BEGIN SELECT RAISE(ABORT, 'Navigation must match its ready tree and revision'); END"""
+        for operation in ("INSERT", "UPDATE")
+    ),
+    """CREATE TRIGGER ukb_revision_inputs_draft BEFORE INSERT ON ukb_revision_inputs
         WHEN NOT EXISTS (SELECT 1 FROM ukb_knowledge_revisions
                          WHERE revision_id = NEW.revision_id AND state = 'draft')
         BEGIN SELECT RAISE(ABORT, 'Sealed revision inputs are immutable'); END""",
-    """CREATE TRIGGER ukb_revision_indexes_no_update BEFORE UPDATE ON ukb_revision_indexes
+    """CREATE TRIGGER ukb_revision_inputs_no_update BEFORE UPDATE ON ukb_revision_inputs
         BEGIN SELECT RAISE(ABORT, 'Revision input bindings are immutable'); END""",
-    """CREATE TRIGGER ukb_revision_indexes_no_delete BEFORE DELETE ON ukb_revision_indexes
+    """CREATE TRIGGER ukb_revision_inputs_no_delete BEFORE DELETE ON ukb_revision_inputs
         WHEN NOT EXISTS (SELECT 1 FROM ukb_knowledge_revisions
                          WHERE revision_id = OLD.revision_id AND state = 'retiring')
         BEGIN SELECT RAISE(ABORT, 'Revision inputs must retire through reclamation'); END""",

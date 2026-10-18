@@ -56,6 +56,8 @@ class ProcessingVersion:
     body_path: str
     files: tuple[InputFile, ...]
     decision: ProcessingDecision
+    source_path: str
+    source_kind: str
 
 
 @dataclass(frozen=True)
@@ -243,6 +245,8 @@ class CatalogStore:
         files: dict[str, Path],
         *,
         body_path: str,
+        source_path: str | None = None,
+        source_kind: str = "markdown",
         fingerprint: str,
         operation_id: str,
         decision: ProcessingDecision,
@@ -258,11 +262,27 @@ class CatalogStore:
             raise ValueError("Processing requires a complete body, policy and operation identity")
         for path in files:
             InputFile(path, "0" * 64, 0, "main" if path == body_path else "sidecar")
+        source_path = source_path if source_path is not None else body_path
+        if (
+            not isinstance(source_path, str)
+            or source_path not in files
+            or not isinstance(source_kind, str)
+            or source_kind not in {"markdown", "text", "pages"}
+        ):
+            raise ValueError("Processing requires its retained normalized source and protocol")
         decision_json = decision.model_dump_json()
         if (
             len(
                 json.dumps(
-                    (revision_id, fingerprint, operation_id, body_path, decision_json),
+                    (
+                        revision_id,
+                        fingerprint,
+                        operation_id,
+                        body_path,
+                        decision_json,
+                        source_path,
+                        source_kind,
+                    ),
                     ensure_ascii=False,
                 ).encode()
             )
@@ -288,22 +308,32 @@ class CatalogStore:
                     [file.__dict__ for file in captured], ensure_ascii=False, sort_keys=True
                 ).encode(),
             )
-            expected = (revision_id, fingerprint, body_path, manifest.digest, decision_json)
+            expected = (
+                revision_id,
+                fingerprint,
+                body_path,
+                manifest.digest,
+                decision_json,
+                source_path,
+                source_kind,
+            )
             with db.transaction() as connection:
                 existing = connection.execute(
                     "SELECT processing_id, source_revision_id, fingerprint, body_path, "
-                    "manifest_digest, decision_json, state FROM ukb_processing_versions "
+                    "manifest_digest, decision_json, source_path, source_kind, state "
+                    "FROM ukb_processing_versions "
                     "WHERE operation_id = ?",
                     (operation_id,),
                 ).fetchone()
-                if existing and existing[1:6] != expected:
+                if existing and existing[1:8] != expected:
                     raise CatalogConflict(
                         "The processing operation already accepted different inputs"
                     )
                 processing_id = existing[0] if existing else uuid.uuid4().hex
                 if not existing:
                     connection.execute(
-                        "INSERT INTO ukb_processing_versions VALUES (?, ?, ?, ?, ?, ?, ?, 'draft')",
+                        "INSERT INTO ukb_processing_versions "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')",
                         (
                             processing_id,
                             revision_id,
@@ -312,14 +342,16 @@ class CatalogStore:
                             body_path,
                             manifest.digest,
                             decision_json,
+                            source_path,
+                            source_kind,
                         ),
                     )
                     retain_blob(
                         connection, "processing-version", processing_id, "manifest", manifest
                     )
-            if existing and existing[6] == "ready":
+            if existing and existing[8] == "ready":
                 return self._processing(db, processing_id)
-            if not existing or existing[6] == "draft":
+            if not existing or existing[8] == "draft":
                 for batch in file_batches(captured):
                     with db.transaction() as connection:
                         state = connection.execute(
@@ -366,7 +398,8 @@ class CatalogStore:
     @staticmethod
     def _processing(db, processing_id):
         row = db.connection.execute(
-            "SELECT source_revision_id, fingerprint, body_path, manifest_digest, decision_json "
+            "SELECT source_revision_id, fingerprint, body_path, manifest_digest, decision_json, "
+            "source_path, source_kind "
             "FROM ukb_processing_versions WHERE processing_id = ? AND state = 'ready'",
             (processing_id,),
         ).fetchone()
@@ -378,6 +411,8 @@ class CatalogStore:
         files = tuple(InputFile(**value) for value in values)
         if sum(file.kind == "main" and file.path == row[2] for file in files) != 1:
             raise ValueError("Processing manifest is missing its exact main body")
+        if row[5] not in {file.path for file in files}:
+            raise ValueError("Processing manifest is missing its exact normalized source")
         return ProcessingVersion(
             processing_id,
             row[0],
@@ -385,6 +420,8 @@ class CatalogStore:
             row[2],
             files,
             ProcessingDecision.model_validate_json(row[4]),
+            row[5],
+            row[6],
         )
 
     def processing(self, processing_id: str) -> ProcessingVersion:

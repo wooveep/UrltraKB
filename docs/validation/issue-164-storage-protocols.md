@@ -36,16 +36,18 @@ not ordinary reading; that application repair entry point remains outstanding.
 `CatalogStore.admit` gives each source its own identity and retains the original
 file as an immutable CAS Blob. The input manifest contains logical relative
 paths, byte counts, kinds and digests. `read_original` does not consult the
-external input path. The current factory accepts one main file; sidecar,
-normalization, processing-unit and pending-job admission still need integration.
+external input path. Processing versions retain full output/sidecar manifests,
+an explicit normalized-source path/protocol, and stable processing-unit targets.
+These interfaces still need application admission integration.
 
 `KnowledgeStore.prepare_revision` prepares content and manifest Blobs, commits
 bounded draft batches, seals, validates outside a write transaction, and marks
 the exact sealed object ready. `publish` checks the expected publication and
 atomically advances the public head. `bind` returns immutable publication reads;
 later publications do not change their content or images. Published history is
-retained. The ready-navigation, source-target, import-attempt and projection-plan
-bindings required for production publication are not implemented here yet.
+retained. Every candidate prebuilds and retains ready deterministic navigation,
+including an explicit empty tree. Source-target, import-attempt and projection-plan
+bindings required for production publication remain outstanding.
 
 `SessionStore` retains complete immutable exchanges. Each accepted CTree
 checkpoint is independently committed. `session_codec` saves every SDK snapshot
@@ -207,8 +209,8 @@ durable, but discovery metering is not yet connected to this new queue.
 Before issue closure, implement and verify the remaining P0–P8 work from the
 issue, in particular:
 
-- ConDB borrowed connections, tree-local entities, bounded sealed tree builds
-  and retirement; document/index revision and ready-navigation bindings.
+- Representative tree/ledger calibration and complete publication preconditions
+  beyond the development ConDB, index and ready-navigation interfaces.
 - Complete model-budget/receipt and compile/index-checkpoint integration,
   incremental usage audit, stages, tasks and paginated task details.
 - Joint writer/reader/session/configuration integration through shared
@@ -241,7 +243,23 @@ Unbound tree retirement resumes across bounded calls, deleting deepest nodes
 before entities and removing each content reference with its owning row. Real
 SDK block retrieval over a borrowed connection and large CAS content is covered
 with provider responses injected at the model boundary; no live-model claim is
-made. Ready knowledge navigation and application integration remain outstanding.
+made. Application integration remains outstanding.
+
+Every candidate binds all selected processing units and document indexes,
+prepares navigation before sealing, and verifies its exact ready tree before
+publication. Navigation fingerprints contain fixed revision/publication and
+input identities, schema/content policy and file digests; no execution model or
+endpoint participates. Reads open only the retained tree. Missing bindings
+raise `recovery_required`; `KnowledgeStore.repair_navigation` explicitly rebuilds
+the same deterministic input and refuses a changed policy or manifest. Original
+page, block, cell and character navigation policies share one pure assembler
+with the existing application path. Tests cover empty navigation without write
+side effects, retained page positions after external deletion, explicit repair,
+and fixed historical short-source processing inputs.
+Spec review additionally found that positive index ranges could still exceed
+their retained source. Index acceptance and navigation preparation now validate
+complete page/block coverage against the fixed original ordinals, rejecting
+out-of-range or gapped intervals before they become public.
 
 The repeatable synthetic calibration is `python -m scripts.verify_shared_storage
 --nodes 5000 --directory . --output /tmp/shared-storage.json`. It creates and

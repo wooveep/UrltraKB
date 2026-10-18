@@ -6,8 +6,10 @@ from uuid import uuid4
 
 from pydantic import TypeAdapter
 
+from ultrakb.context.navigation_nodes import validate_index_positions
 from ultrakb.source_records import Digest, RecordId
 
+from .catalog_store import CatalogStore
 from .coordination import storage_stage
 from .database import DatabaseIdentity
 from .tree_store import TreeStore, retain_tree
@@ -49,6 +51,16 @@ class IndexStore:
                 raise KeyError(unit_revision_id)
         # The build commits independently; publication or binding failure cannot undo it.
         with storage_stage(self.root, self.identity) as db:
+            if not isinstance(document, dict) or not isinstance(document.get("structure"), list):
+                raise ValueError("An index requires a complete document and ordered structure")
+            catalog = CatalogStore(self.root, self.identity)
+            unit = catalog.unit_revision(unit_revision_id)
+            processing = catalog.processing(unit.processing_id)
+            validate_index_positions(
+                catalog.read_processed(processing.processing_id, processing.source_path),
+                processing.source_kind,
+                document["structure"],
+            )
             tree = TreeStore(self.root, self.identity).build(
                 document, protocol="document", input_fingerprint=content_fingerprint
             )

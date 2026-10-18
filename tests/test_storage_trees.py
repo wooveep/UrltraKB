@@ -102,7 +102,8 @@ def test_ready_document_index_is_shared_by_publications_and_retains_full_source(
     assert store.find(unit.unit_revision_id, content_fingerprint="a" * 64) == accepted
     from ultrakb.storage.maintenance import Maintenance
 
-    assert Maintenance(root, identity).preview().protected_trees == 1
+    # One reusable document tree and each publication's immutable navigation.
+    assert Maintenance(root, identity).preview().protected_trees == 3
     Maintenance(root, identity).collect()
     assert store.document(accepted.index_revision_id) == source
 

@@ -7,6 +7,7 @@ additionally needs its ready navigation, import-attempt and Wiki sync bindings.
 import hashlib
 import json
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -16,6 +17,14 @@ from ultrakb.source_records import RecordId
 from ultrakb.storage.blobs import Blob, put_blob, read_bytes, retain_blob
 from ultrakb.storage.coordination import storage_stage
 from ultrakb.storage.database import DatabaseIdentity
+from ultrakb.storage.navigation_store import (
+    RecoveryRequired,
+    bind_navigation,
+    prepare_navigation,
+    require_navigation,
+    resolve_inputs,
+)
+from ultrakb.storage.tree_store import TreeStore
 
 MAX_BATCH_ROWS = 128
 MAX_BATCH_BYTES = 256 * 1024
@@ -33,6 +42,7 @@ class PreparedRevision:
     view_id: str
     expected_publication: str | None
     manifest_digest: str
+    navigation_fingerprint: str
 
 
 @dataclass(frozen=True)
@@ -110,12 +120,20 @@ class BoundKnowledge:
     def index_revisions(self) -> tuple[str, ...]:
         with storage_stage(self.root, self.identity, read_only=True) as db:
             rows = db.connection.execute(
-                "SELECT i.index_revision_id FROM ukb_publications p JOIN ukb_revision_indexes i "
+                "SELECT i.index_revision_id FROM ukb_publications p JOIN ukb_revision_inputs i "
                 "ON i.revision_id = p.revision_id WHERE p.publication_id = ? "
-                "AND p.revision_id = ? AND p.view_id = ? ORDER BY i.index_revision_id",
+                "AND p.revision_id = ? AND p.view_id = ? AND i.index_revision_id IS NOT NULL "
+                "ORDER BY i.index_revision_id",
                 (self.publication_id, self.publication.revision_id, self.publication.view_id),
             ).fetchall()
             return tuple(row[0] for row in rows)
+
+    @contextmanager
+    def navigation(self):
+        with storage_stage(self.root, self.identity, read_only=True) as db:
+            revision = require_navigation(db, self.publication.revision_id)
+            with TreeStore(self.root, self.identity).open(revision.tree_id) as bound:
+                yield bound
 
 
 class KnowledgeStore:
@@ -129,6 +147,7 @@ class KnowledgeStore:
         expected: str | None,
         view_id: str = "legacy",
         index_revisions: tuple[str, ...] = (),
+        unit_revisions: tuple[str, ...] = (),
     ) -> PreparedRevision:
         if (
             not isinstance(view_id, str)
@@ -150,39 +169,53 @@ class KnowledgeStore:
             TypeAdapter(RecordId).validate_python(index_id)
         revision_id, publication_id = uuid.uuid4().hex, uuid.uuid4().hex
         with storage_stage(self.root, self.identity) as db:
+            inputs = resolve_inputs(db, unit_revisions, index_revisions)
             entries = []
             for path, payload in sorted(files.items()):
                 blob = put_blob(db, payload)
                 entries.append([path, blob.digest, blob.byte_count])
+            navigation = prepare_navigation(
+                self.root, self.identity, revision_id, publication_id, entries, inputs
+            )
             manifest = put_blob(
-                db, _manifest({"files": entries, "indexes": sorted(index_revisions)})
+                db,
+                _manifest(
+                    {
+                        "files": entries,
+                        "inputs": inputs,
+                        "navigation": navigation.input_fingerprint,
+                    }
+                ),
             )
             prepared = PreparedRevision(
-                revision_id, publication_id, view_id, expected, manifest.digest
+                revision_id,
+                publication_id,
+                view_id,
+                expected,
+                manifest.digest,
+                navigation.input_fingerprint,
             )
             with db.transaction() as connection:
                 connection.execute(
-                    "INSERT INTO ukb_knowledge_revisions VALUES (?, ?, ?, ?, ?, 'draft')",
-                    (revision_id, publication_id, view_id, expected, manifest.digest),
+                    "INSERT INTO ukb_knowledge_revisions VALUES (?, ?, ?, ?, ?, ?, 'draft')",
+                    (
+                        revision_id,
+                        publication_id,
+                        view_id,
+                        expected,
+                        manifest.digest,
+                        navigation.input_fingerprint,
+                    ),
                 )
                 retain_blob(connection, "knowledge-revision", revision_id, "manifest", manifest)
-            for start in range(0, len(index_revisions), 63):
-                index_batch = index_revisions[start : start + 63]
+                bind_navigation(connection, revision_id, navigation)
+            for start in range(0, len(inputs), 63):
+                input_batch = inputs[start : start + 63]
                 with db.transaction() as connection:
-                    for index_id in index_batch:
-                        ready = connection.execute(
-                            "SELECT 1 FROM ukb_index_revisions i JOIN ukb_tree_builds t "
-                            "ON t.tree_id = i.tree_id WHERE i.index_revision_id = ? "
-                            "AND t.state = 'ready' AND t.protocol = 'document'",
-                            (index_id,),
-                        ).fetchone()
-                        if not ready:
-                            raise ValueError(
-                                "Knowledge requires complete accepted document indexes"
-                            )
+                    for unit_id, index_id in input_batch:
                         connection.execute(
-                            "INSERT INTO ukb_revision_indexes VALUES (?, ?)",
-                            (revision_id, index_id),
+                            "INSERT INTO ukb_revision_inputs VALUES (?, ?, ?)",
+                            (revision_id, unit_id, index_id),
                         )
             # Each batch is prepared before the short transaction begins.
             for batch in _batches(entries):
@@ -220,15 +253,19 @@ class KnowledgeStore:
                     (revision_id,),
                 ).fetchall()
             ]
-            retained_indexes = [
-                row[0]
-                for row in db.connection.execute(
-                    "SELECT index_revision_id FROM ukb_revision_indexes WHERE revision_id = ? "
-                    "ORDER BY index_revision_id",
-                    (revision_id,),
-                ).fetchall()
-            ]
-            sealed_manifest = _manifest({"files": persisted, "indexes": retained_indexes})
+            retained_inputs = db.connection.execute(
+                "SELECT unit_revision_id, index_revision_id FROM ukb_revision_inputs "
+                "WHERE revision_id = ? ORDER BY unit_revision_id",
+                (revision_id,),
+            ).fetchall()
+            ready_navigation = require_navigation(db, revision_id)
+            sealed_manifest = _manifest(
+                {
+                    "files": persisted,
+                    "inputs": retained_inputs,
+                    "navigation": ready_navigation.input_fingerprint,
+                }
+            )
             if hashlib.sha256(sealed_manifest).hexdigest() != prepared.manifest_digest:
                 raise ValueError("Sealed revision manifest does not match its entries")
             for _, digest, byte_count in persisted:
@@ -247,7 +284,8 @@ class KnowledgeStore:
     def publish(self, prepared: PreparedRevision) -> Publication:
         with storage_stage(self.root, self.identity) as db, db.transaction() as connection:
             record = connection.execute(
-                "SELECT publication_id, view_id, expected_publication, manifest_digest, state "
+                "SELECT publication_id, view_id, expected_publication, manifest_digest, "
+                "navigation_fingerprint, state "
                 "FROM ukb_knowledge_revisions WHERE revision_id = ?",
                 (prepared.revision_id,),
             ).fetchone()
@@ -256,9 +294,11 @@ class KnowledgeStore:
                 prepared.view_id,
                 prepared.expected_publication,
                 prepared.manifest_digest,
+                prepared.navigation_fingerprint,
                 "ready",
             ):
                 raise ValueError("Only the exact validated revision can be published")
+            require_navigation(db, prepared.revision_id)
             head = connection.execute(
                 "SELECT publication_id FROM ukb_heads WHERE view_id = ?", (prepared.view_id,)
             ).fetchone()
@@ -299,6 +339,41 @@ class KnowledgeStore:
             ).fetchone()
             if not row:
                 raise FileNotFoundError("This knowledge publication is unavailable")
+            require_navigation(db, row[0])
             return BoundKnowledge(
                 self.root, self.identity, Publication(publication_id, row[0], view_id)
             )
+
+    def repair_navigation(self, publication_id: str, *, view_id: str = "legacy"):
+        """Rebuild the same deterministic input only through this explicit use case."""
+        with storage_stage(self.root, self.identity) as db:
+            record = db.connection.execute(
+                "SELECT r.revision_id, r.navigation_fingerprint FROM ukb_publications p "
+                "JOIN ukb_knowledge_revisions r ON r.revision_id = p.revision_id "
+                "WHERE p.publication_id = ? AND p.view_id = ?",
+                (publication_id, view_id),
+            ).fetchone()
+            if not record:
+                raise FileNotFoundError("This knowledge publication is unavailable")
+            try:
+                return require_navigation(db, record[0])
+            except RecoveryRequired:
+                pass
+            files = db.connection.execute(
+                "SELECT path, digest, byte_count FROM ukb_revision_files "
+                "WHERE revision_id = ? ORDER BY path",
+                (record[0],),
+            ).fetchall()
+            inputs = db.connection.execute(
+                "SELECT unit_revision_id, index_revision_id FROM ukb_revision_inputs "
+                "WHERE revision_id = ? ORDER BY unit_revision_id",
+                (record[0],),
+            ).fetchall()
+            tree = prepare_navigation(
+                self.root, self.identity, record[0], publication_id, files, inputs
+            )
+            if tree.input_fingerprint != record[1]:
+                raise RecoveryRequired("Knowledge navigation policy or committed inputs changed")
+            with db.transaction() as connection:
+                bind_navigation(connection, record[0], tree)
+            return tree
