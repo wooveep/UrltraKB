@@ -152,6 +152,28 @@ deletion, real CTree restoration and tamper refusal, fixed publication reads and
 conflicts, GC reference rechecks/busy, interrupted retirement and backup restore
 generation changes. `test_cross_platform_locks` covers the reused lock protocol.
 
+Recorded checks on the development foundation:
+
+- Full default offline suite: **3,407 passed, 14 skipped, 745 live tests
+  deselected**, two upstream WebSocket deprecation warnings, 504.58 seconds.
+  The three final WAL regressions were added during that run and are included
+  in the separate final focused run below.
+- Final focused storage suite: **28 passed** against the final code.
+- `ruff check .`, `ruff format --check .` (920 files) and `mypy ultrakb`
+  (451 source files) passed.
+- Independent Standards and Spec reviews found and verified corrections for
+  reserved reference-slot collisions, read-only acceptance side effects,
+  unconfirmed CAS rename durability, omitted orphan metadata in backups,
+  restored journal mode, format-probe side effects and last-close checkpointing.
+  Their final foundation reviews reported no remaining verified code defects.
+- The original uncommitted tracked diff was compared byte-for-byte with the
+  saved pre-task diff and remained unchanged. Existing untracked work was not
+  included in the storage commits.
+
+These results validate the development foundation only. Both reviews retain
+the overall specification's incomplete status. No live model or complete
+three-entrypoint / packaged-runtime acceptance is claimed.
+
 Before issue closure, implement and verify the remaining P0–P8 work from the
 issue, in particular:
 
