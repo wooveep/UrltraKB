@@ -22,6 +22,7 @@ GENERATION_SCHEMA = (
         revision_id TEXT NOT NULL UNIQUE,
         digest TEXT NOT NULL REFERENCES ukb_blobs(digest),
         byte_count INTEGER NOT NULL CHECK (byte_count >= 0),
+        operation TEXT NOT NULL CHECK (operation IN ('write', 'delete')),
         PRIMARY KEY (plan_id, ordinal),
         UNIQUE (plan_id, path)
     )""",

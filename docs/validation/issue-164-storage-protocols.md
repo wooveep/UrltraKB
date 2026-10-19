@@ -1814,3 +1814,36 @@ reviews reproduce and close the transaction, concurrency, paging, long-name,
 budget, view and real Qt/GC stop findings. Remaining generator replacement/deck
 and management flows, observation/archive/audit work and the sole P8 activation
 are still unfinished. Issue 164 remains open.
+
+### Retained Skill replacement and explicit artifact removal
+
+Schema 29 distinguishes immutable artifact writes from explicit deletion records.
+Removing a current artifact preserves its earlier epochs and revision identities.
+Bounded file cursors advance over deleted names, including empty pages. A missing
+first entry cannot hide the remaining files of an existing generated directory.
+Projection retries synchronize the existing parent chain even after an earlier
+unlink; persistent directory synchronization failures remain pending. Unknown
+external edits are preserved by the same physical-baseline checks as writes.
+
+Skill overlay reconstructs the selected retained directory before generation,
+preserving untouched references. Archive prepares a separate retained plan,
+accepts all copies before any removal, and finishes before further model work.
+Interrupted removal resumes the same archive plan and model budget. Structural
+diff reports reuse the existing Skill diff writer. A conflict before the first
+copy reports no accepted archive, and independent archives do not claim that
+unrun validators passed.
+
+Main generation replay also retries pending archive synchronization without
+model configuration or another SDK send. Archive synchronization preserves the
+main generation's actual execution outcome. Response checkpoint failures after
+archive report blocked recovery while retaining accepted archive facts; a real
+model failure remains failed in both the public result and the execution ledger.
+
+The focused replacement matrix passes eight actual SDK-loopback/SQLite/CAS
+cases, including persistent directory I/O faults, SQL rollback, concurrent CAS
+conflict, exact old-epoch reads and response recovery. The expanded generator and
+artifact matrix passes 57 tests; mypy passes 577 modules and Ruff, formatting,
+module-size and diff checks pass. Independent readonly
+reviews reproduce and close the paging, durability and execution-state findings.
+Deck/custom-skill generation and remaining management, observation/archive/audit
+work and the sole P8 activation are still unfinished. Issue 164 remains open.

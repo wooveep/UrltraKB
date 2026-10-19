@@ -41,7 +41,13 @@ def _selection(scope, target_type, name, *, skill_name=None):
         store.entry(path, epoch=epoch)
         exists = True
     except FileNotFoundError:
-        exists = bool(store.files(prefix=path + "/", epoch=epoch, limit=1).files)
+        after = None
+        while True:
+            page = store.files(prefix=path + "/", epoch=epoch, after=after, limit=1)
+            exists = bool(page.files)
+            if exists or page.next_after is None:
+                break
+            after = page.next_after
     version = digest(
         {
             "operation": "generate-v1",
@@ -113,10 +119,10 @@ async def generate_stored_artifact(scope, options, context, *, bundle=None, mode
         return GenerationResult("invalid", message=error)
     if options.target_type != "skill":
         return GenerationResult("blocked", unfinished=("deck_generation",))
-    result = None
+    result, archived = None, None
 
     async def execute(credentials):
-        nonlocal result
+        nonlocal result, archived
         if retained is not None:
             result = accept_generation(scope, retained, context)
             return
@@ -158,13 +164,38 @@ async def generate_stored_artifact(scope, options, context, *, bundle=None, mode
                 "conflict", message="Artifacts changed; review and confirm again"
             )
             return
-        if preview.exists:
+        if preview.exists and options.overwrite == "refuse":
             result = GenerationResult(
                 "conflict", message="Artifact already exists; review replacement"
             )
             return
+        if preview.exists:
+            try:
+                ArtifactStore(root, base.identity).entry(selection["path"], epoch=initial_epoch)
+            except FileNotFoundError:
+                pass
+            else:
+                result = GenerationResult(
+                    "conflict", message="A skill directory cannot replace a regular file"
+                )
+                return
+        if preview.exists and options.overwrite == "archive":
+            from .storage_generation_replacement import archive_generation
+
+            archived = archive_generation(
+                scope, work, request_key, selection["path"], initial_epoch, context
+            )
+            if archived.status != "completed":
+                result = archived
+                return
+            initial_epoch = archived.artifact_epoch
         with materialize_baseline(base, ()) as baseline:
             output = baseline.directory / ".generated" / options.name
+            if preview.exists and options.overwrite == "overlay":
+                from .storage_generation_replacement import materialize_overlay
+
+                with task_stage(context, "generator.overlay.prepare.v1", root=root):
+                    materialize_overlay(scope, selection["path"], initial_epoch, output)
             agent = build_skill_create_agent(
                 wiki_root=str(baseline.directory),
                 skill_root=str(output),
@@ -178,7 +209,7 @@ async def generate_stored_artifact(scope, options, context, *, bundle=None, mode
                 agent, resolve_query_views(root, scope=scope), checkpoints=work
             )
             managed = CheckpointAgentModel(context.executor, work)
-            failure, validation, extra = None, None, {}
+            failure, validation, extra, quality = None, None, {}, ()
             try:
                 with (
                     task_stage(context, "generator.skill.generate.v1", root=root),
@@ -201,6 +232,20 @@ async def generate_stored_artifact(scope, options, context, *, bundle=None, mode
                     extra[".claude-plugin/marketplace.json"] = _marketplace(
                         scope, options.name, initial_epoch, context.snapshot.values()["effective"]
                     )
+                if archived is not None:
+                    from .storage_generation_replacement import skill_archive_diff
+
+                    try:
+                        with task_stage(context, "generator.skill.diff.v1", root=root):
+                            extra.update(
+                                skill_archive_diff(
+                                    scope, archived, initial_epoch, output, baseline.directory
+                                )
+                            )
+                    except RecoveryRequired:
+                        raise
+                    except Exception:
+                        quality = ("artifact_diff_failed",)
             except (LockCancelled, asyncio.CancelledError, RecoveryRequired, PageResponseError):
                 raise
             except Exception as error:
@@ -226,6 +271,10 @@ async def generate_stored_artifact(scope, options, context, *, bundle=None, mode
                         generation_complete=failure is None,
                         error_type=type(failure).__name__ if failure else None,
                         unfinished=("generation",) if failure else (),
+                        archive_path=archived.archive_path.relative_to(root).as_posix()
+                        if archived and archived.archive_path
+                        else None,
+                        quality=quality,
                     ),
                     {
                         (preview.target / file.relative_to(output))
@@ -244,6 +293,13 @@ async def generate_stored_artifact(scope, options, context, *, bundle=None, mode
     except (Exception, asyncio.CancelledError) as error:
         if result is not None:
             return replace(result, unfinished=(*result.unfinished, "confirm execution cleanup"))
+        if archived is not None:
+            return replace(
+                archived,
+                status="blocked" if isinstance(error, RecoveryRequired) else "failed",
+                unfinished=("generation",),
+                error_type=type(error).__name__,
+            )
         if isinstance(error, (LockCancelled, asyncio.CancelledError)):
             raise
         return GenerationResult(

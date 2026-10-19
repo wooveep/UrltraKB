@@ -25,6 +25,8 @@ from .wiki_paths import page_after, wiki_path
 
 def artifact_path(value):
     wiki_path(value)
+    if len(value.encode()) > 63 * 1024:
+        raise ValueError("Artifact paths exceed the storage item limit")
     if not value.startswith("output/") and value != ".claude-plugin/marketplace.json":
         raise ValueError("Artifacts require output/ files or the application marketplace manifest")
     return value
@@ -38,16 +40,17 @@ def _epoch(value):
 def _request(path, payload, expected_epoch, execution_id, evidence_publication_id):
     artifact_path(path)
     _epoch(expected_epoch)
-    if not isinstance(payload, bytes) or len(path.encode()) > 63 * 1024:
+    if (payload is not None and not isinstance(payload, bytes)) or len(path.encode()) > 63 * 1024:
         raise ValueError("Artifacts require immutable bytes and a bounded logical name")
     for identity in (execution_id, evidence_publication_id):
         TypeAdapter(RecordId).validate_python(identity)
     return (
         path,
-        hashlib.sha256(payload).hexdigest(),
+        hashlib.sha256(payload if payload is not None else b"").hexdigest(),
         expected_epoch,
         execution_id,
         evidence_publication_id,
+        "delete" if payload is None else "write",
     )
 
 
@@ -58,6 +61,7 @@ class ArtifactRevision:
     path: str
     digest: str
     epoch: int | None
+    operation: str = "write"
 
 
 @dataclass(frozen=True)
@@ -106,13 +110,17 @@ class ArtifactStore:
         parent = path.rpartition("/")[0]
         while parent:
             if db.connection.execute(
-                "SELECT 1 FROM ukb_artifact_heads WHERE path = ?", (parent,)
+                "SELECT 1 FROM ukb_artifact_heads h JOIN ukb_artifact_revisions r "
+                "ON r.revision_id = h.revision_id WHERE h.path = ? AND r.operation = 'write'",
+                (parent,),
             ).fetchone():
                 return False
             parent = parent.rpartition("/")[0]
         return (
             db.connection.execute(
-                "SELECT 1 FROM ukb_artifact_heads WHERE path >= ? AND path < ? LIMIT 1",
+                "SELECT 1 FROM ukb_artifact_heads h JOIN ukb_artifact_revisions r "
+                "ON r.revision_id = h.revision_id WHERE h.path >= ? AND h.path < ? "
+                "AND r.operation = 'write' LIMIT 1",
                 (path + "/", path + "0"),
             ).fetchone()
             is None
@@ -140,7 +148,8 @@ class ArtifactStore:
     def _entry(self, db, path, *, epoch, revision_id=None):
         if revision_id is not None:
             row = db.connection.execute(
-                "SELECT path, revision_id, digest, byte_count FROM ukb_artifact_revisions "
+                "SELECT path, revision_id, digest, byte_count, operation "
+                "FROM ukb_artifact_revisions "
                 "WHERE revision_id = ? AND path = ?",
                 (revision_id, path),
             ).fetchone()
@@ -149,14 +158,15 @@ class ArtifactStore:
             if epoch is not None and epoch > current:
                 raise ValueError("Artifact epoch has not been accepted")
             row = db.connection.execute(
-                "SELECT path, revision_id, digest, byte_count FROM ukb_artifact_revisions "
+                "SELECT path, revision_id, digest, byte_count, operation "
+                "FROM ukb_artifact_revisions "
                 "WHERE path = ? AND state = 'accepted' AND epoch <= ? "
                 "ORDER BY epoch DESC LIMIT 1",
                 (path, current if epoch is None else epoch),
             ).fetchone()
-        if row is None:
+        if row is None or row[4] == "delete":
             raise FileNotFoundError(path)
-        return ArtifactEntry(*row)
+        return ArtifactEntry(*row[:4])
 
     def files(self, *, prefix="output/", epoch=None, after=None, limit=63):
         if prefix != "output/":
@@ -176,7 +186,7 @@ class ArtifactStore:
             # Limit candidate names first. Newly accepted names may have no
             # version in this snapshot; they still advance the bounded cursor.
             rows = db.connection.execute(
-                "SELECT h.path, r.revision_id, r.digest, r.byte_count "
+                "SELECT h.path, r.revision_id, r.digest, r.byte_count, r.operation "
                 "FROM ukb_artifact_heads h LEFT JOIN ukb_artifact_revisions r "
                 "ON r.revision_id = (SELECT revision_id FROM ukb_artifact_revisions v "
                 "WHERE v.path = h.path AND v.state = 'accepted' AND v.epoch <= ? "
@@ -186,7 +196,11 @@ class ArtifactStore:
                 (selected, lower, prefix[:-1] + "0", exclusive, limit + 1),
             ).fetchall()
             return ArtifactFiles(
-                tuple(ArtifactEntry(*row) for row in rows[:limit] if row[1] is not None),
+                tuple(
+                    ArtifactEntry(*row[:4])
+                    for row in rows[:limit]
+                    if row[1] is not None and row[4] == "write"
+                ),
                 rows[limit - 1][0] if len(rows) > limit else None,
                 selected,
             )
@@ -195,14 +209,18 @@ class ArtifactStore:
     def _committed(db, revision_id, fingerprint):
         row = db.connection.execute(
             "SELECT state, revision_id, path, digest, epoch, expected_epoch, execution_id, "
-            "evidence_publication_id FROM ukb_artifact_revisions WHERE revision_id = ?",
+            "evidence_publication_id, operation FROM ukb_artifact_revisions WHERE revision_id = ?",
             (revision_id,),
         ).fetchone()
         if row is None:
             return None
         if (row[2], row[3], *row[5:]) != fingerprint:
             raise ValueError("Artifact operation identity does not match its original request")
-        return ArtifactRevision("saved" if row[0] == "accepted" else "conflict", *row[1:5])
+        return ArtifactRevision(
+            ("deleted" if row[8] == "delete" else "saved") if row[0] == "accepted" else "conflict",
+            *row[1:5],
+            operation=row[8],
+        )
 
     def committed_write(
         self, revision_id, *, path, payload, expected_epoch, execution_id, evidence_publication_id
@@ -266,7 +284,7 @@ class ArtifactStore:
             if committed is not None:
                 return committed
             require_active_execution(db.connection, self.identity, execution_id)
-            content = put_blob(db, payload)
+            content = put_blob(db, b"" if payload is None else payload)
             with file_write_lock(self.root / ".ultrakb/ingest.lock", cancelled=cancelled):
                 available = self._path_available(db, path)
                 with db.transaction() as connection:
@@ -293,7 +311,7 @@ class ArtifactStore:
         available,
         check_cancelled,
     ):
-        path, _, expected_epoch, execution_id, evidence_publication_id = fingerprint
+        path, _, expected_epoch, execution_id, evidence_publication_id, operation = fingerprint
         committed = self._committed(db, revision_id, fingerprint)
         if committed is not None:
             return committed
@@ -303,7 +321,7 @@ class ArtifactStore:
         accepted = current == expected_epoch and available
         epoch = current + 1 if accepted else None
         connection.execute(
-            "INSERT INTO ukb_artifact_revisions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO ukb_artifact_revisions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 revision_id,
                 path,
@@ -315,6 +333,7 @@ class ArtifactStore:
                 "accepted" if accepted else "conflict",
                 epoch,
                 timestamp,
+                operation,
             ),
         )
         retain_blob(connection, "artifact-revision", revision_id, "content", content)
@@ -327,7 +346,12 @@ class ArtifactStore:
                 (path, revision_id),
             )
         return ArtifactRevision(
-            "saved" if accepted else "conflict", revision_id, path, content.digest, epoch
+            ("deleted" if operation == "delete" else "saved") if accepted else "conflict",
+            revision_id,
+            path,
+            content.digest,
+            epoch,
+            operation,
         )
 
     def sync(self, path, *, revision_id=None, check_cancelled=lambda: None):
@@ -346,7 +370,8 @@ class ArtifactStore:
             ):
                 row = db.connection.execute(
                     "SELECT r.revision_id, r.digest, h.applied_digest, h.pending_revision_id, "
-                    "h.pending_base_digest, pending.digest FROM ukb_artifact_heads h "
+                    "h.pending_base_digest, pending.digest, r.operation, pending.operation "
+                    "FROM ukb_artifact_heads h "
                     "JOIN ukb_artifact_revisions r ON r.revision_id = h.revision_id "
                     "LEFT JOIN ukb_artifact_revisions pending "
                     "ON pending.revision_id = h.pending_revision_id AND pending.path = h.path "
@@ -366,11 +391,12 @@ class ArtifactStore:
                 if target.is_dir():
                     return ArtifactProjection("changed", revision_id, "artifact_is_directory")
                 actual = file_versions(self.root, [target]).get(path)
-                allowed = {row[1], row[2]}
+                desired = None if row[6] == "delete" else row[1]
+                allowed = {desired, row[2]}
                 if row[3] is not None:
                     if row[5] is None:
                         raise RecoveryRequired("Artifact projection activation is invalid")
-                    allowed.update((row[4], row[5]))
+                    allowed.update((row[4], None if row[7] == "delete" else row[5]))
                 if actual not in allowed:
                     return ArtifactProjection("changed", revision_id, "external_artifact_changed")
                 check_cancelled()
@@ -387,8 +413,11 @@ class ArtifactStore:
                         != 1
                     ):
                         raise RecoveryRequired("Artifact target changed before activation")
-                if actual != row[1]:
-                    atomic_write_bytes(target, read_bytes(db, row[1]))
+                if actual != desired:
+                    if desired is None:
+                        target.unlink(missing_ok=True)
+                    else:
+                        atomic_write_bytes(target, read_bytes(db, desired))
                 sync_file_and_parents(target, ancestor=self.root)
                 with db.transaction() as connection:
                     if (
@@ -396,7 +425,7 @@ class ArtifactStore:
                             "UPDATE ukb_artifact_heads SET applied_digest = ?, "
                             "pending_revision_id = NULL, pending_base_digest = NULL "
                             "WHERE path = ? AND revision_id = ? AND pending_revision_id = ?",
-                            (row[1], path, revision_id, revision_id),
+                            (desired, path, revision_id, revision_id),
                         ).rowcount
                         != 1
                     ):

@@ -16,10 +16,18 @@ from .task_stages import task_stage
 
 def _result(root, plan, accepted, *, status, unfinished=(), error_type=None):
     details = plan.details
+    archive_saved = details.archive_path is not None and (
+        details.output_dir != details.archive_path
+        or any(
+            item.operation == "write" and item.path.startswith(details.archive_path + "/")
+            for item in accepted
+        )
+    )
     return GenerationResult(
         status,
         output_dir=root / details.output_dir,
         artifact_path=root / details.artifact_path,
+        archive_path=root / details.archive_path if archive_saved else None,
         validation=ValidationResult(
             errors=list(details.validation_errors), warnings=list(details.validation_warnings)
         )
@@ -27,9 +35,14 @@ def _result(root, plan, accepted, *, status, unfinished=(), error_type=None):
         else None,
         generation_id=plan.plan_id,
         artifact_epoch=max((item.epoch for item in accepted), default=plan.expected_epoch),
-        resources=tuple(str(root / item.path) for item in accepted),
-        changes=tuple(f"saved: {item.path}" for item in accepted),
-        quality=tuple(
+        resources=tuple(str(root / item.path) for item in accepted if item.operation == "write")
+        + ((str(root / details.archive_path),) if archive_saved else ()),
+        changes=tuple(
+            f"{'removed' if item.operation == 'delete' else 'saved'}: {item.path}"
+            for item in accepted
+        ),
+        quality=details.quality
+        + tuple(
             issue
             for issue, present in (
                 ("validation_errors", details.validation_errors),
@@ -91,6 +104,16 @@ def accept_generation(scope, plan, context):
     pending = False
     try:
         with task_stage(context, "generator.sync.v1", root=root) if observed else nullcontext():
+            if plan.details.archive_path and plan.details.output_dir != plan.details.archive_path:
+                archive = GenerationStore(root, identity).archive(plan)
+                if archive is None:
+                    raise RecoveryRequired("The independently accepted archive is unavailable")
+                main_status = context._storage_result
+                try:
+                    previous = accept_generation(scope, archive, context)
+                finally:
+                    context._storage_result = main_status
+                pending |= previous.projection_pending or previous.status != "completed"
             artifacts = ArtifactStore(root, identity)
             for item in accepted:
                 projection = artifacts.sync(

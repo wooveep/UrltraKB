@@ -8,6 +8,7 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict
 
 from ultrakb.compile_checkpoints import digest
+from ultrakb.mutation import RecoveryRequired
 from ultrakb.source_records import RelativePath
 
 from .artifact_store import ArtifactRevision, ArtifactStore, artifact_path
@@ -29,6 +30,8 @@ class GenerationDetails(BaseModel):
     generation_complete: bool = True
     error_type: str | None = None
     unfinished: tuple[str, ...] = ()
+    archive_path: RelativePath | None = None
+    quality: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -89,14 +92,26 @@ class GenerationStore:
         plan_id = uuid4().hex
         entries = []
         ordered = sorted(
-            files.items(), key=lambda item: (item[0] == ".claude-plugin/marketplace.json", item[0])
+            files.items(),
+            key=lambda item: (
+                item[1] is None,
+                item[0] == ".claude-plugin/marketplace.json",
+                item[0],
+            ),
         )
         for ordinal, (path, payload) in enumerate(ordered):
             artifact_path(path)
-            if not isinstance(payload, bytes):
+            if payload is not None and not isinstance(payload, bytes):
                 raise ValueError("Generator outputs require immutable bytes")
             entries.append(
-                (ordinal, path, uuid4().hex, hashlib.sha256(payload).hexdigest(), len(payload))
+                (
+                    ordinal,
+                    path,
+                    uuid4().hex,
+                    hashlib.sha256(payload or b"").hexdigest(),
+                    len(payload or b""),
+                    "delete" if payload is None else "write",
+                )
             )
         encoded = details.model_dump_json().encode()
         if len(encoded) > 4 * 1024 * 1024 or epoch + len(entries) >= 2**63:
@@ -123,21 +138,22 @@ class GenerationStore:
                     ),
                 )
                 retain_blob(connection, "generator-plan", plan_id, "details", blob)
-        for ordinal, path, revision_id, expected_digest, size in entries:
+        for ordinal, path, revision_id, expected_digest, size, operation in entries:
             with storage_stage(self.root, self.identity) as db:
-                blob = put_blob(db, files[path])
+                blob = put_blob(db, files[path] if files[path] is not None else b"")
                 if (blob.digest, blob.byte_count) != (expected_digest, size):
                     raise ValueError("Generator output changed during preparation")
                 with db.transaction() as connection:
                     work._active(connection)
                     connection.execute(
-                        "INSERT INTO ukb_generation_files VALUES (?, ?, ?, ?, ?, ?)",
-                        (plan_id, ordinal, path, revision_id, blob.digest, size),
+                        "INSERT INTO ukb_generation_files VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (plan_id, ordinal, path, revision_id, blob.digest, size, operation),
                     )
                     retain_blob(connection, "generator-plan", plan_id, path, blob)
         with storage_stage(self.root, self.identity) as db:
             rows = db.connection.execute(
-                "SELECT ordinal, path, revision_id, digest, byte_count FROM ukb_generation_files "
+                "SELECT ordinal, path, revision_id, digest, byte_count, operation "
+                "FROM ukb_generation_files "
                 "WHERE plan_id = ? ORDER BY ordinal",
                 (plan_id,),
             ).fetchall()
@@ -149,6 +165,16 @@ class GenerationStore:
                     "UPDATE ukb_generation_plans SET state = 'ready' WHERE plan_id = ?", (plan_id,)
                 )
         return self.find(work.model_budget_id, request_key)
+
+    def archive(self, plan):
+        with storage_stage(self.root, self.identity, read_only=True) as db:
+            row = db.connection.execute(
+                "SELECT request_key FROM ukb_generation_plans WHERE plan_id = ?", (plan.plan_id,)
+            ).fetchone()
+        if row is None:
+            raise RecoveryRequired("The retained generator plan is unavailable")
+        archive_key = digest({"operation": "generator-archive-v1", "request": row[0]})
+        return self.find(plan.model_budget_id, archive_key)
 
     def accept(self, plan, execution_id, *, check_cancelled):
         accepted = []
@@ -171,16 +197,16 @@ class GenerationStore:
                     raise ValueError("Generator plan belongs to another model budget")
         with storage_stage(self.root, self.identity, read_only=True) as db:
             rows = db.connection.execute(
-                "SELECT ordinal, path, revision_id, digest FROM ukb_generation_files "
+                "SELECT ordinal, path, revision_id, digest, operation FROM ukb_generation_files "
                 "WHERE plan_id = ? ORDER BY ordinal",
                 (plan.plan_id,),
             ).fetchall()
-        for ordinal, path, revision_id, content_digest in rows:
+        for ordinal, path, revision_id, content_digest, operation in rows:
             with storage_stage(self.root, self.identity, read_only=True) as db:
                 payload = read_bytes(db, content_digest)
             fields = dict(
                 path=path,
-                payload=payload,
+                payload=None if operation == "delete" else payload,
                 expected_epoch=plan.expected_epoch + ordinal,
                 evidence_publication_id=plan.publication_id,
             )

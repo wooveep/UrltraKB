@@ -15,6 +15,7 @@ ARTIFACT_SCHEMA = (
         state TEXT NOT NULL CHECK (state IN ('accepted', 'conflict')),
         epoch INTEGER UNIQUE CHECK (epoch > 0),
         accepted_at TEXT NOT NULL,
+        operation TEXT NOT NULL CHECK (operation IN ('write', 'delete')),
         CHECK ((state = 'accepted') = (epoch IS NOT NULL))
     )""",
     "CREATE INDEX ukb_artifact_history ON ukb_artifact_revisions(path, epoch DESC) "
