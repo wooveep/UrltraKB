@@ -191,7 +191,7 @@ def materialize_inputs(base, baseline, target):
     )
 
 
-def prepare_compiled_revision(store, base, baseline, target, work):
+def prepare_compiled_revision(store, base, baseline, target, work, *, index_revisions=()):
     """Reuse unchanged immutable files and retain a unit's exact import claim."""
     changes = {}
     for path in baseline.directory.rglob("*"):
@@ -209,7 +209,7 @@ def prepare_compiled_revision(store, base, baseline, target, work):
 
     indexes = tuple(
         index
-        for index in base.index_revisions()
+        for index in dict.fromkeys((*base.index_revisions(), *index_revisions))
         if IndexStore(base.root, base.identity).revision(index).unit_revision_id in unit_revisions
     )
     basis = base.page_input_revisions()

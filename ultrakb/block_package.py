@@ -124,11 +124,26 @@ class FrozenBlockParser:
         return [".okbi"]
 
     def parse(self, file_path: str, **kwargs):
+        package = BlockPackage.model_validate_json(Path(file_path).read_text("utf-8"))
+        if set(package.assets) != set(package.source.assets):
+            raise ValueError("Incomplete frozen block package")
+        frozen = package.source
+        parsed = self.parse_source(frozen, doc_name=package.doc_name, model=kwargs.get("model"))
+        base = Path(kwargs["images_dir"]).parent
+        for name, encoded in package.assets.items():
+            data = base64.b64decode(encoded, validate=True)
+            if hashlib.sha256(data).hexdigest() != frozen.assets[name]:
+                raise ValueError("Packaged asset digest changed")
+            target = base / name
+            contained_paths(base, [target])
+            atomic_write_bytes(target, data)
+        return parsed
+
+    def parse_source(self, frozen: FrozenText, *, doc_name: str, model=None):
+        """Adapt already retained native coordinates without packaging assets again."""
         from pageindex.parser.protocol import ContentNode, ParsedDocument
         from pageindex.tokens import count_tokens
 
-        package = BlockPackage.model_validate_json(Path(file_path).read_text("utf-8"))
-        frozen = package.source
         from ultrakb.content_blocks import BLOCK_POLICY, LEGACY_BLOCK_POLICY
 
         expected = LEGACY_BLOCK_POLICY if self.legacy else BLOCK_POLICY
@@ -161,28 +176,20 @@ class FrozenBlockParser:
                 for context in block.display_context
             ):
                 raise ValueError("Block input contains unqualified original display context")
-        if frozen.unit_kind != "block" or set(package.assets) != set(frozen.assets):
-            raise ValueError("Incomplete frozen block package")
-        base = Path(kwargs["images_dir"]).parent
-        for name, encoded in package.assets.items():
-            data = base64.b64decode(encoded, validate=True)
-            if hashlib.sha256(data).hexdigest() != frozen.assets[name]:
-                raise ValueError("Packaged asset digest changed")
-            target = base / name
-            contained_paths(base, [target])
-            atomic_write_bytes(target, data)
+        if frozen.unit_kind != "block":
+            raise ValueError("Frozen source has no recorded content blocks")
         units = read_block_selection(frozen.model_dump(mode="json"))["units"]
         nodes = [
             ContentNode(
                 content=unit["content"],
-                tokens=count_tokens(unit["content"], kwargs.get("model")),
+                tokens=count_tokens(unit["content"], model),
                 index=unit["ordinal"],
                 metadata=unit,
             )
             for unit in units
         ]
         return ParsedDocument(
-            doc_name=package.doc_name,
+            doc_name=doc_name,
             nodes=nodes,
             metadata={
                 "unit_kind": "block",

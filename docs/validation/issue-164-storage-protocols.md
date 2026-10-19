@@ -938,3 +938,31 @@ query/fragment values; unchanged normalized pages explicitly retain even an
 empty basis rather than inheriting publication defaults. The ten image
 application cases pass. Both review axes confirmed the adjacent fixes in the
 workspace; no real-model traffic or original user edits were involved.
+
+### Actual shared document-index construction
+
+Development-scope recompilation can now build a missing document index directly
+with the existing PageIndex pipeline and accept its complete document into the
+shared tree store before publication. Retained Markdown uses the pinned parser;
+frozen content blocks reuse the existing qualification adapter without packaging
+or copying their assets again. Physical page and slide body/notes inputs keep
+their original text, ordinals, roles and coordinates. No private index database
+or legacy index-stage directory is created.
+
+Exact model requests bind their own invocation in the calling thread/task, so
+concurrent SDK stages with the same display stage cannot borrow another request's
+identity. Raw responses and accepted per-node/stage results use the main recovery
+store. The SDK's mutable dispatch count remains a small consecutive guarded
+record; individual dispatches and accepted work stay independently durable.
+Missing adapter delivery recovers the exact gateway receipt, including its real
+finish status, before considering a new send. A ready index is reused after a
+later publication failure. Scheduling concurrency is excluded from its content
+identity; selected model, generation, endpoint, policy and retained unit remain
+bound.
+
+Six real SDK/loopback application cases cover Markdown and native block/page/slide
+inputs, publication failure, raw response confirmation failure and partial node
+acceptance. Related offline regressions pass 88 tests (8 live cases deselected),
+and full mypy passes 502 source modules. Managed public admission, the rest of
+the compiler fault matrix, maintenance, task observations, other generators and
+P8 activation remain required; this does not close issue 164.

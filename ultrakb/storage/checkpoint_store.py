@@ -302,6 +302,7 @@ class CompileWork:
                 check_model_stop()
                 self._invocation(connection, key, request_digest, stage, "generation", invocation)
                 self._write_record(connection, key, request_digest, previous, encoded)
+            return invocation
 
     def claim_repair(self, key, request_digest):
         self._claim_once(key, request_digest, "repair")

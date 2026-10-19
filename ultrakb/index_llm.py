@@ -2,6 +2,7 @@
 
 import asyncio
 from concurrent.futures import Future
+from contextlib import nullcontext
 from threading import Lock
 
 from pageindex.llm import IndexResponse
@@ -99,6 +100,10 @@ class PageIndexLLM:
 
         return save
 
+    def _request_binding(self, key, stage):
+        claim = getattr(self.checkpoints, "request", None)
+        return claim(key, stage) if claim else nullcontext()
+
     @staticmethod
     def may_defer(error):
         import litellm
@@ -115,13 +120,14 @@ class PageIndexLLM:
         future, owner = self._claim(key)
         if owner:
             try:
-                result = self._response(
-                    self.executor.complete(
-                        "document_index",
-                        self._request(messages, stage),
-                        on_response=self._receive(key),
+                with self._request_binding(key, stage):
+                    result = self._response(
+                        self.executor.complete(
+                            "document_index",
+                            self._request(messages, stage),
+                            on_response=self._receive(key),
+                        )
                     )
-                )
             except BaseException as error:
                 future.set_exception(error)
                 raise
@@ -136,11 +142,14 @@ class PageIndexLLM:
         if not owner:
             return await asyncio.shield(asyncio.wrap_future(future))
         try:
-            result = self._response(
-                await self.executor.acomplete(
-                    "document_index", self._request(messages, stage), on_response=self._receive(key)
+            with self._request_binding(key, stage):
+                result = self._response(
+                    await self.executor.acomplete(
+                        "document_index",
+                        self._request(messages, stage),
+                        on_response=self._receive(key),
+                    )
                 )
-            )
         except BaseException as error:
             future.set_exception(error)
             raise

@@ -106,10 +106,6 @@ async def _compile(scope, target, context, bundle, model, max_concurrency):
                 None,
             )
             segmented = processing.decision.execution_mode == "segmented"
-            if segmented and index is None:
-                raise RecoveryRequired(
-                    "Long document compilation requires its accepted shared index"
-                )
             checkpoints = CompileCheckpointStore(base.root, base.identity).for_work(
                 execution.model_budget_id,
                 object_id={
@@ -122,6 +118,12 @@ async def _compile(scope, target, context, bundle, model, max_concurrency):
             )
             with materialize_baseline(base, ()) as baseline:
                 inputs = materialize_inputs(base, baseline, target)
+                if segmented and index is None:
+                    from .storage_indexing import prepare_document_index
+
+                    index = prepare_document_index(
+                        base, target, processing, baseline, context, bundle, model
+                    )
                 private = KnowledgeScope(
                     kb_dir=base.root,
                     view_id=scope.view_id,
@@ -160,7 +162,9 @@ async def _compile(scope, target, context, bundle, model, max_concurrency):
                         )
                 report.require_complete()
                 context.check_stop()
-                prepared = prepare_compiled_revision(store, base, baseline, target, work)
+                prepared = prepare_compiled_revision(
+                    store, base, baseline, target, work, index_revisions=(index,) if index else ()
+                )
         try:
             publication = store.publish(
                 prepared, check_cancelled=context.check_stop, execution_id=execution.execution_id

@@ -118,6 +118,27 @@ def retained_response(work, key, signature, protocol, sections, stage):
 
 def provider_delivery(db, work, key, signature):
     """Recover the exact gateway response if compiler validation never received it."""
+    retained = provider_response(db, work, key, signature)
+    if retained is None:
+        return None
+    value, request_id = retained
+    try:
+        choices = value["choices"]
+        if not isinstance(choices, list) or len(choices) != 1:
+            raise ValueError("Expected one complete response choice")
+        choice = choices[0]
+        if choice.get("finish_reason") != "stop":
+            raise ValueError("The retained response did not finish normally")
+        body = choice["message"]["content"]
+        if not isinstance(body, str):
+            raise ValueError("The retained response has no complete text")
+    except (ValueError, TypeError, KeyError) as error:
+        raise RecoveryRequired("The retained compiler response requires explicit repair") from error
+    return body.strip(), request_id
+
+
+def provider_response(db, work, key, signature):
+    """Select only the exact invocation's paid receipt, including truncation status."""
     invocation = db.connection.execute(
         "SELECT invocation_id FROM ukb_compile_invocations "
         "WHERE work_id = ? AND step_key = ? AND request_digest = ? "
@@ -148,18 +169,9 @@ def provider_delivery(db, work, key, signature):
         return None
     try:
         value = json.loads(read_bytes(db, row[1]))
-        choices = value["choices"]
-        if not isinstance(choices, list) or len(choices) != 1:
-            raise ValueError("Expected one complete response choice")
-        choice = choices[0]
-        if choice.get("finish_reason") != "stop":
-            raise ValueError("The retained response did not finish normally")
-        body = choice["message"]["content"]
-        if not isinstance(body, str):
-            raise ValueError("The retained response has no complete text")
     except (ValueError, TypeError, KeyError) as error:
         raise RecoveryRequired("The retained compiler response requires explicit repair") from error
-    return body.strip(), row[0]
+    return value, row[0]
 
 
 def capture_resolution(work, key, signature, raw, delivered, resolutions):
