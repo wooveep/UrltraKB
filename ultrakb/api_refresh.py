@@ -2,13 +2,16 @@
 
 import asyncio
 from dataclasses import asdict
+from threading import Event
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from ultrakb.api_helpers import _resolve_kb, require_bearer_token
 from ultrakb.api_views import resolve_api_scope
 from ultrakb.application import refresh as application
+from ultrakb.context.workers import run_blocking
 from ultrakb.source_records import Digest, RecordId, RelativePath, ViewId
 
 refresh_router = APIRouter(dependencies=[Depends(require_bearer_token)])
@@ -40,8 +43,21 @@ async def _selected(kb, view_id):
 
 
 async def _history_read(operation, *args, **kwargs):
+    stopped = Event()
+    scope = kwargs.get("scope")
+
+    def read():
+        if scope is not None and scope.knowledge is not None:
+            from ultrakb.storage.coordination import storage_stage
+
+            with storage_stage(
+                scope.kb_dir, scope.knowledge.identity, read_only=True, cancelled=stopped.is_set
+            ):
+                return operation(*args, **kwargs)
+        return operation(*args, **kwargs)
+
     try:
-        return await asyncio.to_thread(operation, *args, **kwargs)
+        return await run_blocking(read, on_cancel=stopped.set)
     except FileNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:
@@ -51,7 +67,7 @@ async def _history_read(operation, *args, **kwargs):
 @refresh_router.get("/api/v1/refresh/status")
 async def status(kb: str, view_id: ViewId = "legacy"):
     root, scope = await _selected(kb, view_id)
-    return await asyncio.to_thread(application.refresh_status, root, scope=scope)
+    return await _history_read(application.refresh_status, root, scope=scope)
 
 
 @refresh_router.get("/api/v1/refresh/history")
@@ -145,18 +161,33 @@ async def empty(request: EmptyRequest):
 
 
 @refresh_router.get("/api/v1/refresh/proposals")
-async def proposals(kb: str, view_id: ViewId = "legacy"):
+async def proposals(
+    kb: str,
+    view_id: ViewId = "legacy",
+    after: RecordId | None = None,
+    limit: int = Query(default=63, ge=1, le=128),
+):
     root, scope = await _selected(kb, view_id)
-    return await asyncio.to_thread(application.list_refresh_proposals, root, scope=scope)
+    page = await _history_read(
+        application.list_refresh_proposal_page, root, scope=scope, after=after, limit=limit
+    )
+    return JSONResponse(
+        list(page.proposals),
+        headers={"X-UltraKB-Next-After": page.next_after} if page.next_after else {},
+    )
 
 
 @refresh_router.post("/api/v1/refresh/proposal")
 async def proposal(request: ProposalRequest):
     root, scope = await _selected(request.kb, request.view_id)
     try:
-        return await asyncio.to_thread(
+        return await _history_read(
             application.read_refresh_proposal, root, request.proposal_id, scope=scope
         )
+    except HTTPException as exc:
+        if exc.status_code in {400, 404}:
+            raise HTTPException(status_code=409, detail=exc.detail) from exc
+        raise
     except (OSError, ValueError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 

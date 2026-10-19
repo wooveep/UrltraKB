@@ -74,12 +74,20 @@ def empty(ctx, source_id, generation):
 
 
 @refresh.command("proposals")
+@click.option("--after", default=None)
+@click.option("--limit", type=click.IntRange(1, 128), default=63)
 @click.pass_context
-def proposals(ctx):
-    from ultrakb.application.refresh import list_refresh_proposals
+def proposals(ctx, after, limit):
+    from ultrakb.application.refresh import list_refresh_proposal_page, list_refresh_proposals
 
     root, scope = _selection(ctx)
-    click.echo(json.dumps(list_refresh_proposals(root, scope=scope), ensure_ascii=False))
+    if scope is not None and scope.knowledge is not None:
+        result = asdict(list_refresh_proposal_page(root, scope=scope, after=after, limit=limit))
+    else:
+        if after is not None:
+            raise click.ClickException("Refresh review cursors require a main-store scope")
+        result = list_refresh_proposals(root, scope=scope)
+    click.echo(json.dumps(result, ensure_ascii=False))
 
 
 @refresh.command("show")

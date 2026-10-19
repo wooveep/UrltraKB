@@ -12,7 +12,11 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from ultrakb.application.refresh import list_refresh_proposals, refresh_status
+from ultrakb.application.refresh import (
+    list_refresh_proposal_page,
+    read_refresh_proposal,
+    refresh_status,
+)
 from ultrakb.runtime.records import TERMINAL
 from ultrakb.runtime.requests import AcceptRefreshProposal, RefreshKnowledge
 
@@ -21,7 +25,16 @@ class RefreshDialog(QDialog):
     def __init__(self, window, kb):
         super().__init__(window)
         self.window, self.kb = window, kb
+        captured = getattr(window, "read_scope", None)
+        self.scope = (
+            captured
+            if captured is not None and captured.knowledge is not None
+            else getattr(window, "scope", None)
+        )
+        self.view_id = self.scope.view_id if self.scope else None
         self._closed, self._task, self._generation = False, None, 0
+        self._after, self._reviewed, self._selection = None, None, 0
+        self._page_loading = False
         self.setWindowTitle("刷新知识与历史依据")
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.resize(980, 740)
@@ -50,6 +63,10 @@ class RefreshDialog(QDialog):
         self.proposals = QListWidget()
         self.proposals.currentItemChanged.connect(self.selected)
         layout.addWidget(self.proposals)
+        self.more_button = QPushButton("加载更多差异")
+        self.more_button.setEnabled(False)
+        self.more_button.clicked.connect(self.load_more)
+        layout.addWidget(self.more_button)
         self.diff = QPlainTextEdit()
         self.diff.setReadOnly(True)
         layout.addWidget(self.diff, 1)
@@ -67,19 +84,33 @@ class RefreshDialog(QDialog):
         self._generation += 1
         generation = self._generation
         self.accept_button.setEnabled(False)
+        self.more_button.setEnabled(False)
+        self._reviewed, self._after, self._page_loading = None, None, True
         self.proposals.clear()
+        self.diff.clear()
+        selected = self.scope
 
         def read():
-            return refresh_status(self.kb), list_refresh_proposals(self.kb)
+            scope = selected
+            if scope is not None and scope.knowledge is not None:
+                from ultrakb.application.views import storage_scope
+
+                scope = storage_scope(self.kb, scope.knowledge.identity, view_id=scope.view_id)
+            return (
+                scope,
+                refresh_status(self.kb, scope=scope),
+                list_refresh_proposal_page(self.kb, scope=scope),
+            )
 
         def loaded(value, error):
+            self._page_loading = False
             if error:
                 self.status.setText(str(error))
                 return
-            status, proposals = value
+            self.scope, status, page = value
             lines = []
-            for page, reasons in status["needs_refresh"].items():
-                lines.append(page)
+            for page_path, reasons in status["needs_refresh"].items():
+                lines.append(page_path)
                 for reason in reasons:
                     label = {"updated": "来源更新", "empty": "确认清空", "withdrawn": "来源撤回"}[
                         reason["kind"]
@@ -90,25 +121,66 @@ class RefreshDialog(QDialog):
                 f"{len(status['needs_refresh'])} 个页面待刷新；"
                 f"{len(status['effective_inputs'])} 个当前有效输入。旧知识和历史原文将保留。"
             )
-            for proposal in proposals:
-                if proposal["status"] != "awaiting_confirmation":
-                    continue
-                item = QListWidgetItem("人工修改需要审阅 · " + ", ".join(proposal["conflicts"]))
-                item.setData(Qt.ItemDataRole.UserRole, proposal)
-                self.proposals.addItem(item)
+            self.append_proposals(page)
             self.run_button.setEnabled(self._task is None)
 
-        self.window.io.submit(
+        self._read(
             read,
             loaded,
-            kb=self.kb,
+            obsolete=lambda: self._closed or generation != self._generation,
+        )
+
+    def _read(self, operation, callback, *, obsolete):
+        scope = self.scope
+        if scope is None or scope.knowledge is None:
+            self.window.io.submit(operation, callback, kb=self.kb, obsolete=obsolete)
+            return
+        from ultrakb.storage.coordination import storage_stage
+
+        def read():
+            with storage_stage(
+                self.kb, scope.knowledge.identity, read_only=True, cancelled=obsolete
+            ):
+                return operation()
+
+        self.window.io.submit(read, callback, obsolete=obsolete)
+
+    def append_proposals(self, page):
+        for proposal in page.proposals:
+            if proposal["status"] != "awaiting_confirmation":
+                continue
+            count = proposal.get("conflict_count", len(proposal.get("conflicts", ())))
+            item = QListWidgetItem(f"人工修改需要审阅 · {count} 个页面")
+            item.setData(Qt.ItemDataRole.UserRole, proposal)
+            self.proposals.addItem(item)
+        self._after = page.next_after
+        self.more_button.setEnabled(self._after is not None)
+
+    def load_more(self):
+        if self._page_loading or self._after is None:
+            return
+        generation, after, scope = self._generation, self._after, self.scope
+        self._page_loading = True
+        self.more_button.setEnabled(False)
+
+        def loaded(page, error):
+            self._page_loading = False
+            if error:
+                self.status.setText(str(error))
+                self.more_button.setEnabled(True)
+                return
+            self.append_proposals(page)
+
+        self._read(
+            lambda: list_refresh_proposal_page(self.kb, scope=scope, after=after),
+            loaded,
             obsolete=lambda: self._closed or generation != self._generation,
         )
 
     def show_history(self):
         from ultrakb.desktop.knowledge_history import KnowledgeHistoryDialog
 
-        KnowledgeHistoryDialog(self.window, self.kb, "legacy").show()
+        KnowledgeHistoryDialog(self.window, self.kb, self.view_id or "legacy").show()
 
     def run(self):
         if self._task:
@@ -120,18 +192,45 @@ class RefreshDialog(QDialog):
             self.run_button.setEnabled(False)
             self.status.setText("刷新任务已提交，可在主窗口查看进度或安全停止。")
 
-        submit_panel(self, [RefreshKnowledge()], description="更新知识", on_submitted=submitted)
+        submit_panel(
+            self,
+            [RefreshKnowledge(view_id=self.view_id)],
+            description="更新知识",
+            on_submitted=submitted,
+        )
 
     def selected(self, item, previous=None):
+        self._selection += 1
+        selection = self._selection
+        self._reviewed = None
+        self.accept_button.setEnabled(False)
+        self.diff.clear()
         proposal = item.data(Qt.ItemDataRole.UserRole) if item else None
-        self.diff.setPlainText(proposal["diff"] if proposal else "")
-        self.accept_button.setEnabled(bool(proposal) and self._task is None)
+        if proposal is None:
+            return
+        scope = self.scope
+
+        def loaded(value, error):
+            if error:
+                self.status.setText(str(error))
+                return
+            self._reviewed = value
+            self.diff.setPlainText(value["diff"])
+            self.accept_button.setEnabled(
+                value["status"] == "awaiting_confirmation" and self._task is None
+            )
+
+        self._read(
+            lambda: read_refresh_proposal(self.kb, proposal["proposal_id"], scope=scope),
+            loaded,
+            obsolete=lambda: self._closed or selection != self._selection,
+        )
 
     def accept_selected(self):
         item = self.proposals.currentItem()
-        if item is None or self._task:
+        if item is None or self._task or self._reviewed is None:
             return
-        proposal = item.data(Qt.ItemDataRole.UserRole)
+        proposal = self._reviewed
         self._task = self.window.manager.submit(
             self.kb,
             [

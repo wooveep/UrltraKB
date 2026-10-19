@@ -194,6 +194,28 @@ def read_refresh_proposal(
         return proposal
 
 
+@dataclass(frozen=True)
+class RefreshProposalPage:
+    proposals: tuple[dict, ...]
+    next_after: str | None
+
+
+def list_refresh_proposal_page(kb_dir: Path, *, scope=None, after=None, limit=63):
+    kb_dir = kb_dir.resolve()
+    if scope is not None:
+        scope = resolve_scope(kb_dir, scope)
+        if scope.knowledge is not None:
+            from ultrakb.storage.refresh_store import RefreshStore
+
+            proposals, cursor = RefreshStore(kb_dir, scope.knowledge.identity).summary_page(
+                scope.view_id, after=after, limit=limit
+            )
+            return RefreshProposalPage(proposals, cursor)
+    if after is not None:
+        raise ValueError("Refresh review cursors require a main-store scope")
+    return RefreshProposalPage(list_refresh_proposals(kb_dir, scope=scope), None)
+
+
 def list_refresh_proposals(
     kb_dir: Path, *, scope: KnowledgeScope | None = None
 ) -> tuple[dict, ...]:
@@ -201,9 +223,13 @@ def list_refresh_proposals(
     if scope is not None:
         scope = resolve_scope(kb_dir, scope)
         if scope.knowledge is not None:
-            from .storage_refresh import list_stored_refreshes
-
-            return list_stored_refreshes(scope)
+            items, after = [], None
+            while True:
+                page = list_refresh_proposal_page(kb_dir, scope=scope, after=after)
+                items.extend(page.proposals)
+                if page.next_after is None:
+                    return tuple(items)
+                after = page.next_after
     with kb_read_lock(kb_dir / ".ultrakb"):
         proposals = (
             read_refresh_proposal(kb_dir, p.parent.name)

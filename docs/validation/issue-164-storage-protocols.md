@@ -1879,3 +1879,24 @@ Ruff, formatting, module-size and diff checks pass. Independent readonly reviews
 close the logical-path, archive-basis and late-tool findings. Remaining management
 connections, observation/archive/audit work and the sole P8 activation remain
 unfinished. Issue 164 remains open.
+
+### Bounded refresh review and actual reader cancellation
+
+Refresh review lists now page over retained proposal metadata in the selected
+view without loading every diff. CLI and HTTP expose the same cursor, and Qt
+loads the complete selected diff before enabling acceptance. The dialog captures
+its main-store identity, reads the current publication on refresh, and keeps the
+selected review version fixed. A real withdrawn source verifies that refresh
+reasons and a review beyond the first 63 superseded entries remain accessible.
+
+Both HTTP list and full-diff reads signal cancellation through the storage lease
+and join the actual reader before returning. The ASGI witnesses hold a real GC
+exclusive lease throughout cancellation; they fail if the request abandons its
+blocked reader. Closing the Qt panel likewise stops its queued storage read.
+
+The expanded refresh/entrypoint/history/desktop matrix passes 51 tests, with 39
+live cases deselected. After extending cancellation coverage to the full-diff
+endpoint, all three focused review cases pass. Mypy passes 580 modules; focused
+Ruff, formatting, module-size and diff checks pass. Remaining artifact management,
+observation/archive/audit work and the sole P8 activation remain unfinished.
+Issue 164 remains open.

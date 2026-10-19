@@ -197,9 +197,25 @@ class RefreshStore:
             }
 
     def summaries(self, view_id, *, limit=63):
+        return self.summary_page(view_id, limit=limit)[0]
+
+    def summary_page(self, view_id, *, after=None, limit=63):
         if type(limit) is not int or not 1 <= limit <= 128:
             raise ValueError("Refresh list requires a bounded positive limit")
         with storage_stage(self.root, self.identity, read_only=True) as db:
+            db.connection.execute("BEGIN")
+            cursor, parameters = "", (view_id,)
+            if after is not None:
+                TypeAdapter(RecordId).validate_python(after)
+                previous = db.connection.execute(
+                    "SELECT p.rowid FROM ukb_refresh_proposals p "
+                    "JOIN ukb_knowledge_revisions r ON r.revision_id = p.proposal_id "
+                    "WHERE p.proposal_id = ? AND r.view_id = ?",
+                    (after, view_id),
+                ).fetchone()
+                if previous is None:
+                    raise ValueError("Refresh cursor belongs to another knowledge view")
+                cursor, parameters = "AND p.rowid < ? ", (view_id, previous[0])
             rows = db.connection.execute(
                 "SELECT p.proposal_id, p.conflict_count, r.publication_id, "
                 "r.expected_publication, f.catalog_generation, h.publication_id, c.generation, "
@@ -213,8 +229,9 @@ class RefreshStore:
                 "JOIN ukb_projection_state ps ON ps.view_id = r.view_id, "
                 "ukb_catalog_state c WHERE r.view_id = ? AND c.singleton = 1 "
                 "AND (p.conflict_count > 0 OR r.state != 'published') "
-                "ORDER BY p.rowid DESC LIMIT ?",
-                (view_id, limit),
+                + cursor
+                + "ORDER BY p.rowid DESC LIMIT ?",
+                (*parameters, limit + 1),
             ).fetchall()
             return tuple(
                 {
@@ -228,8 +245,8 @@ class RefreshStore:
                     if row[3:5] == row[5:7] and row[8]
                     else "superseded",
                 }
-                for row in rows
-            )
+                for row in rows[:limit]
+            ), rows[limit - 1][0] if len(rows) > limit else None
 
     def files(self, proposal_id):
         TypeAdapter(RecordId).validate_python(proposal_id)
