@@ -7,6 +7,7 @@ import logging
 import re
 import shutil
 import unicodedata
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -16,7 +17,12 @@ import pymupdf
 from ultrakb.config import resolve_effective_config
 from ultrakb.images import convert_pdf_with_images, extract_base64_images
 from ultrakb.inputs import PreparedInput
-from ultrakb.locks import atomic_write_json, atomic_write_text, kb_ingest_lock
+from ultrakb.locks import (
+    PrivateMaterialization,
+    atomic_write_json,
+    atomic_write_text,
+    kb_ingest_lock,
+)
 from ultrakb.processing_policy import ProcessingDecision, classify_pdf
 from ultrakb.source_records import TextDecoding
 from ultrakb.state import HashRegistry
@@ -163,6 +169,7 @@ def convert_document(
     check_stop: Callable[[], None] = lambda: None,
     office_identity=None,
     cnki_identity=None,
+    private_workspace: PrivateMaterialization | None = None,
 ) -> ConvertResult:
     """Convert a fixed input version while retaining its original identity."""
     from ultrakb.inputs import prepared_input
@@ -179,6 +186,7 @@ def convert_document(
             check_stop=check_stop,
             office_identity=office_identity,
             cnki_identity=cnki_identity,
+            private_workspace=private_workspace,
         )
     with prepared_input(src) as ready:
         return _convert_prepared_document(
@@ -192,6 +200,7 @@ def convert_document(
             check_stop=check_stop,
             office_identity=office_identity,
             cnki_identity=cnki_identity,
+            private_workspace=private_workspace,
         )
 
 
@@ -207,6 +216,7 @@ def _convert_prepared_document(
     check_stop: Callable[[], None] = lambda: None,
     office_identity=None,
     cnki_identity=None,
+    private_workspace: PrivateMaterialization | None = None,
 ) -> ConvertResult:
     """Convert a document and integrate it into the knowledge base.
 
@@ -226,7 +236,13 @@ def _convert_prepared_document(
         preflight_import_text(kb_dir, ready, check_stop=check_stop, cnki_identity=cnki_identity),
     )
     source_identity = _portable_path(ready.identity, kb_dir.resolve())
-    with kb_ingest_lock(kb_dir / ".ultrakb"):
+    if private_workspace is not None and (
+        staging_dir is None or doc_name is None or not private_workspace.permits_scope(staging_dir)
+    ):
+        raise ValueError(
+            "Private conversion requires its owned workspace and explicit document name"
+        )
+    with nullcontext() if private_workspace is not None else kb_ingest_lock(kb_dir / ".ultrakb"):
         # ------------------------------------------------------------------
         # Load config & state
         # ------------------------------------------------------------------
@@ -234,12 +250,12 @@ def _convert_prepared_document(
         config = resolve_effective_config(kb_dir)[0]
         processing = None
         artifact_root = staging_dir if staging_dir is not None else kb_dir
-        registry = HashRegistry(ultrakb_dir / "hashes.json")
+        registry = HashRegistry(ultrakb_dir / "hashes.json") if doc_name is None else None
 
         # ------------------------------------------------------------------
         # 1. Hash check + identity resolution
         # ------------------------------------------------------------------
-        if doc_name is None and registry.is_known(file_hash):
+        if registry is not None and registry.is_known(file_hash):
             logger.info("Skipping already-known file: %s", src.name)
             stored = registry.get(file_hash) or {}
             return ConvertResult(
@@ -247,13 +263,15 @@ def _convert_prepared_document(
                 file_hash=file_hash,
                 doc_name=stored.get("doc_name") or Path(stored.get("name", src.name)).stem,
             )
-        doc_name = doc_name or resolve_doc_name(
-            src,
-            kb_dir,
-            registry,
-            persist_legacy=staging_dir is None,
-            path_key=source_identity,
-        )
+        if doc_name is None:
+            assert registry is not None
+            doc_name = resolve_doc_name(
+                src,
+                kb_dir,
+                registry,
+                persist_legacy=staging_dir is None,
+                path_key=source_identity,
+            )
         if _sanitize_stem(doc_name) != doc_name:
             raise ValueError("Invalid normalized document name")
 

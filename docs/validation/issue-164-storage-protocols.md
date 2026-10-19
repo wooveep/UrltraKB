@@ -966,3 +966,29 @@ acceptance. Related offline regressions pass 88 tests (8 live cases deselected),
 and full mypy passes 502 source modules. Managed public admission, the rest of
 the compiler fault matrix, maintenance, task observations, other generators and
 P8 activation remain required; this does not close issue 164.
+
+### Public managed document admission (development scope)
+
+`import_document` now routes an explicit main-store scope through original and
+sidecar admission, retained native processing and the actual shared compiler.
+The operation captures settings once, uses complete fixed Markdown for capacity
+assessment, and keeps conversion/private preparation outside the old-format
+ingest lease. The existing converter accepts only an owned private target when
+that lease is omitted, with an explicit document name and no registry lookup.
+Existing Markdown/text conversion, PDF page extraction, capacity selection and
+block policy remain shared. Long text freezes its native blocks without creating
+an unused input package. Accepted originals retain their identities even when
+normalization confirmation fails.
+
+Public application cases cover Markdown with a sidecar, zero-send repeated
+admission, external-file deletion followed by real recompilation, full and
+segmented PDF import, failed normalization and long text with multiple SDK
+structure fragments. The eleven import/index application cases pass; 139 related
+offline regressions pass separately, and the long-text case passes after correcting
+the controlled provider's continuation reply. Full mypy passes 504 source modules;
+lint/format checks pass. These runs include the unchanged original workspace edits.
+
+Workbook units and discovery, retain-without-knowledge handling, complete explicit
+processing-policy/recovery paths, task observations and maintenance, remaining
+writers and all three adapters still need joint acceptance. The normal factory
+continues to use the prior format until P8. No live model was called.

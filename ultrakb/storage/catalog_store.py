@@ -535,3 +535,12 @@ class CatalogStore:
             if not row or row[0] is None:
                 raise KeyError(unit_id)
             return self._unit_revision(db, row[0])
+
+    def unit_for_source(self, source_id: str, *, key: str) -> UnitTarget | None:
+        with storage_stage(self.root, self.identity, read_only=True) as db:
+            row = db.connection.execute(
+                "SELECT target_revision_id FROM ukb_import_units "
+                "WHERE source_id = ? AND unit_key = ?",
+                (source_id, key),
+            ).fetchone()
+            return self._unit_revision(db, row[0]) if row and row[0] else None

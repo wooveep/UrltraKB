@@ -22,15 +22,12 @@ class BlockPackage(Record):
     assets: dict[RelativePath, str]
 
 
-def freeze_block_package(source: Path, doc_name: str) -> Path:
-    """Freeze units once, after execution mode selection and before any model request."""
+def freeze_content_blocks(raw: dict) -> FrozenText:
+    """Freeze the existing block protocol independently of an explicit input package."""
     from ultrakb.content_blocks import BLOCK_POLICY, split_blocks
 
-    wiki = source.parent.parent
-    map_path = source.with_suffix(".content.json")
-    raw = json.loads(map_path.read_text("utf-8"))
     frozen = FrozenText.model_validate_json(json.dumps(raw))
-    frozen = FrozenText.model_validate(
+    return FrozenText.model_validate(
         {
             **frozen.model_dump(),
             "unit_kind": "block",
@@ -43,6 +40,14 @@ def freeze_block_package(source: Path, doc_name: str) -> Path:
             "block_policy": BLOCK_POLICY,
         }
     )
+
+
+def freeze_block_package(source: Path, doc_name: str) -> Path:
+    """Freeze units once, after execution mode selection and before any model request."""
+    wiki = source.parent.parent
+    map_path = source.with_suffix(".content.json")
+    raw = json.loads(map_path.read_text("utf-8"))
+    frozen = freeze_content_blocks(raw)
     assets = {}
     for name, digest in frozen.assets.items():
         path = wiki / name

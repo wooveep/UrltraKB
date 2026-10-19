@@ -467,6 +467,20 @@ def import_document(
     if download_remote_assets is not None and type(download_remote_assets) is not bool:
         raise ValueError("download_remote_assets must be a boolean")
     requested_scope = scope
+    scope = resolve_scope(kb_dir, scope)
+    if scope.knowledge is not None:
+        from .storage_ingestion import import_stored_document
+
+        return import_stored_document(
+            scope,
+            source,
+            context=context,
+            prepared=prepared,
+            origin_url=origin_url,
+            source_root=source_root,
+            on_event=on_event,
+            download_remote_assets=download_remote_assets,
+        )
     scope = resolve_scope(kb_dir, scope, writable=True)
     from ultrakb.state import HashRegistry
 

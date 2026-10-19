@@ -47,6 +47,12 @@ def indexing_response(request, number):
         or "PHYSICAL SLIDE STRUCTURE" in str(message.get("content"))
         for message in request["messages"]
     ):
+        if "\nPrevious structure:\n" in prompt:
+            previous, _ = json.JSONDecoder().raw_decode(
+                prompt.split("\nPrevious structure:\n", 1)[1]
+            )
+            if previous:
+                return {"content": "[]"}
         return {
             "content": json.dumps(
                 [
