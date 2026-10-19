@@ -137,6 +137,10 @@ def preview_generation(
     scope = resolve_scope(kb_dir, scope)
     GenerationOptions(target_type, name, "preview")
     kb_dir = kb_dir.resolve()
+    if scope.knowledge is not None:
+        from .storage_generators import preview_stored_generation
+
+        return preview_stored_generation(scope, target_type, name, skill_name=skill_name)
     with kb_read_lock(kb_dir / ".ultrakb"):
         prepared = _prepare(kb_dir, target_type, name, skill_name, scope=scope)
         target, roots = _paths(kb_dir, target_type, name, prepared, scope=scope)
@@ -171,6 +175,9 @@ class GenerationResult:
     message: str | None = None
     error_type: str | None = None
     artifact_path: Path | None = None
+    generation_id: str | None = None
+    artifact_epoch: int | None = None
+    projection_pending: bool = False
 
 
 def _archive(kb_dir: Path, target: Path) -> Path:
@@ -213,6 +220,10 @@ async def generate_artifact(
     context = context or ExecutionContext()
     scope = resolve_scope(kb_dir, scope)
     kb_dir = kb_dir.resolve()
+    if scope.knowledge is not None:
+        from .storage_generators import generate_stored_artifact
+
+        return await generate_stored_artifact(scope, options, context, bundle=bundle, model=model)
     async with async_kb_lock(
         kb_dir / ".ultrakb",
         exclusive=True,

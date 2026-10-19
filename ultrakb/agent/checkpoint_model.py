@@ -1,7 +1,8 @@
-"""Accepted non-streaming agent responses for replaying read-only maintenance tools."""
+"""Accepted non-streaming agent responses for reads and rebuilding private output."""
 
 from dataclasses import replace
 
+from agents.exceptions import UserError
 from agents.models.interface import ModelResponse
 from agents.tool import FunctionTool
 from pydantic import TypeAdapter
@@ -14,7 +15,16 @@ from ultrakb.storage.compile_deliveries import provider_response
 from ultrakb.storage.coordination import storage_stage
 
 from .managed_model import ManagedAgentModel
+from .page_response import PageResponseError
 from .retained_agent_response import RetainedAgentResponse
+
+
+def raise_checkpoint_failure(error):
+    """Recover our termination protocol from the SDK's tool error wrapper."""
+    while isinstance(error, UserError) and error.__cause__ is not None:
+        error = error.__cause__
+    if isinstance(error, (LockCancelled, RecoveryRequired, PageResponseError)):
+        raise error
 
 
 class CheckpointAgentModel(ManagedAgentModel):

@@ -25,8 +25,8 @@ from .wiki_paths import page_after, wiki_path
 
 def artifact_path(value):
     wiki_path(value)
-    if not value.startswith("output/"):
-        raise ValueError("Artifacts require a logical file path under output/")
+    if not value.startswith("output/") and value != ".claude-plugin/marketplace.json":
+        raise ValueError("Artifacts require output/ files or the application marketplace manifest")
     return value
 
 
@@ -210,6 +210,33 @@ class ArtifactStore:
         TypeAdapter(RecordId).validate_python(revision_id)
         fingerprint = _request(path, payload, expected_epoch, execution_id, evidence_publication_id)
         with storage_stage(self.root, self.identity, read_only=True) as db:
+            return self._committed(db, revision_id, fingerprint)
+
+    def resumed_write(
+        self,
+        revision_id,
+        *,
+        model_budget_id,
+        path,
+        payload,
+        expected_epoch,
+        evidence_publication_id,
+    ):
+        """Confirm a reserved generator write across executions of one retained budget."""
+        TypeAdapter(RecordId).validate_python(revision_id)
+        TypeAdapter(RecordId).validate_python(model_budget_id)
+        with storage_stage(self.root, self.identity, read_only=True) as db:
+            row = db.connection.execute(
+                "SELECT r.execution_id, e.model_budget_id FROM ukb_artifact_revisions r "
+                "JOIN ukb_executions e ON e.execution_id = r.execution_id "
+                "WHERE r.revision_id = ?",
+                (revision_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            if row[1] != model_budget_id:
+                raise ValueError("Generator write belongs to another model budget")
+            fingerprint = _request(path, payload, expected_epoch, row[0], evidence_publication_id)
             return self._committed(db, revision_id, fingerprint)
 
     def save(

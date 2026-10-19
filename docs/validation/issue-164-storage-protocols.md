@@ -1386,6 +1386,45 @@ result retention. Normal factories remain at the P8 gate; remaining compiler
 matrix, source maintenance, observation/archive/audit and final enablement are
 unfinished. Issue 164 remains open.
 
+### New Skill generation with independent main-store acceptance
+
+The main-store development path now runs the actual Skill creator against a
+fixed knowledge publication. It accepts each delivered output file independently
+through the artifact catalog and writes the marketplace manifest after its
+referenced Skill files. Generated output does not create a knowledge publication.
+Existing target replacement and Deck/custom-skill generation remain separate
+unfinished work; normal factories are still behind the P8 activation gate.
+
+Schema 25 retains immutable generation plans with reserved per-file acceptance
+identities. Recovery confirms the exact original receipts across resumed
+executions. The first artifact epoch, reviewed selection and model fingerprint
+are captured before paid work; an unrelated artifact update cannot silently
+change the work identity and repeat accepted requests. Conflicting acceptance
+retains the candidate instead of replacing a concurrent output.
+
+Native SDK responses, reader outputs and nested paid navigation ranking responses
+have separate retained checkpoints. Replaying private file writes rebuilds the
+temporary output, while replaying a search returns its exact accepted text and
+restores its context allocation. A received rank or reader result awaiting SQL
+acceptance recovers without another provider send. The SDK's tool-error wrapper
+is unwrapped only for known checkpoint/cancellation errors. Real provider errors
+continue to preserve private files already delivered by successful tools.
+
+Each successful artifact receipt returns with the known prefix of accepted
+files. A later persistent database failure cannot erase those facts or require
+another successful SQL query to display them. Working-copy synchronization is
+reported separately. Lost plan acknowledgement, per-file acceptance failure,
+lost save acknowledgement, projection failure, cancellation and later HTTP 400
+all retain the appropriate paid work or accepted files.
+
+The generator fault matrix uses actual SDK requests through a loopback provider
+and real temporary SQLite/CAS, including a persistent WAL SHM availability fault.
+The expanded generator/artifact/lint/retrieval/application set passes 80 cases
+before the final provider-failure parameter was added; the final targeted matrix
+passes 49. Both independent reviews confirm all reported findings are closed.
+Full mypy passes 564 modules. Issue 164 remains open while compiler review/discovery integration,
+remaining generator/management writers, observation/archive/audit and P8 remain.
+
 ### Main-store lint and link maintenance
 
 Link repair and structural/semantic checks now read a fixed complete private

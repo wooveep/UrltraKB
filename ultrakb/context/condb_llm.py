@@ -103,11 +103,12 @@ class ConDBLLMAdapter:
 
     def chat(self, messages, system="", tools=None, cache_key=None):
         from ultrakb.application.execution import activity
+        from ultrakb.storage.read_checkpoints import complete_read
 
         with activity("retrieving"), self.executor.retrieval_slot():
             for attempt in range(2):
                 request = self.request(messages, system, tools, cache_key, attempt=attempt)
-                result = self.executor.complete(self.role, request)
+                result = complete_read(self.executor, self.role, request)
                 try:
                     return completed_rank(result, tools)
                 except RetrievalFailure:

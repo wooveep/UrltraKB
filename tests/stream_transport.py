@@ -6,7 +6,7 @@ from threading import Condition, Thread
 
 
 class StreamTransport:
-    def __init__(self, responses, *, gate=None, body_gate=None, usage_events=None):
+    def __init__(self, responses, *, gate=None, body_gate=None, usage_events=None, statuses=None):
         self.responses = responses
         self.requests = []
         self.bodies = []
@@ -31,6 +31,16 @@ class StreamTransport:
                     if callable(owner.responses)
                     else owner.responses[index]
                 )
+                status = statuses[index] if statuses is not None else 200
+                if status >= 400:
+                    body = json.dumps(response).encode()
+                    owner.bodies.append(body)
+                    self.send_response(status)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
                 base = {
                     "id": f"chatcmpl-script-{index}",
                     "object": "chat.completion.chunk",

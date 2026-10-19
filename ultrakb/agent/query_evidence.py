@@ -82,7 +82,7 @@ def _original_payload(selected: dict, offset: int) -> dict:
     }
 
 
-def restrict_query_agent(agent, selection: QuerySelection):
+def restrict_query_agent(agent, selection: QuerySelection, *, checkpoints=None):
     """Replace every wiki reader; preserving artifact writers grants no extra knowledge reads."""
     if len(selection.views) > 1:
         raise ValueError("Multiple source collections are unsupported; bind one at the application")
@@ -302,6 +302,11 @@ def restrict_query_agent(agent, selection: QuerySelection):
     if sources:
         selected_tools.append(search_originals)
     if executor:
+        if checkpoints is not None:
+            from ultrakb.storage.read_checkpoints import checkpoint_reader
+
+            for tool in selected_tools:
+                checkpoint_reader(tool, checkpoints, executor)
 
         def bounded(tool):
             invoke = tool.on_invoke_tool

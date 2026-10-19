@@ -70,7 +70,17 @@ def _list_skill_dirs(kb_dir: Path) -> list[Path]:
 
 def _build_manifest(kb_dir: Path) -> dict[str, Any]:
     skills = _list_skill_dirs(kb_dir)
-    skill_paths = [f"./output/skills/{d.name}" for d in skills]
+    config = load_config(kb_dir / ".ultrakb" / "config.yaml")
+    return build_marketplace_manifest(
+        kb_dir, [skill.name for skill in skills], version=str(config.get("version", "0.1.0"))
+    )
+
+
+def build_marketplace_manifest(
+    kb_dir: Path, skill_names: list[str], *, version: str = "0.1.0"
+) -> dict[str, Any]:
+    """Describe accepted skill names without reading a mutable output directory."""
+    skill_paths = [f"./output/skills/{name}" for name in sorted(set(skill_names))]
 
     # Fixed clean descriptions — no truncation, no SKILL.md interpolation.
     # Naming convention is locked to `ultrakb@vectify` so users get one
@@ -78,10 +88,6 @@ def _build_manifest(kb_dir: Path) -> dict[str, Any]:
     # different KBs are distinguished by <owner>/<repo> URL.
     metadata_desc = f"Skills compiled from the {kb_dir.name} knowledge base via UltraKB."
     plugin_desc = "Knowledge skills compiled from this UltraKB-managed knowledge base."
-
-    # Pull KB config for version if available; default to 0.1.0
-    config = load_config(kb_dir / ".ultrakb" / "config.yaml")
-    version = str(config.get("version", "0.1.0"))
 
     owner = _git_owner(kb_dir)
     return {
