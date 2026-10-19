@@ -29,22 +29,9 @@ def interrupt_work(db):
                 ).rowcount
             if changed < 128:
                 break
-    from .usage_store import UsageStore
+    from .usage_store import interrupt_restored_requests
 
-    store = UsageStore(db.root, db.identity)
-    after = 0
-    while True:
-        rows = db.connection.execute(
-            "SELECT sequence, request_id, observation_version FROM ukb_usage_requests "
-            "WHERE sequence > ? AND json_extract(payload_json, '$.state') = 'started' "
-            "ORDER BY sequence LIMIT 128",
-            (after,),
-        ).fetchall()
-        if not rows:
-            break
-        for _, request_id, version in rows:
-            store.merge(request_id, version=version + 1, state="interrupted")
-        after = rows[-1][0]
+    interrupt_restored_requests(db)
 
 
 def rebind_imports(db, generation):

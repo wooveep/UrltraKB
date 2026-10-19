@@ -189,7 +189,10 @@ def test_unknown_pending_receipt_is_retained_with_explicit_incomplete_coverage(t
 
 
 @pytest.mark.asyncio
-async def test_restore_interrupts_running_work_without_resetting_its_paid_budget(tmp_path):
+@pytest.mark.parametrize("receipt_version", [None, 2**63 - 1])
+async def test_restore_interrupts_running_work_without_resetting_its_paid_budget(
+    tmp_path, receipt_version
+):
     import asyncio
     from threading import Event
 
@@ -218,6 +221,12 @@ async def test_restore_interrupts_running_work_without_resetting_its_paid_budget
                     break
                 await asyncio.sleep(0.01)
             assert len(service.requests) == 1
+            if receipt_version is not None:
+                usage = UsageStore(root, identity)
+                [request] = usage.requests(
+                    execution_id=context.storage_execution.execution_id
+                ).records
+                usage.merge(request.request_attempt_id, version=receipt_version, state="started")
             archive, destination = tmp_path / "backup", tmp_path / "restored"
             backup_knowledge(root, archive, scope=storage_scope(root, identity))
             restored = restore_knowledge(archive, destination)

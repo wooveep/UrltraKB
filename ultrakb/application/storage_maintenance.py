@@ -27,3 +27,18 @@ def backup_knowledge(kb_dir: Path, destination: Path, *, scope=None) -> BackupRe
 def restore_knowledge(backup: Path, destination: Path) -> BackupResult:
     receipt = Maintenance.restore_package(backup, destination)
     return BackupResult("completed", str(destination.resolve()), receipt.identity, receipt.coverage)
+
+
+def _maintenance(kb_dir, scope):
+    scope = resolve_scope(kb_dir, scope)
+    if scope.knowledge is None:
+        raise ValueError("Collection requires a main-store knowledge base")
+    return Maintenance(scope.kb_dir, scope.knowledge.identity)
+
+
+def preview_collection(kb_dir: Path, *, scope=None, max_items=128, max_bytes=64 * 1024**2):
+    return _maintenance(kb_dir, scope).preview(max_items=max_items, max_bytes=max_bytes)
+
+
+def collect_garbage(kb_dir: Path, *, scope=None, max_items=128, max_bytes=64 * 1024**2):
+    return _maintenance(kb_dir, scope).collect(max_items=max_items, max_bytes=max_bytes)

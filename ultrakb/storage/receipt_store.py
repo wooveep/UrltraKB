@@ -49,6 +49,49 @@ class ReceiptRepair:
     remaining: int | None
 
 
+def read_pending_packet(path, identity, *, byte_limit=None):
+    if byte_limit is not None and path.stat().st_size > byte_limit:
+        raise ValueError("Pending packet exceeds the repair byte budget")
+    packet = ReceiptPacket.model_validate_json(path.read_bytes())
+    if (packet.kb_id, packet.generation) != (identity.kb_id, identity.generation):
+        raise ValueError("Pending receipt belongs to another generation")
+    response = (
+        base64.b64decode(packet.response_base64, validate=True)
+        if packet.response_base64 is not None
+        else None
+    )
+    return packet, response
+
+
+def pending_reclamation_barrier(db, *, limit=1000, byte_limit=64 * 1024**2):
+    """Unknown ownership protects all candidates; valid packets contain their own bytes."""
+    directory = db.root / ".ultrakb/receipts/pending"
+    try:
+        for path in (directory, *directory.parents):
+            if path == db.root:
+                break
+            if path.is_symlink():
+                return "unresolved_pending_receipts"
+        if not directory.exists():
+            return None
+        count = total = 0
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                if entry.is_symlink() or not entry.is_file():
+                    return "unresolved_pending_receipts"
+                count += 1
+                total += entry.stat().st_size
+                if count > limit or total > byte_limit:
+                    return "pending_receipt_scan_limit"
+                packet, _ = read_pending_packet(
+                    Path(entry.path), db.identity, byte_limit=byte_limit
+                )
+                require_request_generation(db, packet.request_id)
+    except (OSError, ValueError, KeyError):
+        return "unresolved_pending_receipts"
+    return None
+
+
 class ReceiptStore:
     def __init__(self, root: Path, identity: DatabaseIdentity):
         self.root, self.identity = root.resolve(), identity
@@ -139,16 +182,8 @@ class ReceiptStore:
                     try:
                         if entry.is_symlink() or not entry.is_file():
                             raise ValueError("Unknown pending receipt ownership")
-                        packet = ReceiptPacket.model_validate_json(Path(entry.path).read_bytes())
-                        if (packet.kb_id, packet.generation) != (
-                            self.identity.kb_id,
-                            self.identity.generation,
-                        ):
-                            raise ValueError("Pending receipt belongs to another generation")
-                        response = (
-                            base64.b64decode(packet.response_base64, validate=True)
-                            if packet.response_base64 is not None
-                            else None
+                        packet, response = read_pending_packet(
+                            Path(entry.path), self.identity, byte_limit=byte_limit
                         )
                         self._accept(packet.request_id, response, packet.version, packet.usage)
                     except (ValueError, KeyError, OSError, sqlite3.Error, BlobRetiring):

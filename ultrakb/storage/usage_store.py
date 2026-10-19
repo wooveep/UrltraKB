@@ -109,6 +109,46 @@ def _apply_delta(connection, record, stage_code, before):
             )
 
 
+def interrupt_restored_requests(db):
+    """Private restore state is independent of the provider's receipt version space."""
+    after = 0
+    while True:
+        rows = db.connection.execute(
+            "SELECT sequence, request_id, stage_code, payload_json, budget_charged, "
+            "model_budget_id FROM ukb_usage_requests WHERE sequence > ? "
+            "AND json_extract(payload_json, '$.state') = 'started' ORDER BY sequence LIMIT 128",
+            (after,),
+        ).fetchall()
+        if not rows:
+            return
+        # Parse and encode outside the short state/counter transaction. No provider
+        # field version is invented, including at the maximum legal int64 version.
+        prepared = []
+        for _, request_id, stage, payload, prior_charge, budget in rows:
+            previous = UsageRequest.model_validate_json(payload)
+            current = UsageRequest.model_validate(
+                {**previous.model_dump(), "state": "interrupted", "ended_at": None}
+            )
+            prepared.append(
+                (request_id, stage, previous, current, _encode(current), prior_charge, budget)
+            )
+        with db.transaction() as connection:
+            for request_id, stage, previous, current, encoded, prior_charge, budget in prepared:
+                charged = int(current.send_status != "not_sent")
+                connection.execute(
+                    "UPDATE ukb_usage_requests SET payload_json = ?, budget_charged = ?, "
+                    "storage_version = storage_version + 1 WHERE request_id = ?",
+                    (encoded, charged, request_id),
+                )
+                if charged != prior_charge:
+                    connection.execute(
+                        "UPDATE ukb_model_budgets SET used = used + ? WHERE model_budget_id = ?",
+                        (charged - prior_charge, budget),
+                    )
+                _apply_delta(connection, current, stage, _counts(previous))
+        after = rows[-1][0]
+
+
 @dataclass(frozen=True)
 class RequestPage:
     records: tuple[UsageRequest, ...]

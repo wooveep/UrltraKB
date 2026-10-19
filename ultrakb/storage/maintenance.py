@@ -27,6 +27,7 @@ from ultrakb.storage.database import (
     database_path,
     open_database,
 )
+from ultrakb.storage.receipt_store import pending_reclamation_barrier
 from ultrakb.storage.wiki_projection import projection_lock
 
 
@@ -39,6 +40,7 @@ class CollectionPreview:
     has_more: bool
     candidate_trees: int = 0
     protected_trees: int = 0
+    blocked_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -48,6 +50,7 @@ class CollectionResult:
     deleted_bytes: int = 0
     trees_deleted: int = 0
     tree_rows_deleted: int = 0
+    blocked_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -151,9 +154,18 @@ class Maintenance:
 
     def preview(self, *, max_items: int = 128, max_bytes: int = 64 * 1024 * 1024):
         _limits(max_items, max_bytes)
-        with storage_stage(self.root, self.identity, read_only=True) as db:
+        with (
+            storage_stage(self.root, self.identity, read_only=True) as db,
+            file_write_lock(self.root / ".ultrakb/ingest.lock"),
+        ):
             from .tree_reclamation import tree_candidates
 
+            if reason := pending_reclamation_barrier(db):
+                count, size = db.connection.execute(
+                    "SELECT count(*), coalesce(sum(byte_count), 0) FROM ukb_blobs"
+                ).fetchone()
+                trees = db.connection.execute("SELECT count(*) FROM ukb_tree_builds").fetchone()[0]
+                return CollectionPreview(0, 0, count, size, False, 0, trees, reason)
             trees = tree_candidates(db, max_items + 1)
             tree_count = min(len(trees), max_items)
             rows, has_more = _candidates(db, max_items - tree_count, max_bytes)
@@ -181,6 +193,8 @@ class Maintenance:
         with try_reclamation(self.root, self.identity) as db:
             if db is None:
                 return CollectionResult("busy")
+            if reason := pending_reclamation_barrier(db):
+                return CollectionResult("blocked", blocked_reason=reason)
             from .tree_reclamation import reclaim_trees
 
             trees_deleted, tree_rows_deleted = reclaim_trees(db, max_items=max_items)

@@ -1,6 +1,5 @@
 """Retain pending packets exactly; accept known responses before changing generation."""
 
-import base64
 import os
 import sqlite3
 from pathlib import Path
@@ -10,22 +9,8 @@ from ultrakb.locks import durable_unlink
 from .backup_state import BackupPendingReceipt, fingerprint, pending_payload, state_path
 from .blobs import BlobRetiring
 from .database import open_database
-from .receipt_store import ReceiptPacket, ReceiptStore
+from .receipt_store import ReceiptStore, read_pending_packet
 from .usage_store import require_request_generation
-
-
-def _packet(path, identity):
-    if path.stat().st_size > 64 * 1024**2:
-        raise ValueError("Pending packet exceeds the repair byte budget")
-    packet = ReceiptPacket.model_validate_json(path.read_bytes())
-    if (packet.kb_id, packet.generation) != (identity.kb_id, identity.generation):
-        raise ValueError("Pending receipt belongs to another generation")
-    response = (
-        base64.b64decode(packet.response_base64, validate=True)
-        if packet.response_base64 is not None
-        else None
-    )
-    return packet, response
 
 
 def capture_pending(root, snapshot, identity, copy_verified):
@@ -44,7 +29,7 @@ def capture_pending(root, snapshot, identity, copy_verified):
                     )
                 state = "repairable"
                 try:
-                    packet, _ = _packet(path, identity)
+                    packet, _ = read_pending_packet(path, identity, byte_limit=64 * 1024**2)
                     require_request_generation(db, packet.request_id)
                 except (ValueError, KeyError, OSError):
                     state = "unresolved"
@@ -67,7 +52,7 @@ def restore_pending(backup, destination, identity, manifest, copy_verified):
             unresolved += 1
             continue
         try:
-            packet, response = _packet(target, identity)
+            packet, response = read_pending_packet(target, identity, byte_limit=64 * 1024**2)
             store._accept(packet.request_id, response, packet.version, packet.usage)
         except (ValueError, KeyError, OSError, sqlite3.Error, BlobRetiring):
             unresolved += 1

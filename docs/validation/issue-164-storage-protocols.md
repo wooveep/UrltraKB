@@ -1052,3 +1052,19 @@ changes, known/unknown packets, running tasks and restored compilation. Related
 maintenance, usage, model, pending, session, artifact, compiler and editor
 regressions pass 89 tests. Remaining P6/P7 product queries, manual retention and
 the full P8 matrix are still required.
+
+### Conservative recovery ownership during manual collection
+
+Shared collection/preview use cases now inspect pending ownership under existing
+coordination. Unknown, malformed or bounded-scan-overflow packets protect every
+candidate and return a reason with zero deletions; exact known packets carry
+their own response bytes. Three public GC cases cover malformed/unknown requests,
+retained orphan bytes and GC busy throughout actual backup Blob copying. Pending
+packet parsing is shared with explicit repair and backup.
+
+Review also found that incrementing a legal maximum provider receipt version
+could make restore fail. A real running-question backup reproduces this boundary.
+Private restoration now changes request runtime state and counters independently
+of provider field versions, without inventing a later receipt or completion time.
+The accepted provider versions, spent calls and historical identity remain intact.
+Seventy related GC, backup, model, usage, compiler and tree cases pass.
