@@ -109,10 +109,10 @@ def _publication(row):
         if row[9] is None
         else "paused"
         if row[12] and row[13] == row[9]
-        else "conflict"
-        if row[11]
         else "superseded"
         if row[8] == "superseded"
+        else "conflict"
+        if row[11]
         else "pending"
         if row[10]
         else "synced"
@@ -200,13 +200,16 @@ class TaskStore:
             ).fetchall()
             publications = db.connection.execute(
                 "SELECT r.rowid, r.publication_id, r.revision_id, r.execution_id, r.generation, "
-                "r.attempt_id, r.published_at, p.view_id, s.state, s.plan_id, "
-                "s.remaining_count, s.conflict_count, w.paused, w.active_plan_id, "
+                "r.attempt_id, r.published_at, p.view_id, COALESCE(a.state, s.state), "
+                "COALESCE(a.plan_id, s.plan_id), COALESCE(a.remaining_count, s.remaining_count), "
+                "COALESCE(a.conflict_count, s.conflict_count), w.paused, w.active_plan_id, "
                 "i.source_revision_id, i.unit_revision_id "
                 "FROM ukb_publication_receipts r JOIN ukb_publications p USING(publication_id) "
                 "LEFT JOIN ukb_revision_sync b ON b.revision_id = r.revision_id "
                 "LEFT JOIN ukb_sync_plans s ON s.plan_id = b.plan_id "
                 "LEFT JOIN ukb_projection_state w ON w.view_id = p.view_id "
+                "LEFT JOIN ukb_sync_plans a ON a.plan_id = w.active_plan_id "
+                "AND a.revision_id = r.revision_id "
                 "LEFT JOIN ukb_revision_import i ON i.revision_id = r.revision_id "
                 "WHERE r.execution_id = ? AND r.rowid > ? ORDER BY r.rowid LIMIT ?",
                 (execution_id, publications_after, limit + 1),

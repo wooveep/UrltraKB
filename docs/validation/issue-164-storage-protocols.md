@@ -1124,3 +1124,11 @@ and double-KB regressions went from failing to passing. The four task applicatio
 cases and related publication, database, backup, compiler and size checks pass
 73 tests; 34 related export/model cases pass separately. Full mypy passes 516
 source modules. Three-adapter presentation and remaining P6/P7 acceptance remain.
+
+Task-publication review then reproduced stale projection status after explicit
+discard activated a resumption plan for the same head, and a superseded plan
+retaining old conflict counts. Details now select the current matching resumption
+plan when present and classify supersession before former conflicts. Two public
+import/editor application regressions prove pending-to-synced resumption and
+historical supersession after a later successful import. All 24 related task,
+editor and projection regressions pass.

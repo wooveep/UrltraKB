@@ -196,3 +196,76 @@ def test_failed_cleanup_progress_subscription_still_closes_the_actual_controller
         assert "confirm execution cleanup" in result.unfinished
         assert len(service.requests) == 2
     assert controllers and all(controller._closed for controller in controllers)
+
+
+def test_task_publication_tracks_the_active_resumption_plan_for_the_same_head(tmp_path):
+    from ultrakb.application.knowledge_tasks import read_knowledge_task
+    from ultrakb.application.wiki_worktree import begin_external_edit, discard_external_edit
+    from ultrakb.storage.wiki_projection import ProjectionStore
+
+    root, identity, _ = question_knowledge(tmp_path)
+    source = tmp_path / "guide.md"
+    source.write_text("The value is 17.")
+    context = ExecutionContext(storage_identity=identity)
+    responses = [
+        {"content": json.dumps({"description": "Guide", "content": "The value is 17."})},
+        {"content": json.dumps({"concepts": [], "entities": []})},
+    ]
+    with StreamTransport(responses) as service:
+        (root / ".env").write_text(f"LLM_API_KEY=offline-test-key\nOPENAI_API_BASE={service.url}\n")
+        result = import_document(root, source, context=context, scope=storage_scope(root, identity))
+        assert result.status == "added", result.message
+    edit = begin_external_edit(root, identity)
+    (edit.directory / "index.md").write_text("Temporary editor change")
+    discarded = discard_external_edit(root, identity, edit.edit_id, editor_stopped=True)
+    assert discarded.status == "discarded"
+    detail = read_knowledge_task(
+        root, context.storage_execution.task_id, scope=storage_scope(root, identity)
+    )
+    [publication] = detail.publications
+    assert publication.publication_id == discarded.publication_id
+    assert publication.projection_status == "pending"
+    assert ProjectionStore(root, identity).sync().status == "synced"
+    [publication] = read_knowledge_task(
+        root, context.storage_execution.task_id, scope=storage_scope(root, identity)
+    ).publications
+    assert publication.projection_status == "synced"
+
+
+def test_superseded_task_publication_does_not_report_its_former_projection_conflict(tmp_path):
+    from ultrakb.application.knowledge_tasks import read_knowledge_task
+
+    root, identity, _ = question_knowledge(tmp_path)
+    (root / "wiki").mkdir()
+    (root / "wiki/index.md").write_text("Unknown worktree contents")
+    source = tmp_path / "guide.md"
+    source.write_text("The value is 17.")
+    first = ExecutionContext(storage_identity=identity)
+    second = ExecutionContext(storage_identity=identity)
+    responses = [
+        {"content": json.dumps({"description": "Guide", "content": f"The value is {value}."})}
+        if position == 0
+        else {"content": json.dumps({"concepts": [], "entities": []})}
+        for value in (17, 18)
+        for position in (0, 1)
+    ]
+    with StreamTransport(responses) as service:
+        (root / ".env").write_text(f"LLM_API_KEY=offline-test-key\nOPENAI_API_BASE={service.url}\n")
+        result = import_document(root, source, context=first, scope=storage_scope(root, identity))
+        assert result.status == "added", result.message
+        scope = storage_scope(root, identity)
+        [publication] = read_knowledge_task(
+            root, first.storage_execution.task_id, scope=scope
+        ).publications
+        assert publication.projection_status == "conflict"
+        (root / "wiki/index.md").write_bytes(scope.knowledge.read("index.md"))
+        source.write_text("The value is 18.")
+        result = import_document(root, source, context=second, scope=storage_scope(root, identity))
+        assert result.status == "added", result.message
+    scope = storage_scope(root, identity)
+    [old] = read_knowledge_task(root, first.storage_execution.task_id, scope=scope).publications
+    [current] = read_knowledge_task(
+        root, second.storage_execution.task_id, scope=scope
+    ).publications
+    assert old.projection_status == "superseded"
+    assert current.projection_status == "synced"
