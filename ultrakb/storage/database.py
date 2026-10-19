@@ -15,14 +15,16 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
+from time import perf_counter
 from typing import Iterator
 
 from ultrakb.locks import _fsync_directory
+from ultrakb.storage.costs import active_costs
 from ultrakb.storage.schema import SCHEMA
 
 FORMAT = "ultrakb.context-kb"
 FORMAT_VERSION = 2
-SCHEMA_VERSION = 32
+SCHEMA_VERSION = 34
 WRITER_VERSION = 1
 CAPABILITIES = frozenset({"cas-v1", "independent-commits-v1", "condb-tree-scope-v2"})
 BUSY_TIMEOUT_MS = 2_000
@@ -247,17 +249,25 @@ class Database:
             raise RuntimeError("Durable storage requires an independent top-level transaction")
         _validate(self.connection, self.identity)
         token = _WRITING.set(_WRITING.get() | {self.root})
+        capture = active_costs()
+        began = perf_counter() if capture is not None else 0.0
+        acquired, outcome = None, "errors"
         try:
             self.connection.execute("BEGIN IMMEDIATE")
+            acquired = perf_counter() if capture is not None else None
             try:
                 _validate(self.connection, self.identity)
                 yield self.connection
                 self.connection.commit()
+                outcome = "commits"
             except BaseException:
                 self.connection.rollback()
+                outcome = "rollbacks"
                 raise
         finally:
             _WRITING.reset(token)
+            if capture is not None:
+                capture.transaction(began, acquired, perf_counter(), outcome)
 
 
 @contextmanager

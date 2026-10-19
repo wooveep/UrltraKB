@@ -78,7 +78,10 @@ EXECUTION_SCHEMA = (
             ('started', 'completed', 'failed', 'cancelled', 'interrupted', 'reused')),
         ended_at TEXT,
         duration_seconds REAL CHECK (duration_seconds >= 0),
-        error_code TEXT
+        error_code TEXT,
+        observation TEXT CHECK (observation IS NULL OR json_valid(observation)),
+        observation_coverage TEXT NOT NULL DEFAULT 'not_recorded' CHECK
+            (observation_coverage IN ('not_recorded', 'pending', 'recorded', 'partial', 'retired'))
     )""",
     "CREATE INDEX ukb_stage_execution ON ukb_stage_attempts(execution_id, sequence)",
     "CREATE INDEX ukb_stage_active ON ukb_stage_attempts(execution_id, state)",

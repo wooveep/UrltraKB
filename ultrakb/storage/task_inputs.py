@@ -39,6 +39,7 @@ def describe_stage_input(db, stage):
                     unit_revision_id=unit.unit_revision_id if unit else None,
                     unit_id=unit.unit_id if unit else None,
                     unit_key=unit.key if unit else None,
+                    unit_label=unit.label if unit else None,
                     document_name=unit.doc_name if unit else None,
                     processing_fingerprint=fingerprint,
                 )

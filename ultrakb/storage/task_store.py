@@ -5,6 +5,7 @@ from pydantic import TypeAdapter
 from ultrakb.llm_usage import UsageRequest
 from ultrakb.llm_usage_models import UsageAggregate
 from ultrakb.source_records import RecordId
+from ultrakb.stage_observations import StageObservation
 from ultrakb.task_records import (
     TaskBudget,
     TaskDetail,
@@ -62,7 +63,23 @@ _STAGE_KEYS = (
     "ended_at",
     "duration_seconds",
     "error_code",
+    "observation",
+    "observation_coverage",
 )
+
+
+def _stage(values):
+    record = dict(zip(_STAGE_KEYS, values, strict=True))
+    if record["observation"] is not None:
+        try:
+            record["observation"] = StageObservation.model_validate_json(record["observation"])
+        except (ValueError, TypeError):
+            record["observation"] = None
+            record["observation_coverage"] = "partial"
+            record["observation_unavailable_reason"] = "invalid_or_unsupported_observation"
+    if record["observation_coverage"] == "pending" and record["state"] != "started":
+        record["observation_coverage"] = "partial"
+    return TaskStage.model_validate(record)
 
 
 def _page(after, limit):
@@ -185,9 +202,7 @@ class TaskStore:
             ).fetchone()
             if row is None:
                 raise KeyError(stage_id)
-            stage = describe_stage_input(
-                db, TaskStage.model_validate(dict(zip(_STAGE_KEYS, row[1:], strict=True)))
-            )
+            stage = describe_stage_input(db, _stage(row[1:]))
             requests = db.connection.execute(
                 "SELECT sequence, payload_json FROM ukb_usage_requests "
                 "WHERE stage_attempt_id = ? AND sequence > ? ORDER BY sequence LIMIT ?",
@@ -233,6 +248,7 @@ class TaskStore:
                     else "recorded"
                     if stage.input is not None
                     else "not_bound",
+                    "storage_costs": stage.observation_coverage,
                 },
             )
 
@@ -302,6 +318,7 @@ class TaskStore:
             cursors = [
                 _cursor(rows, limit) for rows in (executions, stages, requests, publications)
             ]
+            stage_page = describe_stage_inputs(db, (_stage(row[1:]) for row in stages[:limit]))
             return TaskDetail(
                 statistics_at=now(),
                 kb_id=self.identity.kb_id,
@@ -316,13 +333,7 @@ class TaskStore:
                     TaskExecution.model_validate(dict(zip(_EXECUTION_KEYS, row[1:], strict=True)))
                     for row in executions[:limit]
                 ),
-                stages=describe_stage_inputs(
-                    db,
-                    (
-                        TaskStage.model_validate(dict(zip(_STAGE_KEYS, row[1:], strict=True)))
-                        for row in stages[:limit]
-                    ),
-                ),
+                stages=stage_page,
                 requests=tuple(
                     UsageRequest.model_validate_json(row[1]) for row in requests[:limit]
                 ),
@@ -336,6 +347,12 @@ class TaskStore:
                     "model_usage": "recorded" if task.usage is not None else "not_recorded",
                     "non_model_stages": "partial",
                     "stage_usage": "not_included",
+                    "storage_costs": "recorded"
+                    if stage_page
+                    and all(item.observation_coverage == "recorded" for item in stage_page)
+                    else "partial"
+                    if any(item.observation_coverage != "not_recorded" for item in stage_page)
+                    else "not_recorded",
                     "resource_samples": "not_recorded",
                     "pricing": "not_recorded",
                     "projection_details": "retired"

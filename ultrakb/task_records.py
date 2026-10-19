@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from ultrakb.llm_usage import UsageRequest
 from ultrakb.llm_usage_models import UsageAggregate
 from ultrakb.source_records import RecordId
+from ultrakb.stage_observations import StageObservation
 
 
 class TaskRecord(BaseModel):
@@ -58,6 +59,7 @@ class TaskInput(TaskRecord):
     unit_revision_id: RecordId | None = None
     unit_id: RecordId | None = None
     unit_key: str | None = None
+    unit_label: str | None = None
     document_name: str | None = None
     processing_fingerprint: str | None = None
 
@@ -77,6 +79,11 @@ class TaskStage(TaskRecord):
     error_code: str | None
     input: TaskInput | None = None
     input_unavailable_reason: str | None = None
+    observation: StageObservation | None = None
+    observation_unavailable_reason: str | None = None
+    observation_coverage: Literal["not_recorded", "pending", "recorded", "partial", "retired"] = (
+        "not_recorded"
+    )
 
 
 class TaskList(TaskRecord):

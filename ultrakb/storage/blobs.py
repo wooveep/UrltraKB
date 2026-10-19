@@ -3,10 +3,12 @@
 import hashlib
 from dataclasses import dataclass
 from pathlib import Path
+from time import perf_counter
 from typing import BinaryIO
 
 from ultrakb.locks import PrivateMaterialization, _fsync_directory, atomic_write_bytes
 from ultrakb.storage.coordination import require_stage
+from ultrakb.storage.costs import active_costs
 from ultrakb.storage.database import Database
 
 
@@ -53,14 +55,24 @@ def put_blob(db: Database, payload: bytes) -> Blob:
     if row and row[1] != "live":
         raise BlobRetiring("Blob retirement is incomplete; retry after maintenance")
     path = blob_path(db.root, blob.digest)
+    capture = active_costs()
     if row or path.exists():
         if read_bytes(db, blob.digest, registered=bool(row)) != payload:
             raise ValueError("CAS content does not match its digest")
+        if row and capture is not None:
+            capture.dedup_hit()
     if not row:
         # An unregistered final name may survive an interrupted directory sync.
         # Validate it above, then re-establish file and directory durability.
-        _prepare_directory(db.root, path)
-        atomic_write_bytes(path, payload)
+        began = perf_counter() if capture is not None else 0.0
+        failed = True
+        try:
+            _prepare_directory(db.root, path)
+            atomic_write_bytes(path, payload)
+            failed = False
+        finally:
+            if capture is not None:
+                capture.blob("write", 0 if failed else len(payload), began, failed)
     # A crash before this commit leaves only a recoverable orphan, never a ref.
     with db.transaction() as connection:
         connection.execute(
@@ -80,10 +92,18 @@ def read_bytes(db: Database, digest: str, *, registered: bool = True) -> bytes:
     path = blob_path(db.root, digest)
     if path.is_symlink() or path.parent.is_symlink():
         raise ValueError("CAS content cannot follow symbolic links")
-    payload = path.read_bytes()
-    if hashlib.sha256(payload).hexdigest() != digest or row and len(payload) != row[0]:
-        raise ValueError("CAS content failed integrity validation")
-    return payload
+    capture = active_costs()
+    began = perf_counter() if capture is not None else 0.0
+    payload, failed = None, True
+    try:
+        payload = path.read_bytes()
+        if hashlib.sha256(payload).hexdigest() != digest or row and len(payload) != row[0]:
+            raise ValueError("CAS content failed integrity validation")
+        failed = False
+        return payload
+    finally:
+        if capture is not None:
+            capture.blob("read", len(payload) if payload is not None else 0, began, failed)
 
 
 def copy_blob(db: Database, digest: str, output: BinaryIO, *, cancelled=None) -> None:
@@ -97,20 +117,27 @@ def copy_blob(db: Database, digest: str, output: BinaryIO, *, cancelled=None) ->
     if row is None or row[1] != "live":
         raise ValueError("Blob is missing or unavailable")
     path, hasher, size = blob_path(db.root, digest), hashlib.sha256(), 0
-    with path.open("rb") as reader:
-        while True:
-            if cancelled is not None and cancelled():
-                raise InterruptedError("Blob read cancelled")
-            chunk = reader.read(1024 * 1024)
-            if not chunk:
-                break
-            size += len(chunk)
-            if size > row[0]:
-                raise ValueError("Blob failed integrity validation")
-            hasher.update(chunk)
-            output.write(chunk)
-    if size != row[0] or hasher.hexdigest() != digest:
-        raise ValueError("Blob failed integrity validation")
+    capture = active_costs()
+    began, failed = perf_counter() if capture is not None else 0.0, True
+    try:
+        with path.open("rb") as reader:
+            while True:
+                if cancelled is not None and cancelled():
+                    raise InterruptedError("Blob read cancelled")
+                chunk = reader.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > row[0]:
+                    raise ValueError("Blob failed integrity validation")
+                hasher.update(chunk)
+                output.write(chunk)
+        if size != row[0] or hasher.hexdigest() != digest:
+            raise ValueError("Blob failed integrity validation")
+        failed = False
+    finally:
+        if capture is not None:
+            capture.blob("read", size, began, failed)
 
 
 def retain_blob(connection, owner_kind: str, owner_id: str, slot: str, blob: Blob) -> None:
@@ -144,10 +171,23 @@ def materialize_private(
     ).fetchone()
     if row != (blob.byte_count, "live"):
         raise ValueError("The exact retained Blob is unavailable for materialization")
-    workspace.copy(
-        blob_path(db.root, blob.digest),
-        path,
-        digest=blob.digest,
-        byte_count=blob.byte_count,
-        replace=replace,
-    )
+    capture = active_costs()
+    began, size, failed = perf_counter() if capture is not None else 0.0, 0, True
+    try:
+        with blob_path(db.root, blob.digest).open("rb") as reader:
+            try:
+                workspace.copy(
+                    reader, path, digest=blob.digest, byte_count=blob.byte_count, replace=replace
+                )
+                failed = False
+            finally:
+                if capture is not None:
+                    # PrivateMaterialization only reads forwards. The file position
+                    # includes bytes read before a hash, target write or I/O failure.
+                    try:
+                        size = reader.tell()
+                    except (OSError, ValueError):
+                        pass
+    finally:
+        if capture is not None:
+            capture.blob("read", size, began, failed)

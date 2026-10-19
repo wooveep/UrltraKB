@@ -129,7 +129,10 @@ def test_retained_replacement_keeps_public_body_and_explicit_historical_input_se
         assert replacement.source_id == first.source_id
         assert replacement.units[0].unit_id == first.units[0].unit_id
         assert storage_scope(root, identity).publication_id == public.publication_id
-        assert "17" in read_document_source(root, first.source_id, scope=public)["content"]
+        assert (
+            "The value is 17."
+            in read_document_source(root, first.source_id, scope=public)["content"]
+        )
         assert (
             read_document_source(
                 root,
@@ -143,7 +146,7 @@ def test_retained_replacement_keeps_public_body_and_explicit_historical_input_se
         diagnostic = read_retained_input(root, replacement.source_id, target, identity=identity)
         assert diagnostic["publication_id"] is None
         assert diagnostic["source_revision_id"] == replacement.source_revision_id
-        assert "17" not in diagnostic["content"]
+        assert "The value is 17." not in diagnostic["content"]
         with pytest.raises(ValueError, match="another source"):
             read_retained_input(root, "0" * 32, target, identity=identity)
         with pytest.raises(FileNotFoundError):

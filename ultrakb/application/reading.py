@@ -71,20 +71,12 @@ def read_knowledge_context(
 
 def read_knowledge_image(kb_dir: Path, path: str, *, scope: KnowledgeScope) -> tuple[bytes, str]:
     """Read a raster image from the same fixed wiki as the displayed body."""
+    from ultrakb.image_media import knowledge_image_media_type
+
     selected = resolve_scope(kb_dir, scope)
-    media_types = {
-        ".png": "image/png",
-        ".jpg": "image/jpeg",
-        ".jpeg": "image/jpeg",
-        ".gif": "image/gif",
-        ".webp": "image/webp",
-        ".bmp": "image/bmp",
-    }
-    suffix = Path(path).suffix.lower()
-    if suffix not in media_types:
-        raise ValueError("Unsupported knowledge image format")
+    media_type = knowledge_image_media_type(path)
     with reading_scope(selected):
-        return read_wiki_bytes(selected, path), media_types[suffix]
+        return read_wiki_bytes(selected, path), media_type
 
 
 def read_page_context(

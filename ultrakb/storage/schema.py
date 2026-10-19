@@ -118,6 +118,7 @@ SCHEMA = (
         unit_id TEXT NOT NULL REFERENCES ukb_import_units(unit_id),
         processing_id TEXT NOT NULL REFERENCES ukb_processing_versions(processing_id),
         generation INTEGER NOT NULL CHECK (generation > 0),
+        label TEXT NOT NULL,
         UNIQUE (unit_id, generation)
     )""",
         """CREATE TABLE ukb_import_groups (

@@ -48,7 +48,14 @@ class ImportCandidates:
                     (prepared.revision_id,),
                 ).fetchall()
             )
-            conflicts = protected_knowledge_pages(base.files(), files, base.generated_baselines())
+            from .import_review_assets import only_image_relocations
+
+            before = base.files()
+            conflicts = {
+                path
+                for path in protected_knowledge_pages(before, files, base.generated_baselines())
+                if not only_image_relocations(db, path, before, files)
+            }
             if db.connection.execute(
                 "SELECT publication_id FROM ukb_heads WHERE view_id = ?", (prepared.view_id,)
             ).fetchone() != (prepared.expected_publication,):

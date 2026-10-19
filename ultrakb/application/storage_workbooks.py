@@ -9,6 +9,7 @@ from ultrakb.ingest_result import ImportUnitOutcome, IngestResult
 from ultrakb.knowledge_scope import KnowledgeScope
 from ultrakb.locks import LockCancelled, atomic_write_json, atomic_write_text
 from ultrakb.processing_policy import classify_markdown_tokens
+from ultrakb.stage_observations import InputObservation
 from ultrakb.storage.compile_workspace import materialize_baseline
 from ultrakb.storage.workbook_store import WorkbookStore
 from ultrakb.workbooks.normalization import freeze_sheet
@@ -52,12 +53,22 @@ def _plan(
             + hashlib.sha256(sheet.key.encode()).hexdigest()[:12]
         )
     )
+    original = next(file for file in revision.files if file.kind == "main")
+    measured = sheet.content_state in {"content", "empty"}
     with task_stage(
         context,
         "worksheet.normalize.v1",
         source_revision_id=revision.revision_id,
         work_key=sheet.key,
         ordinal=sheet.ordinal,
+        observation_input=InputObservation(
+            input_name=original.path,
+            input_bytes=original.byte_count,
+            input_digest=original.digest,
+            unit_label=sheet.name,
+            item_count=len(sheet.cells) if measured else None,
+            item_kind="cells" if measured else None,
+        ),
     ):
         with materialize_baseline(scope.knowledge, ()) as baseline:
             body = baseline.directory / f"sources/{doc_name}.md"
@@ -115,6 +126,7 @@ def _plan(
                 processing.processing_id,
                 key=sheet.key,
                 doc_name=doc_name,
+                label=sheet.name,
                 expected_generation=target.generation if target else 0,
                 expected_source_generation=None if reprocessing else source_generation,
             )
@@ -224,7 +236,16 @@ def import_workbook(
                     current, ready, context, catalog, revision, target, sheet
                 )
             elif sheet.content_state != "content":
-                result = _uncompiled(current, ready, revision, target, sheet)
+                with task_stage(
+                    context,
+                    "worksheet.validate.v1",
+                    source_revision_id=revision.revision_id,
+                    unit_revision_id=target.unit_revision_id,
+                    work_key=sheet.key,
+                    ordinal=sheet.ordinal,
+                ) as progress:
+                    result = _uncompiled(current, ready, revision, target, sheet)
+                    progress.update(status="failed", reason_code=sheet.content_state)
             else:
                 result, accepted = compile_stored_unit(
                     current, ready, context, catalog, revision, target, name=sheet.name

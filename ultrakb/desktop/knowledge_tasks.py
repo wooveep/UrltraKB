@@ -44,6 +44,7 @@ _STAGES = {
     "import.reprocess.v1": "重新处理保留原件",
     "workbook.inventory.v1": "读取工作表清单",
     "worksheet.normalize.v1": "整理工作表原文",
+    "worksheet.validate.v1": "校验工作表内容",
     "import.retain_original.v1": "保留原件和原图",
     "compile.inputs.v1": "准备编译输入",
     "compile.generate.v1": "生成知识",
@@ -137,12 +138,39 @@ def stage_text(detail):
         lines += [
             f"资料：{original.name} · 原件大小：{original.original_bytes} 字节",
             f"资料修订序号：{original.source_ordinal}",
-            f"处理单元：{original.document_name or '尚未关联'}",
+            f"处理单元：{original.unit_label or original.document_name or '尚未关联'}",
         ]
     else:
         lines.append(
             "保留输入描述暂不可用。" if stage.input_unavailable_reason else "尚未关联资料。"
         )
+    if stage.observation is not None and stage.observation.input is not None:
+        observed = stage.observation.input
+        lines.append(f"观测输入：{observed.input_name or '未记录名称'}")
+        if observed.input_bytes is not None:
+            lines.append(f"输入大小：{observed.input_bytes} 字节")
+        if observed.unit_label is not None:
+            lines.append(f"工作表：{observed.unit_label}")
+        if observed.item_count is not None:
+            unit = {"pages": "页", "cells": "单元格", "tokens": "token", "items": "项"}
+            lines.append(f"输入规模：{observed.item_count} {unit.get(observed.item_kind, '项')}")
+    costs = stage.observation.storage if stage.observation is not None else None
+    if costs is not None:
+        lines += [
+            "",
+            "内置存储调用的观测范围；嵌套观测单列：",
+            f"写事务：{costs.writer_attempts} 次 · 提交 {costs.writer_commits} · "
+            f"回滚 {costs.writer_rollbacks} · 未确认 {costs.writer_errors}",
+            f"写者等待：{costs.writer_wait_seconds:.6f} 秒 · "
+            f"持锁：{costs.writer_hold_seconds:.6f} 秒 · "
+            f"最长持锁：{costs.writer_max_hold_seconds:.6f} 秒",
+            f"Blob 已知读取：{costs.blob_read_bytes} 字节 · "
+            f"已确认写入：{costs.blob_write_bytes} 字节 · 去重命中：{costs.blob_dedup_hits}",
+        ]
+        if costs.blob_read_errors or costs.blob_write_errors:
+            lines.append("出错的 Blob 操作可能包含尚无法确认的部分字节。")
+    else:
+        lines.append("此阶段尚无独立的存储成本记录。")
     scope = "处理单元" if detail.usage_scope == "unit" else "资料"
     lines += [
         "",
@@ -172,10 +200,19 @@ def fill_stage_tree(tree, stages):
     sources, units, parents = {}, {}, {}
     for stage in stages:
         original = stage.input
+        observed = stage.observation.input if stage.observation is not None else None
         source_key = original.source_revision_id if original else stage.source_revision_id
+        if source_key is None and observed is not None and observed.temporary_input_id is not None:
+            source_key = ("temporary", observed.temporary_input_id)
         if source_key not in sources:
             sources[source_key] = QTreeWidgetItem(
-                [original.name if original else "未关联或描述不可用的资料"]
+                [
+                    original.name
+                    if original
+                    else observed.input_name
+                    if observed is not None and observed.input_name
+                    else "未关联或描述不可用的资料"
+                ]
             )
             tree.addTopLevelItem(sources[source_key])
         parent = sources[source_key]
@@ -183,7 +220,9 @@ def fill_stage_tree(tree, stages):
         if original is not None and original.unit_revision_id is not None:
             key = (source_key, original.unit_revision_id)
             if key not in units:
-                units[key] = QTreeWidgetItem([f"处理单元：{original.document_name}"])
+                units[key] = QTreeWidgetItem(
+                    [f"处理单元：{original.unit_label or original.document_name}"]
+                )
                 parent.addChild(units[key])
             parent = units[key]
         if stage.parent_stage_id in parents:

@@ -9,6 +9,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from ultrakb.locks import LockCancelled
+from ultrakb.stage_observations import StageObservation, encode_observation
 
 from .coordination import storage_stage
 from .database import DatabaseIdentity
@@ -345,8 +346,10 @@ class ExecutionStore:
         source_revision_id: str | None = None,
         unit_revision_id: str | None = None,
         allow_stopping: bool = False,
+        observation: StageObservation | None = None,
     ) -> str:
         _label(stage_code, limit=64)
+        encoded = encode_observation(observation)
         if work_key is not None:
             _label(work_key, limit=1024)
         if ordinal is not None and (type(ordinal) is not int or not 0 <= ordinal < 2**63):
@@ -369,8 +372,8 @@ class ExecutionStore:
             connection.execute(
                 "INSERT INTO ukb_stage_attempts(stage_attempt_id, execution_id, parent_stage_id, "
                 "stage_code, work_key, ordinal, source_revision_id, unit_revision_id, "
-                "process_clock_id, started_at, started_monotonic, state) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'started')",
+                "process_clock_id, started_at, started_monotonic, state, observation, "
+                "observation_coverage) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'started', ?, ?)",
                 (
                     stage_id,
                     execution_id,
@@ -383,15 +386,25 @@ class ExecutionStore:
                     clock_id,
                     timestamp,
                     monotonic,
+                    encoded,
+                    "pending" if encoded is not None else "not_recorded",
                 ),
             )
         return stage_id
 
-    def finish_stage(self, stage_id: str, *, state: str, error_code: str | None = None):
+    def finish_stage(
+        self,
+        stage_id: str,
+        *,
+        state: str,
+        error_code: str | None = None,
+        observation: StageObservation | None = None,
+    ):
         if state not in {"completed", "failed", "cancelled", "interrupted", "reused"}:
             raise ValueError("Invalid terminal stage state")
         if error_code is not None:
             _label(error_code)
+        encoded = encode_observation(observation)
         timestamp, monotonic, clock_id = now(), time.monotonic(), _clock_id()
         with storage_stage(self.root, self.identity) as db, db.transaction() as connection:
             row = connection.execute(
@@ -409,12 +422,17 @@ class ExecutionStore:
             duration = monotonic - row[1] if row[0] == clock_id and state != "interrupted" else None
             connection.execute(
                 "UPDATE ukb_stage_attempts SET state = ?, ended_at = ?, duration_seconds = ?, "
-                "error_code = ? WHERE stage_attempt_id = ?",
+                "error_code = ?, observation = COALESCE(?, observation), "
+                "observation_coverage = CASE WHEN ? THEN 'recorded' "
+                "WHEN observation_coverage = 'pending' THEN 'partial' "
+                "ELSE observation_coverage END WHERE stage_attempt_id = ?",
                 (
                     state,
                     timestamp if state != "interrupted" else None,
                     duration,
                     error_code,
+                    encoded,
+                    int(encoded is not None),
                     stage_id,
                 ),
             )

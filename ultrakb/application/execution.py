@@ -33,6 +33,7 @@ class ExecutionContext:
     install_process_settings: bool = False
     usage_task_id: str | None = None
     usage_unit_id: str | None = None
+    observe_storage_costs: bool = True
     parent_usage_task_id: str | None = None
     require_verified_connection: bool = False
     executor: CompletionExecutor | None = field(default=None, repr=False)

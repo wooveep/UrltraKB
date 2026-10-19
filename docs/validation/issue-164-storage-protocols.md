@@ -2023,3 +2023,56 @@ Mypy passes 585 modules; focused Ruff, formatting and diff checks pass. Both
 readonly review axes close the selection-race finding. Remaining non-model
 observation coverage, worksheet-specific failure descriptions, archive/audit/root
 retirement and the sole P8 activation are unfinished. Issue 164 remains open.
+
+### Actual non-model storage costs and worksheet descriptions
+
+Schema 34 retains worksheet labels with their processing-unit revision and adds
+optional, versioned stage observations. Actual worksheet validation failures now
+have durable failed stages, while successful worksheets continue independently.
+An external workbook rename or deletion cannot rewrite historical sheet names.
+Admission observations retain a temporary input identity, name, digest and known
+byte count; worksheet normalization records known cell counts with their unit.
+
+Writer attempts, acquisition waits, lock holds and commit/rollback/error outcomes
+are measured at the existing transaction boundary. Blob reads, confirmed writes,
+deduplication hits and errors are measured at real payload operations, including
+streamed private compiler inputs. Failed private copies preserve the known read
+position. Nested observed scopes are exclusive, and stage-ledger bookkeeping is
+excluded from those costs. These are instrumented payload and writer costs, not
+physical disk usage, all filesystem traffic or an inclusive sum of nested work.
+The original private copy validation and durability behavior are preserved.
+
+Optional observations commit with the existing stage start/finish transactions.
+Disabling them retains core stages, budgets and request records. Interrupted or
+invalid optional observations remain partial without inventing final costs or
+hiding known input usage. CLI, HTTP and desktop stage details use the same typed
+payload and coverage states; the desktop labels the scope and known byte counts.
+
+The actual parser calibration uses a five-sheet XLSX with 25,000 cells and
+149,020 input bytes, one warmup pair and seven alternating measured pairs. Both
+modes retain core execution/stage commits and produce identical parsed output.
+Python 3.12.13, SQLite 3.53.1 and openpyxl 3.1.5 on this Linux host yield median
+536.57 ms without and 543.00 ms with optional observations: +6.42 ms / +1.20%.
+Observed p95/max are 547.05 and 558.47 ms respectively (seven samples per mode).
+This meets the initial 5% target for this host/workload only. Reproduction is
+`scripts/verify_storage_observations.py`; exact samples and environment are in
+`issue-164-observations-benchmark.md`.
+
+Expanded picture regressions exposed an existing import-review mismatch: moving
+an unchanged manual page's image URL to the same retained bytes unnecessarily
+required review. Review now compares structured text/media/digest segments;
+literal unresolved URLs cannot collide with content markers, and unsupported or
+different media types cannot qualify as equivalent. Actual manual text/image
+updates still require explicit review and acceptance without new model sends.
+Real SQLite/CAS witnesses first reproduce both marker-collision directions and
+the reader-unsupported suffix case, then pass after their respective repairs.
+A retained-input assertion now checks the factual sentence rather than a short
+number that could occur randomly in a generated source identity.
+
+The expanded storage/task/compiler/review/boundary matrix passes 107 tests before
+the final shared-media refinement; its reader/picture/protection/boundary/size
+matrix then passes 45 tests. Mypy passes 589 modules. Both readonly review axes
+close their concrete findings; focused Ruff, formatting and diff checks pass.
+Remaining P6 identity/phase coverage,
+observation retention, aggregate audit, obsolete-root retirement and the sole P8
+activation remain unfinished. Issue 164 remains open.

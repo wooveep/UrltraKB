@@ -152,6 +152,23 @@ def confirm_import_usage(result, context, root, identity):
     return confirm_result_usage(result, context, root, identity, source_id=result.source_id)
 
 
+def _input_observation(ready):
+    from uuid import uuid4
+
+    from ultrakb.stage_observations import InputObservation
+
+    try:
+        size = ready.path.stat().st_size
+    except OSError:
+        size = None
+    return InputObservation(
+        temporary_input_id=uuid4().hex,
+        input_name=ready.source.name,
+        input_bytes=size,
+        input_digest=ready.digest,
+    )
+
+
 def _import_body(
     scope, ready, context, bundle, origin_url, download_remote_assets, *, text_assessment=None
 ):
@@ -159,7 +176,12 @@ def _import_body(
     catalog = CatalogStore(root, identity)
     revision = None
     try:
-        with task_stage(context, "import.admit.v1", work_key=ready.digest):
+        with task_stage(
+            context,
+            "import.admit.v1",
+            work_key=ready.digest,
+            observation_input=_input_observation(ready),
+        ):
             revision = catalog.admit(
                 ready.path,
                 source_key=origin_url or str(ready.identity),

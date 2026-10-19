@@ -83,6 +83,7 @@ class UnitTarget:
     key: str
     doc_name: str
     generation: int
+    label: str | None = None
 
 
 class CatalogConflict(ValueError):
@@ -536,14 +537,18 @@ class CatalogStore:
         *,
         key: str,
         doc_name: str,
+        label: str | None = None,
         expected_generation: int | None = None,
         expected_source_generation: int | None = None,
     ) -> UnitTarget:
         TypeAdapter(DocName).validate_python(doc_name)
+        label = doc_name if label is None else label
         if (
             not isinstance(key, str)
             or not key
-            or len(key.encode()) + len(doc_name.encode()) > 65536
+            or not isinstance(label, str)
+            or not label
+            or len(key.encode()) + len(doc_name.encode()) + len(label.encode()) > 65536
         ):
             raise ValueError("A processing unit requires a bounded stable key and document name")
         if expected_generation is not None and (
@@ -598,6 +603,8 @@ class CatalogStore:
                     raise CatalogConflict("A unit document name cannot be silently reassigned")
                 current = self._unit_revision(db, unit[1])
                 if current.processing_id == processing_id:
+                    if current.label != label:
+                        raise CatalogConflict("A retained unit label cannot be silently reassigned")
                     return current
             unit_id = unit[0] if unit else uuid.uuid4().hex
             if not unit:
@@ -608,8 +615,8 @@ class CatalogStore:
             revision_id = uuid.uuid4().hex
             generation = unit[2] + 1 if unit else 1
             connection.execute(
-                "INSERT INTO ukb_unit_revisions VALUES (?, ?, ?, ?)",
-                (revision_id, unit_id, processing_id, generation),
+                "INSERT INTO ukb_unit_revisions VALUES (?, ?, ?, ?, ?)",
+                (revision_id, unit_id, processing_id, generation, label),
             )
             connection.execute(
                 "UPDATE ukb_import_units SET target_revision_id = ?, generation = ? "
@@ -637,13 +644,14 @@ class CatalogStore:
                 key,
                 doc_name,
                 generation,
+                label,
             )
 
     @staticmethod
     def _unit_revision(db, revision_id):
         row = db.connection.execute(
             "SELECT u.unit_id, r.unit_revision_id, u.source_id, r.processing_id, "
-            "p.source_revision_id, u.unit_key, u.doc_name, r.generation "
+            "p.source_revision_id, u.unit_key, u.doc_name, r.generation, r.label "
             "FROM ukb_unit_revisions r JOIN ukb_import_units u ON u.unit_id = r.unit_id "
             "JOIN ukb_processing_versions p ON p.processing_id = r.processing_id "
             "WHERE r.unit_revision_id = ?",

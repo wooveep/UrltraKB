@@ -163,6 +163,7 @@ async def test_shared_update_retains_each_picture_version_and_excludes_unrelated
     tmp_path, monkeypatch, factual_basis
 ):
     from ultrakb.agent.page_figures import split_gallery
+    from ultrakb.application.proposals import accept_proposal, read_proposal
     from ultrakb.config import save_config
 
     root, identity, _ = question_knowledge(tmp_path)
@@ -272,7 +273,19 @@ async def test_shared_update_retains_each_picture_version_and_excludes_unrelated
         result = await recompile_document(
             root, current.source_id, unit_id=current.unit_id, scope=storage_scope(root, identity)
         )
-        assert result.status == "compiled", result.message
+        # This concept was manually published above. An actual content update
+        # requires review even though relocating identical image bytes does not.
+        assert result.status == "blocked", result.message
+        assert knowledge.bind().publication_id == before.publication_id
+        scope = storage_scope(root, identity)
+        proposal = read_proposal(root, result.proposal_id, scope=scope)
+        assert proposal.conflicts == ("concepts/value.md",)
+        requests = len(service.requests)
+        accepted = accept_proposal(
+            root, proposal.proposal_id, version=proposal.version, scope=scope
+        )
+        assert accepted.status == "added", accepted.message
+        assert len(service.requests) == requests
     assert "images/unrelated.png" not in copied
     assert not any(path.endswith("unreferenced.png") for path in copied)
     assert not any(path.endswith((".sqlite", ".db")) for path in copied)
