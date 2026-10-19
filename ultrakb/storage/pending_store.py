@@ -90,6 +90,18 @@ class PendingStore:
     def __init__(self, root: Path, identity: DatabaseIdentity):
         self.root, self.identity = root.resolve(), identity
 
+    def unit_status(self, unit_revision_id):
+        """Read the last actual work outcome for one immutable retained target."""
+        with storage_stage(self.root, self.identity, read_only=True) as db:
+            row = db.connection.execute(
+                "SELECT i.status, a.error_code FROM ukb_import_intents i "
+                "LEFT JOIN ukb_pending_attempts a ON a.attempt_id = i.attempt_id "
+                "WHERE i.unit_revision_id = ? AND i.kind = 'import' "
+                "ORDER BY i.sequence DESC LIMIT 1",
+                (unit_revision_id,),
+            ).fetchone()
+            return row
+
     def enqueue(
         self,
         source_revision_id: str,

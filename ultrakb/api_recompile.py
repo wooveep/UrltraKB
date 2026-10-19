@@ -10,7 +10,6 @@ from ultrakb.application.execution import ExecutionContext
 from ultrakb.application.recompilation import recompile_document, select_recompilation
 from ultrakb.application.recompilation import refresh_schema as refresh_kb_schema
 from ultrakb.knowledge_scope import KnowledgeScope, resolve_scope
-from ultrakb.llm_usage import merge_usage_receipts
 from ultrakb.log import append_log
 
 
@@ -26,7 +25,13 @@ async def iter_recompile(
     scope: KnowledgeScope | None = None,
 ):
     selection = await asyncio.to_thread(
-        select_recompilation, kb_dir, doc_name, all_docs=all_docs, scope=scope, unit_id=unit_id
+        select_recompilation,
+        kb_dir,
+        doc_name,
+        all_docs=all_docs,
+        scope=scope,
+        unit_id=unit_id,
+        confirmation=True,
     )
     targets = selection.targets
     if selection.status != "ready":
@@ -66,11 +71,19 @@ async def iter_recompile(
             "docs": [],
         }
         return
+    version = selection.version
     if refresh_schema:
-        await asyncio.to_thread(refresh_kb_schema, kb_dir, scope=scope)
+        if scope is not None and scope.knowledge is not None:
+            from ultrakb.application.storage_recompilation import refresh_compilation_schema
+
+            scope, version, _ = await asyncio.to_thread(refresh_compilation_schema, scope, version)
+        else:
+            await asyncio.to_thread(refresh_kb_schema, kb_dir, scope=scope)
     context = ExecutionContext()
     docs = []
     recompiled = skipped = blocked = partial = 0
+    final_status = "done"
+    continuation_unfinished = ()
     for target in targets:
         result = await recompile_document(
             kb_dir,
@@ -79,7 +92,12 @@ async def iter_recompile(
             context=context,
             scope=scope,
             unit_id=target.unit_id,
+            version=version,
         )
+        from ultrakb.application.storage_recompilation import advance_recompilation
+
+        if result.status == "compiled":
+            version = result.version
         doc = {
             "name": result.name or None,
             "doc_name": result.name or None,
@@ -103,6 +121,15 @@ async def iter_recompile(
         else:
             # Historical REST totals fold ordinary failures into skipped.
             skipped += 1
+        if result.status in {"conflict", "stopped"}:
+            final_status = "stopped" if result.status == "stopped" else "partial"
+            break
+        try:
+            scope = advance_recompilation(scope, result)
+        except Exception:
+            final_status = "partial"
+            continuation_unfinished = ("confirm next publication",)
+            break
     await asyncio.to_thread(
         append_log,
         resolve_scope(kb_dir, scope).wiki_dir,
@@ -110,14 +137,21 @@ async def iter_recompile(
         f"recompiled {recompiled}, skipped {skipped}",
         scope=resolve_scope(kb_dir, scope),
     )
+    from ultrakb.application.result_usage import merge_result_usage
+
+    usage, unfinished = await asyncio.to_thread(
+        merge_result_usage, kb_dir, [doc["model_usage"] for doc in docs]
+    )
     yield {
         "event": "final",
-        "status": "done",
+        "status": final_status,
         "total": total,
         "recompiled": recompiled,
         "skipped": skipped,
         "blocked": blocked,
         "partial": partial,
+        "remaining": total - len(docs),
         "docs": docs,
-        "model_usage": merge_usage_receipts(kb_dir, [doc["model_usage"] for doc in docs]),
+        "model_usage": usage,
+        "unfinished": (*continuation_unfinished, *unfinished),
     }

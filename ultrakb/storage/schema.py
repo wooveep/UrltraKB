@@ -128,6 +128,8 @@ SCHEMA = (
     )""",
         "CREATE INDEX ukb_import_queue ON ukb_import_intents(status, sequence)",
         "CREATE INDEX ukb_import_group ON ukb_import_intents(root_import_id, sequence)",
+        "CREATE INDEX ukb_import_unit_outcome "
+        "ON ukb_import_intents(unit_revision_id, kind, sequence DESC)",
         "CREATE INDEX ukb_import_group_status "
         "ON ukb_import_intents(root_import_id, status, sequence)",
         """CREATE TABLE ukb_pending_attempts (

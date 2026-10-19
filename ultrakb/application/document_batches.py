@@ -6,7 +6,6 @@ from pathlib import Path
 from ultrakb.application.document_actions import DocumentIdentity, document_inventory
 from ultrakb.application.recompilation import RecompileTarget, _version, select_recompilation
 from ultrakb.knowledge_scope import KnowledgeScope
-from ultrakb.locks import kb_read_lock
 
 
 @dataclass(frozen=True)
@@ -53,7 +52,9 @@ def preview_document_batch(
     selected = tuple(sorted(set(provided)))
     if action not in {"recompile", "retry"}:
         raise ValueError("Unsupported document batch action")
-    with kb_read_lock(root / ".ultrakb"):
+    from ultrakb.knowledge_scope import reading_scope, resolve_scope
+
+    with reading_scope(resolve_scope(root, scope)):
         rows = {row.identity: row for row in document_inventory(root, scope=scope)}
         if action == "retry":
             approved, skipped, retry_targets = [], [], []
@@ -105,7 +106,8 @@ def preview_document_batch(
                 tuple(retry_targets),
             )
         selection = select_recompilation(root, all_docs=True, confirmation=True, scope=scope)
-        approved, skipped, targets = [], [], []
+        approved, skipped = [], []
+        targets: list[RecompileTarget] = []
         for identity in selected:
             row = rows.get(identity)
             matches = tuple(
@@ -117,7 +119,7 @@ def preview_document_batch(
                 else row.actions["recompile"].reason
                 if not row.actions["recompile"].allowed
                 else "资料标识冲突或已改变，请核对记录。"
-                if len(matches) != 1
+                if not matches
                 else None
             )
             if reason is not None:
@@ -130,7 +132,12 @@ def preview_document_batch(
                 label = row.document["name"]
                 if row.document.get("location"):
                     label += f"（{row.document['location']}）"
-                targets.append(replace(matches[0], name=label))
+                targets.extend(
+                    replace(
+                        target, name=label + (f" · {target.doc_name}" if len(matches) > 1 else "")
+                    )
+                    for target in matches
+                )
         return DocumentBatchPreview(
             root, selected, tuple(approved), tuple(skipped), selection.version, tuple(targets)
         )

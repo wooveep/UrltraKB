@@ -139,7 +139,9 @@ def requests_for(preview, view_id, *, retry_failed_response=False):
         )
     assert preview.version is not None
     return tuple(
-        RecompileDocument(target.file_hash, preview.version, view_id=view_id)
+        RecompileDocument(
+            target.file_hash, preview.version, view_id=view_id, unit_id=target.unit_id
+        )
         for target in preview.targets
     )
 

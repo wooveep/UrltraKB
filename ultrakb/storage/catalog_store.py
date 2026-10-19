@@ -229,6 +229,22 @@ class CatalogStore:
                 raise KeyError(source_id)
             return SourceTarget(source_id, row[0], row[1], revision[0])
 
+    def source_page(self, *, after: str = "", limit: int = 63) -> tuple[SourceTarget, ...]:
+        """List admitted source identities without opening originals or processing bodies."""
+        if not isinstance(after, str) or type(limit) is not int or not 1 <= limit <= 128:
+            raise ValueError("Source pages require a string cursor and a limit of 1..128")
+        with storage_stage(self.root, self.identity, read_only=True) as db:
+            rows = db.connection.execute(
+                "SELECT s.source_id, s.source_key, s.label, "
+                "(SELECT r.revision_id FROM ukb_source_revisions r "
+                "WHERE r.source_id = s.source_id AND r.state = 'ready' "
+                "ORDER BY r.ordinal DESC LIMIT 1) AS target "
+                "FROM ukb_sources s WHERE s.source_id > ? AND target IS NOT NULL "
+                "ORDER BY s.source_id LIMIT ?",
+                (after, limit),
+            ).fetchall()
+            return tuple(SourceTarget(*row) for row in rows)
+
     @staticmethod
     def _revision(db, revision_id):
         row = db.connection.execute(

@@ -30,13 +30,18 @@ logger = logging.getLogger(__name__)
 
 async def recompile_stored(scope, source_id, *, unit_id, context, version, model, max_concurrency):
     base = scope.knowledge
-    if version is not None and version != base.publication_id:
+    from .storage_recompilation import confirmation_version, confirmed_result, target_fingerprint
+
+    targets = target_fingerprint(scope)
+    if version is not None and version != confirmation_version(scope, targets=targets):
         return RecompileResult("conflict", message="Knowledge changed after confirmation")
     if unit_id is None:
         return RecompileResult("blocked", message="Select an explicit retained processing unit")
     target = CatalogStore(scope.kb_dir, base.identity).unit(unit_id)
     if target.source_id != source_id:
         raise ValueError("The compilation unit belongs to another source")
+    if version is not None and targets != target_fingerprint(scope):
+        return RecompileResult("conflict", message="Retained inputs changed after confirmation")
     processing = CatalogStore(scope.kb_dir, base.identity).processing(target.processing_id)
     if processing.content_state != "content":
         return RecompileResult(
@@ -100,7 +105,7 @@ async def recompile_stored(scope, source_id, *, unit_id, context, version, model
                 error_type=type(error).__name__,
                 unfinished=("compilation",),
             )
-    return _result_receipt(
+    result = _result_receipt(
         scope,
         target,
         processing.decision,
@@ -109,6 +114,7 @@ async def recompile_stored(scope, source_id, *, unit_id, context, version, model
         context if execution_began else None,
         started,
     )
+    return confirmed_result(scope, result, targets, confirmed=version is not None)
 
 
 def _result_receipt(scope, target, decision, previous, result, context, started):

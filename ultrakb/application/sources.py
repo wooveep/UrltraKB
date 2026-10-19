@@ -123,6 +123,10 @@ def source_inventory(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> li
     root = kb_dir.resolve()
     if scope is not None:
         scope = resolve_scope(root, scope)
+    if scope is not None and scope.knowledge is not None:
+        from .storage_inventory import source_inventory as stored_inventory
+
+        return stored_inventory(scope)
     if scope is not None and scope.publication is not None:
         from ultrakb.application.published_sources import source_inventory as published_inventory
 

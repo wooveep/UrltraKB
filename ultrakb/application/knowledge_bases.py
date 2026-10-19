@@ -282,6 +282,10 @@ def initialize_kb(
 def get_kb_list(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> dict[str, Any]:
     """Return a structured inventory of the knowledge base (REST ``/list``)."""
     selected = resolve_scope(kb_dir, scope)
+    if selected.knowledge is not None:
+        from .storage_inventory import knowledge_inventory
+
+        return knowledge_inventory(selected)
     with reading_scope(selected):
         metadata_root = selected.publication.metadata_dir if selected.publication else kb_dir
         ultrakb_dir = metadata_root / ".ultrakb"

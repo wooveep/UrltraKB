@@ -90,10 +90,19 @@ class UsageAggregate(_UsageModel):
         return self
 
 
+class UsageSelection(_UsageModel):
+    execution_id: Identity
+    source_id: Identity | None = None
+    unit_id: Identity | None = None
+
+
 class UsageReceipt(_UsageModel):
     execution_ids: list[Identity]
     source_ids: list[Identity]
     unit_ids: list[Identity] = Field(default_factory=list)
+    selections: list[UsageSelection] = Field(default_factory=list)
+    kb_id: Identity | None = None
+    generation: str | None = None
     ledger: str
     current: UsageAggregate
     cumulative: UsageAggregate

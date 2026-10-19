@@ -1349,3 +1349,39 @@ regressions also pass (19 live cases deselected). Full mypy passes 533 modules;
 Ruff and format checks pass. Both independent review axes find no remaining
 concrete defect in this batch, including early-stop and old/new policy cases.
 Normal entrypoint activation and the rest of issue 164 remain unfinished.
+
+### Retained document management and confirmed recompilation batches
+
+Development schema 19 adds indexed last-work outcomes for retained units. Source
+and document management queries now read the main catalog and fixed publication,
+show actual successful processing separately from current replacement targets,
+and list compiled pages from the immutable manifest. Source enumeration uses
+bounded indexed metadata pages and does not open every original or read legacy
+JSON catalog files.
+
+Selection expands retained sources into explicit units, including every eligible
+worksheet. A confirmed token binds database identity/generation, the displayed
+source/unit target snapshot and publication. It never incorporates a replacement
+accepted while the preview is rendered. CLI/HTTP batches advance only to each
+unit's own durable publication; desktop requests retain unit identities and the
+existing receipt-based next-unit precondition. Intervening foreign publications
+stop the next unit before a model send. Explicit schema refresh preserves its
+previous bytes in the publication and advances only its own resulting baseline.
+
+Main-store usage receipts retain identity and precise execution/source/unit
+selections. Merging reads indexed buckets and overlap intersections within one
+short read snapshot; parent and child costs are not counted twice. Late usage
+cannot make cross-time subtraction negative, and a same-path rebuilt database
+cannot silently replace an old paid receipt with zero. Failed final statistics
+or next-publication confirmation retains already compiled unit outcomes and
+reports the remaining work/confirmation diagnostic.
+
+Fourteen management regressions pass at actual SQLite/SDK/loopback boundaries,
+including CLI and HTTP batches, native request identity, concurrent target and
+publication changes, schema refresh, exact unit totals, late receipts, generation
+replacement and post-publication read failures. A related set passes 101 cases
+(13 live cases deselected); full mypy passes 536 modules, Ruff and formatting
+checks pass. Both review axes verify the concurrency/identity fixes and final
+result retention. Normal factories remain at the P8 gate; remaining compiler
+matrix, source maintenance, observation/archive/audit and final enablement are
+unfinished. Issue 164 remains open.

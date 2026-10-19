@@ -177,9 +177,12 @@ class UsageStore:
             else total
         )
         return UsageReceipt(
+            kb_id=self.identity.kb_id,
+            generation=self.identity.generation,
             execution_ids=[execution_id],
             source_ids=[source_id] if source_id is not None else [],
             unit_ids=[unit_id] if unit_id is not None else [],
+            selections=[{"execution_id": execution_id, "source_id": source_id, "unit_id": unit_id}],
             ledger=str(database_path(self.root)),
             current=UsageAggregate.model_validate(total),
             cumulative=UsageAggregate.model_validate(cumulative),
@@ -187,6 +190,54 @@ class UsageStore:
             if source_id is not None or unit_id is not None
             else "execution_only",
         ).model_dump(mode="json")
+
+    def combined_receipt(self, receipts) -> dict:
+        """Combine execution/source receipts from indexed counters, never request files."""
+        from .usage_selection import combine_usage
+
+        return combine_usage(self, receipts)
+
+    def selected_summary(self, parts, *, subtract=(), database=None):
+        """Sum disjoint scope buckets, subtracting selected execution intersections."""
+        if database is None:
+            with storage_stage(self.root, self.identity, read_only=True) as db:
+                db.connection.execute("BEGIN")
+                return self.selected_summary(parts, subtract=subtract, database=db)
+        totals = {}
+
+        def merge(rows, sign=1):
+            for stage, *counts in rows:
+                previous = totals.setdefault(stage, [0] * len(COUNTS))
+                for i, value in enumerate(counts):
+                    previous[i] += sign * value
+
+        db = database
+        if db.identity != self.identity or not db.connection.in_transaction:
+            raise ValueError("Usage unions require this database's active read snapshot")
+        for bucket, identities in parts:
+            identities = sorted(identities)
+            for offset in range(0, len(identities), 63):
+                batch = identities[offset : offset + 63]
+                merge(
+                    db.connection.execute(
+                        f"SELECT stage_code, {', '.join('sum(' + key + ')' for key in COUNTS)} "
+                        "FROM ukb_usage_counters WHERE bucket = ? AND identity IN "
+                        f"({','.join('?' for _ in batch)}) GROUP BY stage_code",
+                        (bucket, *batch),
+                    ).fetchall()
+                )
+        for bucket, execution_ids, selected in subtract:
+            for execution_id in execution_ids:
+                # An indexed prefix reads only this execution's intersections,
+                # rather than multiplying every execution by every source.
+                rows = db.connection.execute(
+                    f"SELECT identity, stage_code, {', '.join(COUNTS)} "
+                    "FROM ukb_usage_counters WHERE bucket = ? "
+                    "AND identity >= ? AND identity < ?",
+                    (bucket, execution_id + ":", execution_id + ";"),
+                ).fetchall()
+                merge([row[1:] for row in rows if row[0].split(":", 1)[1] in selected], -1)
+        return summarize_counters([(stage, *counts) for stage, counts in totals.items()])
 
     def begin(
         self,

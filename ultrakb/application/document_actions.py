@@ -74,7 +74,7 @@ def document_inventory(
         for doc in documents:
             doc = dict(doc)
             identity = DocumentIdentity.from_inventory(doc)
-            if identity.kind == "source":
+            if identity.kind == "source" and scope.knowledge is None:
                 from ultrakb.source_catalog import read_source, read_source_revision
 
                 if scope.publication is not None:

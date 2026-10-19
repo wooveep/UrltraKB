@@ -64,6 +64,12 @@ def select_recompilation(
     scope = resolve_scope(kb_dir, scope)
     if bool(identifier) == all_docs or (unit_id is not None and all_docs):
         return RecompileSelection("invalid")
+    if scope.knowledge is not None:
+        from .storage_recompilation import select_retained
+
+        return select_retained(
+            scope, identifier, all_docs=all_docs, confirmation=confirmation, unit_id=unit_id
+        )
     with kb_read_lock(kb_dir / ".ultrakb"):
         from ultrakb.application.sources import source_inventory
 
@@ -147,6 +153,10 @@ def _version(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> str:
     intervening changes made by another operation.
     """
     selected = resolve_scope(kb_dir, scope)
+    if selected.knowledge is not None:
+        from .storage_recompilation import confirmation_version
+
+        return confirmation_version(selected)
     roots = [
         kb_dir / ".ultrakb/hashes.json",
         kb_dir / ".ultrakb/catalog",
@@ -166,6 +176,11 @@ def _validate_metadata(meta: object) -> None:
 
 def refresh_schema(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> bool:
     """Atomically keep the legacy .bak and install the current schema."""
+    selected = resolve_scope(kb_dir, scope)
+    if selected.knowledge is not None:
+        from .storage_recompilation import refresh_compilation_schema
+
+        return refresh_compilation_schema(selected)[2]
     scope = resolve_scope(kb_dir, scope, writable=True)
     from ultrakb.schema import AGENTS_MD
 
@@ -201,6 +216,7 @@ class RecompileResult:
     units: tuple[ImportUnitOutcome, ...] = ()
     model_usage: dict | None = None
     knowledge_revision_id: str | None = None
+    publication_id: str | None = None
 
 
 @track_import_usage

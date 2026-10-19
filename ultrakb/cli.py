@@ -928,7 +928,7 @@ def recompile(ctx, doc_name, all_docs, dry_run, yes, refresh_schema, unit_id):
         return
     scope = _selected_scope(ctx, kb_dir)
     selection = select_recompilation(
-        kb_dir, doc_name, all_docs=all_docs, scope=scope, unit_id=unit_id
+        kb_dir, doc_name, all_docs=all_docs, scope=scope, unit_id=unit_id, confirmation=True
     )
     targets = selection.targets
     if selection.status != "ready":
@@ -971,11 +971,17 @@ def recompile(ctx, doc_name, all_docs, dry_run, yes, refresh_schema, unit_id):
         if not click.confirm("Proceed?", default=False):
             click.echo("Aborted.")
             return
+    version = selection.version
     if refresh_schema:
         document_scope = resolve_scope(kb_dir, scope)
         from ultrakb.application.recompilation import refresh_schema as refresh_view_schema
 
-        refresh_view_schema(kb_dir, scope=document_scope)
+        if document_scope.knowledge is not None:
+            from ultrakb.application.storage_recompilation import refresh_compilation_schema
+
+            scope, version, _ = refresh_compilation_schema(document_scope, version)
+        else:
+            refresh_view_schema(kb_dir, scope=document_scope)
     from ultrakb.application.execution import ExecutionContext
 
     context = ExecutionContext()
@@ -989,9 +995,13 @@ def recompile(ctx, doc_name, all_docs, dry_run, yes, refresh_schema, unit_id):
                 context=context,
                 scope=scope,
                 unit_id=target.unit_id,
+                version=version,
             )
         )
+        from ultrakb.application.storage_recompilation import advance_recompilation
+
         if result.status == "compiled":
+            version = result.version
             recompiled += 1
             click.echo(f"  [OK] {result.name} ({result.elapsed:.1f}s)")
         else:
@@ -1011,6 +1021,13 @@ def recompile(ctx, doc_name, all_docs, dry_run, yes, refresh_schema, unit_id):
 
         for line in describe_model_usage(result.model_usage) + describe_units(result.units):
             click.echo(f"  {line}")
+        if result.status in {"conflict", "stopped"}:
+            break
+        try:
+            scope = advance_recompilation(scope, result)
+        except Exception as error:
+            click.echo(f"  [BLOCKED] Next publication needs confirmation ({type(error).__name__}).")
+            break
     click.echo(
         f"\nDone: recompiled {recompiled}, skipped {skipped}, blocked {blocked}, partial {partial}."
     )

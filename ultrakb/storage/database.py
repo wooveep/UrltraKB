@@ -22,7 +22,7 @@ from ultrakb.storage.schema import SCHEMA
 
 FORMAT = "ultrakb.context-kb"
 FORMAT_VERSION = 2
-SCHEMA_VERSION = 18
+SCHEMA_VERSION = 19
 WRITER_VERSION = 1
 CAPABILITIES = frozenset({"cas-v1", "independent-commits-v1", "condb-tree-scope-v2"})
 BUSY_TIMEOUT_MS = 2_000

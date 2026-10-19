@@ -463,6 +463,21 @@ def merge_usage_receipts(kb_dir: Path, receipts) -> dict | None:
     receipts = [receipt for receipt in receipts if receipt]
     if not receipts:
         return None
+    from ultrakb.storage.database import DatabaseIdentity, database_path, open_database
+
+    main_ledger = str(database_path(kb_dir))
+    if any(receipt.get("ledger") == main_ledger for receipt in receipts):
+        if any(receipt.get("ledger") != main_ledger for receipt in receipts):
+            raise ValueError("Usage receipts belong to different ledgers")
+        from ultrakb.storage.usage_store import UsageStore
+
+        first = receipts[0]
+        if not first.get("kb_id") or not first.get("generation"):
+            raise ValueError("Main-store usage receipt is missing its database identity")
+        expected = DatabaseIdentity(first["kb_id"], first["generation"])
+        with open_database(kb_dir, expected=expected, read_only=True) as db:
+            identity = db.identity
+        return UsageStore(kb_dir, identity).combined_receipt(receipts)
     records = read_requests(kb_dir)
     ids = {identity for receipt in receipts for identity in receipt["current"]["request_ids"]}
     source_ids = {identity for receipt in receipts for identity in receipt.get("source_ids", [])}
