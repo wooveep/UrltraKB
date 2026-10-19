@@ -136,7 +136,7 @@ def test_public_import_retains_native_pdf_pages_without_private_index_files(tmp_
     import pymupdf
     from test_storage_indexing import indexing_response
 
-    from ultrakb.config import save_config
+    from ultrakb.config import load_config, save_config
     from ultrakb.storage.index_store import IndexStore
     from ultrakb.storage.knowledge_store import KnowledgeStore
 
@@ -149,6 +149,7 @@ def test_public_import_retains_native_pdf_pages_without_private_index_files(tmp_
     save_config(
         root / ".ultrakb/config.yaml",
         {
+            **load_config(root / ".ultrakb/config.yaml"),
             "pdf_short_max_pages": 0 if segmented else 10,
             "model_policy": {"max_calls": 10, "retries": 0},
         },
@@ -213,7 +214,7 @@ def test_public_long_text_import_keeps_blocks_without_building_an_unused_package
     from test_storage_indexing import indexing_response
 
     from ultrakb import block_package
-    from ultrakb.config import save_config
+    from ultrakb.config import load_config, save_config
     from ultrakb.storage.index_store import IndexStore
     from ultrakb.storage.knowledge_store import KnowledgeStore
 
@@ -221,7 +222,13 @@ def test_public_long_text_import_keeps_blocks_without_building_an_unused_package
     source = tmp_path / "long.txt"
     original = "The value is 17.\n" + "Further details are retained.\n" * 1500
     source.write_text(original)
-    save_config(root / ".ultrakb/config.yaml", {"model_policy": {"max_calls": 10, "retries": 0}})
+    save_config(
+        root / ".ultrakb/config.yaml",
+        {
+            **load_config(root / ".ultrakb/config.yaml"),
+            "model_policy": {"max_calls": 10, "retries": 0},
+        },
+    )
     write = block_package.atomic_write_text
 
     def no_unused_package(path, text, **options):

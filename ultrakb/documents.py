@@ -100,6 +100,8 @@ def read_document_source(
         from ultrakb.workbooks.selection import select_cells
 
         return select_cells(select_page_part(admitted, part), cells)
+    if scope is not None and scope.knowledge is not None:
+        return None
     if cells is not None or unit_id is not None:
         raise PageRangeError("Legacy source has no verified worksheet units")
     if part is not None:

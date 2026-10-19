@@ -12,6 +12,7 @@ from ultrakb.import_text import (
     ImportTextRejected,
     preflight_import_text,
     rejection_result,
+    retainable_without_text,
     validate_text_preflight,
 )
 from ultrakb.ingest_result import ImportUnitOutcome, IngestResult
@@ -71,14 +72,31 @@ def import_stored_document(
 
                 raise InputChanged("The input changed before admission")
             try:
-                validate_text_preflight(
-                    ready, preflight_import_text(root, ready, check_stop=context.check_stop)
-                )
+                assessment = preflight_import_text(root, ready, check_stop=context.check_stop)
+                validate_text_preflight(ready, assessment)
             except ImportTextRejected as error:
-                result = rejection_result(ready, error)
+                result = (
+                    _import_body(
+                        scope,
+                        ready,
+                        context,
+                        bundle,
+                        origin_url,
+                        download_remote_assets,
+                        text_assessment=error.assessment,
+                    )
+                    if retainable_without_text(error.assessment)
+                    else rejection_result(ready, error)
+                )
             else:
                 result = _import_body(
-                    scope, ready, context, bundle, origin_url, download_remote_assets
+                    scope,
+                    ready,
+                    context,
+                    bundle,
+                    origin_url,
+                    download_remote_assets,
+                    text_assessment=assessment,
                 )
             context._storage_result = (
                 "completed"
@@ -119,7 +137,9 @@ def confirm_import_usage(result, context, root, identity):
     return result
 
 
-def _import_body(scope, ready, context, bundle, origin_url, download_remote_assets):
+def _import_body(
+    scope, ready, context, bundle, origin_url, download_remote_assets, *, text_assessment=None
+):
     root, identity = scope.kb_dir, scope.knowledge.identity
     catalog = CatalogStore(root, identity)
     revision = None
@@ -135,7 +155,14 @@ def _import_body(scope, ready, context, bundle, origin_url, download_remote_asse
                 },
             )
         return process_admitted(
-            scope, ready, context, bundle, download_remote_assets, catalog, revision
+            scope,
+            ready,
+            context,
+            bundle,
+            download_remote_assets,
+            catalog,
+            revision,
+            text_assessment=text_assessment,
         )
     except (Exception, asyncio.CancelledError) as error:
         if revision is None:
@@ -153,14 +180,50 @@ def _import_body(scope, ready, context, bundle, origin_url, download_remote_asse
 
 
 def process_admitted(
-    scope, ready, context, bundle, download_remote_assets, catalog, revision, *, unit_id=None
+    scope,
+    ready,
+    context,
+    bundle,
+    download_remote_assets,
+    catalog,
+    revision,
+    *,
+    unit_id=None,
+    text_assessment=None,
 ):
-    if ready.source.suffix.lower() in {".xlsx", ".xls"}:
+    workbook = ready.source.suffix.lower() in {".xlsx", ".xls"}
+    target = None if workbook else catalog.unit_for_source(revision.source_id, key="body")
+    if text_assessment is not None or (
+        not workbook and (target is None or target.source_revision_id != revision.revision_id)
+    ):
+        assessment = text_assessment or preflight_import_text(
+            scope.kb_dir, ready, check_stop=context.check_stop
+        )
+        try:
+            validate_text_preflight(ready, assessment)
+        except ImportTextRejected as error:
+            if retainable_without_text(error.assessment):
+                from .storage_retained_inputs import retain_unreadable_input
+
+                return retain_unreadable_input(
+                    scope,
+                    ready,
+                    context,
+                    catalog,
+                    revision,
+                    error.assessment,
+                    download_remote_assets,
+                )
+            return replace(
+                rejection_result(ready, error),
+                source_id=revision.source_id,
+                source_revision_id=revision.revision_id,
+            )
+    if workbook:
         from .storage_workbooks import import_workbook
 
         return import_workbook(scope, ready, context, bundle, catalog, revision, unit_id=unit_id)
     root = scope.kb_dir
-    target = catalog.unit_for_source(revision.source_id, key="body")
     if target is None or target.source_revision_id != revision.revision_id:
         with task_stage(context, "import.process.v1", source_revision_id=revision.revision_id):
             doc_name = (

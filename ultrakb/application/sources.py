@@ -329,6 +329,18 @@ def read_admitted_source(
     root = kb_dir.resolve()
     if scope is not None:
         scope = resolve_scope(root, scope)
+    if scope is not None and scope.knowledge is not None:
+        from .storage_sources import read_stored_source
+
+        return read_stored_source(
+            scope,
+            identifier,
+            unit_id=unit_id,
+            source_revision_id=source_revision_id,
+            pages=page_range,
+            chars=char_range,
+            blocks=block_range,
+        )
     if scope is not None and scope.publication is not None:
         from ultrakb.application.published_sources import read_source as read_published_source
 

@@ -1215,3 +1215,27 @@ entrypoint/boundary cases pass; the earlier 74 legacy workbook/database/compiler
 backup regressions also pass. Full mypy passes 522 modules, with lint and format
 checks passing. P8 remains disabled and the full issue remains open; retained
 non-text inputs, remaining compiler/writer paths and P6/P7/P8 acceptance continue.
+
+### Managed non-text retention and fixed native source reads
+
+Unreliable or absent native text now retains the admitted original, available
+figures, extraction assessment and immutable processing target in CAS without
+model work or a knowledge publication. Actual blank inputs remain distinct from
+unreadable display formats. Explicit retained-input/original/asset reads require
+one exact processing revision; normal source reads stay within the bound
+publication's active and historical input closure. Markdown and PDF image bytes
+remain fixed after a replacement reuses the original file names.
+
+Both review axes reproduced and verified repairs for an unsupported JSON display
+shape, cancellation before accepting processing, stale native coordinates after
+historical image relocation, and a stopped admission's retry bypassing the native
+text gate. The last case could otherwise send two requests for a blank original;
+the real application/SDK regression now retains it with zero sends after deleting
+the external file. Historical PDF relocation uses the SDK's recorded per-page
+spans before generating selections, preserving image/table roles and offsets.
+
+Nine focused retention cases pass independently on both review axes. Related
+compiler, workbook and ingestion checks pass 39 cases; source reading/ingestion
+checks pass 34 cases. Targeted mypy and Ruff checks pass. These are development
+main-store paths; explicit reprocessing, remaining writers, maintenance and P8
+activation are still being completed. Issue 164 remains open.

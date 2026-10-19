@@ -19,8 +19,8 @@ class RetainedDocument(Record):
     observed_blank: bool
 
 
-def _retain_original_content(
-    kb_dir, prepared, admission, unit, directory, check_stop, resource_policy
+def capture_retained_content(
+    kb_dir, prepared, doc_name, directory, check_stop, resource_policy, *, decoding=None
 ):
     from ultrakb.inputs import (
         CNKI_SOURCE_EXTENSIONS,
@@ -34,9 +34,9 @@ def _retain_original_content(
 
         frozen = normalize_text_document(
             prepared,
-            unit.doc_name,
+            doc_name,
             directory,
-            decoding=admission.revision.text_decoding,
+            decoding=decoding,
             resource_policy=resource_policy,
         )
         return frozen.model_dump(mode="json"), not frozen.text.strip()
@@ -62,9 +62,7 @@ def _retain_original_content(
 
     from ultrakb.images import extract_pdf_images
 
-    images = extract_pdf_images(
-        pdf_path, unit.doc_name, directory / "sources/images" / unit.doc_name
-    )
+    images = extract_pdf_images(pdf_path, doc_name, directory / "sources/images" / doc_name)
     with pymupdf.open(pdf_path) as pdf:
         count = len(pdf)
         observed_blank = all(
@@ -157,8 +155,14 @@ def retain_without_knowledge(
             )
             observed_blank = saved.observed_blank
         else:
-            raw, observed_blank = _retain_original_content(
-                kb_dir, prepared, admission, unit, directory, check_stop, resource_policy
+            raw, observed_blank = capture_retained_content(
+                kb_dir,
+                prepared,
+                unit.doc_name,
+                directory,
+                check_stop,
+                resource_policy,
+                decoding=admission.revision.text_decoding,
             )
             if observed_blank:
                 message = "资料已保存，未生成知识：原件页面为空白；未自动确认来源贡献为空。"

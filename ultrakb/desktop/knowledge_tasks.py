@@ -39,6 +39,7 @@ _STAGES = {
     "import.process.v1": "转换与解析",
     "workbook.inventory.v1": "读取工作表清单",
     "worksheet.normalize.v1": "整理工作表原文",
+    "import.retain_original.v1": "保留原件和原图",
     "compile.inputs.v1": "准备编译输入",
     "compile.generate.v1": "生成知识",
     "compile.validate.v1": "校验知识",
