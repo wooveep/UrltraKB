@@ -40,8 +40,9 @@ def _counts(record):
     }
 
 
-def _buckets(record):
+def _buckets(record, task_id):
     yield "execution", record.execution_id
+    yield "task", task_id
     if record.source_id:
         yield "source", record.source_id
     if record.unit_id:
@@ -94,7 +95,10 @@ def _apply_delta(connection, record, stage_code, before):
     columns = ", ".join(COUNTS)
     update = ", ".join(f"{key} = {key} + ?" for key in COUNTS)
     placeholders = ", ".join("?" for _ in COUNTS)
-    for bucket, identity in _buckets(record):
+    task_id = connection.execute(
+        "SELECT task_id FROM ukb_executions WHERE execution_id = ?", (record.execution_id,)
+    ).fetchone()[0]
+    for bucket, identity in _buckets(record, task_id):
         for stage in ("", stage_code):
             # Two indexed rows per identity; no callback scans the request history.
             connection.execute(
@@ -381,31 +385,35 @@ class UsageStore:
                 "WHERE bucket = ? AND identity = ? ORDER BY stage_code",
                 (bucket, identity),
             ).fetchall()
-        counters = {row[0]: dict(zip(COUNTS, row[1:], strict=True)) for row in rows}
-        totals = counters.get("", dict.fromkeys(COUNTS, 0))
-        result = {
-            **{
-                key: totals[key]
-                for key in (
-                    *TOKENS,
-                    "requests",
-                    "actual_sends",
-                    "unsent_attempts",
-                    "send_unknown",
-                    "unknown_requests",
-                    "in_flight_requests",
-                )
-            },
-            "total_known": totals["input_total"] + totals["output_total"],
-            "unknown_fields": {key: totals[f"missing_{key}"] for key in TOKENS},
-            "collection_complete": not totals["collection_pending"],
-            "usage_complete": not totals["usage_pending"],
-            "request_ids": [],
-            "request_ids_complete": False,
-            "stages": {
-                stage: {key: counts[key] for key in ("requests", "input_total", "output_total")}
-                for stage, counts in counters.items()
-                if stage
-            },
-        }
-        return UsageAggregate.model_validate(result).model_dump()
+        return summarize_counters(rows)
+
+
+def summarize_counters(rows):
+    counters = {row[0]: dict(zip(COUNTS, row[1:], strict=True)) for row in rows}
+    totals = counters.get("", dict.fromkeys(COUNTS, 0))
+    result = {
+        **{
+            key: totals[key]
+            for key in (
+                *TOKENS,
+                "requests",
+                "actual_sends",
+                "unsent_attempts",
+                "send_unknown",
+                "unknown_requests",
+                "in_flight_requests",
+            )
+        },
+        "total_known": totals["input_total"] + totals["output_total"],
+        "unknown_fields": {key: totals[f"missing_{key}"] for key in TOKENS},
+        "collection_complete": not totals["collection_pending"],
+        "usage_complete": not totals["usage_pending"],
+        "request_ids": [],
+        "request_ids_complete": False,
+        "stages": {
+            stage: {key: counts[key] for key in ("requests", "input_total", "output_total")}
+            for stage, counts in counters.items()
+            if stage
+        },
+    }
+    return UsageAggregate.model_validate(result).model_dump()

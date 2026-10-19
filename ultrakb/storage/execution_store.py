@@ -171,6 +171,7 @@ class ExecutionStore:
         ordinal: int | None = None,
         source_revision_id: str | None = None,
         unit_revision_id: str | None = None,
+        allow_stopping: bool = False,
     ) -> str:
         _label(stage_code, limit=64)
         if work_key is not None:
@@ -180,7 +181,11 @@ class ExecutionStore:
         stage_id, timestamp, monotonic = uuid4().hex, now(), time.monotonic()
         clock_id = _clock_id()
         with storage_stage(self.root, self.identity) as db, db.transaction() as connection:
-            require_active_execution(connection, self.identity, execution_id)
+            if type(allow_stopping) is not bool:
+                raise ValueError("Cleanup permission must be explicit")
+            state = execution_state(connection, self.identity, execution_id)
+            if state != "stopping" or not allow_stopping:
+                require_active_execution(connection, self.identity, execution_id)
             if parent_stage_id is not None:
                 parent = connection.execute(
                     "SELECT execution_id, state FROM ukb_stage_attempts WHERE stage_attempt_id = ?",

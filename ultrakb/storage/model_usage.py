@@ -13,6 +13,7 @@ from ultrakb.mutation import RecoveryRequired
 from .database import DatabaseIdentity
 from .execution_store import Execution, ExecutionStore
 from .receipt_store import CapturedResponse, ReceiptStore
+from .stage_context import parent_stage
 from .usage_store import UsageStore
 
 logger = logging.getLogger(__name__)
@@ -104,6 +105,7 @@ class StoredModelUsage:
             stage = self.executions.start_stage(
                 self.execution.execution_id,
                 "model_request",
+                parent_stage_id=parent_stage(self.root, self.identity, self.execution.execution_id),
                 work_key=compile_key or request.logical_call_id or request.request_attempt_id,
                 source_revision_id=request.source_revision_id,
                 unit_revision_id=request.unit_revision_id,

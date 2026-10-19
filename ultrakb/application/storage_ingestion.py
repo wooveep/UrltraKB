@@ -26,6 +26,7 @@ from ultrakb.text_formats import normalize_text_document
 
 from .execution import ExecutionContext
 from .recompilation import RecompileResult, recompile_document
+from .task_stages import task_stage
 
 
 def import_stored_document(
@@ -116,20 +117,24 @@ def import_stored_document(
 def _import_body(scope, ready, context, bundle, origin_url, download_remote_assets):
     root, identity = scope.kb_dir, scope.knowledge.identity
     catalog = CatalogStore(root, identity)
-    revision = catalog.admit(
-        ready.path,
-        source_key=origin_url or str(ready.identity),
-        sidecars={
-            "sidecars/" + quote(reference, safe=""): image.path
-            for reference, image in ready.images.items()
-            if image.path is not None
-        },
-    )
+    revision = None
     try:
+        with task_stage(context, "import.admit.v1", work_key=ready.digest):
+            revision = catalog.admit(
+                ready.path,
+                source_key=origin_url or str(ready.identity),
+                sidecars={
+                    "sidecars/" + quote(reference, safe=""): image.path
+                    for reference, image in ready.images.items()
+                    if image.path is not None
+                },
+            )
         return _process_admitted(
             scope, ready, context, bundle, download_remote_assets, catalog, revision
         )
     except (Exception, asyncio.CancelledError) as error:
+        if revision is None:
+            raise
         return IngestResult(
             str(ready.identity),
             "stopped" if isinstance(error, (LockCancelled, asyncio.CancelledError)) else "blocked",
@@ -146,72 +151,75 @@ def _process_admitted(scope, ready, context, bundle, download_remote_assets, cat
     root = scope.kb_dir
     target = catalog.unit_for_source(revision.source_id, key="body")
     if target is None or target.source_revision_id != revision.revision_id:
-        doc_name = (
-            target.doc_name
-            if target
-            else f"{_sanitize_stem(ready.source.stem)}-{revision.source_id[:8]}"
-        )
-        with materialize_baseline(scope.knowledge, ()) as baseline:
-            private = KnowledgeScope(
-                kb_dir=root,
-                view_id=scope.view_id,
-                wiki_dir=baseline.directory,
-                private_workspace=baseline.private,
+        with task_stage(context, "import.process.v1", source_revision_id=revision.revision_id):
+            doc_name = (
+                target.doc_name
+                if target
+                else f"{_sanitize_stem(ready.source.stem)}-{revision.source_id[:8]}"
             )
-            if ready.source.suffix.lower() in TEXT_SOURCE_EXTENSIONS:
-                resource_policy = None
-                if ready.source.suffix.lower() in {".html", ".htm"}:
-                    from ultrakb.remote_assets import resolve_resource_policy
-
-                    resource_policy = resolve_resource_policy(root, download_remote_assets)
-                frozen = normalize_text_document(
-                    ready, doc_name, baseline.directory, resource_policy=resource_policy
+            with materialize_baseline(scope.knowledge, ()) as baseline:
+                private = KnowledgeScope(
+                    kb_dir=root,
+                    view_id=scope.view_id,
+                    wiki_dir=baseline.directory,
+                    private_workspace=baseline.private,
                 )
-                body = baseline.directory / f"sources/{doc_name}.md"
-                native = body.with_suffix(".content.json")
-                atomic_write_text(body, frozen.text)
-                atomic_write_json(native, frozen.model_dump(mode="json"))
-                decision = select_execution_mode(
-                    root,
-                    classify_markdown_tokens(frozen.tokens),
-                    body,
-                    doc_name,
-                    scope=private,
-                    bundle=bundle,
-                )
-                if decision.execution_mode == "segmented":
-                    from ultrakb.block_package import freeze_content_blocks
+                if ready.source.suffix.lower() in TEXT_SOURCE_EXTENSIONS:
+                    resource_policy = None
+                    if ready.source.suffix.lower() in {".html", ".htm"}:
+                        from ultrakb.remote_assets import resolve_resource_policy
 
-                    frozen = freeze_content_blocks(frozen.model_dump(mode="json"))
+                        resource_policy = resolve_resource_policy(root, download_remote_assets)
+                    frozen = normalize_text_document(
+                        ready, doc_name, baseline.directory, resource_policy=resource_policy
+                    )
+                    body = baseline.directory / f"sources/{doc_name}.md"
+                    native = body.with_suffix(".content.json")
+                    atomic_write_text(body, frozen.text)
                     atomic_write_json(native, frozen.model_dump(mode="json"))
-                source_kind = "text"
-                files = {path: baseline.directory / path for path in frozen.assets}
-            else:
-                from .storage_processing import convert_native_input
+                    decision = select_execution_mode(
+                        root,
+                        classify_markdown_tokens(frozen.tokens),
+                        body,
+                        doc_name,
+                        scope=private,
+                        bundle=bundle,
+                    )
+                    if decision.execution_mode == "segmented":
+                        from ultrakb.block_package import freeze_content_blocks
 
-                decision, body, native, files = convert_native_input(
-                    scope, ready, baseline, private, doc_name, context, bundle
+                        frozen = freeze_content_blocks(frozen.model_dump(mode="json"))
+                        atomic_write_json(native, frozen.model_dump(mode="json"))
+                    source_kind = "text"
+                    files = {path: baseline.directory / path for path in frozen.assets}
+                else:
+                    from .storage_processing import convert_native_input
+
+                    decision, body, native, files = convert_native_input(
+                        scope, ready, baseline, private, doc_name, context, bundle
+                    )
+                    files = {
+                        name: path for name, path in files.items() if path not in {body, native}
+                    }
+                    source_kind = "pages"
+                fingerprint = digest(
+                    {"native": json_native(native), "decision": decision.model_dump(mode="json")}
                 )
-                files = {name: path for name, path in files.items() if path not in {body, native}}
-                source_kind = "pages"
-            fingerprint = digest(
-                {"native": json_native(native), "decision": decision.model_dump(mode="json")}
-            )
-            processing = catalog.retain_processing(
-                revision.revision_id,
-                {
-                    body.name: body,
-                    native.name: native,
-                    **files,
-                },
-                body_path=body.name,
-                source_path=native.name,
-                source_kind=source_kind,
-                fingerprint=fingerprint,
-                operation_id=digest([revision.revision_id, fingerprint]),
-                decision=decision,
-            )
-            target = catalog.plan_unit(processing.processing_id, key="body", doc_name=doc_name)
+                processing = catalog.retain_processing(
+                    revision.revision_id,
+                    {
+                        body.name: body,
+                        native.name: native,
+                        **files,
+                    },
+                    body_path=body.name,
+                    source_path=native.name,
+                    source_kind=source_kind,
+                    fingerprint=fingerprint,
+                    operation_id=digest([revision.revision_id, fingerprint]),
+                    decision=decision,
+                )
+                target = catalog.plan_unit(processing.processing_id, key="body", doc_name=doc_name)
     reused = target.unit_revision_id in {
         unit.unit_revision_id for unit in scope.knowledge.input_units()
     }

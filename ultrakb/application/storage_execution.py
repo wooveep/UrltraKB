@@ -102,7 +102,12 @@ def begin_storage_execution(root: Path, context: ExecutionContext) -> Iterator[L
             finally:
                 try:
                     try:
-                        usage.close()
+                        from .task_stages import task_stage
+
+                        with task_stage(
+                            context, "execution.cleanup.v1", ensure_work=True, allow_stopping=True
+                        ):
+                            usage.close()
                     finally:
                         store.finish(
                             execution.execution_id,

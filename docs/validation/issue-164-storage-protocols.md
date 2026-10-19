@@ -1076,3 +1076,29 @@ endpoint fingerprint, retaining no credentials or endpoint text. A dual-provider
 public backup/recompile case now rejects the changed recipe before creating a new
 execution or sending, while the unchanged endpoint continues with zero resend.
 Thirty-eight relevant offline cases pass (48 live cases deselected).
+
+### Bounded task queries and actual import stages
+
+Shared task list/detail use cases now return versioned validated payloads from
+the main store. Executions, actual stage attempts and request metadata have
+independent bounded cursors; a selected execution must belong to its task. JSON
+export uses the same page schema, keeps continuation cursors/coverage, and never
+reads prompts or response bodies. Request callbacks update task counters in the
+same short transaction as existing counters. Lists read those bounded summaries;
+details distinguish current execution usage from cumulative task usage and expose
+the original budget across retries.
+
+Import and compilation now persist actual admission, processing, materialization,
+generation, validation, retention, publication, Wiki synchronization and cleanup
+boundaries. Model requests bind their actual generation parent. Observation
+failure cannot skip required SDK cleanup, and cleanup is allowed while stopping;
+published outcomes and admitted source identities retain their existing latches.
+The public query case follows real SDK traffic, pagination, exported JSON,
+zero-send repeated import and cross-task identity rejection. Coverage explicitly
+marks remaining non-model/resource/price observations incomplete rather than
+inventing measurements. Publication-result links and the three presentation
+adapters remain the next integration work.
+
+Seventy-eight related regressions, including file-size/boundary checks, pass;
+full mypy passes 515 source modules and lint/format checks pass. Issue 164 remains
+open and P8 remains the sole normal-format activation point.

@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import time
+from contextlib import ExitStack
 from dataclasses import replace
 
 from ultrakb.compilation_report import compilation_attempt
@@ -22,6 +23,7 @@ from ultrakb.storage.wiki_projection import ProjectionConflict
 
 from .publications import sync_publication
 from .recompilation import RecompileResult
+from .task_stages import task_stage
 
 logger = logging.getLogger(__name__)
 
@@ -116,8 +118,15 @@ async def _compile(scope, target, context, bundle, model, max_concurrency):
                 conditions={"fingerprint": context.executor.fingerprint, "compiler": 3},
                 execution_id=execution.execution_id,
             )
-            with materialize_baseline(base, ()) as baseline:
-                inputs = materialize_inputs(base, baseline, target)
+            with ExitStack() as temporary:
+                with task_stage(
+                    context,
+                    "compile.inputs.v1",
+                    source_revision_id=target.source_revision_id,
+                    unit_revision_id=target.unit_revision_id,
+                ):
+                    baseline = temporary.enter_context(materialize_baseline(base, ()))
+                    inputs = materialize_inputs(base, baseline, target)
                 if segmented and index is None:
                     from .storage_indexing import prepare_document_index
 
@@ -131,6 +140,12 @@ async def _compile(scope, target, context, bundle, model, max_concurrency):
                     private_workspace=baseline.private,
                 )
                 with (
+                    task_stage(
+                        context,
+                        "compile.generate.v1",
+                        source_revision_id=target.source_revision_id,
+                        unit_revision_id=target.unit_revision_id,
+                    ),
                     compile_binding(
                         checkpoints, view_id=scope.view_id, document=target.doc_name, inputs=inputs
                     ),
@@ -160,27 +175,42 @@ async def _compile(scope, target, context, bundle, model, max_concurrency):
                             model or config["model"],
                             **options,
                         )
-                report.require_complete()
-                context.check_stop()
-                prepared = prepare_compiled_revision(
-                    store, base, baseline, target, work, index_revisions=(index,) if index else ()
+                with task_stage(
+                    context, "compile.validate.v1", unit_revision_id=target.unit_revision_id
+                ):
+                    report.require_complete()
+                    context.check_stop()
+                with task_stage(
+                    context, "compile.persist.v1", unit_revision_id=target.unit_revision_id
+                ):
+                    prepared = prepare_compiled_revision(
+                        store,
+                        base,
+                        baseline,
+                        target,
+                        work,
+                        index_revisions=(index,) if index else (),
+                    )
+        with task_stage(context, "knowledge.publish.v1", unit_revision_id=target.unit_revision_id):
+            try:
+                publication = store.publish(
+                    prepared,
+                    check_cancelled=context.check_stop,
+                    execution_id=execution.execution_id,
                 )
-        try:
-            publication = store.publish(
-                prepared, check_cancelled=context.check_stop, execution_id=execution.execution_id
+            except Exception:
+                publication = store.committed_publication(prepared)
+                if publication is None:
+                    raise
+            accepted = RecompileResult(
+                "compiled",
+                target.doc_name,
+                version=publication.publication_id,
+                knowledge_revision_id=publication.revision_id,
+                unfinished=("synchronize wiki",),
             )
-        except Exception:
-            publication = store.committed_publication(prepared)
-            if publication is None:
-                raise
-        accepted = RecompileResult(
-            "compiled",
-            target.doc_name,
-            version=publication.publication_id,
-            knowledge_revision_id=publication.revision_id,
-            unfinished=("synchronize wiki",),
-        )
-        projection = sync_publication(base.root, base.identity, prepared)
+        with task_stage(context, "wiki.sync.v1", unit_revision_id=target.unit_revision_id):
+            projection = sync_publication(base.root, base.identity, prepared)
         return replace(
             accepted, unfinished=() if projection.status == "synced" else ("synchronize wiki",)
         )
