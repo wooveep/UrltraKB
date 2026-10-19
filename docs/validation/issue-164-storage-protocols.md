@@ -1420,3 +1420,21 @@ modules; Ruff, formatting and diff checks pass. Both independent review axes
 verify accepted-repair recovery, bounded persistence and cleanup-result retention.
 This is further compiler migration coverage, not overall completion or P8
 activation. Issue 164 remains open.
+
+### Shared-page coordination request identity
+
+Six real SDK/main-store cases retain all 24 original paragraphs while updating
+separate editing groups and coordinating conflicting metadata under a 24,000-byte
+input guard. Interruption after the first or second accepted update resumes from
+the saved steps without repeating any already sent request. This exposes a real
+request-identity defect: canonical checkpoint JSON changed nested proposal key
+order after restart, changing the later coordination signature. Main-store
+CompileWork explicitly declares canonical drafts; both coordination contexts
+reproduce their canonical order. Legacy checkpoints, including protocol v3, keep
+their frozen request bytes. Independent review's legacy-v3 upgrade witness also
+passes without a repeated accepted step.
+
+The related update/plan/compiler set passes 36 cases; shared-update and existing
+reconciliation recovery pass 28 cases. Full mypy passes 538 modules; Ruff and
+format checks pass. This closes this shared-page recovery gap, not the complete
+issue or the P8 gate.

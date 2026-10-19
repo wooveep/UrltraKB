@@ -172,6 +172,7 @@ async def reconcile_update(
                         "are retained locally. Nothing is published until every source is read.",
                     },
                     ensure_ascii=False,
+                    sort_keys=getattr(checkpoints, "canonical_drafts", False),
                 )
                 partitions = prepare_update_requests(
                     target,

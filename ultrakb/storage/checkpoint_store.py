@@ -79,6 +79,7 @@ class CompileWork:
     request_version = 3
     structured_summary = True
     legacy_summary_format = False
+    canonical_drafts = True
 
     def __init__(self, root, identity, work_id, model_budget_id, object_digest, execution_id):
         self.root, self.identity, self.work_id = root, identity, work_id

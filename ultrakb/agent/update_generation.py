@@ -445,6 +445,9 @@ async def generate_page_update(
                     "metadata_target": conflict.metadata,
                 },
                 ensure_ascii=False,
+                # Main-store checkpoints use canonical object order. Reproduce
+                # the same request bytes before and after loading those drafts.
+                sort_keys=getattr(checkpoints, "canonical_drafts", False),
             )
         )
         # Metadata needs the whole editing view; body editing remains restricted.
