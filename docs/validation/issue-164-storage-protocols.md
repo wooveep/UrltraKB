@@ -1465,3 +1465,24 @@ Both independent review axes verify the generation checks and receipt recovery;
 Spec independently confirms the obsolete-plan regression. Normal factories stay
 behind the P8 gate. Refresh/maintenance completion, remaining observation work
 and final entrypoint activation are still required; issue 164 remains open.
+
+### Knowledge validity and committed status
+
+Main-store evidence compares the selected page's actual immutable unit inputs with
+current source and processing targets in a short read snapshot. Updated or withdrawn
+inputs mark dependent pages for refresh without changing their bodies, digests or
+source revision references. A newer unrelated publication does not invalidate an
+otherwise current basis. A fresh question captures validity again even when its
+fixed resource inventory was already cached; per-page reads report that page's
+actual basis. Legacy current and explicit historical selections retain their
+existing distinction.
+
+The status use case counts committed main-store resources and managed sources,
+ignoring external worktree drafts. Compile timestamps come from actual import
+publication receipts in commit order; missing compile/lint observations remain
+unrecorded instead of using file modification times as evidence. Five main-store
+cases and a real legacy publication regression cover these contracts. The related
+compiler/question/document set passes 87 cases (two live cases deselected); the
+final validity/page-write set passes 17. Full mypy passes 543 modules and Ruff and
+format checks pass. Both review axes close the fixed-reader and legacy validity
+findings. The refresh writer and P8 activation are still unfinished.

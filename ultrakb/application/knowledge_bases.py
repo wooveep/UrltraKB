@@ -348,6 +348,10 @@ def get_kb_list(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> dict[st
 def get_kb_status(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> dict[str, Any]:
     """Return structured status for the knowledge base (REST ``/status``)."""
     selected = resolve_scope(kb_dir, scope)
+    if selected.knowledge is not None:
+        from .storage_status import knowledge_status
+
+        return knowledge_status(selected)
     with reading_scope(selected):
         from ultrakb.application.refresh import refresh_status
 

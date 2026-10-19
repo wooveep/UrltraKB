@@ -60,7 +60,11 @@ class QuerySelection:
 
 def _pin_view(kb_dir: Path, scope: KnowledgeScope | None = None) -> QueryView | None:
     if scope is not None and scope.knowledge is not None:
-        return scope.reading_view
+        from ultrakb.storage.knowledge_validity import publication_validity
+
+        return replace(
+            scope.reading_view, validity=publication_validity(scope.knowledge)["validity"]
+        )
     public = scope.publication if scope is not None else None
     head = public.head if public is not None else read_head(kb_dir)
     catalog = public.metadata_dir if public is not None else kb_dir
@@ -284,6 +288,8 @@ def read_query_page(
         from ultrakb.knowledge_evidence import page_evidence
 
         evidence = page_evidence(view.scope, path)
+        if view.scope.knowledge is not None:
+            view = replace(view, validity=evidence["validity"])
         if evidence["source_revision_ids"]:
             view = replace(view, source_revision_ids=evidence["source_revision_ids"])
     import json

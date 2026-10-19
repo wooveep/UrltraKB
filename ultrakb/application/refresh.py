@@ -293,6 +293,10 @@ async def refresh_knowledge_view(kb_dir: Path, *, scope: KnowledgeScope, context
 
 def refresh_status(kb_dir: Path, *, scope: KnowledgeScope) -> dict:
     scope = resolve_scope(kb_dir, scope)
+    if scope.knowledge is not None:
+        from ultrakb.storage.knowledge_validity import publication_validity
+
+        return publication_validity(scope.knowledge)
     with kb_read_lock(scope.kb_dir / ".ultrakb"):
         head = read_head(scope.kb_dir, scope.view_id)
         return {
