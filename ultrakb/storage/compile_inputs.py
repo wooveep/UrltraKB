@@ -214,11 +214,13 @@ def prepare_compiled_revision(store, base, baseline, target, work):
     )
     basis = base.page_input_revisions()
     page_inputs = {
-        path: tuple(dict.fromkeys((*basis.get(path, ()), target.unit_revision_id)))
+        path: (
+            basis.get(path, ())
+            if hashlib.sha256(value).hexdigest() == baseline.normalized_pages.get(path)
+            else tuple(dict.fromkeys((*basis.get(path, ()), target.unit_revision_id)))
+        )
         for path, value in changes.items()
-        if value is not None
-        and path.endswith(".md")
-        and hashlib.sha256(value).hexdigest() != baseline.normalized_pages.get(path)
+        if value is not None and path.endswith(".md")
     }
     return store._prepare_revision(
         changes,

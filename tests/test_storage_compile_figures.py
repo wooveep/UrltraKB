@@ -100,15 +100,25 @@ async def test_recompile_preserves_every_supported_referenced_image_format(tmp_p
 
 
 @pytest.mark.asyncio
-async def test_an_unchanged_inline_picture_keeps_its_old_bytes_when_the_source_advances(tmp_path):
+@pytest.mark.parametrize("html", [False, True], ids=["markdown", "html"])
+@pytest.mark.parametrize("factual_basis", [True, False], ids=["source-page", "manual-page"])
+async def test_an_unchanged_inline_picture_keeps_its_old_bytes_when_the_source_advances(
+    tmp_path, html, factual_basis
+):
     from ultrakb.application.reading_assets import capture_reading_assets
 
     root, identity, _ = question_knowledge(tmp_path)
     old = retained_picture(root, identity, tmp_path / "old", 17, "red")
     knowledge = KnowledgeStore(root, identity)
+    suffix = "?label=&quot;old&quot;#view" if html else "?raw=1#original-view"
+    markup = (
+        f'<img src="../sources/images/figure.png{suffix}" alt="Original">'
+        if html
+        else f"![Original](../sources/images/figure.png{suffix})"
+    )
     original = (
         "---\ndescription: Original\nsources: [summaries/fixture.md]\n---\n"
-        "The value was 17.\n\n![Original](../sources/images/figure.png?raw=1#original-view)\n"
+        f"The value was 17.\n\n{markup}\n"
     )
     before = knowledge.publish(
         knowledge.prepare_revision(
@@ -119,7 +129,7 @@ async def test_an_unchanged_inline_picture_keeps_its_old_bytes_when_the_source_a
             },
             expected=knowledge.bind().publication_id,
             unit_revisions=(old.unit_revision_id,),
-            page_inputs={"concepts/old-value.md": (old.unit_revision_id,)},
+            page_inputs={"concepts/old-value.md": (old.unit_revision_id,) if factual_basis else ()},
         )
     )
     current = retained_picture(root, identity, tmp_path / "new", 23, "blue")
@@ -140,9 +150,9 @@ async def test_an_unchanged_inline_picture_keeps_its_old_bytes_when_the_source_a
     assert len(assets.images) == 1
     assert next(iter(assets.images.values())) == png_bytes("red")
     assert "The value was 17." in page.body
-    assert "?raw=1#original-view" in page.body
-    assert knowledge.bind().page_input_revisions()["concepts/old-value.md"] == (
-        old.unit_revision_id,
+    assert suffix in page.body
+    assert knowledge.bind().page_input_revisions().get("concepts/old-value.md", ()) == (
+        (old.unit_revision_id,) if factual_basis else ()
     )
     assert knowledge.bind(before.publication_id).read("concepts/old-value.md") == original.encode()
 

@@ -1,5 +1,6 @@
 """Locate actual Markdown images while leaving code and surrounding text intact."""
 
+import html
 import re
 from dataclasses import dataclass
 from urllib.parse import quote, unquote, urlsplit
@@ -27,7 +28,7 @@ class ImageReference:
                 "#" + source.fragment if source.fragment else ""
             )
         if self.html:
-            return target
+            return html.escape(target, quote=True)
         title = self.title.replace("\\", "\\\\").replace('"', '\\"')
         suffix = f' "{title}"' if title else ""
         return f"![{self.alt}]({target}{suffix})"

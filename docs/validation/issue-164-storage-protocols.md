@@ -931,3 +931,10 @@ bases. Only a later substantive compiler edit adds the target unit to that page'
 basis. Source originals remain unchanged. This disposable normalization uses the
 branded streaming helper without file or directory fsync. Related regressions
 pass 73 tests; full mypy still passes 500 source modules.
+
+Follow-up review added public cases for HTML attribute quoting and manual pages
+with an explicitly empty factual basis. Relocated HTML URLs now escape decoded
+query/fragment values; unchanged normalized pages explicitly retain even an
+empty basis rather than inheriting publication defaults. The ten image
+application cases pass. Both review axes confirmed the adjacent fixes in the
+workspace; no real-model traffic or original user edits were involved.
