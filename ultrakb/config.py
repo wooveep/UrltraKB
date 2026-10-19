@@ -608,7 +608,7 @@ def kb_root_dir() -> Path:
 
 
 def _is_kb_dir(kb_dir: Path) -> bool:
-    """Whether ``kb_dir`` is a KB directory (has both ``.ultrakb`` and ``wiki``).
+    """Whether ``kb_dir`` has main storage and its separate execution configuration.
 
     Mirrors ``ultrakb.api_helpers._is_kb_dir``; duplicated here (rather than
     imported) so this low-level config module — used by the CLI — does not pull
@@ -616,7 +616,7 @@ def _is_kb_dir(kb_dir: Path) -> bool:
     imports this module). Used to recognize ``kb_root_dir()`` children so a
     root-level KB is never shadowed by a same-named off-root registry entry.
     """
-    return (kb_dir / ".ultrakb").is_dir() and (kb_dir / "wiki").is_dir()
+    return (kb_dir / ".ultrakb/config.yaml").is_file() and (kb_dir / ".ultrakb/kb.sqlite").is_file()
 
 
 def _root_child_names() -> set[str]:
@@ -630,7 +630,7 @@ def _root_child_names() -> set[str]:
     root = kb_root_dir()
     if not root.is_dir():
         return set()
-    return {child.name for child in root.iterdir() if child.is_dir() and _is_kb_dir(child)}
+    return {child.name for child in root.iterdir() if (child / ".ultrakb").exists()}
 
 
 def resolve_init_kb_dir(kb_name: str, path: str | None = None) -> Path:
@@ -713,7 +713,7 @@ def resolve_kb_alias(name: str) -> Path:
         if isinstance(raw, str):
             return Path(raw).expanduser().resolve()
     root_candidate = (kb_root_dir() / alias).resolve()
-    if _is_kb_dir(root_candidate):
+    if (root_candidate / ".ultrakb").exists():
         return root_candidate
     for reg_name, reg_path in registered_kbs():
         if reg_name == alias:

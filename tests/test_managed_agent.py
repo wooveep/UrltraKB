@@ -114,9 +114,7 @@ async def test_agent_retry_first_send_is_single_and_accounted(
     model_service, kb_dir, stream, monkeypatch
 ):
     import httpx
-
-    from ultrakb.llm_usage import aggregate_usage, read_requests
-    from ultrakb.llm_usage_execution import import_usage_execution
+    from native_usage_fixtures import aggregate_usage, native_usage_execution, read_requests
 
     original = httpx.AsyncClient._send_single_request
     failures = []
@@ -130,7 +128,7 @@ async def test_agent_retry_first_send_is_single_and_accounted(
         return await original(client, outgoing)
 
     monkeypatch.setattr(httpx.AsyncClient, "_send_single_request", disconnect_once)
-    with import_usage_execution(kb_dir, "answer"):
+    with native_usage_execution(kb_dir, "answer"):
         executor = executor_for(model_service, retries=1, backoff=0)
         agent = agent_for(executor)
         agent.model_settings.max_tokens = 64
@@ -206,8 +204,8 @@ async def test_stream_without_usage_remains_unknown(model_service, kb_dir):
 
 @pytest.mark.asyncio
 async def test_agent_cancel_waits_for_cleanup_without_retry(model_service, kb_dir):
-    from ultrakb.llm_usage import read_requests
-    from ultrakb.llm_usage_execution import import_usage_execution
+    from native_usage_fixtures import native_usage_execution, read_requests
+
     from ultrakb.locks import LockCancelled
 
     warm_agent = agent_for(executor_for(model_service))
@@ -220,7 +218,7 @@ async def test_agent_cancel_waits_for_cleanup_without_retry(model_service, kb_di
     model_service.requests.clear()
     model_service.delay = 0.3
     stopped = threading.Event()
-    with import_usage_execution(kb_dir, "answer"):
+    with native_usage_execution(kb_dir, "answer"):
         executor = executor_for(model_service, cancelled=stopped.is_set)
         agent = agent_for(executor)
         agent.model_settings.max_tokens = 64
@@ -287,16 +285,16 @@ async def test_failed_stream_after_text_is_never_replayed(model_service, live_ll
 async def test_two_agent_tasks_keep_bindings_and_ledgers_separate(model_service, kb_dir, tmp_path):
     from dataclasses import replace
 
+    from native_usage_fixtures import native_usage_execution, read_requests
+
     from ultrakb.llm_execution import CompletionExecutor, RoleBindings
-    from ultrakb.llm_usage import read_requests
-    from ultrakb.llm_usage_execution import import_usage_execution
 
     other_root = tmp_path / "other"
     other_root.mkdir()
     fingerprints = []
 
     async def run(root, task):
-        with import_usage_execution(root, "answer"):
+        with native_usage_execution(root, "answer"):
             executor = CompletionExecutor(
                 RoleBindings(
                     "deepseek/deepseek-flash",
@@ -328,10 +326,14 @@ async def test_two_agent_tasks_keep_bindings_and_ledgers_separate(model_service,
 async def test_real_application_commits_only_complete_answers(
     model_service, kb_dir, chat, outcome, monkeypatch, live_llm
 ):
-    from ultrakb.agent.chat_session import load_session
-    from ultrakb.application.conversations import ask_question, continue_conversation
+    from native_usage_fixtures import read_requests
+
+    from ultrakb.application.conversations import (
+        ask_question,
+        continue_conversation,
+        read_conversation,
+    )
     from ultrakb.application.execution import ExecutionContext
-    from ultrakb.llm_usage import read_requests
     from ultrakb.locks import atomic_write_text
 
     atomic_write_text(
@@ -373,8 +375,8 @@ async def test_real_application_commits_only_complete_answers(
     )
     if chat:
         result = await continue_conversation(kb_dir, question, context=context)
-        session = load_session(kb_dir, result.session_id)
-        assert session.turn_count == (1 if outcome == "complete" else 0)
+        session = read_conversation(kb_dir, result.session_id)
+        assert session.total_turns == (1 if outcome == "complete" else 0)
     else:
         result = await ask_question(kb_dir, question, save=True, context=context)
         assert bool(result.saved_path) == (outcome == "complete")
@@ -389,7 +391,7 @@ async def test_real_application_commits_only_complete_answers(
         ]
         assert "Orion costs 17 credits." in json.dumps(originals)
         if chat:
-            assert session.assistant_texts[0] == result.answer
+            assert session.turns[0][1] == result.answer
         else:
             assert result.answer in Path(result.saved_path).read_text()
     assert len(model_service.requests) == len(read_requests(kb_dir))

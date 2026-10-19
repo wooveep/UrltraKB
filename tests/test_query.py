@@ -308,18 +308,10 @@ class TestBuildRunConfigFromBundle:
         assert not run_config.model.model.startswith("litellm/")
 
 
-def test_chat_session_agent_has_write_file(tmp_path):
-    from ultrakb.agent.chat import build_chat_session_agent
-    from ultrakb.agent.chat_session import ChatSession
+def test_chat_agent_has_write_file(kb_dir):
+    from ultrakb.agent.query import build_chat_agent
+    from ultrakb.application.views import published_scope
 
-    kb_dir = tmp_path / "kb"
-    (kb_dir / "wiki").mkdir(parents=True)
-    (kb_dir / ".ultrakb").mkdir(parents=True)
-    (kb_dir / "wiki" / "index.md").write_text("# Index\n", encoding="utf-8")
-
-    session = ChatSession.new(kb_dir, model="openai/gpt-4o", language="en")
-    agent = build_chat_session_agent(kb_dir, session)
-
-    tool_names = {getattr(t, "name", "") for t in agent.tools}
-    assert "write_file" in tool_names
-    assert "read_file" in tool_names  # still a superset of the query agent
+    agent = build_chat_agent(kb_dir, "openai/gpt-4o", scope=published_scope(kb_dir))
+    tool_names = {tool.name for tool in agent.tools}
+    assert {"write_file", "read_file"} <= tool_names

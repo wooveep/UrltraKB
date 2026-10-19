@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 import pytest
 import yaml
 from compile_plan_delivery_inputs import DOC_NAME, ORIGINAL, prepare_delivery_input
+from native_usage_fixtures import read_requests
 
 from ultrakb import frontmatter
 from ultrakb.agent import compile_delivery, compile_messages, compile_plan
@@ -24,7 +25,6 @@ from ultrakb.application.execution import ExecutionContext
 from ultrakb.block_package import BlockPackage
 from ultrakb.compilation_report import collect_compile_report
 from ultrakb.llm_execution import CompletionExecutor
-from ultrakb.llm_usage import read_requests
 from ultrakb.locks import kb_ingest_lock
 
 _PLAN_CONTROL = """Controlled protocol-recovery input for this small source.

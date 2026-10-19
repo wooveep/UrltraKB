@@ -24,6 +24,7 @@ from ultrakb.storage.catalog_store import CatalogConflict, CatalogStore
 from ultrakb.storage.compile_workspace import materialize_baseline
 from ultrakb.text_formats import normalize_text_document
 
+from .connection_failures import operation_error_message
 from .execution import ExecutionContext
 from .recompilation import RecompileResult, recompile_document
 from .task_stages import task_stage
@@ -123,6 +124,10 @@ def import_stored_document(
                 else "failed"
             )
     except (Exception, asyncio.CancelledError) as error:
+        from .model_connections import ConnectionRequired
+
+        if isinstance(error, ConnectionRequired):
+            raise
         context._storage_result = "failed"
         if result is not None:
             result = replace(result, unfinished=(*result.unfinished, "confirm execution cleanup"))
@@ -134,7 +139,7 @@ def import_stored_document(
                 else "blocked",
                 (),
                 unfinished=("import",),
-                message=str(error),
+                message=operation_error_message(error),
             )
     return confirm_import_usage(result, context, root, identity)
 
@@ -268,7 +273,7 @@ def _import_body(
             source_revision_id=revision.revision_id,
             input_version=ready.digest,
             unfinished=("processing",),
-            message=str(error),
+            message=operation_error_message(error),
         )
 
 
@@ -390,7 +395,9 @@ def process_admitted(
                     atomic_write_json(native, frozen.model_dump(mode="json"))
                     decision = select_execution_mode(
                         root,
-                        classify_markdown_tokens(frozen.tokens),
+                        classify_markdown_tokens(frozen.tokens).model_copy(
+                            update={"characters": len(frozen.text)}
+                        ),
                         body,
                         doc_name,
                         scope=private,
@@ -495,6 +502,7 @@ def compile_stored_unit(scope, ready, context, catalog, revision, target, *, nam
             length_class=decision.length_class,
             execution_mode=decision.execution_mode,
             processing=decision.model_dump(mode="json"),
+            quality=result.quality,
             unfinished=result.unfinished,
             message=result.message,
         )
@@ -507,12 +515,15 @@ def compile_stored_unit(scope, ready, context, catalog, revision, target, *, nam
         if compiled
         else "stopped"
         if result.status == "stopped"
+        else "failed"
+        if result.status == "failed"
         else "blocked",
         (),
         source_id=revision.source_id,
         source_revision_id=revision.revision_id,
         input_version=ready.digest,
         units=(unit_outcome,),
+        quality=result.quality,
         unfinished=result.unfinished,
         message=result.message,
         publication_id=result.publication_id,

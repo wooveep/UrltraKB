@@ -35,7 +35,8 @@ def _version(scope, source):
 def _matches(catalog, identifier, *, include_removed=False):
     if not isinstance(identifier, str) or not identifier.strip():
         raise ValueError("Document identifier is required")
-    matches = []
+    matches, partial = [], []
+    query = identifier.strip().casefold()
     for source in catalog_sources(catalog, include_removed=include_removed):
         units = catalog.source_units(source.source_id)
         if identifier in {
@@ -45,7 +46,11 @@ def _matches(catalog, identifier, *, include_removed=False):
             *(unit.doc_name for unit in units),
         }:
             matches.append((source, units))
-    return matches
+        elif query in source.label.casefold() or any(
+            query in unit.doc_name.casefold() for unit in units
+        ):
+            partial.append((source, units))
+    return matches or partial
 
 
 def preview_stored_removal(scope, identifier):

@@ -48,8 +48,6 @@ def begin_storage_execution(root: Path, context: ExecutionContext) -> Iterator[L
         # An idle connection preserves WAL coordination across short callbacks.
         # It holds neither a SQL snapshot nor a reclamation lease during model waits.
         with _running(context), open_database(root, expected=identity, read_only=True):
-            if context.resume_model_task_id is not None or context.model_task is not None:
-                raise ValueError("A new-store execution cannot resume a legacy model-task ledger")
             if context.snapshot is None:
                 with context.activity("preparing"):
                     context.snapshot = capture_storage_config(
@@ -69,7 +67,9 @@ def begin_storage_execution(root: Path, context: ExecutionContext) -> Iterator[L
             if context.install_process_settings:
                 context.snapshot.install_worker_environment()
             if context.executor is None:
-                context.executor = executor_from_snapshot(context.snapshot, context.cancelled)
+                context.executor = executor_from_snapshot(
+                    context.snapshot, lambda: context.cancelled()
+                )
             executor = context.executor
             store = ExecutionStore(root, identity)
             previous = context.storage_execution
@@ -136,6 +136,38 @@ def begin_storage_execution(root: Path, context: ExecutionContext) -> Iterator[L
                     if failure is None:
                         raise
                     logger.warning("Could not confirm execution cleanup", exc_info=True)
+
+
+@contextmanager
+def begin_retained_execution(root, context, previous):
+    """Finish accepted computation locally without recapturing model credentials."""
+    identity = context.storage_identity
+    assert identity is not None
+    if current_execution() is context:
+        context.check_stop()
+        yield
+        return
+    with (
+        read_lifecycle(root, database_identity=identity, cancelled=context.cancelled),
+        _running(context),
+    ):
+        store = ExecutionStore(root, identity)
+        context.storage_execution = store.continue_local(
+            previous.execution_id,
+            application_task_id=context.usage_task_id,
+            application_unit_id=context.usage_unit_id,
+            parent_application_task_id=context.parent_usage_task_id,
+        )
+        context._storage_result = "failed"
+        try:
+            with _activate_context(context):
+                yield
+        finally:
+            store.finish(
+                context.storage_execution.execution_id,
+                state=context._storage_result,
+                work_settled=True,
+            )
 
 
 @contextmanager

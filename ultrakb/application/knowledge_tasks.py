@@ -82,6 +82,19 @@ def read_knowledge_execution(kb_dir: Path, execution_id: str, **options) -> Task
     return store.for_execution(execution_id, **options)
 
 
+def read_application_task(kb_dir: Path, application_task_id: str, **options) -> TaskDetail:
+    """Resolve an application operation, including one that never uses a model."""
+    from ultrakb.storage.execution_store import ExecutionStore
+
+    store = _store(kb_dir, options.pop("scope", None), options.pop("identity", None))
+    execution = ExecutionStore(store.root, store.identity).application_operation(
+        application_task_id
+    )
+    if execution is None:
+        raise KeyError("This application task has no recorded execution")
+    return store.for_execution(execution.execution_id, **options)
+
+
 def read_knowledge_stage(kb_dir: Path, task_id: str, stage_id: str, **options) -> TaskStageDetail:
     """Read one exact stage and bounded requests, including retained input context."""
     store = _store(kb_dir, options.pop("scope", None), options.pop("identity", None))

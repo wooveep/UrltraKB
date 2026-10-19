@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 import litellm
 import pytest
 from error_transport import ErrorTransport
+from native_usage_fixtures import aggregate_usage, observe_executor, read_requests
 
 from ultrakb.config import LlmCredentialBundle
 from ultrakb.llm_execution import (
@@ -17,21 +18,21 @@ from ultrakb.llm_execution import (
     ModelRequest,
     RoleBindings,
 )
-from ultrakb.llm_usage import UsageScope, aggregate_usage, read_requests
 from ultrakb.locks import LockCancelled
 
 pytestmark = pytest.mark.integration
 
 
 def executor_for(service, kb_dir, *, timeout=1, **policy):
-    return CompletionExecutor(
+    executor = CompletionExecutor(
         RoleBindings(
             "openai/gpt-4o-mini",
             LlmCredentialBundle(api_key="offline-test-key", base_url=service.url, timeout=timeout),
         ),
         ModelCallPolicy(**{"backoff": 0, **policy}),
-        scope=UsageScope(kb_dir, "a" * 32),
     )
+
+    return observe_executor(kb_dir, executor)
 
 
 def request():

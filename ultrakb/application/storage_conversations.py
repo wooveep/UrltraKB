@@ -4,6 +4,7 @@ import asyncio
 import sqlite3
 from contextlib import AsyncExitStack, aclosing
 from dataclasses import asdict, replace
+from threading import Event
 from uuid import uuid4
 
 from ultrakb.agent.query import (
@@ -16,6 +17,7 @@ from ultrakb.context.workers import run_blocking
 from ultrakb.locks import LockCancelled, async_session_lock
 from ultrakb.model_tokenizer import ContextCapacityError, question_measure
 from ultrakb.mutation import RecoveryRequired
+from ultrakb.storage.session_recovery import recover_submission, submission_execution
 from ultrakb.storage.session_store import SessionStore
 
 from .conversations import AnswerResult
@@ -47,6 +49,25 @@ async def continue_stored_conversation(
         asyncio.run(owned_turn())
 
     try:
+        if (
+            attempt_id is not None
+            and context.storage_execution is None
+            and context.resume_storage_execution_id is None
+        ):
+            lookup_stopped = Event()
+
+            def lookup():
+                return submission_execution(
+                    SessionStore(scope.kb_dir, scope.knowledge.identity),
+                    identity,
+                    attempt_id,
+                    view_id=scope.view_id,
+                    cancelled=lambda: lookup_stopped.is_set() or context.cancelled(),
+                )
+
+            context.resume_storage_execution_id = await run_blocking(
+                lookup, on_cancel=lookup_stopped.set
+            )
         # Only the lifecycle and execution are owned by the parent. The worker
         # acquires its own session/stage leases; no connection or lock is borrowed.
         with context.begin(scope.kb_dir) as bundle:
@@ -65,6 +86,10 @@ async def continue_stored_conversation(
             )
         return result
     except (Exception, asyncio.CancelledError) as error:
+        from .model_connections import ConnectionRequired
+
+        if isinstance(error, ConnectionRequired):
+            raise
         if result is not None:
             return replace(
                 result,
@@ -175,10 +200,13 @@ async def _continue(
                 execution_id=execution_id,
                 publication_id=scope.knowledge.publication_id,
                 order=submission_order,
+                model=config["model"],
+                language=config["language"],
             )
             registered = True
             completed = _committed_result(store, identity, attempt_id, message, execution_id, scope)
-            if completed is None and store.recover_submission(
+            if completed is None and recover_submission(
+                store,
                 identity,
                 attempt_id,
                 message,

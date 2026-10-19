@@ -48,7 +48,7 @@ def _event_names(frames: list[str]) -> list[str]:
     return names
 
 
-def test_recompile_stream_stops_and_releases_lock_on_disconnect(monkeypatch):
+def test_recompile_stream_stops_and_releases_lock_on_disconnect(monkeypatch, kb_dir):
     consumed = 0
 
     async def fake_iter_recompile(kb_dir, doc_name, **kwargs):
@@ -65,7 +65,7 @@ def test_recompile_stream_stops_and_releases_lock_on_disconnect(monkeypatch):
 
     lock = asyncio.Lock()
     request = RecompileRequest(kb="k", all_docs=True)
-    frames = _drain(_stream_recompile(request, Path("."), lock, _fake_request(True), bundle=None))
+    frames = _drain(_stream_recompile(request, kb_dir, lock, _fake_request(True), bundle=None))
 
     names = _event_names(frames)
     # Breaks at the top of the loop, so no plan/doc/final is forwarded.
@@ -76,7 +76,7 @@ def test_recompile_stream_stops_and_releases_lock_on_disconnect(monkeypatch):
     assert not lock.locked()
 
 
-def test_recompile_stream_completes_and_releases_lock_when_connected(monkeypatch):
+def test_recompile_stream_completes_and_releases_lock_when_connected(monkeypatch, kb_dir):
     """Control: the added poll must not break a normal (connected) run."""
 
     async def fake_iter_recompile(kb_dir, doc_name, **kwargs):
@@ -88,7 +88,7 @@ def test_recompile_stream_completes_and_releases_lock_when_connected(monkeypatch
 
     lock = asyncio.Lock()
     request = RecompileRequest(kb="k", all_docs=True)
-    frames = _drain(_stream_recompile(request, Path("."), lock, _fake_request(False), bundle=None))
+    frames = _drain(_stream_recompile(request, kb_dir, lock, _fake_request(False), bundle=None))
 
     names = _event_names(frames)
     assert names == ["start", "plan", "doc", "final", "done"]

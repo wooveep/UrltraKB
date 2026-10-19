@@ -105,7 +105,7 @@ def _page_contributors(page, baseline, targets, contributors):
 
 
 async def _reconcile(
-    scope, baseline, inputs, page, revisions, contributors, targets, context, bundle
+    scope, baseline, inputs, page, revisions, contributors, targets, context, bundle, registry
 ):
     base, execution = scope.knowledge, context.storage_execution
     revisions = tuple(
@@ -132,9 +132,6 @@ async def _reconcile(
     if generated is not None and generated != baseline.files.get(page):
         with storage_stage(base.root, base.identity, read_only=True) as db:
             manual_base = read_bytes(db, generated).decode("utf-8")
-    registry = FrozenLinkRegistry.capture(
-        baseline.directory, list_existing_wiki_targets(baseline.directory)
-    )
     readers = [
         CompileSourceWindows(
             baseline.directory,
@@ -185,6 +182,9 @@ async def prepare_selected_refresh(scope, targets, context, bundle):
     with materialize_baseline(base, ()) as baseline:
         with task_stage(context, "refresh.inputs.v1", root=base.root):
             inputs = materialize_inputs(base, baseline, None)
+        registry = FrozenLinkRegistry.capture(
+            baseline.directory, list_existing_wiki_targets(baseline.directory)
+        )
         for page in sorted(targets.pages):
             context.check_stop()
             if page.startswith("summaries/"):
@@ -203,7 +203,16 @@ async def prepare_selected_refresh(scope, targets, context, bundle):
                 if revisions is None:
                     continue
                 await _reconcile(
-                    scope, baseline, inputs, page, revisions, contributors, targets, context, bundle
+                    scope,
+                    baseline,
+                    inputs,
+                    page,
+                    revisions,
+                    contributors,
+                    targets,
+                    context,
+                    bundle,
+                    registry,
                 )
                 selected_sources = {r["source_id"] for r in targets.reasons[page]}
                 replacements = {

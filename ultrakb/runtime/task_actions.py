@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from ultrakb.application.knowledge_bases import get_kb_list
@@ -32,7 +32,7 @@ class RetryPreview:
 def preview_retry(manager: TaskManager, task_id: str) -> RetryPreview:
     view, requests, identities = manager.retry_inputs(task_id)
     root = Path(view.kb_dir)
-    if not (root / ".ultrakb/config.yaml").is_file() or not (root / "wiki").is_dir():
+    if not (root / ".ultrakb/config.yaml").is_file():
         raise ValueError("任务所属知识库已移动或不可用，请重新打开知识库")
     with kb_read_lock(root / ".ultrakb"):
         get_kb_list(root)  # Shared recovery barrier and registry shape validation.
@@ -83,11 +83,21 @@ def retry_task(manager: TaskManager, preview: RetryPreview) -> str:
         raise ValueError("任务成果已变化，请重新查看重试预览")
     if not current.allowed:
         raise ValueError(current.reason)
-    _view, requests, _identities = manager.retry_inputs(preview.task_id)
+    view, requests, _identities = manager.retry_inputs(preview.task_id)
+    from ultrakb.runtime.requests import GenerateArtifact
+
+    selected = []
+    for index in current.indices:
+        request = requests[index]
+        if isinstance(request, GenerateArtifact) and index < len(view.results):
+            execution = (view.results[index].generation or {}).get("execution_id")
+            if request.resume_execution_id is None and execution is not None:
+                request = replace(request, resume_execution_id=execution)
+        selected.append(request)
     # submit creates new identities and a fresh, initially absent snapshot.
     # Original overwrite/CAS conditions stay attached to each retained request.
     return manager.submit(
         Path(current.kb_dir),
-        [requests[index] for index in current.indices],
+        selected,
         retry_of=preview.task_id,
     )

@@ -111,10 +111,10 @@ class CompileSourceWindows:
         self._figure_sources: dict[str, tuple] = {}
 
     def figure_source(self, path: str):
-        from ultrakb.figure_assets import freeze_figures, source_identity
+        from ultrakb.figure_assets import freeze_figures
 
         if path not in self._figure_sources:
-            name = (
+            (
                 Path(path)
                 .name.removesuffix(".content.json")
                 .removesuffix(".json")
@@ -123,16 +123,7 @@ class CompileSourceWindows:
             from ultrakb.storage.compile_binding import bound_inputs
 
             captured = bound_inputs()
-            inputs = None
-            if captured is None and self.kb_dir is not None and name != self.doc_name:
-                from ultrakb.unit_publication import read_head
-
-                inputs = read_head(self.kb_dir, self.view_id).inputs
-            identity = (
-                captured.identity(path)
-                if captured is not None
-                else source_identity(self.kb_dir, name, inputs=inputs)
-            )
+            identity = captured.identity(path) if captured is not None else {}
             identity["source_digest"] = hashlib.sha256(self._read(path)).hexdigest()
             figures = freeze_figures(
                 self.wiki,
@@ -629,9 +620,9 @@ class CompileSourceWindows:
                     and self.kb_dir
                     and (self.wiki / path).is_file()
                 ):
-                    from ultrakb.source_navigation import published_navigation
+                    from ultrakb.storage.compile_binding import bound_inputs
 
-                    previous = published_navigation(self.kb_dir, self.view_id, Path(path).stem)
+                    captured = bound_inputs()
                     location = self._locations(
                         {
                             "name": item["name"],
@@ -639,7 +630,7 @@ class CompileSourceWindows:
                             "aliases": item.get("aliases", []),
                         },
                         path=path,
-                        navigation=previous.get("structure", []),
+                        navigation=captured.navigation(path) if captured is not None else [],
                     )
                 paths.setdefault(path, location)
         windows: list[dict] = []

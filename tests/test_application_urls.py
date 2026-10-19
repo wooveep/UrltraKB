@@ -10,9 +10,10 @@ from ultrakb.application.urls import import_url
 
 
 def test_url_compiles_records_provenance_and_deduplicates(kb_dir, monkeypatch):
+    from native_catalog_fixtures import list_sources
+
     from ultrakb.application.execution import ExecutionContext
     from ultrakb.locks import kb_ingest_lock_held
-    from ultrakb.source_catalog import list_sources
 
     context = ExecutionContext()
     private = []
@@ -38,7 +39,7 @@ def test_url_compiles_records_provenance_and_deduplicates(kb_dir, monkeypatch):
     assert all(not path.exists() for path in private)
     sources = list_sources(kb_dir)
     assert len(sources) == 1
-    assert sources[0].identity == url and sources[0].source_id == result.source_id
+    assert sources[0].source_key == url and sources[0].source_id == result.source_id
     assert duplicate.source_revision_id == result.source_revision_id
 
 

@@ -57,9 +57,12 @@ async def test_text_references_and_literal_code_survive_real_sdk(model_service):
 
 @pytest.mark.asyncio
 async def test_reading_tools_list_every_occurrence_without_offering_pixels(kb_dir):
+    from PIL import Image
     from test_original_context import agent_for as reading_agent
     from test_original_context import invoke, pages
 
+    for number in range(9):
+        Image.new("RGB", (8, 8), "white").save(kb_dir / f"wiki/sources/figure-{number}.png")
     pages(kb_dir, ["Native explanation."], [f"sources/figure-{i}.png" for i in range(9)])
     agent = reading_agent(kb_dir)
     assert "get_image" not in {tool.name for tool in agent.tools}
@@ -68,38 +71,3 @@ async def test_reading_tools_list_every_occurrence_without_offering_pixels(kb_di
     assert len(coverage["occurrences"]) == 9
     assert "get_image" not in json.dumps(coverage)
     assert "Native explanation." in content
-
-
-@pytest.mark.asyncio
-async def test_old_image_tool_history_is_projected_as_text_without_mutating_archive(model_service):
-    from copy import deepcopy
-
-    from ultrakb.agent.chat_session import sanitize_history
-
-    history = [
-        {"role": "user", "content": "Read the figure."},
-        {
-            "type": "function_call",
-            "name": "get_image",
-            "call_id": "old-figure",
-            "arguments": '{"image_path":"sources/old.png"}',
-        },
-        {
-            "type": "function_call_output",
-            "call_id": "old-figure",
-            "output": [
-                {"type": "input_image", "image_url": "https://example.org/old.png"},
-            ],
-        },
-    ]
-    before = deepcopy(history)
-    await Runner.run(
-        agent_for(executor_for(model_service)),
-        sanitize_history(history),
-        run_config=RunConfig(tracing_disabled=True),
-    )
-    sent = json.dumps(model_service.requests)
-    assert "sources/old.png" in sent
-    assert "input_image" not in sent and "image_url" not in sent
-    assert "not interpreted" in sent
-    assert history == before

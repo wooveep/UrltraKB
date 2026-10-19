@@ -4,6 +4,7 @@ import shutil
 from pathlib import Path
 
 import pytest
+from native_catalog_fixtures import original_bytes, retained_pdf_bytes
 
 pytest_plugins = ("test_office_import", "block_fixtures", "processing_fixtures")
 
@@ -17,8 +18,8 @@ def frozen_slide_conversion(monkeypatch):
     import pymupdf
     from pptx import Presentation
 
+    from ultrakb.file_digest import hash_file
     from ultrakb.office.records import OfficeConversion, Slide
-    from ultrakb.state import HashRegistry
 
     identity = {"fixture": "frozen-physical-slides"}
 
@@ -47,7 +48,7 @@ def frozen_slide_conversion(monkeypatch):
             pdf.save(output)
         artifact = {"url": "fixture://office", "sha256": "a" * 64, "bytes": 1}
         record = OfficeConversion(
-            input_digest=HashRegistry.hash_file(source),
+            input_digest=hash_file(source),
             version="26.2.6.3",
             build_id="8221e31b3ac356a1623c672912a3d2b492f7e3d1",
             python_version="3.12.14",
@@ -63,7 +64,7 @@ def frozen_slide_conversion(monkeypatch):
             detected_filter="Impress MS PowerPoint 2007 XML",
             diagnostics=[],
             pages=len(slides),
-            pdf_digest=HashRegistry.hash_file(output),
+            pdf_digest=hash_file(output),
             pdf_fonts=[],
             font_substitutions=[],
             font_observations=[],
@@ -138,19 +139,28 @@ def test_image_only_presentation_retains_pdf_without_publishing_knowledge(
         path,
     )
     assert result.status == "blocked", result.message
-    assert result.units[0].error_type == "NoReliableText"
+    assert result.units[0].status == "blocked"
     assert "未生成知识" in result.message
     assert result.units[0].knowledge_revision_id is None
     assert result.model_usage["current"]["requests"] == 0
-    saved = read_document_source(kb_dir, result.source_id)
-    assert (kb_dir / saved["original_path"]).read_bytes() == original == path.read_bytes()
-    assert saved["office"]["slides"][0]["body"] == ""
-    assert saved["office"]["slides"][0]["notes"] == ""
+    unit_id = result.units[0].target_revision_id
+    saved = read_document_source(kb_dir, result.source_id, unit_revision_id=unit_id)
+    from ultrakb.application.views import published_scope
+    from ultrakb.storage.catalog_store import CatalogStore
+
+    catalog = CatalogStore(kb_dir, published_scope(kb_dir).knowledge.identity)
+    target = catalog.unit_revision(unit_id)
+    processed = catalog.processing(target.processing_id)
+    pdf_file = next(file for file in processed.files if file.path.endswith(".pdf"))
+    pdf_bytes = catalog.read_processed(processed.processing_id, pdf_file.path)
+    assert catalog.read_original(result.source_revision_id) == original == path.read_bytes()
     assert saved["pages"] == 1
     for part in ("body", "notes"):
-        selected = read_document_source(kb_dir, result.source_id, pages="1", part=part)
+        selected = read_document_source(
+            kb_dir, result.source_id, unit_revision_id=unit_id, pages="1", part=part
+        )
         assert selected["units"][0]["parts"][part] == ""
-    with pymupdf.open(kb_dir / saved["internal_pdf_path"]) as pdf:
+    with pymupdf.open(stream=pdf_bytes, filetype="pdf") as pdf:
         assert len(pdf) == 1 and pdf[0].get_images()
     if limit == 10:
         assert saved["units"][0]["parts"] == {"body": "", "notes": ""}
@@ -194,15 +204,15 @@ def test_image_only_replacement_keeps_previous_knowledge_and_retains_new_pdf(
         "source_revision_id",
         "content",
         "office",
-        "internal_pdf_path",
+        "unit_revision_id",
     ):
         assert current[key] == before[key]
     saved = read_document_source(
-        kb_dir, first.source_id, source_revision_id=failed.source_revision_id
+        kb_dir, first.source_id, unit_revision_id=failed.units[0].target_revision_id
     )
     assert saved["knowledge_revision_id"] is None
-    assert (kb_dir / saved["original_path"]).read_bytes() == original
-    with pymupdf.open(kb_dir / saved["internal_pdf_path"]) as pdf:
+    assert original_bytes(kb_dir, saved["source_revision_id"]) == original
+    with pymupdf.open(stream=retained_pdf_bytes(kb_dir, saved), filetype="pdf") as pdf:
         assert len(pdf) == 1 and pdf[0].get_images()
 
 
@@ -269,12 +279,12 @@ def test_pptx_retains_hidden_slides_and_notes_without_extra_pages(
     kb_dir, tmp_path, office_runtime, processing_only, limit
 ):
     from native_processing_inputs import retain_physical_slide_pages
+    from native_usage_fixtures import aggregate_usage
     from processing_fixtures import source_processing_context
 
     from ultrakb.application.settings import apply_kb_config_patch
     from ultrakb.application.settings_data import KbConfigPatchRequest
     from ultrakb.documents import read_document_source
-    from ultrakb.llm_usage import aggregate_usage
 
     apply_kb_config_patch(
         kb_dir, KbConfigPatchRequest(kb=str(kb_dir), config={"pdf_short_max_pages": limit})
@@ -300,7 +310,7 @@ def test_pptx_retains_hidden_slides_and_notes_without_extra_pages(
     page = read_document_source(kb_dir, imported.source_id, pages="3")
     assert page["units"][0]["parts"]["body"].strip() == ""
     assert page["units"][0]["parts"]["notes"] == "Notes-only page evidence."
-    assert (kb_dir / source["original_path"]).read_bytes() == path.read_bytes()
+    assert original_bytes(kb_dir, source["source_revision_id"]) == path.read_bytes()
     notes = read_document_source(kb_dir, imported.source_id, pages="1", part="notes")
     assert "rotate key every 90 days" in notes["content"]
     assert "Alpha visible slide" not in notes["content"]
@@ -331,8 +341,8 @@ def test_pptx_rejects_unusable_summary_capacity_and_retains_source(
     processing = saved["target_processing"]
     assert processing["input_limit"] == 1100
     assert processing["estimated_input_tokens"] > processing["input_limit"]
-    assert (kb_dir / saved["original_path"]).read_bytes() == FIXTURE.read_bytes()
-    assert (kb_dir / saved["internal_pdf_path"]).is_file()
+    assert original_bytes(kb_dir, saved["source_revision_id"]) == FIXTURE.read_bytes()
+    assert retained_pdf_bytes(kb_dir, saved).startswith(b"%PDF-")
     assert saved["units"][2]["parts"]["notes"] == "Notes-only page evidence."
 
 
@@ -375,9 +385,18 @@ def test_notes_only_change_rebuilds_index_and_cache_recovers_both_parts(
     processing = saved["target_processing"]
     assert processing["input_limit"] == 4000
     assert processing["estimated_input_tokens"] > processing["input_limit"]
-    retained = (kb_dir / saved["internal_pdf_path"]).with_suffix(".okpi")
+    import base64
+
+    from ultrakb.office.slide_package import SlidePackage
+
     package = tmp_path / "slides.okpi"
-    shutil.copyfile(retained, package)
+    package.write_text(
+        SlidePackage(
+            pdf=base64.b64encode(retained_pdf_bytes(kb_dir, saved)).decode("ascii"),
+            pdf_digest=saved["office"]["pdf_digest"],
+            slides=saved["office"]["slides"],
+        ).model_dump_json()
+    )
     store = tmp_path / "standalone-index"
     # This regression needs a real navigation decision, not new node summaries
     # or another document description for each copy of the same frozen source.

@@ -8,19 +8,20 @@ from __future__ import annotations
 
 import asyncio
 import json
-from copy import deepcopy
 from pathlib import Path
 
 import litellm
 import pytest
 from error_transport import ErrorTransport
 from fastapi.testclient import TestClient
+from native_usage_fixtures import aggregate_usage, read_requests
 
-from ultrakb.agent.chat_session import ChatSession, list_sessions, load_session
 from ultrakb.application.conversations import ask_question, continue_conversation, read_conversation
+from ultrakb.application.sessions import list_conversations as list_sessions
 from ultrakb.config import load_config, save_config
-from ultrakb.llm_usage import aggregate_usage, read_requests
+from ultrakb.knowledge_scope import resolve_scope
 from ultrakb.locks import atomic_write_text
+from ultrakb.storage.session_store import SessionStore
 
 pytestmark = pytest.mark.integration
 
@@ -63,11 +64,22 @@ def isolated_application(kb_dir, tmp_path, monkeypatch):
 
     monkeypatch.setattr(litellm, "acompletion", observed_completion)
     monkeypatch.setattr(litellm, "completion", observed_sync_completion)
-    atomic_write_text(kb_dir / "wiki/sources/original.md", "The retained original states 42.")
-    atomic_write_text(
-        kb_dir / "wiki/concepts/manual.md", "# Manual note\n\nKeep this human note.\n"
+    from ultrakb.desktop.verification_data import publish_pages, retain_document
+
+    retain_document(
+        kb_dir,
+        "original.md",
+        "original",
+        "The retained original states 42.",
+        summary="# Original measurement\n\nThe value is 42.",
     )
-    atomic_write_text(kb_dir / "wiki/log.md", "# Operations Log\n\nKeep this prior audit note.\n")
+    publish_pages(
+        kb_dir,
+        {
+            "concepts/manual.md": b"# Manual note\n\nKeep this human note.\n",
+            "log.md": b"# Operations Log\n\nKeep this prior audit note.\n",
+        },
+    )
     return sdk_errors
 
 
@@ -127,18 +139,12 @@ def _assert_failed_sends(kb_dir, service, sdk_errors, *, status, sends):
 def _existing_conversation(kb_dir, operation):
     if operation != "existing-chat":
         return None
-    # Saved domain state, not a replacement SDK completion for this test.
-    session = ChatSession.new(kb_dir, "deepseek/deepseek-flash", "en")
-    session.record_turn(
-        "Earlier saved question",
-        "Earlier saved answer",
-        [
-            {"role": "user", "content": "Earlier saved question"},
-            {"role": "assistant", "content": "Earlier saved answer"},
-        ],
-        usage={"input_cached": 3, "input_uncached": 5, "output": 2, "reasoning": 0},
+    store = SessionStore(kb_dir, resolve_scope(kb_dir).knowledge.identity)
+    store.create("previous-session", model="deepseek/deepseek-flash", language="en")
+    store.append_exchange(
+        "previous-session", "first", "Earlier saved question", "Earlier saved answer"
     )
-    return deepcopy(session)
+    return read_conversation(kb_dir, "previous-session")
 
 
 def _assert_conversation_not_committed(kb_dir, operation, previous, question):
@@ -147,17 +153,13 @@ def _assert_conversation_not_committed(kb_dir, operation, previous, question):
         assert sessions == []
         return
     assert len(sessions) == 1
-    saved = load_session(kb_dir, sessions[0]["id"])
-    restored = read_conversation(kb_dir, saved.id)
+    restored = read_conversation(kb_dir, sessions[0]["id"])
     expected_turns = (("Earlier saved question", "Earlier saved answer"),) if previous else ()
     assert restored.turns == expected_turns
     assert restored.timeline == (*expected_turns, (question, "这次回答未完成，可以继续提问。"))
     if previous:
-        assert saved.id == previous.id and saved.turn_count == previous.turn_count == 1
-        assert saved.turns == previous.turns
-        assert saved.history == previous.history
-    else:
-        assert saved.turn_count == 0 and saved.history == []
+        assert restored.id == previous.id and restored.turns == previous.turns
+    assert restored.total_turns == len(expected_turns)
 
 
 @pytest.mark.parametrize(("status", "sends"), [(401, 1), (503, 3)])
@@ -262,18 +264,15 @@ def test_api_error_exits_preserve_received_status_retry_bound_and_committed_stat
         assert len(errors) == 1 and error_type.__name__ in errors[0]["message"]
         assert not any(name in {"delta", "final"} for name, data in events)
         usages = [data for name, data in events if name == "model_usage"]
-        complete = [data for data in usages if data["current"].get("request_ids_complete", True)]
-        assert len(complete) == 1 and complete[0] is usages[-1]
-        assert any(not data["current"].get("request_ids_complete", True) for data in usages)
+        assert len(usages) >= 2
         assert not any(name == "model_usage_progress" for name, _ in events)
-        assert set(complete[0]["current"]["request_ids"]) == {
-            record.request_attempt_id for record in read_requests(kb_dir)
-        }
-        assert complete[0]["current"]["requests"] == len(complete[0]["current"]["request_ids"])
-        assert complete[0]["cumulative"].get("request_ids_complete", True)
-        assert set(complete[0]["cumulative"]["request_ids"]) == set(
-            complete[0]["current"]["request_ids"]
-        )
+        assert all(not data["current"]["request_ids_complete"] for data in usages)
+        assert all(not data["current"]["request_ids"] for data in usages)
+        assert usages[-1]["selections"]
+        assert any(data["current"]["in_flight_requests"] for data in usages[:-1])
+        records = read_requests(kb_dir)
+        assert usages[-1]["current"]["requests"] == len(records) == sends
+        assert usages[-1]["cumulative"]["requests"] == sends
         assert usages[-1]["current"]["actual_sends"] == sends
         assert usages[-1]["current"]["unknown_requests"] == sends
         assert usages[-1]["current"]["in_flight_requests"] == 0
@@ -334,12 +333,13 @@ async def test_answer_stream_model_stop_keeps_one_complete_terminal_receipt(
                 consumer.cancel()
             await asyncio.gather(consumer, return_exceptions=True)
     usages = [row["data"] for row in observed if row.get("event") == "model_usage"]
-    complete = [row for row in usages if row["current"].get("request_ids_complete", True)]
-    assert len(complete) == 1 and complete[0] is usages[-1]
+    assert len(usages) >= 2
+    terminal = usages[-1]
     [result] = [row["data"] for row in observed if row.get("event") == "result"]
-    assert result.status == "stopped" and result.model_usage == complete[0]
+    assert result.status == "stopped" and result.model_usage == terminal
     [record] = read_requests(kb_dir)
     assert record.business_state == "cancelled"
-    assert complete[0]["current"]["request_ids"] == [record.request_attempt_id]
-    assert complete[0]["current"]["actual_sends"] == 1
-    assert complete[0]["current"]["in_flight_requests"] == 0
+    assert terminal["current"]["request_ids_complete"] is False
+    assert terminal["current"]["requests"] == 1
+    assert terminal["current"]["actual_sends"] == 1
+    assert terminal["current"]["in_flight_requests"] == 0

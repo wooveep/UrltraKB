@@ -10,8 +10,6 @@ from urllib.parse import unquote, urlsplit
 from markdown_it import MarkdownIt
 
 from ultrakb.application.query_views import read_selected_file, resolve_read_path
-from ultrakb.file_state import contained_paths
-from ultrakb.locks import kb_read_lock
 from ultrakb.source_context import original_paths
 
 _WIKI = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
@@ -47,46 +45,18 @@ def citation_targets(markdown):
 
 
 def _source_identity(root, view, path):
-    if view.scope.knowledge is not None:
-        from ultrakb.storage.catalog_store import CatalogStore
+    assert view.scope.knowledge is not None
+    from ultrakb.storage.catalog_store import CatalogStore
 
-        native = view.native_inputs.get(path)
-        if native is None:
-            return "reference", path, _doc_name(path), None, None
-        unit = next(
-            unit
-            for unit in view.scope.knowledge.input_units()
-            if unit.unit_revision_id == native[0]
-        )
-        source = CatalogStore(root, view.scope.knowledge.identity).revision(unit.source_revision_id)
-        name = next(file.path for file in source.files if file.kind == "main")
-        return "source", source.source_id, name, source.revision_id, unit.unit_id
-    from ultrakb.source_catalog import read_source, read_source_revision
-    from ultrakb.state import HashRegistry
-    from ultrakb.unit_publication import list_source_units
-
-    revision = view.source_revisions_by_path.get(path)
-    doc_name = _doc_name(path)
-    if revision:
-        source = read_source(root, read_source_revision(root, revision).source_id)
-        unit = next(
-            (
-                unit
-                for unit in list_source_units(root, source.source_id)
-                if unit.doc_name == doc_name
-            ),
-            None,
-        )
-        return "source", source.source_id, source.name, revision, unit.unit_id if unit else None
-    matches = [
-        (identity, entry)
-        for identity, entry in HashRegistry(root / ".ultrakb/hashes.json").all_entries().items()
-        if (entry.get("doc_name") or Path(entry.get("name", "")).stem) == doc_name
-    ]
-    if len(matches) == 1:
-        identity, entry = matches[0]
-        return "legacy", identity, entry.get("name", doc_name), None, None
-    return "reference", path, doc_name, None, None
+    native = view.native_inputs.get(path)
+    if native is None:
+        return "reference", path, _doc_name(path), None, None
+    unit = next(
+        unit for unit in view.scope.knowledge.input_units() if unit.unit_revision_id == native[0]
+    )
+    source = CatalogStore(root, view.scope.knowledge.identity).revision(unit.source_revision_id)
+    name = next(file.path for file in source.files if file.kind == "main")
+    return "source", source.source_id, name, source.revision_id, unit.unit_id
 
 
 def _stored_publication(view):
@@ -105,15 +75,9 @@ def _stored_publication(view):
 def _same_input_read(view, read, path, revision):
     if read.get("path") == path:
         return True
-    if view.scope.knowledge is not None:
-        target = view.native_inputs.get(path)
-        observed = view.native_inputs.get(read.get("path"))
-        return target is not None and observed is not None and target[0] == observed[0]
-    return bool(
-        revision
-        and read.get("source_revision_id") == revision
-        and _doc_name(read.get("path", "")) == _doc_name(path)
-    )
+    target = view.native_inputs.get(path)
+    observed = view.native_inputs.get(read.get("path"))
+    return target is not None and observed is not None and target[0] == observed[0]
 
 
 def capture_answer_citations(answer, selection, returned_reads):
@@ -140,8 +104,6 @@ def capture_answer_citations(answer, selection, returned_reads):
                     continue
                 base = view.native_file_roots.get(path, view.scope.wiki_dir)
                 file = base / path
-                if view.scope.knowledge is None:
-                    contained_paths(root, [file])
                 read_selected_file(view, path)
                 references.append(
                     {
@@ -284,36 +246,20 @@ def read_answer_reference(kb_dir: Path, reference, *, historical_unknown=False):
 
         content, note, _ = _reference_content(data, root / "wiki" / reference["path"], reference)
         return content, note, capture_reading_assets(scope, reference["path"], content)
-    with kb_read_lock(root / ".ultrakb"):
-        raw_path = reference.get("stored_path")
-        if raw_path is None and historical_unknown:
-            from ultrakb.application.pages import read_page
+    if historical_unknown and reference.get("stored_path") is None:
+        from ultrakb.application.pages import read_page
+        from ultrakb.application.views import published_scope
 
-            page = read_page(root, reference["path"].removesuffix(".md"))
-            return (
-                page.body,
-                "旧回答未保存证据快照；这是当前可读引用，无法确认生成时版本。",
-                root / "wiki",
-            )
-        if not raw_path:
-            raise ValueError("该引用未记录可读的原文依据；请在资料页核对并恢复内容。")
-        path = root / raw_path
-        contained_paths(root, [path])
-        base = root / reference.get("stored_root", "invalid")
-        allowed = reference.get("stored_root") == "wiki" or (
-            base.relative_to(root).parts[:2]
-            in {(".ultrakb", "knowledge"), (".ultrakb", "retained-documents")}
+        from .reading_assets import capture_reading_assets
+
+        scope = published_scope(root, reference["view_id"])
+        page = read_page(root, reference["path"].removesuffix(".md"), scope=scope)
+        return (
+            page.body,
+            "该回答未保存证据快照；这是当前可读引用，无法确认生成时版本。",
+            capture_reading_assets(scope, reference["path"], page.body),
         )
-        if (
-            not allowed
-            or not path.resolve().is_relative_to(base.resolve())
-            or path.suffix not in {".md", ".json"}
-        ):
-            raise ValueError("Invalid retained source path")
-        data = path.read_bytes()
-        if hashlib.sha256(data).hexdigest() != reference["digest"]:
-            raise ValueError("生成时依据已改变或缺失；不会替换为另一修订。请在资料页核对原件。")
-        return _reference_content(data, path, reference)
+    raise ValueError("This reference lacks its retained main-store provenance")
 
 
 def _reference_content(data, path, reference):

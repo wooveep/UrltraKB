@@ -15,36 +15,73 @@ def main():
     args = parser.parse_args()
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
+    os.environ["ULTRAKB_CONFIG_DIR"] = str(output / "settings")
     os.environ["PYTHON_DOTENV_DISABLED"] = "1"
     os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "true"
     os.environ["OPENAI_AGENTS_DISABLE_TRACING"] = "1"
     if args.headless:
         os.environ["QT_QPA_PLATFORM"] = "offscreen"
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tests"))
-    from publication_recovery_inputs import failed_summary_inputs, ledger_bytes
     from PySide6.QtCore import Qt, QTimer
     from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QApplication, QMessageBox, QToolButton, QWidget
+    from test_storage_conversation_writes import StreamTransport
 
     from ultrakb import config
+    from ultrakb.application.documents import import_document
+    from ultrakb.application.execution import ExecutionContext
     from ultrakb.application.knowledge_bases import initialize_kb
+    from ultrakb.application.views import published_scope
+    from ultrakb.config import save_config
     from ultrakb.desktop.document_rows import select_identity
     from ultrakb.desktop.documents import DocumentsDialog
     from ultrakb.desktop.verification import create_application
     from ultrakb.llm_execution import CompletionExecutor
+    from ultrakb.storage.receipt_store import ReceiptStore
+    from ultrakb.storage.usage_store import UsageStore
 
     def forbidden(*args, **kwargs):
         raise AssertionError("Native acceptance must not call a model executor")
 
-    CompletionExecutor.complete = forbidden
-    CompletionExecutor.acomplete = forbidden
     config.GLOBAL_CONFIG_DIR = output / "settings"
     config.GLOBAL_CONFIG_PATH = output / "settings/global.yaml"
     kb = output / "恢复验证库"
     initialize_kb(kb, seed_environment=False)
-    fixture = failed_summary_inputs(kb)
-    retained = ledger_bytes(fixture)
-    app = create_application()
+    save_config(
+        kb / ".ultrakb/config.yaml",
+        {
+            "model": "openai/gpt-4o-mini",
+            "language": "en",
+            "model_capacity": {"max_input_tokens": 65536, "tokenizer_model": "gpt-4o-mini"},
+            "model_policy": {"max_calls": 4, "retries": 0},
+        },
+    )
+    source = output / "summary-input.md"
+    source.write_text("# Retained rule\n\nClose the inlet before maintenance.")
+    context = ExecutionContext()
+    with StreamTransport([{"content": "invalid summary"}] * 2) as service:
+        (kb / ".env").write_text(
+            f"LLM_API_KEY=offline-summary-key\nOPENAI_API_BASE={service.url}\n"
+        )
+        result = import_document(kb, source, context=context)
+        assert result.status == "failed", result.message
+        assert len(service.requests) == 2
+    fixture = SimpleNamespace(result=result)
+    native_identity = published_scope(kb).knowledge.identity
+    usage = UsageStore(kb, native_identity)
+    receipts = ReceiptStore(kb, native_identity)
+
+    def ledger_bytes():
+        rows = usage.requests(execution_id=context.storage_execution.execution_id).records
+        return {
+            row.request_attempt_id: (row.model_dump_json(), receipts.read(row.request_attempt_id))
+            for row in rows
+        }
+
+    retained = ledger_bytes()
+    CompletionExecutor.complete = forbidden
+    CompletionExecutor.acomplete = forbidden
+    app = create_application(settings_dir=output / "qt-settings")
     app.setQuitOnLastWindowClosed(False)
     submissions, errors, checks = [], [], []
 
@@ -103,8 +140,10 @@ def main():
                 if screenshot:
                     assert box.grab().save(str(output / screenshot))
                 captured.append(True)
-            except Exception as error:
-                errors.append(repr(error))
+            except Exception:
+                import traceback
+
+                errors.append(traceback.format_exc())
                 accept_result = QMessageBox.StandardButton.No
             else:
                 accept_result = (
@@ -149,11 +188,16 @@ def main():
         checks.append("Row opt-in submits a source/revision-bound recovery request")
         run(opt_in=True, accept=True, batch=True)
         assert len(submissions) == 3 and submissions[-1][0].retry_failed_response is True
-        assert all(path.read_bytes() == value for path, value in retained.items())
+        assert ledger_bytes() == retained
         checks.append("Bulk retry shares the opt-in and never changes existing model ledgers")
         (output / "result.json").write_text(
             json.dumps(
-                {"checks": checks, "platform": app.platformName(), "model_sends": 0},
+                {
+                    "checks": checks,
+                    "platform": app.platformName(),
+                    "model_sends": 2,
+                    "confirmation_model_sends": 0,
+                },
                 ensure_ascii=False,
                 indent=2,
             )

@@ -2322,8 +2322,9 @@ async def compile_short_doc(
     content = source_path.read_bytes().decode("utf-8")
 
     from ultrakb.agent.source_windows import CompileSourceWindows
+    from ultrakb.knowledge_scope import resolve_private_scope
 
-    selected_scope = resolve_scope(kb_dir, scope, writable=True)
+    selected_scope = resolve_private_scope(kb_dir, scope)
     windows = CompileSourceWindows(
         wiki_dir, doc_name, kb_dir=kb_dir, view_id=selected_scope.view_id
     )
@@ -2491,13 +2492,14 @@ async def compile_long_doc(
     from ultrakb.config import resolve_effective_config
     from ultrakb.config_state import active_values
     from ultrakb.llm_execution import active_executor
-    from ultrakb.source_navigation import stored_navigation
 
     config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
     captured = active_values(kb_dir)
     executor = active_executor()
     language = config.get("language", "en")
-    selected_scope = resolve_scope(kb_dir, scope, writable=True)
+    from ultrakb.knowledge_scope import resolve_private_scope
+
+    selected_scope = resolve_private_scope(kb_dir, scope)
     wiki_dir = selected_scope.wiki_dir
     if summary_path.resolve() != (wiki_dir / "summaries" / f"{doc_name}.md").resolve():
         raise ValueError("Summary must belong to the selected document and knowledge scope")
@@ -2511,10 +2513,7 @@ async def compile_long_doc(
     }
     try:
         if navigation is None:
-            index_root = wiki_dir.parent / "index"
-            if not index_root.exists():
-                index_root = kb_dir / ".ultrakb"
-            navigation = stored_navigation(index_root, doc_id)
+            raise ValueError("Long compilation requires its retained main-store navigation")
         windows = CompileSourceWindows(
             wiki_dir, doc_name, navigation=navigation, kb_dir=kb_dir, view_id=selected_scope.view_id
         )

@@ -13,8 +13,7 @@ from typing import TYPE_CHECKING, Any, Callable, Iterator, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from ultrakb.llm_usage_models import Identity, SourceUsageHistory
-from ultrakb.locks import atomic_record_lock, atomic_write_json
+from ultrakb.llm_usage_models import Identity
 
 if TYPE_CHECKING:
     from ultrakb.storage.model_usage import StoredModelUsage
@@ -83,23 +82,14 @@ def active_scope() -> UsageScope | None:
 
 @contextmanager
 def usage_scope_lifecycle(scope: UsageScope | None) -> Iterator[None]:
-    """Bind a retained callback to its captured directory lifetime.
-
-    Legacy manually constructed scopes have no captured identity. Production
-    scopes capture one while import_usage_execution holds its lifecycle lease.
-    """
-    if scope is not None and scope.storage is not None:
-        from ultrakb.lifecycle import read_lifecycle
-
-        with read_lifecycle(scope.kb_dir, database_identity=scope.storage.identity):
-            yield
-        return
-    if scope is None or scope.generation is None:
+    if scope is None:
         yield
         return
-    from ultrakb.lifecycle import expected_generation, read_lifecycle
+    if scope.storage is None:
+        raise ValueError("Application usage requires its main-store execution")
+    from ultrakb.lifecycle import read_lifecycle
 
-    with expected_generation(scope.kb_dir, scope.generation), read_lifecycle(scope.kb_dir):
+    with read_lifecycle(scope.kb_dir, database_identity=scope.storage.identity):
         yield
 
 
@@ -108,11 +98,6 @@ def usage_context(**fields: Any) -> Iterator[None]:
     scope = _SCOPE.get()
     token = _SCOPE.set(replace(scope, **fields)) if scope else None
     try:
-        if scope and scope.storage is None and fields.get("source_id"):
-            mark_source(scope.kb_dir, fields["source_id"])
-            from ultrakb.llm_usage_execution import bind_source_execution
-
-            bind_source_execution(fields["source_id"])
         yield
     finally:
         if token is not None:
@@ -171,12 +156,6 @@ def normalize_usage(value: Any) -> dict:
     }
 
 
-def _path(root: Path, identity: str) -> Path:
-    if len(identity) != 32 or any(c not in "0123456789abcdef" for c in identity):
-        raise ValueError("Invalid usage request identity")
-    return root / ".ultrakb/usage/requests" / f"{identity}.json"
-
-
 def begin_request(
     model: str, stage: str, *, scope: UsageScope | None = None, **metadata
 ) -> str | None:
@@ -197,16 +176,9 @@ def begin_request(
         stage=stage,
         started_at=_now(),
     )
-    if scope.storage is not None:
-        scope.storage.begin(record)
-        return identity
-    with (
-        usage_scope_lifecycle(scope),
-        atomic_record_lock(scope.kb_dir / ".ultrakb/usage/ledger.lock"),
-    ):
-        from ultrakb.usage_projection import write_request
-
-        write_request(scope.kb_dir, record)
+    if scope.storage is None:
+        raise ValueError("Application usage requires its main-store execution")
+    scope.storage.begin(record)
     return identity
 
 
@@ -228,129 +200,20 @@ def finish_request(
         return
     try:
         with usage_scope_lifecycle(scope):
-            if scope.storage is not None:
-                scope.storage.finish(
-                    identity,
-                    response,
-                    state=state,
-                    observation=observation,
-                    terminal=terminal,
-                    send_status=send_status,
-                    business_state=business_state,
-                )
-                return
-            _finish_request(
+            if scope.storage is None:
+                raise ValueError("Application usage requires its main-store execution")
+            scope.storage.finish(
                 identity,
                 response,
                 state=state,
-                scope=scope,
                 observation=observation,
                 terminal=terminal,
                 send_status=send_status,
                 business_state=business_state,
             )
+            return
     except KnowledgeBaseRemoved:
         return  # Late paid receipts cannot mutate a removed or recreated KB.
-
-
-def _finish_request(
-    identity: str,
-    response: Any,
-    *,
-    state: str,
-    scope: UsageScope,
-    observation: str | None,
-    terminal: bool,
-    send_status: str | None,
-    business_state: str | None,
-) -> None:
-    path = _path(scope.kb_dir, identity)
-    with atomic_record_lock(scope.kb_dir / ".ultrakb/usage/ledger.lock"):
-        record = UsageRequest.model_validate_json(path.read_text("utf-8"))
-        provider_id = _field(response, "id")
-        if (
-            isinstance(provider_id, str)
-            and record.provider_request_id is not None
-            and record.provider_request_id != provider_id
-        ):
-            logger.warning("Ignored conflicting provider identity for usage request %s", identity)
-            return
-        usage = normalize_usage(_field(response, "usage"))
-        updates: dict[str, Any] = {}
-        # Late/repeated callbacks can improve unknown fields, never erase known usage.
-        for key, value in usage.items():
-            if key != "usage_status" and value is not None and getattr(record, key) is None:
-                updates[key] = value
-        if terminal and record.ended_at is None:
-            updates.update(state=state, ended_at=_now())
-        if observation is not None and record.observation != "transport":
-            updates["observation"] = observation
-        if (
-            send_status is not None
-            and record.send_status != "sent"
-            and (send_status != "unknown" or record.send_status == "unknown")
-        ):
-            updates["send_status"] = send_status
-        if business_state is not None and record.business_state != "cancelled":
-            updates["business_state"] = business_state
-        if isinstance(provider_id, str):
-            updates["provider_request_id"] = provider_id
-        merged = record.model_dump() | updates
-        merged["usage_status"] = (
-            "known"
-            if merged["input_total"] is not None and merged["output_total"] is not None
-            else "partial"
-            if merged["input_total"] is not None or merged["output_total"] is not None
-            else "unknown"
-        )
-        saved = UsageRequest.model_validate(merged)
-        from ultrakb.usage_projection import write_request
-
-        write_request(scope.kb_dir, saved)
-    if scope.on_event:
-        try:
-            from ultrakb.usage_projection import progress_receipt
-
-            scope.on_event(
-                {
-                    "event": "model_usage_progress",
-                    "data": progress_receipt(
-                        scope.kb_dir,
-                        execution_ids=[scope.execution_id],
-                        source_ids=[scope.source_id] if scope.source_id else [],
-                    ),
-                }
-            )
-        except Exception:
-            # Delivery is a projection; its failure must never replay a paid request.
-            logger.warning("Import usage progress delivery failed", exc_info=True)
-
-
-def read_requests(kb_dir: Path) -> tuple[UsageRequest, ...]:
-    with atomic_record_lock(kb_dir / ".ultrakb/usage/ledger.lock"):
-        return tuple(
-            UsageRequest.model_validate_json(path.read_text("utf-8"))
-            for path in sorted((kb_dir / ".ultrakb/usage/requests").glob("*.json"))
-        )
-
-
-def aggregate_usage(
-    kb_dir: Path,
-    *,
-    request_ids=None,
-    execution_ids=None,
-    source_id=None,
-    root_import_id=None,
-    unit_id=None,
-) -> dict:
-    return _aggregate_usage(
-        read_requests(kb_dir),
-        request_ids=request_ids,
-        execution_ids=execution_ids,
-        source_id=source_id,
-        root_import_id=root_import_id,
-        unit_id=unit_id,
-    )
 
 
 def _aggregate_usage(
@@ -405,97 +268,22 @@ def _aggregate_usage(
     }
 
 
-def mark_source(kb_dir: Path, source_id: str) -> None:
-    from ultrakb.source_catalog import read_source
-    from ultrakb.unit_publication import list_source_units, read_unit_publication
-
-    path = kb_dir / ".ultrakb/usage/sources" / f"{source_id}.json"
-    if path.exists():
-        return
-    source = read_source(kb_dir, source_id)
-    historical = bool(source.legacy_hash)
-    for unit in list_source_units(kb_dir, source_id):
-        try:
-            historical |= bool(
-                read_unit_publication(kb_dir, unit.unit_id, "legacy").knowledge_revision_id
-            )
-        except FileNotFoundError:
-            pass
-    with atomic_record_lock(kb_dir / ".ultrakb/usage/ledger.lock"):
-        if not path.exists():
-            atomic_write_json(
-                path,
-                SourceUsageHistory(
-                    history_status="partially_recorded" if historical else "recorded"
-                ).model_dump(mode="json"),
-            )
-
-
-def usage_receipt(kb_dir: Path, *, source_id=None, request_ids=None, unit_id=None) -> dict:
-    from ultrakb.llm_usage_execution import model_task_receipts
-
-    scope = _SCOPE.get()
-    executions = [scope.execution_id] if scope and scope.kb_dir == kb_dir.resolve() else []
-    records = read_requests(kb_dir)
-    current = _aggregate_usage(records, execution_ids=executions, request_ids=request_ids)
-    path = kb_dir / ".ultrakb/usage/sources" / f"{source_id}.json"
-    historical = (
-        SourceUsageHistory.model_validate_json(path.read_text("utf-8")).history_status
-        if path.exists()
-        else "unrecorded"
-    )
-    return {
-        "execution_ids": executions,
-        "model_tasks": model_task_receipts(kb_dir, executions),
-        "source_ids": [source_id] if source_id else [],
-        "ledger": str(kb_dir / ".ultrakb/usage"),
-        "current": current,
-        "cumulative": _aggregate_usage(records, source_id=source_id, unit_id=unit_id)
-        if source_id
-        else current,
-        "history_status": historical if source_id else "execution_only",
-    }
-
-
 def merge_usage_receipts(kb_dir: Path, receipts) -> dict | None:
-    from ultrakb.llm_usage_execution import model_task_receipts
+    from ultrakb.storage.database import DatabaseIdentity, database_path, open_database
+    from ultrakb.storage.usage_store import UsageStore
 
     receipts = [receipt for receipt in receipts if receipt]
     if not receipts:
         return None
-    from ultrakb.storage.database import DatabaseIdentity, database_path, open_database
-
-    main_ledger = str(database_path(kb_dir))
-    if any(receipt.get("ledger") == main_ledger for receipt in receipts):
-        if any(receipt.get("ledger") != main_ledger for receipt in receipts):
-            raise ValueError("Usage receipts belong to different ledgers")
-        from ultrakb.storage.usage_store import UsageStore
-
-        first = receipts[0]
-        if not first.get("kb_id") or not first.get("generation"):
-            raise ValueError("Main-store usage receipt is missing its database identity")
-        expected = DatabaseIdentity(first["kb_id"], first["generation"])
-        with open_database(kb_dir, expected=expected, read_only=True) as db:
-            identity = db.identity
-        return UsageStore(kb_dir, identity).combined_receipt(receipts)
-    records = read_requests(kb_dir)
-    ids = {identity for receipt in receipts for identity in receipt["current"]["request_ids"]}
-    source_ids = {identity for receipt in receipts for identity in receipt.get("source_ids", [])}
-    historical_ids = {r.request_attempt_id for r in records if r.source_id in source_ids}
-    executions = {identity for receipt in receipts for identity in receipt["execution_ids"]}
-    return {
-        "execution_ids": sorted(executions),
-        "model_tasks": model_task_receipts(kb_dir, executions),
-        "source_ids": sorted(source_ids),
-        "ledger": str(kb_dir / ".ultrakb/usage"),
-        "current": _aggregate_usage(records, request_ids=ids),
-        "cumulative": _aggregate_usage(records, request_ids=historical_ids | ids),
-        "history_status": "recorded"
-        if all(r["history_status"] == "recorded" for r in receipts)
-        else "execution_only"
-        if not source_ids
-        else "partially_recorded",
-    }
+    if any(receipt.get("ledger") != str(database_path(kb_dir)) for receipt in receipts):
+        raise ValueError("Usage receipts belong to another main store")
+    first = receipts[0]
+    if not first.get("kb_id") or not first.get("generation"):
+        raise ValueError("Main-store usage receipt is missing its database identity")
+    expected = DatabaseIdentity(first["kb_id"], first["generation"])
+    with open_database(kb_dir, expected=expected, read_only=True) as db:
+        identity = db.identity
+    return UsageStore(kb_dir, identity).combined_receipt(receipts)
 
 
 _BUDGET_NOTICE = "模型调用预算按逻辑任务累计，不代表资料完成进度。"

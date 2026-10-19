@@ -51,7 +51,7 @@ def import_url(
         root = Path(temporary)
         manifest = root / "input.json"
         url_hash = hashlib.sha256(url.encode()).hexdigest()
-        from ultrakb.state import HashRegistry
+        from ultrakb.file_digest import hash_file
 
         if manifest.exists():
             saved = json.loads(manifest.read_text(encoding="utf-8"))
@@ -60,7 +60,7 @@ def import_url(
                 not source.is_relative_to(root.resolve())
                 or saved.get("url_hash") != url_hash
                 or not source.is_file()
-                or HashRegistry.hash_file(source) != saved["hash"]
+                or hash_file(source) != saved["hash"]
                 or not isinstance(saved.get("quality"), list)
                 or not all(isinstance(note, str) for note in saved["quality"])
             ):
@@ -82,7 +82,7 @@ def import_url(
                     {
                         "path": source.relative_to(root).as_posix(),
                         "url_hash": url_hash,
-                        "hash": HashRegistry.hash_file(source),
+                        "hash": hash_file(source),
                         "quality": quality,
                     },
                 )

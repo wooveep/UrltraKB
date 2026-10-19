@@ -110,6 +110,16 @@ class CatalogStore:
     def __init__(self, root: Path, identity: DatabaseIdentity):
         self.root, self.identity = root.resolve(), identity
 
+    def has_source_key(self, source_key):
+        """Whether an input location already identifies a retained source."""
+        with storage_stage(self.root, self.identity, read_only=True) as db:
+            return (
+                db.connection.execute(
+                    "SELECT 1 FROM ukb_sources WHERE source_key = ?", (source_key,)
+                ).fetchone()
+                is not None
+            )
+
     def admit(
         self,
         path: Path,

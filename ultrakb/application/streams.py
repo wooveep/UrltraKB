@@ -6,6 +6,8 @@ import asyncio
 from contextlib import suppress
 from typing import AsyncGenerator, Awaitable, Callable, Protocol, TypeVar
 
+import anyio
+
 from ultrakb.application.execution import ExecutionContext
 
 
@@ -45,8 +47,8 @@ async def operation_events(
             if event.get("event") == "operation_finished":
                 result = task.result()
                 if result.model_usage is not None:
-                    # The use case already audited its terminal request set.
-                    # Failed/stopped results retain this same complete receipt.
+                    # Use the settled operation's authoritative counter receipt.
+                    # Request details remain separately paged in the main store.
                     yield {"event": "model_usage", "data": result.model_usage}
                 yield {"event": "result", "data": result}
                 return
@@ -57,18 +59,19 @@ async def operation_events(
             yield event
     finally:
         stopped = True
-        if not task.done():
-            task.cancel()
-        # A child cancellation is an outcome here, not an observer cancellation.
-        # Keeping that distinction lets repeated client cancellation propagate
-        # after the operation has safely settled.
-        settled = asyncio.gather(task, return_exceptions=True)
-        cancelled = False
-        while not settled.done():
-            try:
-                await asyncio.shield(settled)
-            except asyncio.CancelledError:
-                cancelled = True
+        # Starlette uses level cancellation: every await in its cancelled scope
+        # is cancelled again. Protect settlement from that scope so the worker
+        # can close its SDK and retain receipts without a busy cancellation loop.
+        with anyio.CancelScope(shield=True):
+            if not task.done():
+                task.cancel()
+            settled = asyncio.gather(task, return_exceptions=True)
+            cancelled = False
+            while not settled.done():
+                try:
+                    await asyncio.shield(settled)
+                except asyncio.CancelledError:
+                    cancelled = True
         with suppress(asyncio.CancelledError):
             task.result()
         if cancelled:

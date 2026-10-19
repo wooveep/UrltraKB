@@ -13,7 +13,7 @@ def catalog_sources(catalog, *, include_removed=False):
         after = sources[-1].source_id
 
 
-def _unit(catalog, target, actual, scope):
+def unit_inventory(catalog, target, actual, scope):
     processing = catalog.processing(target.processing_id)
     used = catalog.processing(actual.processing_id) if actual else None
     decision = used.decision if used else None
@@ -38,10 +38,20 @@ def _unit(catalog, target, actual, scope):
     work = PendingStore(scope.kb_dir, scope.knowledge.identity).unit_status(target.unit_revision_id)
     if work and work[0] not in {"completed", "stale"}:
         status = {"dispatched": "pending", "started": "processing"}.get(work[0], work[0])
+    measured = decision or processing.decision
+    from ultrakb.storage.compile_outcomes import read_unit_outcome
+
+    outcome = read_unit_outcome(
+        scope.kb_dir,
+        scope.knowledge.identity,
+        target.unit_revision_id,
+        scope.publication_id,
+        scope.view_id,
+    )
     return {
         "unit_id": target.unit_id,
         "key": target.key,
-        "name": target.doc_name,
+        "name": target.label or target.doc_name,
         "doc_name": target.doc_name,
         "target_revision_id": target.unit_revision_id,
         "target_source_revision_id": target.source_revision_id,
@@ -51,7 +61,15 @@ def _unit(catalog, target, actual, scope):
         "view_id": scope.view_id,
         "status": status,
         "content_state": content_state,
+        "tokens": measured.measurement_value if measured.measurement_unit == "token" else None,
+        "pages": measured.measurement_value
+        if measured.measurement_unit == "physical_page"
+        else None,
+        "characters": measured.characters,
         "error_type": work[1] if work else None,
+        "quality": outcome.quality,
+        "unfinished": outcome.unfinished,
+        "quality_known": outcome.quality_known,
         "processing": decision.model_dump(mode="json") if decision else None,
         "target_processing": processing.decision.model_dump(mode="json"),
         "length_class": decision.length_class if decision else processing.decision.length_class,
@@ -75,11 +93,19 @@ def source_inventory(scope):
     documents = []
     for source in catalog_sources(catalog, include_removed=True):
         targets = catalog.source_units(source.source_id)
-        units = [_unit(catalog, unit, actuals.get(unit.unit_id), scope) for unit in targets]
+        units = [
+            unit_inventory(catalog, unit, actuals.get(unit.unit_id), scope) for unit in targets
+        ]
         if source.removed or source.contribution_empty:
             for unit in units:
                 unit["status"] = "retired" if source.removed else "empty"
         actual = next((actuals[unit.unit_id] for unit in targets if unit.unit_id in actuals), None)
+        inventory_error = None
+        if PurePosixPath(source.label).suffix.lower() in {".xlsx", ".xls"}:
+            from ultrakb.storage.workbook_store import WorkbookStore
+
+            workbook = WorkbookStore(scope.kb_dir, bound.identity).read(source.revision_id)
+            inventory_error = workbook.error if workbook else None
         one = units[0] if len(units) == 1 else {}
         changed = (actual is not None and actual.source_revision_id != source.revision_id) or any(
             unit["successful_revision_id"]
@@ -102,6 +128,9 @@ def source_inventory(scope):
                 "view_id": scope.view_id,
                 "doc_name": targets[0].doc_name if targets else source.label,
                 "unit_count": len(units),
+                "tokens": one.get("tokens"),
+                "pages": one.get("pages"),
+                "characters": one.get("characters"),
                 "units": units,
                 "removed": source.removed,
                 "contribution_empty": source.contribution_empty,
@@ -116,7 +145,10 @@ def source_inventory(scope):
                 if source.removed
                 else "empty"
                 if source.contribution_empty
+                else "failed"
+                if inventory_error
                 else source_status([SimpleNamespace(status=unit["status"]) for unit in units]),
+                "message": inventory_error,
                 "length_class": one.get("length_class"),
                 "execution_mode": one.get("execution_mode"),
                 "processing": one.get("processing"),

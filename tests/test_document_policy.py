@@ -36,7 +36,7 @@ def test_import_capacity_keeps_captured_local_tokenizer(kb_dir, tmp_path, operat
     from ultrakb.config_state import capture_config
     from ultrakb.execution_capacity import select_execution_mode
     from ultrakb.locks import kb_ingest_lock
-    from ultrakb.normalization import normalization_fingerprint
+    from ultrakb.normalization import normalization_policy
     from ultrakb.processing_policy import classify_markdown_tokens
 
     asset = tmp_path / "tokenizer.json"
@@ -56,10 +56,10 @@ def test_import_capacity_keeps_captured_local_tokenizer(kb_dir, tmp_path, operat
     with kb_ingest_lock(kb_dir / ".ultrakb"):
         snapshot = capture_config(kb_dir)
     with snapshot.activate():
-        before = normalization_fingerprint(kb_dir)
+        before = normalization_policy(kb_dir)
         Tokenizer(models.WordLevel({"[UNK]": 0, "changed": 1}, unk_token="[UNK]")).save(str(asset))
         if operation == "fingerprint":
-            assert normalization_fingerprint(kb_dir) == before
+            assert normalization_policy(kb_dir) == before
         else:
             source = tmp_path / "source.md"
             source.write_text("note", encoding="utf-8")
@@ -81,9 +81,15 @@ def test_pdf_default_boundary(kb_dir, physical_pdf, processing_only, page_count,
             pdf.new_page(pno=2)
         pdf.saveIncr()
     result = processing_only(physical_pdf)
-    source = read_document_source(kb_dir, result.source_id)
+    source = read_document_source(
+        kb_dir, result.source_id, unit_revision_id=getattr(result, "unit_revision_id", None)
+    )
     assert source["knowledge_revision_id"] is None
-    assert (kb_dir / source["original_path"]).read_bytes() == physical_pdf.read_bytes()
+    from ultrakb.application.views import published_scope
+    from ultrakb.storage.catalog_store import CatalogStore
+
+    catalog = CatalogStore(kb_dir, published_scope(kb_dir).knowledge.identity)
+    assert catalog.read_original(result.source_revision_id) == physical_pdf.read_bytes()
     assert (source["length_class"], source["execution_mode"]) == (length, mode)
     assert source["processing"]["measurement_value"] == page_count
 
@@ -178,9 +184,15 @@ def test_short_pdf_uses_only_known_execution_capacity(
         physical_pdf,
         bundle=LlmCredentialBundle(api_key="local-capacity-test", base_url=endpoint),
     )
-    source = read_document_source(kb_dir, result.source_id)
+    source = read_document_source(
+        kb_dir, result.source_id, unit_revision_id=getattr(result, "unit_revision_id", None)
+    )
     assert source["knowledge_revision_id"] is None
-    assert (kb_dir / source["original_path"]).read_bytes() == physical_pdf.read_bytes()
+    from ultrakb.application.views import published_scope
+    from ultrakb.storage.catalog_store import CatalogStore
+
+    catalog = CatalogStore(kb_dir, published_scope(kb_dir).knowledge.identity)
+    assert catalog.read_original(result.source_revision_id) == physical_pdf.read_bytes()
     assert (source["length_class"], source["execution_mode"]) == ("short", mode)
     processing = source.get("processing") or source["target_processing"]
     assert processing["capacity_status"] == status
@@ -214,7 +226,9 @@ def test_short_segmented_recompile_retains_decision_and_adapters(
         kb_dir,
         physical_pdf,
     )
-    before = read_document_source(kb_dir, result.source_id)
+    before = read_document_source(
+        kb_dir, result.source_id, unit_revision_id=getattr(result, "unit_revision_id", None)
+    )
     assert "short / segmented" in "\n".join(describe_ingest(result))
     target = select_recompilation(kb_dir, result.source_id).targets[0]
     assert (target.kind, target.execution_mode) == ("short", "segmented")
@@ -226,7 +240,11 @@ def test_short_segmented_recompile_retains_decision_and_adapters(
     )
     recompiled = asyncio.run(recompile_document(kb_dir, result.source_id))
     assert recompiled.status == "compiled", recompiled.message
-    after = DocumentSourceResponse(**read_document_source(kb_dir, result.source_id))
+    after = DocumentSourceResponse(
+        **read_document_source(
+            kb_dir, result.source_id, unit_revision_id=getattr(result, "unit_revision_id", None)
+        )
+    )
     assert (after.length_class, after.execution_mode) == ("short", "segmented")
     assert after.processing == before["processing"]
     item = DocumentItem(**get_kb_list(kb_dir)["documents"][0])
@@ -281,7 +299,9 @@ def test_failed_compile_keeps_target_processing_visible(
     before = None
     if first:
         assert first.status == "added", first.message
-        before = read_document_source(kb_dir, first.source_id)
+        before = read_document_source(
+            kb_dir, first.source_id, unit_revision_id=getattr(first, "unit_revision_id", None)
+        )
         assert before["processing"]["input_limit"] == 100000
     capacity(200000)
 
@@ -302,7 +322,9 @@ def test_failed_compile_keeps_target_processing_visible(
         result = import_document(kb_dir, physical_pdf)
     assert result.status == "failed"
     assert "short / full" in "\n".join(describe_ingest(result))
-    reader = read_document_source(kb_dir, result.source_id)
+    reader = read_document_source(
+        kb_dir, result.source_id, unit_revision_id=getattr(result, "unit_revision_id", None)
+    )
     assert reader["target_processing"]["length_class"] == "short"
     assert reader["knowledge_revision_id"] == (
         first.units[0].knowledge_revision_id if first else None

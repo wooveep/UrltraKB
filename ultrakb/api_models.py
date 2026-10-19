@@ -414,6 +414,7 @@ class PageResponse(BaseModel):
 
 class DocumentSourceRequest(PublishedReadRequest):
     unit_id: str | None = None
+    unit_revision_id: str | None = None
     cells: str | None = None
     part: Literal["body", "notes"] | None = None
     blocks: str | None = None
@@ -428,6 +429,8 @@ class DocumentSourceRequest(PublishedReadRequest):
 
 
 class DocumentSourceResponse(BaseModel):
+    content_state: str = "content"
+    images: list[dict] = Field(default_factory=list)
     publication_id: str | None = None
     unit_id: str | None = None
     sheet: dict | None = None

@@ -4,6 +4,8 @@ import json
 
 import pytest
 
+pytest_plugins = ("compile_work_fixtures",)
+
 
 @pytest.mark.parametrize(
     "value,path,expected,actual",
@@ -206,39 +208,23 @@ def test_schema_overhead_is_reserved_and_legacy_json_admission_is_unchanged():
     assert summary_capacity(config, custom_endpoint=False, legacy_format=True)(messages)
 
 
-def test_old_checkpoint_keeps_its_layout_and_new_checkpoint_remembers_its_contract(kb_dir):
-    from types import SimpleNamespace
-
+def test_native_checkpoint_retains_its_summary_contract(kb_dir, compile_work):
     from ultrakb.agent.compiler import _summary_format
-    from ultrakb.compile_checkpoints import CompileCheckpoints
+    from ultrakb.compile_checkpoints import digest
 
-    old = CompileCheckpoints(
-        kb_dir,
-        SimpleNamespace(task_id="a" * 32, parent_task_id=None),
-        {"document": "old"},
-        {"protocol": "unchanged"},
+    work = compile_work({"document": "guide"}, {"protocol": "unchanged"})
+    signature = digest("original-request")
+    payload = {"description": "Accepted", "sections": []}
+    work.save("summary:1", signature, payload)
+    assert work.legacy_summary_format is False and work.structured_summary is True
+    assert (
+        _summary_format("summary-parts-json", ("section-1",), "gpt-4o-mini", None, work)["type"]
+        == "json_schema"
     )
-    old.save("summary:1", "original-request", {"description": "Accepted", "sections": []})
-    before = old.path.read_bytes()
-    assert old.legacy_summary_format is True
-    assert _summary_format("summary-json", ("section-1",), "gpt-4o-mini", None, old)["type"] == (
-        "json_schema"
-    )
-    assert old.path.read_bytes() == before
-    new = CompileCheckpoints(
-        kb_dir,
-        SimpleNamespace(task_id="b" * 32, parent_task_id=None),
-        {"document": "new"},
-        {"protocol": "unchanged"},
-    )
-    assert _summary_format("summary-json", ("section-1",), "gpt-4o-mini", None, new)["type"] == (
-        "json_schema"
-    )
-    new.save("summary:1", "new-request", {"description": "Accepted", "sections": []})
-    restored = CompileCheckpoints(
-        kb_dir, SimpleNamespace(task_id="b" * 32, parent_task_id=None), new.identity, new.conditions
-    )
-    assert restored.legacy_summary_format is False
+    restored = compile_work({"document": "guide"}, {"protocol": "unchanged"})
+    assert restored.work_id == work.work_id
+    assert restored.load("summary:1", signature) == payload
+    assert restored.request_version == 3
 
 
 @pytest.mark.asyncio

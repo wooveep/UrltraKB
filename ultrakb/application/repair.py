@@ -1,17 +1,20 @@
-"""Controlled recovery: preserve evidence until rollback and checks succeed."""
+"""Explicit recovery of native facts, independent of the Wiki working copy."""
 
 from __future__ import annotations
 
-import json
+import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
 
-from ultrakb.config import resolve_effective_config, validate_runtime_config
-from ultrakb.lint import find_invalid_frontmatter, run_structural_lint
-from ultrakb.locks import atomic_write_json, file_write_lock, kb_repair_lock
+from ultrakb.config import validate_runtime_config
+from ultrakb.knowledge_scope import KnowledgeScope
+from ultrakb.lifecycle import read_lifecycle
+from ultrakb.locks import atomic_write_json, file_write_lock
 from ultrakb.mutation import RecoveryRequired, recover_pending_journals, repair_marker
+from ultrakb.storage.database import open_database
+from ultrakb.storage.knowledge_store import KnowledgeStore
 
 
 @dataclass(frozen=True)
@@ -21,6 +24,7 @@ class RepairResult:
     issues: tuple[str, ...]
     structural_report: str | None = None
     initialized: bool = True
+    projection_status: str | None = None
 
 
 @dataclass(frozen=True)
@@ -33,36 +37,42 @@ class KnowledgeDiagnostic:
 
 
 def inspect_knowledge_base(kb_dir: Path) -> KnowledgeDiagnostic:
-    """Inspect retained content without replaying or discarding recovery evidence."""
-    from ultrakb.application.file_state import contained_paths
+    """Read retained facts without rebuilding navigation or replaying recovery."""
+    from .storage_lint import preview_stored_lint
 
-    root = kb_dir.resolve()
-    with kb_repair_lock(root / ".ultrakb"):
-        pages = contained_paths(root, sorted((root / "wiki").rglob("*.md")))
-        journals = sorted((root / ".ultrakb/journal").glob("*.json"))
-        issues: tuple[str, ...] = ()
+    root = kb_dir.expanduser().resolve()
+    with open_database(root, read_only=True) as db:
+        identity = db.identity
+    with read_lifecycle(root, database_identity=identity):
+        journals = tuple(sorted(path.name for path in (root / ".ultrakb/journal").glob("*.json")))
+        pages: tuple[str, ...] = ()
+        issues: list[str] = []
         report = None
         try:
-            report = run_structural_lint(root)
+            bound = KnowledgeStore(root, identity).diagnostic_publication()
+            pages = tuple(path for path in bound.files() if path.endswith(".md"))
+            bound.navigation_revision()
+            _, report = preview_stored_lint(KnowledgeScope(root, root / "wiki", knowledge=bound))
         except Exception as exc:
-            issues = (f"Structural inspection unavailable ({type(exc).__name__})",)
+            issues.append(f"Committed knowledge inspection incomplete ({type(exc).__name__})")
         return KnowledgeDiagnostic(
-            repair_marker(root).exists() or bool(journals),
-            tuple(path.name for path in journals),
-            tuple(path.relative_to(root / "wiki").as_posix() for path in pages),
+            repair_marker(root).exists() or bool(journals) or bool(issues),
+            journals,
+            pages,
             report,
-            issues,
+            tuple(issues),
         )
 
 
 def read_diagnostic_page(kb_dir: Path, path: str) -> str:
-    """Read a contained wiki page while ordinary operations are repair-blocked."""
-    root = kb_dir.resolve()
-    target = (root / "wiki" / path).resolve()
-    if not target.is_relative_to(root / "wiki") or target.suffix != ".md":
+    """Read a committed page even when its derived navigation needs repair."""
+    root = kb_dir.expanduser().resolve()
+    with open_database(root, read_only=True) as db:
+        identity = db.identity
+    if not isinstance(path, str) or not path.endswith(".md"):
         raise ValueError("Invalid diagnostic page path")
-    with kb_repair_lock(root / ".ultrakb"):
-        return target.read_text(encoding="utf-8")
+    with read_lifecycle(root, database_identity=identity):
+        return KnowledgeStore(root, identity).diagnostic_publication().read(path).decode("utf-8")
 
 
 def repair_global_settings() -> RepairResult:
@@ -70,7 +80,7 @@ def repair_global_settings() -> RepairResult:
     from dotenv.parser import parse_stream
 
     from ultrakb import config
-    from ultrakb.application.settings import read_global_config
+    from ultrakb.application.settings import _read_global_config
 
     root = config.GLOBAL_CONFIG_DIR
     lock_path = root / "global.lock"
@@ -87,7 +97,7 @@ def repair_global_settings() -> RepairResult:
                 with (root / ".env").open(encoding="utf-8") as stream:
                     if any(binding.error for binding in parse_stream(stream)):
                         raise ValueError("Global credential file is invalid")
-            read_global_config()
+            _read_global_config()
         except (RecoveryRequired, OSError, ValueError, yaml.YAMLError) as exc:
             atomic_write_json(repair_marker(root), {"error_type": type(exc).__name__})
             return RepairResult(
@@ -100,70 +110,46 @@ def repair_global_settings() -> RepairResult:
 
 
 def repair_knowledge_base(kb_dir: Path) -> RepairResult:
-    """Retry validated journals, checking storage before allowing normal writes.
+    """Recover independent native facts and report projection state separately."""
+    from ultrakb.storage.receipt_store import ReceiptStore
+    from ultrakb.storage.wiki_projection import ProjectionStore
 
-    Missing/corrupt evidence is never discarded or reconstructed by guessing.
-    Restoring a damaged backup remains a deliberate operator action. Ordinary
-    lint notes are reported separately from storage/recovery integrity failures.
-    """
+    from .execution_configuration import repair_storage_config
+    from .storage_lint import preview_stored_lint
+
     root = kb_dir.expanduser().resolve()
-    with kb_repair_lock(root / ".ultrakb"):
-        from ultrakb.catalog_schema import UnsupportedCatalogWriter, validate_catalog_writer
-
-        validate_catalog_writer(root)
-        messages: list[str] = []
+    # Gate before lock files, recovery writes, or any SQL mutation.
+    with open_database(root, read_only=True) as db:
+        identity = db.identity
+    messages: list[str] = []
+    issues: list[str] = []
+    report, projection_status = None, None
+    with read_lifecycle(root, database_identity=identity):
         try:
-            messages = recover_pending_journals(root, repairing=True)
-            validate_catalog_writer(root)
-            from ultrakb.application.knowledge_bases import initialization_rolled_back
-
-            if initialization_rolled_back(root):
-                repair_marker(root).unlink(missing_ok=True)
-                return RepairResult(
-                    True,
-                    tuple(messages),
-                    ("初始化已回滚；请使用“新建知识库”在此目录重新创建。",),
-                    initialized=False,
-                )
-            for directory in (root / "wiki", root / "raw"):
-                if not directory.is_dir():
-                    raise ValueError(f"Required directory is missing: {directory.name}")
-            config = yaml.safe_load((root / ".ultrakb/config.yaml").read_text(encoding="utf-8"))
-            if not isinstance(config, dict):
-                raise ValueError("Configuration must be a mapping")
-            validate_runtime_config(config, allow_inherited=True)
-            from dotenv.parser import parse_stream
-
-            if (root / ".env").exists():
-                with (root / ".env").open(encoding="utf-8") as stream:
-                    if any(binding.error for binding in parse_stream(stream)):
-                        raise ValueError("Knowledge-base credential file is invalid")
-            validate_runtime_config(resolve_effective_config(root)[0])
-            registry_file = root / ".ultrakb/hashes.json"
-            if registry_file.exists():
-                entries = json.loads(registry_file.read_text(encoding="utf-8"))
-                from ultrakb.state import validate_registry
-
-                validate_registry(entries)
-            issues = find_invalid_frontmatter(root / "wiki")
-            if issues:
-                atomic_write_json(repair_marker(root), {"error_type": "InvalidFrontmatter"})
-                return RepairResult(False, tuple(messages), tuple(issues))
-            report = run_structural_lint(root)
-        except UnsupportedCatalogWriter:
-            raise
-        except RecoveryRequired:
-            return RepairResult(
-                False,
-                tuple(messages),
-                ("Recovery evidence is incomplete or unusable; journal and backups retained.",),
+            messages.extend(repair_storage_config(root, identity))
+        except (RecoveryRequired, OSError, ValueError, yaml.YAMLError) as exc:
+            issues.append(f"Settings repair incomplete ({type(exc).__name__}); evidence retained.")
+        try:
+            receipts = ReceiptStore(root, identity).repair()
+            messages.append(f"Repaired response receipts: {receipts.repaired}.")
+            if receipts.remaining is None or receipts.remaining:
+                issues.append("Response receipts still need repair; remaining evidence retained.")
+        except (OSError, ValueError, sqlite3.Error) as exc:
+            issues.append(f"Response repair incomplete ({type(exc).__name__}); evidence retained.")
+        try:
+            store = KnowledgeStore(root, identity)
+            bound = store.diagnostic_publication()
+            store.repair_navigation(bound.publication_id)
+            _, report = preview_stored_lint(KnowledgeScope(root, root / "wiki", knowledge=bound))
+        except (OSError, ValueError, sqlite3.Error) as exc:
+            issues.append(f"Committed knowledge repair incomplete ({type(exc).__name__}).")
+        try:
+            projection_status = ProjectionStore(root, identity).sync().status
+        except (OSError, ValueError, sqlite3.Error) as exc:
+            projection_status = "pending"
+            messages.append(
+                f"Wiki synchronization pending ({type(exc).__name__}); knowledge retained."
             )
-        except (OSError, ValueError, yaml.YAMLError) as exc:
-            atomic_write_json(repair_marker(root), {"error_type": type(exc).__name__})
-            # Parser messages can contain credential text. Report the failure
-            # category and keep the original files available for local repair.
-            return RepairResult(
-                False, tuple(messages), (f"Storage check failed: {type(exc).__name__}",)
-            )
-        repair_marker(root).unlink(missing_ok=True)
-        return RepairResult(True, tuple(messages), (), report)
+        return RepairResult(
+            not issues, tuple(messages), tuple(issues), report, projection_status=projection_status
+        )

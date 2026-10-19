@@ -126,6 +126,7 @@ class StoredModelUsage:
             self._versions[request.request_attempt_id] = 0
             self._stages[request.request_attempt_id] = stage
             self._stage_ids[request.request_attempt_id] = stage
+        self._report_progress()
 
     def _version(self, request_id: str) -> int:
         if request_id not in self._versions:
@@ -160,6 +161,7 @@ class StoredModelUsage:
                     "The pre-send receipt failed; no transport was started"
                 )
                 raise self.failure from error
+        self._report_progress()
 
     def finish(
         self, request_id, response, *, state, observation, terminal, send_status, business_state
@@ -186,7 +188,11 @@ class StoredModelUsage:
                     logger.warning("Could not confirm model stage completion", exc_info=True)
                 else:
                     del self._stages[request_id]
-        if terminal and self.on_event:
+        if terminal:
+            self._report_progress()
+
+    def _report_progress(self):
+        if self.on_event:
             try:
                 self.on_event(
                     {

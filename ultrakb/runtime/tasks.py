@@ -108,12 +108,9 @@ class TaskManager:
                         break
                     results.append(result)
                 view = replace(view, results=tuple(results))
-                from ultrakb.llm_usage_execution import task_usage_receipt
+                from .history import with_retained_usage
 
-                view = replace(
-                    view,
-                    model_usage=task_usage_receipt(Path(view.kb_dir), view.id) or view.model_usage,
-                )
+                view = with_retained_usage(view, results)
                 if view.state == "interrupted" and len(results) == view.total:
                     view = replace(
                         view,
@@ -746,20 +743,14 @@ class TaskManager:
             for task, attempt, latest_usage in usage_updates:
                 from ultrakb.lifecycle import expected_generation, read_lifecycle
                 from ultrakb.llm_usage import merge_usage_receipts
-                from ultrakb.usage_projection import merge_progress
 
-                merge = (
-                    merge_progress
-                    if not latest_usage["current"].get("request_ids_complete", True)
-                    else merge_usage_receipts
-                )
                 root = Path(task.view.kb_dir)
                 try:
                     with (
                         expected_generation(root, attempt.identity.generation),
                         read_lifecycle(root),
                     ):
-                        model_usage = merge(
+                        model_usage = merge_usage_receipts(
                             root,
                             [*(result.model_usage for result in task.view.results), latest_usage],
                         )
@@ -769,9 +760,8 @@ class TaskManager:
                     if self._active.get(task.view.id) is attempt:
                         self._update(task, persist=False, model_usage=model_usage)
             for task, attempt in finished:
+                from ultrakb.application.task_usage import task_usage_receipt
                 from ultrakb.lifecycle import expected_generation, read_lifecycle
-                from ultrakb.llm_usage import merge_usage_receipts
-                from ultrakb.llm_usage_execution import task_usage_receipt
 
                 # The terminal audit may scan the complete ledger. Status reads
                 # and stop requests must remain available while it reconciles.
@@ -786,9 +776,9 @@ class TaskManager:
                         expected_generation(root, attempt.identity.generation),
                         read_lifecycle(root),
                     ):
-                        model_usage = task_usage_receipt(root, task.view.id)
-                        if model_usage is None and any(receipts):
-                            model_usage = merge_usage_receipts(root, receipts)
+                        model_usage = task_usage_receipt(
+                            root, task.view.id, receipts=[value for value in receipts if value]
+                        )
                 except (FileNotFoundError, ValueError, RecoveryRequired):
                     model_usage = None
                 model_usage = model_usage or task.view.model_usage

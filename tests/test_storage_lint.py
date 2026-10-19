@@ -15,6 +15,34 @@ from ultrakb.storage.knowledge_store import KnowledgeStore
 pytestmark = pytest.mark.integration
 
 
+def test_structural_lint_reads_committed_pages_and_does_not_inspect_raw_drafts(tmp_path):
+    from ultrakb.application.knowledge_bases import initialize_kb
+    from ultrakb.application.views import published_scope
+    from ultrakb.lint import run_structural_lint
+    from ultrakb.storage.knowledge_store import KnowledgeStore
+
+    root = tmp_path / "lint"
+    initialize_kb(root)
+    bound = published_scope(root).knowledge
+    store = KnowledgeStore(root, bound.identity)
+    store.publish(
+        store.prepare_changes(
+            bound,
+            {
+                "concepts/committed.md": b"[[concepts/COMMITTED_GHOST]]",
+            },
+        )
+    )
+    draft = root / "wiki/concepts/draft.md"
+    draft.parent.mkdir(parents=True, exist_ok=True)
+    draft.write_text("[[concepts/UNCOMMITTED_GHOST]]")
+    (root / "raw/unadmitted.md").write_text("An input outside the publication.")
+    report = run_structural_lint(root)
+    assert "COMMITTED_GHOST" in report
+    assert "UNCOMMITTED_GHOST" not in report
+    assert "unadmitted.md" not in report
+
+
 def lint_knowledge(tmp_path):
     root, identity, unit = compile_input(tmp_path)
     store = KnowledgeStore(root, identity)
@@ -395,7 +423,7 @@ def test_each_adapter_reports_the_committed_lint_when_projection_is_pending(
             import ultrakb.cli as cli
 
             monkeypatch.setattr(cli, "_find_kb_dir", lambda *args: root)
-            monkeypatch.setattr(cli, "_selected_scope", lambda *args: scope)
+            monkeypatch.setattr(cli, "_selected_scope", lambda *args, **kwargs: scope)
             result = CliRunner().invoke(cli.cli, ["lint", "--fix"])
             assert result.exit_code == 0, result.output
             assert "synchronization pending" in result.output
@@ -441,7 +469,7 @@ def run(root, version, queue):
     with open_database(root, read_only=True) as db:
         identity = db.identity
     scope = views.storage_scope(root, identity)
-    views.view_scope = lambda *args: scope
+    views.view_scope = lambda *args, **kwargs: scope
     def unavailable(*args, **kwargs):
         raise OSError("Projection storage is unavailable")
     ProjectionStore.sync = unavailable

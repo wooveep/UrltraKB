@@ -28,7 +28,7 @@ def test_source_withdrawal_adapters_preserve_publication_and_projection_result(
 
         monkeypatch.setattr(cli_module, "_find_kb_dir", lambda *args: root)
         monkeypatch.setattr(
-            cli_module, "_selected_scope", lambda *args: storage_scope(root, identity)
+            cli_module, "_selected_scope", lambda *args, **kwargs: storage_scope(root, identity)
         )
         result = CliRunner().invoke(cli_module.cli, ["remove", unit.source_id, "--yes"])
         assert result.exit_code == 0, result.output
@@ -91,7 +91,9 @@ def test_source_withdrawal_adapters_preserve_publication_and_projection_result(
         from ultrakb.runtime.requests import RemoveDocument
         from ultrakb.runtime.worker import _execute
 
-        monkeypatch.setattr(views, "view_scope", lambda *args: storage_scope(root, identity))
+        monkeypatch.setattr(
+            views, "view_scope", lambda *args, **kwargs: storage_scope(root, identity)
+        )
         preview = preview_removal(root, unit.source_id, scope=scope)
         request = RemoveDocument(unit.source_id, preview.version, view_id="legacy")
         worker = UnitIdentity.create(

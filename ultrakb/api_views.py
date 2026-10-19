@@ -1,6 +1,5 @@
 """Explicit view selection shared by HTTP read and write adapters."""
 
-import asyncio
 from pathlib import Path
 from threading import Event
 
@@ -20,15 +19,14 @@ class PublishedReadRequest(ViewRequest):
     publication_id: RecordId | None = None
 
 
-async def resolve_api_scope(root: Path, view_id: str | None) -> KnowledgeScope | None:
-    if view_id is None:
-        return None
+async def resolve_api_scope(root: Path, view_id: str | None) -> KnowledgeScope:
     try:
         from ultrakb.context.workers import run_blocking
 
         stopped = Event()
         return await run_blocking(
-            lambda: view_scope(root, view_id, cancelled=stopped.is_set), on_cancel=stopped.set
+            lambda: view_scope(root, view_id or "legacy", cancelled=stopped.is_set),
+            on_cancel=stopped.set,
         )
     except (OSError, ValueError) as exc:
         raise HTTPException(status_code=400, detail="Unknown knowledge view") from exc
@@ -43,28 +41,40 @@ async def resolve_api_read_scope(
 ) -> KnowledgeScope:
     """Bind related HTTP reads to one public identity or explicit historical revision."""
     from ultrakb.application.views import published_scope
-    from ultrakb.published_knowledge import PublicationUnavailable
+    from ultrakb.context.workers import run_blocking
 
-    try:
+    stopped = Event()
+
+    def bind():
         if knowledge_revision_id is not None:
             if publication_id is not None:
-                scope = await asyncio.to_thread(
-                    published_scope, root, view_id or "legacy", publication_id=publication_id
+                scope = published_scope(
+                    root,
+                    view_id or "legacy",
+                    publication_id=publication_id,
+                    cancelled=stopped.is_set,
                 )
-                public = scope.publication
-                if public is None or public.knowledge_revision_id != knowledge_revision_id:
-                    raise PublicationUnavailable(
-                        "Public identity and knowledge revision do not match"
+                if scope.knowledge.publication.revision_id != knowledge_revision_id:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Public identity and knowledge revision do not match",
                     )
                 return scope
-            return await asyncio.to_thread(
-                view_scope, root, view_id or "legacy", historical_revision=knowledge_revision_id
+            return view_scope(
+                root,
+                view_id or "legacy",
+                historical_revision=knowledge_revision_id,
+                cancelled=stopped.is_set,
             )
-        return await asyncio.to_thread(
-            published_scope, root, view_id or "legacy", publication_id=publication_id
+        return published_scope(
+            root,
+            view_id or "legacy",
+            publication_id=publication_id,
+            cancelled=stopped.is_set,
         )
-    except PublicationUnavailable as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    try:
+        return await run_blocking(bind, on_cancel=stopped.set)
     except (OSError, ValueError) as exc:
         raise HTTPException(
             status_code=404, detail="Requested knowledge snapshot unavailable"

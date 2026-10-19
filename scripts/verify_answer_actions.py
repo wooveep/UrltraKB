@@ -14,6 +14,7 @@ def main():
     args = parser.parse_args()
     root = args.output.resolve()
     root.mkdir(parents=True, exist_ok=False)
+    os.environ["ULTRAKB_CONFIG_DIR"] = str(root / "settings")
     if args.headless:
         os.environ["QT_QPA_PLATFORM"] = "offscreen"
     from PySide6.QtCore import QMimeData, Qt, QTimer
@@ -22,13 +23,16 @@ def main():
 
     from ultrakb import config
     from ultrakb.agent.answer_text import visible_answer
-    from ultrakb.agent.chat_session import ChatSession
     from ultrakb.application.knowledge_bases import initialize_kb
+    from ultrakb.application.views import published_scope
     from ultrakb.desktop.answer_actions import AnswerActions, character_count
     from ultrakb.desktop.verification import create_application
+    from ultrakb.desktop.verification_data import publish_pages
     from ultrakb.desktop.verification_workbench import button
     from ultrakb.desktop.window import Workbench
     from ultrakb.locks import atomic_write_text, kb_ingest_lock
+    from ultrakb.storage.session_result import reference_trace
+    from ultrakb.storage.session_store import SessionStore
 
     config.GLOBAL_CONFIG_DIR = root / "settings"
     config.GLOBAL_CONFIG_PATH = config.GLOBAL_CONFIG_DIR / "global.yaml"
@@ -36,20 +40,31 @@ def main():
     initialize_kb(kb, seed_environment=False)
     with kb_ingest_lock(kb / ".ultrakb"):
         atomic_write_text(kb / "wiki/summaries/policy.md", "# Review policy\n\nSeven days.")
-    session = ChatSession.new(kb, "stored-ui-sample", "zh")
+    publish_pages(kb, {"summaries/policy.md": (kb / "wiki/summaries/policy.md").read_bytes()})
+    sessions = SessionStore(kb, published_scope(kb).knowledge.identity)
+    session_id = "answer-actions-sample"
+    sessions.create(session_id, model="stored-ui-sample", language="zh")
     source = "<think>private sample reasoning</think># 第一条回答\n\n"
     source += "**中文**，English! é 👨‍👩‍👧‍👦 🇨🇳\n\n"
     source += "正文随窗口换行。\n\n" * 20
     source += "```python\na + b\n```\n\n|列|值|\n|--|--|\n|中|2|\n\n[[summaries/policy]]\n\n$$x^2$$"
     first_usage = {"input_cached": 100, "input_uncached": 20, "output": 10, "reasoning": 2}
-    session.record_turn("第一问", source, [], usage=first_usage)
-    session.record_turn("第二问", "第二条没有已有单条用量。", [])
-    session.record_usage(
-        {"input_cached": 9999, "input_uncached": 9999, "output": 9999, "reasoning": 9999},
-        baseline=session.token_usage,
+    sessions.append_exchange(
+        session_id,
+        "first-turn",
+        "第一问",
+        source,
+        metadata={
+            "schema": 1,
+            "trace": reference_trace([], source),
+            "result": {"usage": first_usage},
+        },
     )
-    session.begin_attempt("未完成问题")
-    app = create_application()
+    sessions.append_exchange(session_id, "second-turn", "第二问", "第二条没有已有单条用量。")
+    sessions.queue_submission(
+        session_id, "unfinished", "未完成问题", view_id="legacy", after_turn=2
+    )
+    app = create_application(settings_dir=root / "qt-settings")
     app.setQuitOnLastWindowClosed(False)
     assert args.headless or app.platformName() == "xcb"
     old_clipboard = QMimeData()
@@ -74,11 +89,11 @@ def main():
         window.open_knowledge_base(kb)
         wait(lambda: window.kb == kb and not window.io._callbacks)
         button(window, "对话").click()
-        window.conversations.open(session.id)
+        window.conversations.open(session_id)
         wait(lambda: len(window.chat.findChildren(AnswerActions)) == 2)
         bars = window.chat.findChildren(AnswerActions)
-        first = next(bar for bar in bars if bar.data.identity == session.turns[0].turn_id)
-        second = next(bar for bar in bars if bar.data.identity == session.turns[1].turn_id)
+        first = next(bar for bar in bars if bar.data.identity == "first-turn")
+        second = next(bar for bar in bars if bar.data.identity == "second-turn")
         assert all(bar.isVisible() for bar in bars)
         assert any(label.text() == "未完成提示" for label in window.chat.findChildren(QLabel))
         for theme in ("浅色", "深色"):

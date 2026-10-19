@@ -3,20 +3,15 @@
 import json
 
 import pytest
+from reading_fixtures import publish_original
 
-from ultrakb.application.query_views import QuerySelection, QueryView
-from ultrakb.knowledge_scope import legacy_scope
-from ultrakb.state import HashRegistry
+from ultrakb.application.query_views import QuerySelection, resolve_query_views
+from ultrakb.desktop.verification_data import publish_pages, retain_document
+from ultrakb.file_digest import hash_file
 
 
 def selection(kb_dir, versions=()):
-    wiki = kb_dir / "wiki"
-    files = {
-        p.relative_to(wiki).as_posix(): HashRegistry.hash_file(p)
-        for p in wiki.rglob("*")
-        if p.is_file()
-    }
-    return QuerySelection(kb_dir, (QueryView(legacy_scope(kb_dir), None, (), files, 0),))
+    return resolve_query_views(kb_dir)
 
 
 def agent_for(kb_dir):
@@ -44,7 +39,7 @@ async def test_file_activity_observes_metadata_without_parsing_original_json(kb_
     from ultrakb.locks import kb_ingest_lock
 
     original = '{"status":"error","hits":[7]}'
-    (kb_dir / "wiki/sources/note.md").write_text(original)
+    retain_document(kb_dir, "note.md", "note", original)
     events = []
     context = ExecutionContext(on_event=events.append)
     with kb_ingest_lock(kb_dir / ".ultrakb"), context.begin(kb_dir):
@@ -62,8 +57,7 @@ async def test_file_activity_observes_metadata_without_parsing_original_json(kb_
 @pytest.mark.asyncio
 @pytest.mark.parametrize("name", ["部署条件", "Capacity", "operating conditions"])
 async def test_sdk_reads_same_directory_markdown_alias(kb_dir, name):
-    page = kb_dir / "wiki/concepts" / f"{name}.md"
-    page.write_text("A known operating condition.")
+    publish_pages(kb_dir, {f"concepts/{name}.md": b"A known operating condition."})
     agent = agent_for(kb_dir)
     result = await invoke(agent, "read_file", path=f"concepts/{name}")
     assert "A known operating condition." in result
@@ -91,9 +85,9 @@ async def test_sdk_markdown_alias_does_not_guess_or_escape(kb_dir, path):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("change", ["bytes", "symlink", "missing"])
-async def test_sdk_alias_keeps_snapshot_and_filesystem_checks(kb_dir, change):
+async def test_sdk_alias_keeps_committed_bytes_after_working_copy_changes(kb_dir, change):
     page = kb_dir / "wiki/concepts/Capacity.md"
-    page.write_text("Selected fact.")
+    publish_pages(kb_dir, {"concepts/Capacity.md": b"Selected fact."})
     agent = agent_for(kb_dir)
     if change == "bytes":
         page.write_text("Changed fact.")
@@ -103,10 +97,9 @@ async def test_sdk_alias_keeps_snapshot_and_filesystem_checks(kb_dir, change):
             outside = kb_dir / "outside.md"
             outside.write_text("Private fact.")
             page.symlink_to(outside)
-    result = json.loads(await invoke(agent, "read_file", path="concepts/Capacity"))
-    assert result["status"] == "error"
-    if change == "bytes":
-        assert result["reason_code"] == "stale_snapshot"
+    result = await invoke(agent, "read_file", path="concepts/Capacity")
+    assert "Selected fact." in result
+    assert "Changed fact." not in result and "Private fact." not in result
 
 
 def source(kb_dir, *, slides=False, images=()):
@@ -122,7 +115,7 @@ def source(kb_dir, *, slides=False, images=()):
             **({"parts": parts} if slides else {}),
         }
     ]
-    (kb_dir / "wiki/sources/manual.json").write_text(json.dumps(data))
+    publish_original(kb_dir, data)
 
 
 def test_bound_reader_schemas_only_accept_business_arguments(kb_dir):
@@ -160,8 +153,7 @@ async def test_first_catalog_read_uses_the_frozen_source_bytes(kb_dir):
     assert '"pages": "1-1"' in catalog
     (kb_dir / "wiki/sources/manual.json").write_text("[]")
     changed = await invoke(agent, "read_file", path="index.md")
-    assert "changed after selection" in changed
-    assert "start a new question" in changed
+    assert changed == catalog
 
 
 def test_application_rejects_ambiguous_reading_collections(kb_dir):
@@ -199,12 +191,11 @@ async def test_selected_page_returns_image_location_without_an_image_tool(kb_dir
 @pytest.mark.asyncio
 async def test_image_changes_have_actionable_feedback_in_the_storage_reader(kb_dir):
     from ultrakb.agent.tools import read_wiki_image
-    from ultrakb.state import HashRegistry
 
     path = "sources/images/diagram.png"
     image = kb_dir / "wiki" / path
     image.write_bytes(b"original")
-    digest = HashRegistry.hash_file(image)
+    digest = hash_file(image)
     image.write_bytes(b"changed")
     result = read_wiki_image(path, str(kb_dir / "wiki"), expected_digest=digest)
     assert result["type"] == "text"
@@ -223,6 +214,13 @@ async def test_derived_page_read_points_to_original_without_certifying_its_claim
     )
     (kb_dir / "wiki/concepts/rules.md").write_text(
         "---\ntype: Concept\nsources: [summaries/manual.md]\n---\nUnsupported guarantee"
+    )
+    publish_pages(
+        kb_dir,
+        {
+            path: (kb_dir / "wiki" / path).read_bytes()
+            for path in ("summaries/manual.md", "concepts/rules.md")
+        },
     )
     result = await invoke(agent_for(kb_dir), "read_file", path="concepts/rules.md")
     assert '"content_kind": "derived_concept"' in result

@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 
+from ultrakb.api_artifact_reads import artifact_read
 from ultrakb.api_helpers import _resolve_kb, require_bearer_token
 from ultrakb.api_models import DeckListResponse, SkillListResponse
 from ultrakb.application.artifacts import list_artifacts, read_artifact, write_artifact_archive
@@ -22,7 +23,7 @@ async def deck_list_endpoint(
     _: None = Depends(require_bearer_token),
 ) -> DeckListResponse:
     kb_dir = await asyncio.to_thread(_resolve_kb, kb)
-    artifacts = await asyncio.to_thread(list_artifacts, kb_dir)
+    artifacts = await artifact_read(list_artifacts, kb_dir)
     decks = [Path(item.path).name for item in artifacts if item.kind == "幻灯片"]
     return DeckListResponse(decks=[{"name": n} for n in decks])
 
@@ -37,7 +38,7 @@ async def deck_download_endpoint(
         raise HTTPException(status_code=400, detail="Invalid deck name.")
     kb_dir = await asyncio.to_thread(_resolve_kb, kb)
     try:
-        content = await asyncio.to_thread(read_artifact, kb_dir, f"output/decks/{name}/index.html")
+        content = await artifact_read(read_artifact, kb_dir, f"output/decks/{name}/index.html")
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"Deck not found: {name}") from exc
     except ValueError as exc:
@@ -51,7 +52,7 @@ async def skill_list_endpoint(
     _: None = Depends(require_bearer_token),
 ) -> SkillListResponse:
     kb_dir = await asyncio.to_thread(_resolve_kb, kb)
-    artifacts = await asyncio.to_thread(list_artifacts, kb_dir)
+    artifacts = await artifact_read(list_artifacts, kb_dir)
     skills = [Path(item.path).name for item in artifacts if item.kind == "Skill"]
     return SkillListResponse(skills=[{"name": n} for n in skills])
 
@@ -67,7 +68,7 @@ async def skill_archive_endpoint(
     kb_dir = await asyncio.to_thread(_resolve_kb, kb)
     buf = io.BytesIO()
     try:
-        await asyncio.to_thread(write_artifact_archive, kb_dir, f"output/skills/{name}", buf)
+        await artifact_read(write_artifact_archive, kb_dir, f"output/skills/{name}", buf)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"Skill not found: {name}") from exc
     except ValueError as exc:

@@ -17,9 +17,11 @@ def _url_worker(*args):
 
     def fetch(url, root, **kwargs):
         path = root / "raw/article.md"
-        path.parent.mkdir()
+        path.parent.mkdir(exist_ok=True)
         path.write_text("# Privately downloaded source\n", encoding="utf-8")
-        return path
+        from ultrakb.runtime.worker import WaitingForLease
+
+        raise WaitingForLease("Downloaded input is waiting for its next I/O phase")
 
     with patch("ultrakb.url_ingest.fetch_url_to_raw", side_effect=fetch):
         run_unit(*args)
@@ -29,7 +31,7 @@ def _with_observed_input(args, input_action):
     """Exercise prepared-input ownership without needing document generation."""
     from contextlib import contextmanager
 
-    from ultrakb.application.documents import prepared_input
+    from ultrakb.application.storage_ingestion import prepared_input
     from ultrakb.locks import LockCancelled
     from ultrakb.runtime.worker import run_unit
 
@@ -40,7 +42,7 @@ def _with_observed_input(args, input_action):
             raise LockCancelled("Input lifecycle observation completed")
             yield ready  # Retain the actual context-manager interface.
 
-    with patch("ultrakb.application.documents.prepared_input", side_effect=observe):
+    with patch("ultrakb.application.storage_ingestion.prepared_input", side_effect=observe):
         run_unit(*args)
 
 

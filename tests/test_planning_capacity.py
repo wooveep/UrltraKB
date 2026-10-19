@@ -108,11 +108,13 @@ def test_irreducible_planning_catalog_is_retained_when_capacity_is_insufficient(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_retained_summary_reaches_planner_with_every_native_locator(kb_dir, monkeypatch):
+async def test_retained_summary_reaches_planner_with_every_native_locator(
+    kb_dir, monkeypatch, private_compiler_scope
+):
     from ultrakb.agent import compiler, document_summary
     from ultrakb.source_navigation import planning_navigation
 
-    wiki = kb_dir / "wiki"
+    wiki = private_compiler_scope.wiki_dir
     source = wiki / "sources/manual.json"
     atomic_write_text(
         source,
@@ -184,8 +186,17 @@ async def test_retained_summary_reaches_planner_with_every_native_locator(kb_dir
     monkeypatch.setattr("ultrakb.config.resolve_effective_config", lambda *args: (config, {}))
     with executor.activate(), pytest.raises(PlannerInputCaptured):
         await compiler.compile_long_doc(
-            "manual", summary, "document-id", kb_dir, config["model"], navigation=navigation
+            "manual",
+            summary,
+            "document-id",
+            kb_dir,
+            config["model"],
+            navigation=navigation,
+            scope=private_compiler_scope,
         )
     assert summaries_loaded == [True]
     assert executor.calls == 0
     assert source.read_bytes() == original
+
+
+pytest_plugins = ("compiler_scope_fixtures",)

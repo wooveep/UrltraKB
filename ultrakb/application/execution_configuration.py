@@ -116,3 +116,32 @@ def patch_storage_config(
         ):
             _apply_kb_config_patch(root, request)
         return _read_kb_config(root)
+
+
+def repair_storage_config(kb_dir: Path, identity: DatabaseIdentity) -> tuple[str, ...]:
+    """Recover only this format's settings pair, without loading model credentials."""
+    import yaml
+    from dotenv.parser import parse_stream
+
+    from ultrakb.locks import atomic_write_json, durable_unlink
+    from ultrakb.mutation import repair_marker
+
+    root = kb_dir.resolve()
+    lock = configuration_lock_path(root)
+    with read_lifecycle(root, database_identity=identity), file_write_lock(lock):
+        try:
+            _validate_settings_journals(root)
+            messages = recover_pending_journals(root, repairing=True, lock_path=lock)
+            value = yaml.safe_load((root / ".ultrakb/config.yaml").read_text("utf-8"))
+            if value is not None and not isinstance(value, dict):
+                raise ValueError("Configuration must be a mapping")
+            config.validate_runtime_config(value or {}, allow_inherited=True)
+            if (root / ".env").exists():
+                with (root / ".env").open(encoding="utf-8") as stream:
+                    if any(binding.error for binding in parse_stream(stream)):
+                        raise ValueError("Knowledge-base credential file is invalid")
+        except (OSError, ValueError, yaml.YAMLError, RecoveryRequired) as error:
+            atomic_write_json(repair_marker(root), {"error_type": type(error).__name__})
+            raise
+        durable_unlink(repair_marker(root), missing_ok=True)
+        return tuple(messages)

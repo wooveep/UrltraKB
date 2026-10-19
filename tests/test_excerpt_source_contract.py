@@ -4,6 +4,8 @@ import asyncio
 import json
 
 import pytest
+from compile_work_fixtures import accepted_payload
+from reading_fixtures import publish_original
 from test_answer_evidence_regression import agent_for, invoke
 from test_native_table_projection import native_page
 from test_source_qualification import freeze_source
@@ -12,8 +14,11 @@ from ultrakb.agent.document_summary import build_document_summary
 from ultrakb.agent.evidence_payload import project_evidence, slice_evidence
 from ultrakb.agent.source_excerpts import SourceExcerpts
 from ultrakb.agent.source_windows import CompileSourceWindows
+from ultrakb.compile_checkpoints import digest
 from ultrakb.locks import atomic_write_text
 from ultrakb.text_source import read_text_selection
+
+pytest_plugins = ("compile_work_fixtures",)
 
 LITERAL_PATH = "/var/&lt;target&gt;/state"
 VISIBLE_PATH = "/var/<target>/state"
@@ -47,13 +52,16 @@ def test_response_contract_agrees_in_import_and_question(kb_dir, tmp_path, forma
         kb_dir, path, f"Inspect `{expected_path}`.", bundle=LlmCredentialBundle()
     )
     assert result.status == "added", result.message
+    from ultrakb.application.sources import source_inventory
+
+    doc_name = source_inventory(kb_dir)[0]["units"][0]["doc_name"]
     reader = "get_text_content" if qualified else "get_page_content"
     arguments = {"chars": f"0:{len(TABLE)}"} if qualified else {"pages": "1"}
-    delivered = asyncio.run(invoke(agent_for(kb_dir), reader, doc_name="manual", **arguments))
+    delivered = asyncio.run(invoke(agent_for(kb_dir), reader, doc_name=doc_name, **arguments))
     public = json.loads(delivered.split("\n\n", 1)[1].split("\nSource context: ", 1)[0])
     assert len(public.get("native_tables", [])) == int(qualified)
     assert LITERAL_PATH in public["content"]
-    assert expected_path in (kb_dir / "wiki/summaries/manual.md").read_text()
+    assert expected_path in (kb_dir / f"wiki/summaries/{doc_name}.md").read_text()
     assert path.read_bytes() == before
 
 
@@ -72,6 +80,7 @@ def test_response_contract_agrees_in_segmented_compile_and_question(
             native_page(TABLE) if qualified else {"page": 1, "unit_kind": "page", "content": TABLE}
         )
         atomic_write_text(source, json.dumps([page]))
+        publish_original(kb_dir, [page])
         reader_name, arguments = "get_page_content", {"pages": "1"}
     else:
         _, frozen = freeze_source(kb_dir, tmp_path, format, TABLE)
@@ -189,11 +198,11 @@ def test_new_pages_consume_the_same_response_proof(kb_dir, qualified, segmented,
 
 
 @pytest.mark.parametrize("qualified", [True, False])
-def test_saved_summary_response_uses_current_source_proof_without_regeneration(kb_dir, qualified):
-    from types import SimpleNamespace
-
+def test_saved_summary_response_uses_current_source_proof_without_regeneration(
+    kb_dir, qualified, compile_work
+):
     from ultrakb.agent.document_summary import summary_messages
-    from ultrakb.compile_checkpoints import CompileCheckpoints, digest
+    from ultrakb.compile_checkpoints import digest
     from ultrakb.locks import atomic_write_json
 
     source = kb_dir / "wiki/sources/manual.json"
@@ -202,20 +211,24 @@ def test_saved_summary_response_uses_current_source_proof_without_regeneration(k
     before = source.read_bytes()
     saved = {
         "description": "Saved",
-        "sections": [{"id": "section-1", "content": f"Inspect `{VISIBLE_PATH}`."}],
+        "sections": [
+            {
+                "id": "section-1",
+                "parts": [{"kind": "prose", "text": f"Inspect `{VISIBLE_PATH}`.", "refs": []}],
+            }
+        ],
     }
     original_value = json.dumps(saved)
     reader = CompileSourceWindows(kb_dir / "wiki", "manual")
     system = {"role": "system", "content": "Compile"}
     window = next(reader.iter_document_windows(fits=lambda _: True))
-    checkpoints = CompileCheckpoints(
-        kb_dir,
-        SimpleNamespace(task_id="a" * 32, parent_task_id=None, compiler_request_version=2),
-        {"document": "manual"},
-        {"protocol": "summary-json"},
+    checkpoints = compile_work({"document": "manual"}, {"protocol": "summary-json"})
+    checkpoints.save(
+        "summary:1",
+        digest(summary_messages(system, "manual", window, structured=True, request_format=3)),
+        saved,
     )
-    checkpoints.save("summary:1", digest(summary_messages(system, "manual", window)), saved)
-    retained = checkpoints.path.read_bytes()
+    retained = accepted_payload(checkpoints, "summary:1")
 
     async def forbidden(*args):
         raise AssertionError("An accepted result must not regenerate")
@@ -231,16 +244,15 @@ def test_saved_summary_response_uses_current_source_proof_without_regeneration(k
 
     assert VISIBLE_PATH in asyncio.run(compile_saved()).markdown
     assert json.dumps(saved) == original_value and source.read_bytes() == before
-    assert checkpoints.path.read_bytes() == retained
+    assert accepted_payload(checkpoints, "summary:1") == retained
 
 
 @pytest.mark.parametrize("qualified", [True, False])
-def test_saved_short_summary_uses_the_same_proof_without_regeneration(kb_dir, qualified):
-    from types import SimpleNamespace
-
+def test_saved_short_summary_uses_the_same_proof_without_regeneration(
+    kb_dir, qualified, compile_work
+):
     from ultrakb.agent.compiler import _write_summary
     from ultrakb.agent.page_delivery import validate_page_delivery
-    from ultrakb.compile_checkpoints import CompileCheckpoints
     from ultrakb.locks import atomic_write_json
 
     wiki = kb_dir / "wiki"
@@ -251,34 +263,26 @@ def test_saved_short_summary_uses_the_same_proof_without_regeneration(kb_dir, qu
     reader = CompileSourceWindows(wiki, "manual")
     originals = reader.prepare({"reading_locations": {"pages": "1"}}, long=True)
     saved = json.dumps({"description": "Saved", "content": f"Inspect `{VISIBLE_PATH}`."})
-    checkpoints = CompileCheckpoints(
-        kb_dir,
-        SimpleNamespace(task_id="a" * 32, parent_task_id=None, compiler_request_version=2),
-        {"document": "manual"},
-        {"protocol": "summary-page-json"},
-    )
-    checkpoints.save("short-summary", "same-request", saved)
-    retained = checkpoints.path.read_bytes()
+    checkpoints = compile_work({"document": "manual"}, {"protocol": "summary-page-json"})
+    checkpoints.save("short-summary", digest("same-request"), saved)
+    retained = accepted_payload(checkpoints, "summary:1")
     received = json.loads(
         validate_page_delivery(
-            checkpoints.load("short-summary", "same-request"),
+            checkpoints.load("short-summary", digest("same-request")),
             response_protocol="summary-page-json",
             original_excerpts=reader.original_excerpts(originals, long=True),
         )
     )
     _write_summary(wiki, "manual", received["content"], description=received["description"])
     assert VISIBLE_PATH in (wiki / "summaries/manual.md").read_text()
-    assert source.read_text() == TABLE and checkpoints.path.read_bytes() == retained
+    assert source.read_text() == TABLE and accepted_payload(checkpoints, "summary:1") == retained
 
 
 @pytest.mark.parametrize("qualified", [True, False])
 @pytest.mark.parametrize("cached", [True, False])
-def test_page_update_response_uses_the_same_cell_proof(kb_dir, qualified, cached):
-    from types import SimpleNamespace
-
+def test_page_update_response_uses_the_same_cell_proof(kb_dir, qualified, cached, compile_work):
     from ultrakb.agent.page_delivery import validate_page_delivery
     from ultrakb.agent.page_updates import PageUpdate
-    from ultrakb.compile_checkpoints import CompileCheckpoints
     from ultrakb.locks import atomic_write_json
 
     wiki = kb_dir / "wiki"
@@ -299,15 +303,10 @@ def test_page_update_response_uses_the_same_cell_proof(kb_dir, qualified, cached
         ],
     }
     before = json.dumps(value)
-    checkpoints = CompileCheckpoints(
-        kb_dir,
-        SimpleNamespace(task_id="a" * 32, parent_task_id=None, compiler_request_version=2),
-        {"document": "manual"},
-        {"protocol": "page-edits"},
-    )
+    checkpoints = compile_work({"document": "manual"}, {"protocol": "page-edits"})
     if cached:
-        checkpoints.save("page:batch:0", "same-request", value)
-        delivered = checkpoints.load("page:batch:0", "same-request")
+        checkpoints.save("page:batch:0", digest("same-request"), value)
+        delivered = checkpoints.load("page:batch:0", digest("same-request"))
     else:
         delivered = value
     result = json.loads(

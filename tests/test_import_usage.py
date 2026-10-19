@@ -12,7 +12,7 @@ pytest_plugins = ("block_fixtures",)
 
 
 def test_import_reports_consumption_and_dedup_keeps_its_history(kb_dir, tmp_path, block_model):
-    from ultrakb.llm_usage import aggregate_usage
+    from native_usage_fixtures import aggregate_usage
 
     path = tmp_path / "hello.md"
     path.write_text("hello world", encoding="utf-8")
@@ -33,7 +33,7 @@ def test_import_reports_consumption_and_dedup_keeps_its_history(kb_dir, tmp_path
 
 def test_zero_request_task_retains_source_history_after_restart(kb_dir, tmp_path, block_model):
     from ultrakb.application.execution import ExecutionContext
-    from ultrakb.llm_usage_execution import task_usage_receipt
+    from ultrakb.application.task_usage import task_usage_receipt
     from ultrakb.runtime.records import TaskView, UnitResult
     from ultrakb.runtime.tasks import TaskManager
 
@@ -79,8 +79,8 @@ def test_rejected_reprocessing_keeps_the_existing_sources_usage(kb_dir, tmp_path
     from publication_fixtures import publish_document
 
     from ultrakb.application.reprocessing import preview_reprocessing, reprocess_source
+    from ultrakb.application.views import published_scope
     from ultrakb.config import LlmCredentialBundle
-    from ultrakb.source_catalog import read_source
 
     path = tmp_path / "historical.md"
     path.write_text(("参" * 30 + "损坏\n") * 4, encoding="utf-8")
@@ -92,9 +92,9 @@ def test_rejected_reprocessing_keeps_the_existing_sources_usage(kb_dir, tmp_path
             kb_dir, path, "Retained legacy knowledge.", bundle=LlmCredentialBundle()
         )
     assert first.status == "added", first.message
-    from ultrakb.llm_usage import aggregate_usage
+    from native_usage_fixtures import aggregate_usage
 
-    before = read_source(kb_dir, first.source_id)
+    before = published_scope(kb_dir).publication_id
     baseline = aggregate_usage(kb_dir, source_id=first.source_id)
     preview = preview_reprocessing(kb_dir, first.source_id)
     result = reprocess_source(kb_dir, first.source_id, version=preview["version"])
@@ -102,78 +102,19 @@ def test_rejected_reprocessing_keeps_the_existing_sources_usage(kb_dir, tmp_path
     assert result.model_usage["current"]["requests"] == 0
     assert result.model_usage["source_ids"] == [first.source_id]
     assert result.model_usage["cumulative"] == baseline
-    assert read_source(kb_dir, first.source_id) == before
-
-
-def test_unknown_cache_and_duplicate_completion_preserve_known_totals(kb_dir):
-    from ultrakb.llm_usage import aggregate_usage, begin_request, finish_request
-    from ultrakb.llm_usage_execution import import_usage_execution
-
-    with import_usage_execution(kb_dir, "fixture"):
-        identity = begin_request("fixture", "index.summary")
-        response = {
-            "usage": {
-                "input_tokens": 50,
-                "output_tokens": 30,
-                "output_tokens_details": {"reasoning_tokens": 12},
-            }
-        }
-        finish_request(identity, response)
-        finish_request(identity, response)
-        begin_request("fixture", "index.correction")
-    summary = aggregate_usage(kb_dir)
-    assert summary["requests"] == 2 and summary["input_total"] == 50
-    assert summary["total_known"] == 80 and summary["reasoning_output"] == 12
-    assert summary["unknown_fields"]["cached_input"] == 2
-    assert summary["unknown_requests"] == 1 and summary["in_flight_requests"] == 1
-
-
-def test_failed_source_binding_restores_the_execution_context(kb_dir):
-    from ultrakb.llm_usage import active_scope, usage_context
-    from ultrakb.llm_usage_execution import import_usage_execution
-
-    with import_usage_execution(kb_dir, "fixture") as scope:
-        with pytest.raises(ValueError):
-            with usage_context(source_id="a" * 64):
-                pytest.fail("Invalid native identity must fail before entering")
-        assert active_scope() == scope
-    assert active_scope() is None
-
-
-@pytest.mark.parametrize("record_kind", ["execution", "source_history"])
-def test_usage_persistence_rejects_invalid_record_shapes(kb_dir, record_kind):
-    from ultrakb.llm_usage import usage_receipt
-    from ultrakb.llm_usage_execution import import_usage_execution, task_usage_receipt
-    from ultrakb.locks import atomic_write_json
-
-    if record_kind == "execution":
-        with import_usage_execution(kb_dir, "fixture", task_id="a" * 32) as scope:
-            identity = scope.execution_id
-        path = kb_dir / ".ultrakb/usage/executions" / f"{identity}.json"
-        record = json.loads(path.read_text())
-        atomic_write_json(path, record | {"task_id": ["a" * 32]})
-        with pytest.raises(ValueError):
-            task_usage_receipt(kb_dir, "a" * 32)
-    else:
-        path = kb_dir / ".ultrakb/usage/sources" / ("f" * 32 + ".json")
-        atomic_write_json(path, {"history_status": "assumed_complete"})
-        with pytest.raises(ValueError):
-            usage_receipt(kb_dir, source_id="f" * 32)
+    assert published_scope(kb_dir).publication_id == before
 
 
 @pytest.mark.parametrize("outcome", ["failure", "cancel", "truncated", "bad_json", "rollback"])
 def test_model_work_survives_failed_outputs_and_knowledge_rollback(
     kb_dir, live_llm, monkeypatch, outcome
 ):
+    from native_usage_fixtures import aggregate_usage, read_requests
+
     from ultrakb.agent.page_delivery import validate_page_delivery
     from ultrakb.agent.page_response import PageResponseError
-    from ultrakb.llm_usage import (
-        aggregate_usage,
-        begin_request,
-        finish_request,
-        read_requests,
-    )
-    from ultrakb.llm_usage_execution import import_usage_execution
+    from ultrakb.application.execution import ExecutionContext
+    from ultrakb.llm_usage import begin_request, finish_request
     from ultrakb.locks import atomic_write_text, kb_ingest_lock
     from ultrakb.mutation import mutation_scope
 
@@ -193,7 +134,7 @@ def test_model_work_survives_failed_outputs_and_knowledge_rollback(
             response_format={"type": "json_object"},
             max_tokens=64,
         )
-    with import_usage_execution(kb_dir, "delivery_failure"):
+    with ExecutionContext().begin(kb_dir):
         identity = begin_request("deepseek/deepseek-flash", "compile.summary")
         if outcome in {"failure", "cancel"}:
             # Missing historical delivery is a storage input, not a fabricated
@@ -304,35 +245,47 @@ def test_progress_delivery_failure_never_retries_the_model(kb_dir, tmp_path, blo
 def test_index_observer_carries_source_context_into_an_independent_thread(kb_dir):
     from concurrent.futures import ThreadPoolExecutor
 
-    from ultrakb.llm_usage import aggregate_usage, read_requests
-    from ultrakb.llm_usage_execution import import_usage_execution
+    import litellm
+    from native_usage_fixtures import aggregate_usage, read_requests
+    from stream_transport import StreamTransport
+
+    from ultrakb.application.execution import ExecutionContext
     from ultrakb.llm_usage_transport import IndexUsageObserver
 
-    with import_usage_execution(kb_dir, "index_fixture"):
-        observer = IndexUsageObserver()
+    with StreamTransport(lambda *args: {"content": "Local index summary"}) as service:
+        with ExecutionContext().begin(kb_dir):
+            observer = IndexUsageObserver()
 
-        def request():
-            with observer.call("fixture", "index.summary") as call:
-                call.finish({"usage": {"prompt_tokens": 12, "completion_tokens": 3}})
+            def request():
+                with observer.call("openai/gpt-4o-mini", "index.summary") as call:
+                    response = litellm.completion(
+                        model="openai/gpt-4o-mini",
+                        api_key="offline-test-key",
+                        api_base=service.url,
+                        messages=[{"role": "user", "content": "Local fact"}],
+                        num_retries=0,
+                    )
+                    call.finish(response)
 
-        with ThreadPoolExecutor() as pool:
-            pool.submit(request).result()
-    assert aggregate_usage(kb_dir)["input_total"] == 12
+            with ThreadPoolExecutor() as pool:
+                pool.submit(request).result()
+        assert len(service.requests) == 1
+    assert aggregate_usage(kb_dir)["input_total"] > 0
     assert read_requests(kb_dir)[0].stage == "index.summary"
 
 
 def test_index_stage_is_the_operation_even_when_source_mentions_other_stages(kb_dir, block_model):
     import asyncio
 
+    from native_usage_fixtures import read_requests
     from pageindex.config import usage_observer_scope
     from pageindex.index.page_index import toc_detector_single_page
     from pageindex.index.utils import generate_doc_description, generate_node_summary
 
-    from ultrakb.llm_usage import read_requests
-    from ultrakb.llm_usage_execution import import_usage_execution
+    from ultrakb.application.execution import ExecutionContext
     from ultrakb.llm_usage_transport import IndexUsageObserver
 
-    with import_usage_execution(kb_dir, "index_fixture"):
+    with ExecutionContext().begin(kb_dir):
         with usage_observer_scope(IndexUsageObserver()):
             toc_detector_single_page("Correct ONLY this description", model="fixture")
             asyncio.run(generate_node_summary({"text": "Correct ONLY this entry"}, model="fixture"))
@@ -347,26 +300,50 @@ def test_index_stage_is_the_operation_even_when_source_mentions_other_stages(kb_
 def test_two_kbs_are_isolated_and_task_history_recovers_without_new_requests(kb_dir, tmp_path):
     from concurrent.futures import ThreadPoolExecutor
 
-    from ultrakb.llm_usage import aggregate_usage, begin_request, finish_request
-    from ultrakb.llm_usage_execution import import_usage_execution
+    from native_usage_fixtures import aggregate_usage
+    from stream_transport import StreamTransport
+
+    from ultrakb.application.execution import ExecutionContext
+    from ultrakb.application.knowledge_bases import initialize_kb
+    from ultrakb.config import LlmCredentialBundle
+    from ultrakb.llm_execution import (
+        CompletionExecutor,
+        ModelCallPolicy,
+        ModelRequest,
+        RoleBindings,
+    )
     from ultrakb.runtime.records import TaskView
     from ultrakb.runtime.tasks import TaskManager
 
     other = tmp_path / "other-kb"
-    other.mkdir()
+    initialize_kb(other, seed_environment=False)
 
-    def consume(root, count):
-        with import_usage_execution(root, "fixture", task_id="a" * 32):
-            identity = begin_request("fixture", "compile.summary")
-            finish_request(identity, {"usage": {"input_tokens": count, "output_tokens": 2}})
+    def consume(root):
+        with StreamTransport(lambda *args: {"content": "Isolated answer"}) as service:
+            executor = CompletionExecutor(
+                RoleBindings(
+                    "openai/gpt-4o-mini",
+                    LlmCredentialBundle(api_key="offline-test-key", base_url=service.url),
+                ),
+                ModelCallPolicy(max_calls=1, retries=0),
+            )
+            with ExecutionContext(executor=executor, usage_task_id="a" * 32).begin(root):
+                executor.complete(
+                    "compile",
+                    ModelRequest(
+                        [{"role": "user", "content": "Local fact"}],
+                        operation="compile",
+                        stage="summary",
+                    ),
+                )
+            assert len(service.requests) == 1
 
     with ThreadPoolExecutor() as pool:
-        first = pool.submit(consume, kb_dir, 13)
-        second = pool.submit(consume, other, 31)
+        first, second = pool.submit(consume, kb_dir), pool.submit(consume, other)
         first.result()
         second.result()
-    assert aggregate_usage(kb_dir)["input_total"] == 13
-    assert aggregate_usage(other)["input_total"] == 31
+    assert aggregate_usage(kb_dir)["requests"] == 1
+    assert aggregate_usage(other)["requests"] == 1
     history = tmp_path / "task-history"
     history.mkdir()
     view = TaskView(
@@ -378,11 +355,16 @@ def test_two_kbs_are_isolated_and_task_history_recovers_without_new_requests(kb_
     manager = TaskManager(history_dir=history)
     try:
         recovered = manager.get(view.id)
-        assert recovered.model_usage["current"]["input_total"] == 13
+        assert (
+            recovered.model_usage["current"]["input_total"]
+            == aggregate_usage(kb_dir)["input_total"]
+            > 0
+        )
         assert recovered.model_usage["current"]["unknown_requests"] == 0
         assert aggregate_usage(kb_dir)["requests"] == 1
     finally:
         manager.shutdown(stop=True)
+        assert manager.join(10)
 
 
 @pytest.mark.parametrize("segmented", [False, True])
@@ -392,7 +374,9 @@ def test_actual_sdk_retry_and_index_sends_match_the_independent_provider(
 ):
     import httpx
     import litellm
+    from native_usage_fixtures import aggregate_usage, read_requests
 
+    from ultrakb.application.execution import ExecutionContext
     from ultrakb.config import LlmCredentialBundle
     from ultrakb.llm_execution import (
         CompletionExecutor,
@@ -400,8 +384,7 @@ def test_actual_sdk_retry_and_index_sends_match_the_independent_provider(
         ModelRequest,
         RoleBindings,
     )
-    from ultrakb.llm_usage import aggregate_usage, normalize_usage, read_requests
-    from ultrakb.llm_usage_execution import import_usage_execution
+    from ultrakb.llm_usage import normalize_usage
 
     received = []
     credentials = live_llm.credentials
@@ -451,7 +434,7 @@ def test_actual_sdk_retry_and_index_sends_match_the_independent_provider(
     )
     role = operation = "document_index" if segmented else "compile"
     try:
-        with import_usage_execution(kb_dir, "sdk_retry"):
+        with ExecutionContext(executor=executor).begin(kb_dir):
             result = executor.complete(
                 role,
                 ModelRequest(

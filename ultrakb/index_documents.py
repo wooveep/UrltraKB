@@ -6,8 +6,8 @@ from pageindex.backend.input_package import materialize_pages
 from pageindex.index.block_policy import BlockPolicy
 from pageindex.index.page_parts_policy import PagePartsPolicy
 
+from ultrakb.file_digest import hash_file
 from ultrakb.index_location import IndexLocation
-from ultrakb.state import HashRegistry
 
 
 def validate_document(doc: dict, location: IndexLocation, collection: str, doc_id: str) -> None:
@@ -30,7 +30,7 @@ def validate_document(doc: dict, location: IndexLocation, collection: str, doc_i
     if doc["file_path"] != (Path(collection) / f"{doc_id}.{doc_type}").as_posix():
         raise ValueError("Managed source path does not match its document identity")
     source = location.input_path(doc["file_path"])
-    if not source.is_file() or HashRegistry.hash_file(source) != metadata["source_digest"]:
+    if not source.is_file() or hash_file(source) != metadata["source_digest"]:
         raise ValueError("Managed document input digest changed")
     pages = doc.get("pages")
     if pages is None:

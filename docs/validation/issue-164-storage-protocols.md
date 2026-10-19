@@ -1,11 +1,17 @@
 # Issue 164: v2 storage protocol development
 
-Status: **development foundation only; issue 164 is not complete and must stay open.**
-The CLI, desktop, HTTP, compiler and existing knowledge bases still use the
-previous storage implementation. No public creation path enables format 2.
-These modules are the new-format test factory permitted before joint integration
-by [issue 164](https://github.com/wooveep/UrltraKB/issues/164), not a migration or
-compatibility reader.
+Status on 2026-10-20: **P8 implementation is enabled; final release verification
+is in progress and issue 164 remains open.** New knowledge bases, compiler,
+CLI, desktop and HTTP now use the shared SQLite/CAS application chain. Old
+formats are refused; there is no data migration, compatibility reader or dual
+write. The compiler, source readers, conversations, generators, tasks and
+maintenance no longer use v1 registries, snapshots or private index databases.
+
+This document records the development history. Statements below about pending
+integration or inactive factories describe their individual batch at that time;
+they are not the current activation state. The coverage migration is recorded in
+[storage-cutover-tests.md](../storage-cutover-tests.md); current user operations
+are described in [storage-maintenance.md](../storage-maintenance.md).
 
 ## Implemented interfaces
 

@@ -8,6 +8,9 @@ from ultrakb.application.pages import read_page, save_page
 def test_editor_retains_metadata_and_rejects_a_stale_draft(kb_dir):
     page = kb_dir / "wiki/concepts/attention.md"
     page.write_text("---\ntype: Concept\ndescription: 注意力\n---\nOriginal\n")
+    from publication_read_inputs import publish_fixture
+
+    publish_fixture(kb_dir)
     opened = read_page(kb_dir, "concepts/attention")
     assert opened.body == "Original\n"
 
@@ -25,15 +28,21 @@ def test_editor_retains_metadata_and_rejects_a_stale_draft(kb_dir):
 def test_corrupt_recovery_record_blocks_saving_and_retains_evidence(kb_dir):
     page = kb_dir / "wiki/concepts/attention.md"
     page.write_text("Original\n")
-    opened = read_page(kb_dir, "concepts/attention")
-    journal = kb_dir / ".ultrakb/journal/broken.json"
-    journal.parent.mkdir()
-    journal.write_text("{incomplete")
+    from publication_read_inputs import publish_fixture
 
+    publish_fixture(kb_dir)
+    opened = read_page(kb_dir, "concepts/attention")
+    import json
+
+    from ultrakb.storage.database import open_database
+
+    with open_database(kb_dir) as db, db.transaction() as connection:
+        connection.execute(
+            "UPDATE ukb_meta SET required_capabilities = ?", (json.dumps(["unknown-writer"]),)
+        )
     for _ in range(2):
-        with pytest.raises(RuntimeError, match="needs repair"):
+        with pytest.raises(ValueError, match="Unsupported knowledge-base storage"):
             save_page(kb_dir, "concepts/attention", "Replacement\n", version=opened.version)
-        assert journal.read_text() == "{incomplete"
         assert page.read_text() == "Original\n"
 
 
@@ -128,8 +137,6 @@ def test_page_deletion_rejects_a_stale_publication_or_page_version(kb_dir, chang
 
 
 def test_page_deletion_rejects_an_old_generation_without_writing(kb_dir):
-    import shutil
-
     from publication_read_inputs import publish_fixture
 
     from ultrakb.application.pages import delete_page
@@ -140,7 +147,12 @@ def test_page_deletion_rejects_an_old_generation_without_writing(kb_dir):
     opened = delete_page(kb_dir, "concepts/first", dry_run=True)
     previous = kb_dir.with_name(kb_dir.name + "-previous")
     kb_dir.rename(previous)
-    shutil.copytree(previous, kb_dir)
+    from ultrakb.application.knowledge_bases import initialize_kb
+
+    initialize_kb(kb_dir, seed_environment=False)
+    from ultrakb.desktop.verification_data import publish_pages
+
+    publish_pages(kb_dir, {"concepts/first.md": b"Retain this page.\n"})
 
     result = delete_page(
         kb_dir,
@@ -152,24 +164,34 @@ def test_page_deletion_rejects_an_old_generation_without_writing(kb_dir):
     assert target.read_text() == "Retain this page.\n"
 
 
-def test_page_deletion_rechecks_public_identity_after_waiting_for_a_writer(kb_dir):
+def test_page_deletion_rechecks_public_identity_before_its_commit(kb_dir, monkeypatch):
     import threading
-    from concurrent.futures import ThreadPoolExecutor, TimeoutError
+    from concurrent.futures import ThreadPoolExecutor
 
     from publication_read_inputs import publish_fixture
 
     from ultrakb.application.pages import delete_page
-    from ultrakb.locks import kb_ingest_lock
+    from ultrakb.storage.knowledge_store import KnowledgeStore
 
     target = kb_dir / "wiki/concepts/first.md"
     target.write_text("Retain this page.\n")
     (kb_dir / "wiki/concepts/second.md").write_text("Other page.\n")
     publish_fixture(kb_dir)
     opened = delete_page(kb_dir, "concepts/first", dry_run=True)
-    entered = threading.Event()
+    prepared, release = threading.Event(), threading.Event()
+    publish = KnowledgeStore.publish
+    owner = []
+
+    def competing_publish(store, revision, **kwargs):
+        if owner and threading.get_ident() == owner[0]:
+            prepared.set()
+            assert release.wait(5)
+        return publish(store, revision, **kwargs)
+
+    monkeypatch.setattr(KnowledgeStore, "publish", competing_publish)
 
     def delete():
-        entered.set()
+        owner.append(threading.get_ident())
         return delete_page(
             kb_dir,
             "concepts/first",
@@ -178,11 +200,14 @@ def test_page_deletion_rechecks_public_identity_after_waiting_for_a_writer(kb_di
         )
 
     with ThreadPoolExecutor(max_workers=1) as pool:
-        with kb_ingest_lock(kb_dir / ".ultrakb"):
-            pending = pool.submit(delete)
-            assert entered.wait(3)
-            with pytest.raises(TimeoutError):
-                pending.result(0.1)
-            save_page(kb_dir, "concepts/second", "Concurrent public knowledge.\n")
-        assert pending.result(3)["status"] == "conflict"
+        pending = pool.submit(delete)
+        try:
+            assert prepared.wait(5)
+            assert (
+                save_page(kb_dir, "concepts/second", "Concurrent public knowledge.\n").status
+                == "saved"
+            )
+        finally:
+            release.set()
+        assert pending.result(5)["status"] == "conflict"
     assert target.read_text() == "Retain this page.\n"

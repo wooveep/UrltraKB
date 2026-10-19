@@ -1,109 +1,100 @@
-"""Conversation commit rules through real storage and local error transport."""
+"""Native conversation commits retain authored history and pending submissions."""
 
 import pytest
 from error_transport import ErrorTransport
+from native_usage_fixtures import read_requests
+from test_storage_questions import question_knowledge
 
-from ultrakb import config
-from ultrakb.agent.chat_session import ChatSession, load_session
-from ultrakb.application.connection_capacity import template_capacity
-from ultrakb.application.connection_templates import CONNECTION_TEMPLATES
-from ultrakb.application.conversations import continue_conversation
-from ultrakb.llm_usage import read_requests
-from ultrakb.locks import atomic_write_text
+from ultrakb.application.conversations import continue_conversation, read_conversation
+from ultrakb.application.views import storage_scope
+from ultrakb.config import load_config, save_config
+from ultrakb.storage.session_store import SessionStore
 
 pytestmark = pytest.mark.integration
 
 
 @pytest.mark.parametrize("assistant_text", ["", " \n\t"])
-def test_unfinished_commit_keeps_pending_submission_and_authored_history(kb_dir, assistant_text):
-    session = ChatSession.new(kb_dir, "deepseek/deepseek-flash", "en")
-    session.title = "用户手工保留的标题"
-    session.record_turn("作者保存的原文问题", "作者保存的核对记录", [])
-    original = session.turns[0]
+def test_unfinished_commit_keeps_pending_submission_and_authored_history(tmp_path, assistant_text):
+    root, identity, _ = question_knowledge(tmp_path)
+    store = SessionStore(root, identity)
+    store.create("authored", model="openai/gpt-4o-mini", language="en", title="用户手工保留的标题")
+    store.append_exchange("authored", "original", "作者保存的原文问题", "作者保存的核对记录")
     question = "  保留换行\n以及原始问题  "
-    attempt = session.begin_attempt(question, identity="waiting-answer", submission_order=7)
-    before = session.to_dict()
-    saved = session.path.read_bytes()
-
-    with pytest.raises(ValueError, match="committed exchange requires.*text"):
-        session.record_turn(question, assistant_text, [], attempt_id=attempt)
-
-    assert session.to_dict() == before
-    assert session.path.read_bytes() == saved
-    restored = load_session(kb_dir, session.id)
-    assert restored.turns == [original]
-    assert restored.title == "用户手工保留的标题"
-    assert restored.incomplete == [
-        {"id": attempt, "after_turn": 1, "message": question, "order": 7}
-    ]
+    store.queue_submission(
+        "authored", "waiting-answer", question, view_id="legacy", order=7, after_turn=1
+    )
+    before = read_conversation(root, "authored", scope=storage_scope(root, identity))
+    with pytest.raises(ValueError, match="committed.*original"):
+        store.append_exchange(
+            "authored", "unfinished", question, assistant_text, attempt_id="waiting-answer"
+        )
+    after = read_conversation(root, "authored", scope=storage_scope(root, identity))
+    assert after == before
+    assert after.turns == (("作者保存的原文问题", "作者保存的核对记录"),)
+    assert after.title == "用户手工保留的标题"
+    assert after.incomplete == ((1, question),)
 
 
 @pytest.mark.asyncio
-async def test_explicit_retries_after_real_http_errors_keep_one_pending_original(
-    kb_dir, tmp_path, monkeypatch, record_property
-):
-    global_dir = tmp_path / "isolated-global"
-    monkeypatch.setattr(config, "GLOBAL_CONFIG_DIR", global_dir)
-    monkeypatch.setattr(config, "GLOBAL_CONFIG_PATH", global_dir / "global.yaml")
-    for name in ("LLM_API_KEY", "OPENAI_API_KEY", "DEEPSEEK_API_KEY", "OPENAI_API_BASE"):
-        monkeypatch.delenv(name, raising=False)
-    monkeypatch.setenv("LITELLM_LOCAL_MODEL_COST_MAP", "true")
-    atomic_write_text(kb_dir / "wiki/index.md", "# Knowledge\nSee sources/manual.md.")
-    atomic_write_text(kb_dir / "wiki/sources/manual.md", "An authored original measurement.")
-
-    session = ChatSession.new(kb_dir, "deepseek/deepseek-flash", "en")
-    session.title = "保留人工标题"
-    session.record_turn("人工保存的原始问题", "人工核对的历史记录", [])
-    original = session.turns[0]
-    question = "  Read sources/manual.md.\nPreserve this exact submitted question.  "
-    attempt = "retry-the-original-submission"
+async def test_explicit_retries_after_real_http_errors_keep_one_pending_original(tmp_path):
+    root, identity, _ = question_knowledge(tmp_path)
+    store = SessionStore(root, identity)
+    store.create("retry", model="openai/gpt-4o-mini", language="en", title="保留人工标题")
+    store.append_exchange("retry", "original", "人工保存的原始问题", "人工核对的历史记录")
+    original = store.turns("retry")
+    question = "  Read sources/fixture.md.\nPreserve this exact submitted question.  "
+    config_path = root / ".ultrakb/config.yaml"
+    save_config(
+        config_path,
+        {**load_config(config_path), "model_policy": {"max_calls": 3, "retries": 0, "backoff": 0}},
+    )
     results = []
     with ErrorTransport(status=401) as service:
-        config.save_config(
-            kb_dir / ".ultrakb/config.yaml",
-            {
-                "model": "deepseek/deepseek-flash",
-                "language": "en",
-                "model_capacity": template_capacity(CONNECTION_TEMPLATES[2]),
-                "model_policy": {"max_calls": 3, "retries": 0, "backoff": 0},
-                "role_generation": {"answer": {"max_tokens": 128, "reasoning_effort": "none"}},
-            },
+        (root / ".env").write_text(
+            f"LLM_API_KEY=offline-error-test-key\nOPENAI_API_BASE={service.url}\n"
         )
-        atomic_write_text(
-            kb_dir / ".env",
-            f"LLM_API_KEY=offline-error-test-key\nOPENAI_API_BASE={service.url}\n",
-        )
-        for explicit_retry in range(2):
+        for retry in range(2):
             result = await continue_conversation(
-                kb_dir,
+                root,
                 question,
-                session_id=session.id,
-                attempt_id=attempt,
+                session_id="retry",
+                attempt_id="same-original",
                 submission_order=7,
+                scope=storage_scope(root, identity),
             )
             results.append(result)
-            assert result.status == "failed" and not result.answer
-            assert len(service.requests) == explicit_retry + 1
-            restored = load_session(kb_dir, session.id)
-            assert restored.turn_count == 1
-            assert restored.turns == [original]
-            assert restored.incomplete == [
-                {"id": attempt, "after_turn": 1, "message": question, "order": 7}
-            ]
-            if explicit_retry == 0:
-                restored.title = "两次尝试之间人工修改的标题"
-                restored.save()
-            else:
-                assert restored.title == "两次尝试之间人工修改的标题"
-        assert all(request["path"] == "/v1/chat/completions" for request in service.requests)
-        record_property("http_sends", len(service.requests))
-        record_property("successful_model_responses", 0)
-
-    records = read_requests(kb_dir)
+            assert result.status == "failed" and not result.answer, (result.status, result.error)
+            assert len(service.requests) == retry + 1
+            history = read_conversation(root, "retry", scope=storage_scope(root, identity))
+            assert store.turns("retry") == original
+            assert history.title == "保留人工标题"
+            assert history.incomplete == ((1, question),)
+    records = read_requests(root)
     assert len(records) == 2
     assert len({record.execution_id for record in records}) == 2
     assert all(record.send_status == "sent" and record.state == "failed" for record in records)
-    assert all(record.usage_status == "unknown" for record in records)
     assert all(record.input_total is None and record.output_total is None for record in records)
-    assert [result.model_usage["current"]["requests"] for result in results] == [1, 1]
-    assert [result.model_usage["current"]["unknown_requests"] for result in results] == [1, 1]
+    assert [result.model_usage["current"]["actual_sends"] for result in results] == [1, 1]
+
+
+@pytest.mark.asyncio
+async def test_explicit_retry_keeps_the_original_submission_budget(tmp_path):
+    root, identity, _ = question_knowledge(tmp_path)
+    path = root / ".ultrakb/config.yaml"
+    save_config(
+        path, {**load_config(path), "model_policy": {"max_calls": 2, "retries": 0, "backoff": 0}}
+    )
+    with ErrorTransport(status=503) as service:
+        (root / ".env").write_text(f"LLM_API_KEY=offline-test-key\nOPENAI_API_BASE={service.url}\n")
+        for retry in range(3):
+            result = await continue_conversation(
+                root,
+                "Keep this exact question.",
+                new_session_id="bounded-retry",
+                attempt_id="bounded-submission",
+                scope=storage_scope(root, identity),
+            )
+            assert result.status != "completed"
+            assert len(service.requests) == min(retry + 1, 2)
+        assert result.model_usage["current"]["actual_sends"] == 0
+    assert len(read_requests(root)) == 2

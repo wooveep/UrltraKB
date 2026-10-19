@@ -103,31 +103,6 @@ def verify_figure(wiki: Path, figure: FigureOccurrence) -> None:
         raise PageResponseError("figure_changed_asset", f"Changed original: {figure.asset_path}")
 
 
-def source_identity(kb_dir: Path | None, doc_name: str, *, inputs=None) -> dict:
-    """Reuse existing processing/source identities; legacy fixtures have no such IDs."""
-    if kb_dir is None:
-        return {}
-    from ultrakb.ingest_records import ImportUnit, UnitRevision
-    from ultrakb.source_catalog import read_record
-
-    matches = []
-    for path in (kb_dir / ".ultrakb/catalog/units").glob("*.json"):
-        unit = read_record(kb_dir, "units", path.stem, ImportUnit)
-        if unit.doc_name == doc_name:
-            identity = inputs.get(unit.unit_id) if inputs is not None else unit.target_revision_id
-            if identity:
-                revision = read_record(kb_dir, "unit-revisions", identity, UnitRevision)
-                matches.append(
-                    {
-                        "source_revision_id": revision.source_revision_id,
-                        "processing_revision_id": revision.unit_revision_id,
-                    }
-                )
-    if len(matches) > 1:
-        raise PageResponseError("figure_ambiguous_source", "Multiple processing units match")
-    return matches[0] if matches else {}
-
-
 def freeze_figures(
     wiki: Path, source_path: str, raw, identity: dict, *, destination: Path | None = None
 ) -> list[FigureOccurrence]:

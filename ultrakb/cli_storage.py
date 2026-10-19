@@ -15,6 +15,7 @@ from ultrakb.application.storage_maintenance import (
     discard_storage_candidate,
     list_storage_candidates,
     preview_storage_maintenance,
+    repair_knowledge_navigation,
     repair_knowledge_receipts,
     repair_knowledge_usage,
     restore_knowledge,
@@ -109,6 +110,14 @@ def collect(ctx, **options):
 def repair(ctx, **options):
     """Accept retained model responses and usage without sending requests again."""
     _run(ctx, repair_knowledge_receipts, **options)
+
+
+@storage.command("repair-navigation")
+@_identity
+@click.pass_context
+def repair_navigation(ctx, **options):
+    """Rebuild the current publication's deterministic navigation without model sends."""
+    _run(ctx, repair_knowledge_navigation, **options)
 
 
 @storage.command("backup")

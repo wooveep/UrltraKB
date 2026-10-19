@@ -6,7 +6,9 @@ from ultrakb.cli import save_exploration
 def test_save_exploration_cjk_question_gets_hash_slug(tmp_path):
     """CJK / punctuation-only questions must not collapse to an empty slug."""
     kb_dir = tmp_path
-    (kb_dir / "wiki").mkdir()
+    from ultrakb.application.knowledge_bases import initialize_kb
+
+    initialize_kb(kb_dir, seed_environment=False)
     p = save_exploration(kb_dir, "这是什么问题？", "answer text")
     assert p is not None
     assert p.name != ".md"
@@ -16,7 +18,9 @@ def test_save_exploration_cjk_question_gets_hash_slug(tmp_path):
 def test_save_exploration_same_question_uniquifies(tmp_path):
     """Two saves of the same question must not overwrite each other."""
     kb_dir = tmp_path
-    (kb_dir / "wiki").mkdir()
+    from ultrakb.application.knowledge_bases import initialize_kb
+
+    initialize_kb(kb_dir, seed_environment=False)
     p1 = save_exploration(kb_dir, "What is RAG?", "answer 1")
     p2 = save_exploration(kb_dir, "What is RAG?", "answer 2")
     assert p1 != p2
@@ -27,7 +31,9 @@ def test_save_exploration_same_question_uniquifies(tmp_path):
 def test_save_exploration_quote_in_question_safe_yaml(tmp_path):
     """A question containing a double-quote must not break frontmatter."""
     kb_dir = tmp_path
-    (kb_dir / "wiki").mkdir()
+    from ultrakb.application.knowledge_bases import initialize_kb
+
+    initialize_kb(kb_dir, seed_environment=False)
     p = save_exploration(kb_dir, 'What does "RAG" mean?', "answer")
     content = p.read_text(encoding="utf-8")
     import yaml as _yaml
@@ -40,14 +46,18 @@ def test_save_exploration_quote_in_question_safe_yaml(tmp_path):
 
 def test_save_exploration_empty_answer_returns_none(tmp_path):
     kb_dir = tmp_path
-    (kb_dir / "wiki").mkdir()
+    from ultrakb.application.knowledge_bases import initialize_kb
+
+    initialize_kb(kb_dir, seed_environment=False)
     assert save_exploration(kb_dir, "any question", "") is None
 
 
 def test_save_exploration_strips_ghost_wikilinks(tmp_path):
     """Ghost wikilinks to non-existent targets should be stripped (matching CLI)."""
     kb_dir = tmp_path
-    (kb_dir / "wiki").mkdir()
+    from ultrakb.application.knowledge_bases import initialize_kb
+
+    initialize_kb(kb_dir, seed_environment=False)
     p = save_exploration(kb_dir, "What is X?", "see [[nonexistent_page]] for details")
     content = p.read_text(encoding="utf-8")
     assert "[[nonexistent_page]]" not in content

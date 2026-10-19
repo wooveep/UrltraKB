@@ -20,6 +20,9 @@ from ultrakb.agent.tools import read_kb_file
 
 @pytest.fixture
 def kb_root(tmp_path: Path) -> str:
+    from kb_fixtures import mark_current_kb
+
+    mark_current_kb(tmp_path)
     return str(tmp_path)
 
 
@@ -49,7 +52,7 @@ def test_rejects_absolute_path_outside_kb(kb_root: str) -> None:
 def test_rejects_dotultrakb_config(kb_root: str, tmp_path: Path) -> None:
     """The .ultrakb/ directory holds the user's model config and is the
     canonical place an attacker would aim for. Must be inaccessible."""
-    (tmp_path / ".ultrakb").mkdir()
+    (tmp_path / ".ultrakb").mkdir(exist_ok=True)
     (tmp_path / ".ultrakb" / "config.yaml").write_text("model: gpt-5.4\n")
     result = read_kb_file(".ultrakb/config.yaml", kb_root)
     assert result.startswith("Access denied")
@@ -90,6 +93,9 @@ def test_reads_wiki_file(kb_root: str, tmp_path: Path) -> None:
     (tmp_path / "wiki").mkdir()
     target = tmp_path / "wiki" / "index.md"
     target.write_text("# Wiki content", encoding="utf-8")
+    from ultrakb.desktop.verification_data import publish_pages
+
+    publish_pages(tmp_path, {"index.md": b"# Wiki content"})
     result = read_kb_file("wiki/index.md", kb_root)
     assert result == "# Wiki content"
 
@@ -101,6 +107,10 @@ def test_reads_output_file(kb_root: str, tmp_path: Path) -> None:
     out = tmp_path / "output" / "decks" / "foo"
     out.mkdir(parents=True)
     (out / "index.html").write_text("<html>deck content</html>", encoding="utf-8")
+    from artifact_fixtures import publish_artifacts
+
+    publish_artifacts(tmp_path, out)
+    (out / "index.html").unlink()
     result = read_kb_file("output/decks/foo/index.html", kb_root)
     assert "deck content" in result
 

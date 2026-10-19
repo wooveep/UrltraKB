@@ -12,6 +12,7 @@ import asyncio
 from dataclasses import asdict
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from pydantic import Field
 from starlette.concurrency import run_in_threadpool
 
 from ultrakb.api_helpers import _resolve_kb, require_bearer_token
@@ -100,6 +101,10 @@ async def document_source_endpoint(
     request: DocumentSourceRequest,
     _: None = Depends(require_bearer_token),
 ) -> DocumentSourceResponse:
+    if request.unit_revision_id and (request.publication_id or request.knowledge_revision_id):
+        raise HTTPException(
+            status_code=400, detail="Select a retained input separately from a publication"
+        )
     kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
     scope = await resolve_api_read_scope(
         kb_dir,
@@ -114,6 +119,7 @@ async def document_source_endpoint(
             request.hash,
             source_revision_id=request.source_revision_id,
             unit_id=request.unit_id,
+            unit_revision_id=request.unit_revision_id,
             cells=request.cells,
             pages=request.pages,
             chars=request.chars,
@@ -132,15 +138,52 @@ async def document_source_endpoint(
     return DocumentSourceResponse(**result)
 
 
-class RetryWorksheetRequest(ViewRequest):
-    kb: str
-    source_id: str
-    unit_id: str
+@documents_router.get("/api/v1/document/source-image")
+async def document_source_image(
+    kb: str,
+    source_id: str,
+    unit_revision_id: str,
+    path: str,
+    _: None = Depends(require_bearer_token),
+):
+    from ultrakb.application.storage_sources import read_source_image
+
+    root = await asyncio.to_thread(_resolve_kb, kb)
+    scope = await resolve_api_scope(root, None)
+    assert scope.knowledge is not None
+    try:
+        content, media_type = await run_in_threadpool(
+            read_source_image,
+            root,
+            source_id,
+            unit_revision_id,
+            path,
+            identity=scope.knowledge.identity,
+        )
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Retained source image unavailable") from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail="Invalid retained source selection") from error
+    return Response(
+        content,
+        media_type=media_type,
+        headers={
+            "X-UltraKB-Unit-Revision-ID": unit_revision_id,
+            "Content-Security-Policy": "sandbox",
+        },
+    )
 
 
 class RetrySourceRequest(ViewRequest):
     kb: str
     source_id: str
+    source_revision_id: str | None = None
+    unit_revision_id: str | None = None
+    retry_failed_response: bool = Field(default=False, strict=True)
+
+
+class RetryWorksheetRequest(RetrySourceRequest):
+    unit_id: str
 
 
 @documents_router.post("/api/v1/document/retry")
@@ -157,6 +200,9 @@ async def retry_source_endpoint(
                 root,
                 request.source_id,
                 scope=await resolve_api_scope(root, request.view_id),
+                source_revision_id=request.source_revision_id,
+                unit_revision_id=request.unit_revision_id,
+                retry_failed_response=request.retry_failed_response,
             )
         )
     except (OSError, ValueError) as exc:
@@ -174,7 +220,14 @@ async def retry_worksheet_endpoint(
     try:
         return asdict(
             await run_in_threadpool(
-                retry_worksheet, kb_dir, request.source_id, request.unit_id, scope=scope
+                retry_worksheet,
+                kb_dir,
+                request.source_id,
+                request.unit_id,
+                scope=scope,
+                source_revision_id=request.source_revision_id,
+                unit_revision_id=request.unit_revision_id,
+                retry_failed_response=request.retry_failed_response,
             )
         )
     except (OSError, ValueError) as exc:

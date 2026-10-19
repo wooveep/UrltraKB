@@ -130,12 +130,18 @@ async def test_withdrawal_during_model_wait_retains_response_and_stops_following
 async def test_withdrawal_during_index_wait_prevents_following_index_sends(tmp_path):
     from test_storage_indexing import indexing_response
 
-    from ultrakb.config import save_config
+    from ultrakb.config import load_config, save_config
 
     root, identity, unit = compile_input(
         tmp_path, segmented=True, body_text="# Fixture\nThe value is 17.\n"
     )
-    save_config(root / ".ultrakb/config.yaml", {"model_policy": {"max_calls": 10, "retries": 0}})
+    save_config(
+        root / ".ultrakb/config.yaml",
+        {
+            **load_config(root / ".ultrakb/config.yaml"),
+            "model_policy": {"max_calls": 10, "retries": 0},
+        },
+    )
     scope, removed = storage_scope(root, identity), []
 
     def respond(request, index):

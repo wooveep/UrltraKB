@@ -1,20 +1,21 @@
 """CLI watch retains its entry-point semantics and stops unsafe subscriptions."""
 
 import importlib
-import shutil
+import os
 
 import pytest
 from click.testing import CliRunner
 
+from ultrakb.application.knowledge_bases import initialize_kb
+from ultrakb.application.sources import source_inventory
 from ultrakb.mutation import RecoveryRequired
-from ultrakb.state import HashRegistry
 
 cli_module = importlib.import_module("ultrakb.cli")
 
 
-@pytest.mark.parametrize("failure", ["repair", "replacement"])
+@pytest.mark.parametrize("failure", ["repair", "replacement", "database-replacement"])
 def test_cli_watch_stops_before_later_files_after_fatal_failure(kb_dir, monkeypatch, failure):
-    import ultrakb.agent.compiler as compiler
+    import ultrakb.application.storage_compilation as compiler
     import ultrakb.watcher as watcher
 
     first = kb_dir / "raw/first.md"
@@ -23,7 +24,7 @@ def test_cli_watch_stops_before_later_files_after_fatal_failure(kb_dir, monkeypa
     later.write_text("# Later\n", encoding="utf-8")
     calls = []
 
-    async def compile_document(*args, **kwargs):
+    def compile_document(*args, **kwargs):
         calls.append(args)
         raise RecoveryRequired(kb_dir)
 
@@ -31,16 +32,23 @@ def test_cli_watch_stops_before_later_files_after_fatal_failure(kb_dir, monkeypa
         if failure == "replacement":
             old = kb_dir.with_name("previous")
             kb_dir.rename(old)
-            shutil.copytree(old, kb_dir)
+            initialize_kb(kb_dir, seed_environment=False)
+        elif failure == "database-replacement":
+            replacement = kb_dir.with_name("replacement")
+            initialize_kb(replacement, seed_environment=False)
+            os.replace(kb_dir / ".ultrakb", kb_dir.with_name("old-state"))
+            os.replace(replacement / ".ultrakb", kb_dir / ".ultrakb")
         callback([str(first), str(later)])
         assert kwargs["cancelled"]()
         # Late delivery cannot revive a stopped subscription.
         callback([str(later)])
 
-    monkeypatch.setattr(compiler, "compile_short_doc", compile_document)
+    monkeypatch.setattr(compiler, "materialize_inputs", compile_document)
     monkeypatch.setattr(watcher, "watch_directory", observe)
     result = CliRunner().invoke(cli_module.cli, ["--kb-dir", str(kb_dir), "watch"])
     assert result.exception is None, result.output
     assert "Watching stopped" in result.output
     assert len(calls) == (1 if failure == "repair" else 0)
-    assert HashRegistry(kb_dir / ".ultrakb/hashes.json").all_entries() == {}
+    sources = source_inventory(kb_dir)
+    assert len(sources) == (1 if failure == "repair" else 0)
+    assert all(not item["name"].endswith("later.md") for item in sources)

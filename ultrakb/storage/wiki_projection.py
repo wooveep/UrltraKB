@@ -27,8 +27,10 @@ class ProjectionConflict(ValueError):
     """Prepare a new plan from the last confirmed worktree baseline."""
 
 
-def projection_lock(root, *, cancelled=None):
-    return file_write_lock(root / ".ultrakb/wiki-projection.lock", cancelled=cancelled)
+def projection_lock(root, *, cancelled=None, on_wait=None):
+    return file_write_lock(
+        root / ".ultrakb/wiki-projection.lock", cancelled=cancelled, on_wait=on_wait
+    )
 
 
 def _json(value):

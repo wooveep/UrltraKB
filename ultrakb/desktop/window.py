@@ -83,9 +83,7 @@ class Workbench(QMainWindow):
 
     @property
     def scope(self):
-        from ultrakb.knowledge_scope import live_scope
-
-        return live_scope(self.kb, self.view_id) if self.kb and self.view_id else None
+        return self._knowledge_scope
 
     @property
     def read_scope(self):
@@ -246,11 +244,15 @@ class Workbench(QMainWindow):
                 return
             if error:
                 self._pending_open = None
-                from ultrakb.desktop.publication_baseline import offer_baseline
-
-                if offer_baseline(self, path, error, request_id, workspace=workspace):
-                    return
                 self._opened(None, error, attempted=path)
+                return
+
+            from ultrakb.lifecycle import current_generation
+            from ultrakb.mutation import RecoveryRequired
+
+            try:
+                generation = current_generation(path)
+            except (OSError, ValueError, RecoveryRequired):
                 return
 
             def current():
@@ -261,7 +263,7 @@ class Workbench(QMainWindow):
                     return (
                         request_id == self._open_request_id
                         and path not in self._deleting_kbs
-                        and current_generation(path) == value.scope.publication.generation
+                        and current_generation(path) == generation
                     )
                 except (OSError, ValueError, RecoveryRequired):
                     return False

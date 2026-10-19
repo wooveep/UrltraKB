@@ -50,10 +50,11 @@ def test_unrelated_documents_share_the_ordinary_wiki(kb_dir, import_note):
 def test_titles_never_create_product_catalogs_or_gate_import(
     kb_dir, import_note, explicit_scope, title
 ):
+    from native_catalog_fixtures import read_source
+
     from ultrakb.application.documents import import_document
     from ultrakb.documents import read_document_source
     from ultrakb.knowledge_scope import live_scope
-    from ultrakb.source_catalog import read_source
 
     scope = live_scope(kb_dir) if explicit_scope else None
     first = import_note("notes.pdf", title + "\nA documented observation.", scope=scope)
@@ -61,7 +62,7 @@ def test_titles_never_create_product_catalogs_or_gate_import(
     assert first.status == second.status == "added"
     assert first.units[0].view_id == second.units[0].view_id == "legacy"
     source = read_source(kb_dir, first.source_id)
-    assert not {"annotation_id", "family_id"} & source.model_dump().keys()
+    assert not {"annotation_id", "family_id"} & vars(source).keys()
     assert "version_metadata" not in read_document_source(kb_dir, first.source_id)
     for collection in (
         "products",

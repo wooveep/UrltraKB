@@ -380,8 +380,22 @@ async def test_corrupt_rich_original_never_falls_back_to_navigation_or_markdown(
         raise AssertionError("Damaged originals must fail before a model send")
 
     monkeypatch.setattr("litellm.acompletion", forbidden)
-    with pytest.raises(CompilationIncomplete, match="document_summary_reader_invalid"):
-        await compile_long_doc("manual", summary, "id", kb_dir, "test-model", navigation=[])
+    from ultrakb.knowledge_scope import KnowledgeScope
+    from ultrakb.locks import PrivateMaterialization
+
+    with PrivateMaterialization() as workspace:
+        wiki = workspace.directory
+        (wiki / "sources").mkdir()
+        (wiki / "summaries").mkdir()
+        (wiki / "sources/manual.content.json").write_text(damaged)
+        (wiki / "sources/manual.md").write_text("A plausible original cannot hide map damage.")
+        private_summary = wiki / "summaries/manual.md"
+        private_summary.write_bytes(before)
+        scope = KnowledgeScope(kb_dir, wiki, private_workspace=workspace)
+        with pytest.raises(CompilationIncomplete, match="document_summary_reader_invalid"):
+            await compile_long_doc(
+                "manual", private_summary, "id", kb_dir, "test-model", navigation=[], scope=scope
+            )
     assert summary.read_bytes() == before
 
 

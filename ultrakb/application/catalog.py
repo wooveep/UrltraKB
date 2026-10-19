@@ -31,15 +31,8 @@ def knowledge_bases() -> list[tuple[str, Path]]:
 
 
 def knowledge_base_overview(kb_dir: Path) -> dict:
-    from ultrakb.application.knowledge_bases import get_kb_list, get_kb_status
-    from ultrakb.locks import kb_read_lock
+    """Count committed resources and managed originals from one bound publication."""
+    from ultrakb.application.knowledge_bases import get_kb_status
+    from ultrakb.knowledge_scope import resolve_scope
 
-    with kb_read_lock(kb_dir / ".ultrakb"):
-        status = get_kb_status(kb_dir)
-        inventory = get_kb_list(kb_dir)
-        status["directories"]["entities"] = len(inventory["entities"])
-        status["directories"]["explorations"] = sum(
-            1 for path in (kb_dir / "wiki/explorations").glob("*.md") if path.is_file()
-        )
-        status["raw_count"] = sum(1 for path in (kb_dir / "raw").rglob("*") if path.is_file())
-        return status
+    return get_kb_status(kb_dir, scope=resolve_scope(kb_dir))

@@ -7,6 +7,7 @@ import hmac
 import json
 import os
 import threading
+import uuid
 from contextlib import aclosing
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, AsyncGenerator, AsyncIterator, Callable
@@ -19,7 +20,6 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
-from ultrakb.agent.chat_session import ChatSession
 from ultrakb.api_models import (
     AddFileItem,
     AddResponse,
@@ -81,7 +81,7 @@ def _configure_cors(app: FastAPI) -> None:
         allow_credentials=allow_credentials,
         allow_methods=["*"],
         allow_headers=["*"],
-        expose_headers=["X-UltraKB-Publication-ID"],
+        expose_headers=["X-UltraKB-Publication-ID", "X-UltraKB-Unit-Revision-ID"],
     )
 
 
@@ -125,8 +125,8 @@ def _resolve_kb(value: str) -> Path:
 
 
 def _is_kb_dir(kb_dir: Path) -> bool:
-    """A directory counts as a KB when it has both ``.ultrakb`` and ``wiki``."""
-    return (kb_dir / ".ultrakb").is_dir() and (kb_dir / "wiki").is_dir()
+    """The disposable Wiki directory is not knowledge-base identity."""
+    return (kb_dir / ".ultrakb/config.yaml").is_file() and (kb_dir / ".ultrakb/kb.sqlite").is_file()
 
 
 def _init_kb_for_api(
@@ -487,7 +487,7 @@ async def _stream_chat(
     from ultrakb.application.conversations import continue_conversation
 
     scope = await resolve_api_scope(kb_dir, request.view_id)
-    new_id = None if request.session_id else ChatSession.new(kb_dir, "", "").id
+    new_id = None if request.session_id else uuid.uuid4().hex
     yield _sse("start", {"endpoint": "chat", "session_id": request.session_id or new_id})
     stream = _answer_stream(
         lambda context: continue_conversation(

@@ -20,7 +20,6 @@ from pathlib import Path
 from typing import Callable, Generator
 
 from ultrakb.inputs import (
-    FROZEN_SOURCE_EXTENSIONS,
     SUPPORTED_EXTENSIONS,
     current_input_version,
     local_image_inputs,
@@ -31,12 +30,12 @@ from ultrakb.lifecycle import (
     expected_generation,
     read_lifecycle,
 )
-from ultrakb.locks import LockCancelled, kb_read_lock
+from ultrakb.locks import LockCancelled
 from ultrakb.mutation import RecoveryRequired
 from ultrakb.runtime.records import TERMINAL
 from ultrakb.runtime.requests import ImportFile
 from ultrakb.runtime.tasks import TaskManager
-from ultrakb.state import HashRegistry
+from ultrakb.storage.database import open_database
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +117,8 @@ class NativeWatch:
     ) -> None:
         self.root = kb_dir.expanduser().resolve()
         self._generation = current_generation(self.root)
+        with open_database(self.root, read_only=True) as db:
+            self._database_identity = db.identity
         if not (self.root / ".ultrakb/config.yaml").is_file():
             raise ValueError("Open a knowledge base before watching")
         if not 1 <= capacity <= 10000 or not 1 <= max_submitted <= 256:
@@ -244,12 +245,6 @@ class NativeWatch:
         if seen and seen[0] == digest:
             self._remember(db, path, stamp, digest)
             return True
-        with kb_read_lock(self.root / ".ultrakb", cancelled=self._stop.is_set, on_wait=_busy):
-            registry = HashRegistry(self.root / ".ultrakb/hashes.json")
-            entry = registry.get(digest)
-            if entry and path.suffix.lower() not in FROZEN_SOURCE_EXTENSIONS:
-                self._remember(db, path, stamp, digest)
-                return True
         with self._gate:
             if self._stop.is_set():
                 return False
@@ -287,6 +282,12 @@ class NativeWatch:
                     while not self._stop.is_set():
                         if current_generation(self.root) != self._generation:
                             raise KnowledgeBaseRemoved("Watched knowledge base was replaced")
+                        with read_lifecycle(
+                            self.root,
+                            database_identity=self._database_identity,
+                            cancelled=self._stop.is_set,
+                        ):
+                            pass
                         if raw.is_symlink() or raw.resolve() != self.root / "raw":
                             raise ValueError("Watched raw directory changed location")
                         now = time.monotonic()
@@ -328,7 +329,10 @@ class NativeWatch:
                                 with (
                                     expected_generation(self.root, self._generation),
                                     read_lifecycle(
-                                        self.root, cancelled=self._stop.is_set, on_wait=_busy
+                                        self.root,
+                                        database_identity=self._database_identity,
+                                        cancelled=self._stop.is_set,
+                                        on_wait=_busy,
                                     ),
                                 ):
                                     if self._accept(db, path, candidate, now):

@@ -11,11 +11,6 @@ ACCEPTANCE_VERSION = "explicit-delivery-v1"
 def request_version(checkpoints=None) -> int:
     if checkpoints is not None:
         return getattr(checkpoints, "request_version", REQUEST_VERSION)
-    from ultrakb.application.execution import current_execution
-
-    context = current_execution()
-    if context and context.model_task:
-        return context.model_task.record.compiler_request_version
     return REQUEST_VERSION
 
 

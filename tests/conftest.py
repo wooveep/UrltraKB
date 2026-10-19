@@ -1,8 +1,13 @@
-import json
-
 import pytest
 
-pytest_plugins = ("live_llm", "model_service_fixtures", "test_layers", "pytester")
+pytest_plugins = (
+    "live_llm",
+    "model_service_fixtures",
+    "test_layers",
+    "compile_work_fixtures",
+    "index_stage_fixtures",
+    "pytester",
+)
 
 
 @pytest.fixture(autouse=True)
@@ -44,25 +49,21 @@ def kb_dir(tmp_path):
     (tmp_path / "wiki" / "explorations").mkdir(parents=True)
     (tmp_path / "wiki" / "reports").mkdir(parents=True)
 
-    # .ultrakb state directory
-    ultrakb_dir = tmp_path / ".ultrakb"
-    ultrakb_dir.mkdir()
-    from ultrakb.kb_format import KB_FORMAT
+    from ultrakb.config import save_config
+    from ultrakb.storage.database import create_database
+    from ultrakb.storage.knowledge_store import KnowledgeStore
 
-    (ultrakb_dir / "format.json").write_text(json.dumps(KB_FORMAT))
-
-    config_yaml = """\
-version: "0.1.0"
-embedding_model: text-embedding-3-small
-llm_model: gpt-4o-mini
-chunk_size: 512
-chunk_overlap: 64
-model_capacity:
-  max_input_tokens: 65536
-  tokenizer_model: gpt-4o-mini
-"""
-    (ultrakb_dir / "config.yaml").write_text(config_yaml)
-    (ultrakb_dir / "hashes.json").write_text(json.dumps({}))
+    identity = create_database(tmp_path)
+    save_config(
+        tmp_path / ".ultrakb/config.yaml",
+        {
+            "version": "0.1.0",
+            "model": "gpt-4o-mini",
+            "model_capacity": {"max_input_tokens": 65536, "tokenizer_model": "gpt-4o-mini"},
+        },
+    )
+    store = KnowledgeStore(tmp_path, identity)
+    store.publish(store.prepare_revision({}, expected=None))
 
     return tmp_path
 

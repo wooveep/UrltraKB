@@ -8,17 +8,13 @@ import json
 import pymupdf
 import pytest
 from native_source_fixtures import LITERAL_TABLE
-from pageindex import IndexConfig
 from PIL import Image
-from test_answer_evidence_regression import agent_for, invoke
-from test_index_llm import RecordingIndexLLM
+from test_answer_evidence_regression import invoke
 from test_pdf_tables import merged_table_pdf
 
 from ultrakb.agent.source_windows import CompileSourceWindows
 from ultrakb.images import convert_pdf_to_pages
-from ultrakb.index_client import create_index_client
 from ultrakb.index_pdf import NativePdfParser
-from ultrakb.indexer import index_long_document
 from ultrakb.locks import atomic_write_json, atomic_write_text
 from ultrakb.office.records import Slide
 from ultrakb.office.slide_content import attach_slides
@@ -64,101 +60,126 @@ def slide_fixture(tmp_path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("retained_format", ["pdf", "slides"])
 async def test_slide_body_index_compile_and_question_share_native_pdf_roles(
-    kb_dir, tmp_path, live_llm, monkeypatch
+    kb_dir, tmp_path, live_llm, monkeypatch, retained_format
 ):
+    from agents import Agent
+
+    from ultrakb.agent.query_evidence import restrict_query_agent
+    from ultrakb.application.execution import ExecutionContext
+    from ultrakb.application.query_views import resolve_query_views
+    from ultrakb.application.recompilation import recompile_document
+    from ultrakb.application.views import published_scope
+    from ultrakb.config import load_config, save_config
+    from ultrakb.llm_execution import CompletionExecutor, ModelCallPolicy, RoleBindings
+    from ultrakb.processing_policy import PdfLimit, classify_pdf
+    from ultrakb.storage.catalog_store import CatalogStore
+    from ultrakb.storage.compile_inputs import materialize_inputs
+    from ultrakb.storage.index_store import IndexStore
+
     live_llm.install(monkeypatch)
     pdf, package, slides = slide_fixture(tmp_path)
     original = package.read_bytes()
-    pages = attach_slides(
-        convert_pdf_to_pages(pdf, "manual", kb_dir / "wiki/sources/images/manual"), slides
+    base = published_scope(kb_dir).knowledge
+    catalog = CatalogStore(kb_dir, base.identity)
+    admitted = catalog.admit(package if retained_format == "slides" else pdf, source_key="manual")
+    with base.compile_workspace() as workspace:
+        wiki = workspace.directory
+        pages = convert_pdf_to_pages(pdf, "manual", wiki / "sources/images/manual")
+        if retained_format == "slides":
+            pages = attach_slides(pages, slides)
+        atomic_write_json(wiki / "sources/manual.json", pages)
+        atomic_write_text(wiki / "sources/manual.md", pages[0]["content"])
+        files = {
+            path.relative_to(wiki / "sources").as_posix(): path
+            for path in (wiki / "sources").rglob("*")
+            if path.is_file()
+        }
+        processing = catalog.retain_processing(
+            admitted.revision_id,
+            files,
+            body_path="manual.md",
+            source_path="manual.json",
+            source_kind="pages",
+            fingerprint="native-slide-contract-v1",
+            operation_id="manual",
+            decision=classify_pdf(
+                1, {"pdf_limit": PdfLimit(short_max_pages=0, source="kb").model_dump()}
+            ),
+        )
+    unit = catalog.plan_unit(processing.processing_id, key="body", doc_name="manual")
+    config_path = kb_dir / ".ultrakb/config.yaml"
+    save_config(
+        config_path,
+        {
+            **load_config(config_path),
+            "model": "deepseek/deepseek-flash",
+            "model_policy": {"max_calls": 30, "retries": 0},
+        },
     )
-    atomic_write_json(kb_dir / "wiki/sources/manual.json", pages)
+    context = ExecutionContext(
+        executor=CompletionExecutor(
+            RoleBindings("deepseek/deepseek-flash", live_llm.credentials),
+            ModelCallPolicy(max_calls=30, retries=0),
+        )
+    )
+    result = await recompile_document(kb_dir, unit.source_id, unit_id=unit.unit_id, context=context)
+    assert result.status == "compiled", result.message
+    scope = published_scope(kb_dir)
+    [index] = scope.knowledge.index_revisions()
+    indexed = IndexStore(kb_dir, base.identity).document(index)["pages"][0]
+    assert 'rowspan="3"' in indexed["content"]
+    if retained_format == "slides":
+        assert indexed["parts"]["notes"] == slides[0].notes
+        assert indexed["slide"]["hidden"] is True
     native = NativePdfParser().parse(str(pdf), images_dir=str(tmp_path / "native-images"))
-    runtime = RecordingIndexLLM(live_llm=live_llm)
-    options = IndexConfig(
-        llm_client=runtime, if_add_node_summary=False, if_add_doc_description=False
+    agent = restrict_query_agent(
+        Agent(name="fixture", instructions=""), resolve_query_views(kb_dir)
     )
-    with create_index_client(storage_path=tmp_path / "index", index_config=options) as client:
-        collection = client.collection()
-        identity = collection.add(str(package))
-        indexed = collection.get_page_content(identity, "1")[0]
-    for body in [pages[0]["parts"]["body"], indexed["parts"]["body"]]:
-        assert 'rowspan="3"' in body
-        assert body.index("Before figure") < body.index("![image]") < body.index("After figure")
-    assert pages[0]["parts"]["body"] == native.nodes[0].content
-    assert indexed["parts"]["body"] in indexed["content"]
-    assert indexed["slide"]["hidden"] is True
-    assert indexed["parts"]["notes"] == slides[0].notes
-    for asset in [kb_dir / "wiki/sources/images/manual/p1_img1.png", indexed["images"][0]["path"]]:
-        with Image.open(asset) as image:
+    with scope.knowledge.compile_workspace() as baseline:
+        materialize_inputs(scope.knowledge, baseline, unit)
+        windows = CompileSourceWindows(baseline.directory, "manual")
+        parts = (
+            [(None, 1), ("body", 1), ("notes", 0)] if retained_format == "slides" else [(None, 1)]
+        )
+        for part, expected in parts:
+            compiled = windows.read_selection("sources/manual.json", {"pages": "1", "part": part})[
+                0
+            ]
+            response = await invoke(
+                agent,
+                "get_slide_content" if retained_format == "slides" else "get_page_content",
+                **(
+                    {"doc_name": "manual", "slides": "1", "part": part or "all"}
+                    if retained_format == "slides"
+                    else {"doc_name": "manual", "pages": "1"}
+                ),
+            )
+            public = json.loads(response.split("\n\n", 1)[1].split("\nSource context: ", 1)[0])
+            for payload in (compiled, public):
+                assert len(payload.get("native_tables", [])) == expected
+                if expected:
+                    merged = next(
+                        c for c in payload["native_tables"][0]["cells"] if c["id"] == "r2c3"
+                    )
+                    assert merged["value"] == "shared-group" and merged["rows"] == [2, 4]
+                else:
+                    assert LITERAL_TABLE in payload["content"]
+                    assert not payload["units"][0]["images"]
+                if part == "body":
+                    assert "Native speaker note" not in json.dumps(payload)
+            if part is None and retained_format == "slides":
+                assert indexed["parts"]["body"] == native.nodes[0].content
+        image_path = next((baseline.directory / "sources/images/manual").glob("*.png"))
+        with Image.open(image_path) as image:
             assert [image.convert("RGBA").getpixel((x, 20))[3] for x in (10, 30, 50)] == [
                 0,
                 128,
                 255,
             ]
-    windows = CompileSourceWindows(kb_dir / "wiki", "manual")
-    for part, expected in [(None, 1), ("body", 1), ("notes", 0)]:
-        compiled = windows.read_selection("sources/manual.json", {"pages": "1", "part": part})[0]
-        response = await invoke(
-            agent_for(kb_dir),
-            "get_slide_content",
-            doc_name="manual",
-            slides="1",
-            part=part or "all",
-        )
-        public = json.loads(response.split("\n\n", 1)[1].split("\nSource context: ", 1)[0])
-        for payload in [compiled, public]:
-            if part == "body":
-                assert "Native speaker note" not in json.dumps(payload)
-                assert LITERAL_TABLE not in json.dumps(payload)
-            if part == "notes":
-                assert "shared-group" not in json.dumps(payload)
-            assert len(payload.get("native_tables", [])) == expected
-            if expected:
-                merged = next(c for c in payload["native_tables"][0]["cells"] if c["id"] == "r2c3")
-                assert merged["value"] == "shared-group" and merged["rows"] == [2, 4]
-            else:
-                assert LITERAL_TABLE in payload["content"]
-                assert not payload["units"][0]["images"]
-    assert any(
-        'rowspan=\\"3\\"' in str(message["content"])
-        for _, messages in runtime.calls
-        for message in messages
-    )
     assert package.read_bytes() == original
-
-
-@pytest.mark.parametrize("format", ["pdf", "pptx"])
-def test_import_retains_the_contract_used_by_the_real_index(
-    kb_dir, tmp_path, monkeypatch, live_llm, format
-):
-    from ultrakb.application.settings import apply_kb_config_patch
-    from ultrakb.application.settings_data import KbConfigPatchRequest
-
-    live_llm.install(monkeypatch)
-    apply_kb_config_patch(
-        kb_dir, KbConfigPatchRequest(kb=str(kb_dir), config={"model": "deepseek/deepseek-flash"})
-    )
-    pdf, package, slides = slide_fixture(tmp_path)
-    runtime = RecordingIndexLLM(live_llm=live_llm)
-    path = package if format == "pptx" else pdf
-    with runtime.adapter.executor.activate():
-        result = index_long_document(path, kb_dir, doc_name="manual")
-    pages = json.loads((kb_dir / "wiki/sources/manual.json").read_text())
-    windows = CompileSourceWindows(kb_dir / "wiki", "manual")
-    payload = windows.current_original_evidence()
-    assert len(payload["native_tables"]) == 1
-    assert len(windows.page_figures().figures) == 1
-    assert 'rowspan="3"' in pages[0]["content"]
-    if format == "pptx":
-        assert 'rowspan="3"' in pages[0]["parts"]["body"]
-        assert pages[0]["parts"]["notes"] == slides[0].notes
-    with create_index_client(
-        storage_path=kb_dir / ".ultrakb", index_config=IndexConfig(llm_client=runtime)
-    ) as client:
-        indexed = client.collection().get_page_content(result.doc_id, "1")[0]
-        assert 'rowspan="3"' in indexed["content"]
+    assert not list((kb_dir / ".ultrakb").glob("**/context.sqlite"))
 
 
 @pytest.mark.parametrize("part", ["body", "notes"])

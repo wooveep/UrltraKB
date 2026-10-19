@@ -12,14 +12,16 @@ from pageindex.llm import llm_client_scope
 
 from ultrakb.execution_capacity import capacity_policy
 from ultrakb.index_llm import PageIndexLLM
-from ultrakb.index_stages import IndexStages, digest
+from ultrakb.index_stages import digest
 from ultrakb.llm_execution import CompletionExecutor, ModelCallPolicy, RoleBindings
 from ultrakb.locks import atomic_write_json
 
 
 @pytest.mark.live
 @pytest.mark.asyncio
-async def test_real_individual_and_batch_node_work_comparison(tmp_path, live_llm, monkeypatch):
+async def test_real_individual_and_batch_node_work_comparison(
+    tmp_path, live_llm, monkeypatch, index_stages
+):
     page_text = {
         574: "4.1 导出存储池\n4.1.3 操作步骤\n仅在主机停止后导出存储池。\n",
         575: "4.2 删除存储池\n4.2.3 操作步骤\n先备份数据；只读存储池禁止删除。\n",
@@ -83,7 +85,7 @@ async def test_real_individual_and_batch_node_work_comparison(tmp_path, live_llm
                 custom_endpoint=True,
             )
             runtime = PageIndexLLM(executor)
-            runtime.checkpoints = IndexStages(tmp_path / str(batch_size), source, identity={})
+            runtime.checkpoints = index_stages(tmp_path / str(batch_size), source, identity={})
             nodes = copy.deepcopy(summaries)
             started = time.monotonic()
             with node_batch_scope(batch_size), llm_client_scope(runtime):

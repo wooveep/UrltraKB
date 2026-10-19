@@ -5,11 +5,11 @@ import asyncio
 import litellm
 import pytest
 from error_transport import ErrorTransport
+from native_usage_fixtures import aggregate_usage, observe_executor, read_requests
 
 from ultrakb.application.connection_failures import connection_failure, shared_model_failure
 from ultrakb.config import LlmCredentialBundle
 from ultrakb.llm_execution import CompletionExecutor, ModelCallPolicy, ModelRequest, RoleBindings
-from ultrakb.llm_usage import UsageScope, aggregate_usage, read_requests
 
 pytestmark = pytest.mark.integration
 
@@ -48,8 +48,8 @@ def test_real_rate_limit_errors_reach_batch_decision_without_losing_the_send_cou
                 ),
             ),
             ModelCallPolicy(max_calls=3, retries=1, backoff=0),
-            scope=UsageScope(kb_dir, "c" * 32),
         )
+        observe_executor(kb_dir, executor)
         request = ModelRequest(
             [{"role": "user", "content": "This local endpoint only returns errors."}],
             operation="query",

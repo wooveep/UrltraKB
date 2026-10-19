@@ -2,7 +2,6 @@
 
 import json
 import re
-import sqlite3
 
 import pytest
 from test_answer_evidence_regression import selection
@@ -30,9 +29,10 @@ def _complementary_originals(kb_dir):
 
 
 def test_retrieval_fits_complementary_originals_and_reduces_navigation(kb_dir, model_service):
+    from native_catalog_fixtures import knowledge_forest
+
     from ultrakb.config_state import capture_config
     from ultrakb.context.knowledge import KnowledgeRetrieval
-    from ultrakb.context.projection import knowledge_forest
     from ultrakb.locks import kb_ingest_lock
     from ultrakb.model_tokenizer import question_measure
 
@@ -67,9 +67,10 @@ def test_retrieval_fits_complementary_originals_and_reduces_navigation(kb_dir, m
 
 
 def test_token_fit_limits_original_delivery_and_keeps_exact_continuation(kb_dir, model_service):
+    from native_catalog_fixtures import knowledge_forest
+
     from ultrakb.agent.evidence_payload import project_evidence
     from ultrakb.context.knowledge import KnowledgeRetrieval
-    from ultrakb.context.projection import knowledge_forest
     from ultrakb.locks import atomic_write_json
     from ultrakb.model_tokenizer import TokenMeasure
     from ultrakb.source_pages import read_page_selection
@@ -171,8 +172,6 @@ def test_projection_rejects_corrupt_native_pages_before_retrieval(kb_dir, model_
     with pytest.raises(ValueError, match="Stored source"):
         search.ensure_projection()
     assert model_service.requests == []
-    with sqlite3.connect(kb_dir / ".ultrakb/context/runtime.sqlite") as db:
-        assert db.execute("SELECT count(*) FROM okb_projections").fetchone()[0] == 0
 
 
 @pytest.mark.parametrize("cell_size", [19610, 19615, 19617])
@@ -194,44 +193,33 @@ def test_bounded_worksheet_retrieval_does_not_cover_unread_values(
     book.active["A2"] = "45"
     book.save(source)
     retained = processing_only(source)
-    from ultrakb.ingest_records import UnitRevision
-    from ultrakb.normalization import normalization_id, read_normalization
-    from ultrakb.source_catalog import read_record
-    from ultrakb.unit_publication import copy_tree, list_source_units
+    from processing_fixtures import publish_processed_source
 
-    [unit] = list_source_units(kb_dir, retained.source_id)
-    revision = read_record(kb_dir, "unit-revisions", unit.target_revision_id, UnitRevision)
-    directory, _ = read_normalization(
-        kb_dir, normalization_id(retained.source_revision_id, revision.processing_fingerprint)
-    )
-    copy_tree(directory / "wiki", kb_dir / "wiki")
+    publish_processed_source(kb_dir, retained.source_id)
     captured = selection(kb_dir)
     assert any(Path(p).name.endswith(".content.json") for p in captured.views[0].files)
     executor = executor_for(model_service)
     with kb_ingest_lock(kb_dir / ".ultrakb"):
         executor.question_capacity = question_measure(capture_config(kb_dir))
     search = KnowledgeRetrieval(captured, executor)
-    projection = search.ensure_projection()
-    with sqlite3.connect(kb_dir / ".ultrakb/context/runtime.sqlite") as db:
-        rows = db.execute(
-            "SELECT node_id, attrs_json FROM nodes WHERE tree_id=?", (projection.tree_id,)
-        ).fetchall()
-    original_reads = [
-        search._read(json.loads(attrs)["source_ref"])
-        for _, attrs in rows
-        if json.loads(attrs or "{}").get("source_ref")
-    ]
+    search.ensure_projection()
+    from native_catalog_fixtures import knowledge_forest
+
+    def source_refs(node):
+        if node.get("source_ref"):
+            yield node["source_ref"]
+        for child in node.get("children", {}).values():
+            yield from source_refs(child)
+
+    references = list(source_refs(knowledge_forest(captured)))
+    original_reads = [search._read(reference) for reference in references]
     assert any(hit.get("cells") for hit in original_reads)
     for hit in original_reads:
         for cell in hit.get("cells", []):
             if cell.get("value_complete") is not False:
                 value = "x" * cell_size if cell["coordinate"] == "A1" else "45"
                 assert f"{cell['coordinate']}: {json.dumps(value)}" in hit.get("content", "")
-    bounded = [
-        search._read(json.loads(attrs)["source_ref"], token_budget=1200)
-        for _, attrs in rows
-        if json.loads(attrs or "{}").get("source_ref")
-    ]
+    bounded = [search._read(reference, token_budget=1200) for reference in references]
     assert bounded
     assert any(hit.get("coverage") == "budget_exceeded" for hit in bounded)
     assert all(not hit["range_complete"] for hit in bounded if hit["coverage"] == "budget_exceeded")
@@ -300,13 +288,12 @@ def test_knowledge_projection_retrieves_multiple_sources_and_invalidates_changed
     with kb_ingest_lock(kb_dir / ".ultrakb"):
         executor.question_capacity = question_measure(capture_config(kb_dir))
     search = KnowledgeRetrieval(captured, executor)
-    projection = search.ensure_projection()
+    search.ensure_projection()
     assert model_service.requests == []
-    with sqlite3.connect(kb_dir / ".ultrakb/context/runtime.sqlite") as db:
-        rows = db.execute(
-            "SELECT node_id, attrs_json FROM nodes WHERE tree_id=?", (projection.tree_id,)
-        ).fetchall()
-    assert any(json.loads(attrs or "{}").get("source_ref") for _, attrs in rows)
+    from native_catalog_fixtures import knowledge_forest
+
+    navigation = knowledge_forest(captured)["children"]
+    assert any(node.get("source_ref") for node in navigation.values())
     result = search.search("Compare slots")
     assert result["status"] == "completed", result
     assert {hit["doc_name"] for hit in result["hits"]} == {"alpha", "beta"}
@@ -324,9 +311,10 @@ def test_knowledge_projection_retrieves_multiple_sources_and_invalidates_changed
 
 @pytest.mark.asyncio
 async def test_application_uses_real_retrieval_and_reuses_tool_results(kb_dir, model_service):
+    from native_usage_fixtures import read_requests
+
     from ultrakb.application.conversations import ask_question
     from ultrakb.application.execution import ExecutionContext
-    from ultrakb.llm_usage import read_requests
     from ultrakb.locks import atomic_write_text
 
     (kb_dir / ".ultrakb/config.yaml").write_text(
@@ -440,13 +428,12 @@ async def test_one_answer_loop_retains_comparison_calculation_and_local_unknown(
 
 def test_projection_keeps_selected_publication_identity_after_source_update(kb_dir, model_service):
     import pymupdf
+    from native_catalog_fixtures import knowledge_forest, publication
     from publication_fixtures import publish_document
 
     from ultrakb.application.query_views import resolve_query_views
     from ultrakb.application.views import view_scope
-    from ultrakb.context.projection import knowledge_forest
     from ultrakb.locks import atomic_write_bytes, atomic_write_text, kb_ingest_lock
-    from ultrakb.unit_publication import read_head
 
     atomic_write_text(
         kb_dir / ".ultrakb/config.yaml",
@@ -465,7 +452,7 @@ def test_projection_keeps_selected_publication_identity_after_source_update(kb_d
 
     first = publish("alpha.pdf", "Original Alpha requires 12 slots.")
     publish("beta.pdf", "Beta recommends 24 slots.")
-    revision = read_head(kb_dir, "legacy").knowledge_revision_id
+    revision = publication(kb_dir, "legacy").revision_id
     snapshot = view_scope(kb_dir, "legacy", historical_revision=revision)
     latest = publish("alpha.pdf", "Updated Alpha requires 36 slots.")
     with kb_ingest_lock(kb_dir / ".ultrakb"):

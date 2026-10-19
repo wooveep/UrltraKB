@@ -10,7 +10,7 @@ from ultrakb.application.execution import ExecutionContext
 from ultrakb.application.pages import read_page
 from ultrakb.application.recompilation import recompile_document
 from ultrakb.application.views import storage_scope
-from ultrakb.config import save_config
+from ultrakb.config import load_config, save_config
 from ultrakb.storage.index_store import IndexStore
 from ultrakb.storage.knowledge_store import KnowledgeStore
 
@@ -108,7 +108,13 @@ async def test_long_compile_builds_shared_index_and_reuses_it_after_publication_
     root, identity, unit = compile_input(
         tmp_path, segmented=True, body_text="# Fixture\nThe value is 17.\n"
     )
-    save_config(root / ".ultrakb/config.yaml", {"model_policy": {"max_calls": 10, "retries": 0}})
+    save_config(
+        root / ".ultrakb/config.yaml",
+        {
+            **load_config(root / ".ultrakb/config.yaml"),
+            "model_policy": {"max_calls": 10, "retries": 0},
+        },
+    )
     context = ExecutionContext()
 
     def interrupted_publish(*args, **options):
@@ -176,7 +182,13 @@ async def test_segmented_native_text_uses_its_frozen_block_coordinates(tmp_path)
     unit = catalog.plan_unit(processing.processing_id, key="body", doc_name="fixture")
     body.unlink()
     native.unlink()
-    save_config(root / ".ultrakb/config.yaml", {"model_policy": {"max_calls": 10, "retries": 0}})
+    save_config(
+        root / ".ultrakb/config.yaml",
+        {
+            **load_config(root / ".ultrakb/config.yaml"),
+            "model_policy": {"max_calls": 10, "retries": 0},
+        },
+    )
     with StreamTransport(indexing_response) as service:
         (root / ".env").write_text(f"LLM_API_KEY=offline-test-key\nOPENAI_API_BASE={service.url}\n")
         result = await recompile_document(
@@ -237,7 +249,13 @@ async def test_segmented_native_pages_keep_physical_body_and_notes_coordinates(t
     unit = catalog.plan_unit(processing.processing_id, key="body", doc_name="fixture")
     body.unlink()
     native.unlink()
-    save_config(root / ".ultrakb/config.yaml", {"model_policy": {"max_calls": 10, "retries": 0}})
+    save_config(
+        root / ".ultrakb/config.yaml",
+        {
+            **load_config(root / ".ultrakb/config.yaml"),
+            "model_policy": {"max_calls": 10, "retries": 0},
+        },
+    )
     with StreamTransport(indexing_response) as service:
         (root / ".env").write_text(f"LLM_API_KEY=offline-test-key\nOPENAI_API_BASE={service.url}\n")
         result = await recompile_document(
@@ -277,7 +295,13 @@ async def test_received_index_response_recovers_from_gateway_receipt_without_res
             else "# Fixture\nThe value is 17.\n"
         ),
     )
-    save_config(root / ".ultrakb/config.yaml", {"model_policy": {"max_calls": 10, "retries": 0}})
+    save_config(
+        root / ".ultrakb/config.yaml",
+        {
+            **load_config(root / ".ultrakb/config.yaml"),
+            "model_policy": {"max_calls": 10, "retries": 0},
+        },
+    )
     context, save, accepted = ExecutionContext(), StoredIndexStages.save, []
 
     def lost_delivery(self, key, value):

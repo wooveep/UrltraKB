@@ -27,7 +27,7 @@ from ultrakb.lint import (
     list_existing_wiki_targets,
     strip_ghost_wikilinks,
 )
-from ultrakb.locks import atomic_write_text, durable_unlink, kb_ingest_lock
+from ultrakb.locks import durable_unlink
 
 # Compiled page types the user may EDIT (a recompile can still regenerate them):
 # concept/entity synthesis PLUS per-document summaries. index/log/reports are
@@ -104,66 +104,6 @@ def _on_disk_stem(section_dir: Path, stem: str) -> str:
     return ci_match
 
 
-def delete_wiki_page(
-    kb_dir: Path, path: str, *, dry_run: bool = False, scope: KnowledgeScope | None = None
-) -> dict:
-    """Delete a concept/entity page and clean up references to it.
-
-    ``path`` is a ``'section/stem'`` ref (e.g. ``'concepts/attention'``). With
-    ``dry_run`` it only reports the impacted backlink pages (whose inbound links
-    WOULD be demoted). Returns a dict whose ``status`` is one of ``not_found``,
-    ``dry_run``, ``deleted``. Only concept/entity pages are deletable (a summary
-    is removed by deleting its source document, not on its own).
-    """
-    scope = resolve_scope(kb_dir, scope, writable=True)
-    section, stem = validate_page_ref(path, allowed=DELETABLE_SECTIONS)
-    wiki = scope.wiki_dir
-    page = wiki / section / f"{stem}.md"
-    target = f"{section}/{stem}"
-
-    if not page.is_file():
-        return {"status": "not_found", "target": target, "backlinks": []}
-
-    if dry_run:
-        # Preview only — no mutation, so an unlocked scan is fine.
-        backlinks = pages_linking_to(wiki, _normalize_target(target), exclude=page)
-        return {"status": "dry_run", "target": target, "backlinks": backlinks}
-
-    with kb_ingest_lock(kb_dir / ".ultrakb"):
-        # Re-check under the lock: a concurrent delete/recompile may have removed
-        # the page in the window since the pre-lock is_file() gate.
-        if not page.is_file():
-            return {"status": "not_found", "target": target, "backlinks": []}
-        # Compute backlinks INSIDE the lock so a concurrently-added inbound link
-        # is still demoted (matches run_remove_for_api's plan-inside-the-lock).
-        backlinks = pages_linking_to(wiki, _normalize_target(target), exclude=page)
-        # Demote now-dangling inbound [[links]] to plain text — in the backlink
-        # pages AND in index.md (a [[target]] embedded in another entry's brief;
-        # the page's own entry line was already removed above). Surgical restrict
-        # leaves pre-existing dangling links elsewhere untouched (like remove).
-        restrict = [wiki / f"{ref}.md" for ref in backlinks] + [wiki / "index.md"]
-        from ultrakb.knowledge_revisions import manual_knowledge_change
-        from ultrakb.mutation import mutation_scope
-
-        with (
-            manual_knowledge_change(scope),
-            mutation_scope(
-                kb_dir,
-                [page, *restrict],
-                operation="delete-page",
-            ),
-        ):
-            files_changed, ghosts_stripped = delete_page_files(wiki, section, stem, backlinks)
-
-    return {
-        "status": "deleted",
-        "target": target,
-        "backlinks": backlinks,
-        "files_changed": files_changed,
-        "ghosts_stripped": ghosts_stripped,
-    }
-
-
 def page_link_context(kb_dir: Path, path: str, *, scope: KnowledgeScope | None = None) -> dict:
     """Outbound + inbound links for a page — the edit-impact panel.
 
@@ -213,51 +153,3 @@ def edited_page_content(existing: str, body: str, known_targets: set[str]) -> tu
     metadata = parts[0] if parts else ""
     cleaned, ghosts = strip_ghost_wikilinks(body, known_targets)
     return metadata + cleaned, sorted(set(ghosts))
-
-
-def edit_wiki_page(
-    kb_dir: Path, path: str, content: str, *, scope: KnowledgeScope | None = None
-) -> dict:
-    """Replace a concept/entity page's BODY, preserving its OKF frontmatter.
-
-    The ``type:``/``description:``/``sources:`` frontmatter is code-managed, so
-    any frontmatter in the incoming ``content`` is discarded and the existing
-    block is re-attached verbatim. Dead ``[[wikilinks]]`` the user typed are
-    demoted to plain text on save (UltraKB keeps the wiki free of broken links);
-    the demoted targets are returned so the UI can warn. Write is atomic, under
-    the KB ingest lock. Returns ``status`` ``not_found`` when the page is absent.
-    """
-    section, stem = validate_page_ref(path)
-    scope = resolve_scope(kb_dir, scope, writable=True)
-    wiki = scope.wiki_dir
-    page = wiki / section / f"{stem}.md"
-    target = f"{section}/{stem}"
-    if not page.is_file():
-        return {"status": "not_found", "target": target, "ghosts_stripped": []}
-
-    with kb_ingest_lock(kb_dir / ".ultrakb"):
-        # Re-check under the lock: never resurrect a page a concurrent
-        # delete/recompile removed in the pre-lock window (atomic_write would
-        # otherwise recreate the file). Read + demote + write all run here so
-        # the op is atomic against its own inputs (no lost-update).
-        if not page.is_file():
-            return {"status": "not_found", "target": target, "ghosts_stripped": []}
-        # `content` IS the body: the reader strips the code-managed OKF
-        # frontmatter before editing, so it is NEVER re-split here — a body that
-        # legitimately opens with a '---' block must not be mistaken for
-        # frontmatter and silently dropped. The existing block is re-attached.
-        updated, ghosts = edited_page_content(
-            _read_md(page), content, list_existing_wiki_targets(wiki)
-        )
-        from ultrakb.knowledge_revisions import manual_knowledge_change
-        from ultrakb.mutation import mutation_scope
-
-        with manual_knowledge_change(scope), mutation_scope(kb_dir, [page], operation="edit-page"):
-            atomic_write_text(page, updated)
-
-    return {
-        "status": "saved",
-        "target": target,
-        "ghosts_stripped": sorted(set(ghosts)),
-        "content": updated,
-    }

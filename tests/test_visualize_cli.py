@@ -20,6 +20,9 @@ def _kb(tmp_path: Path) -> Path:
     (tmp_path / "wiki" / "concepts" / "b.md").write_text(
         '---\ntype: "Concept"\ndescription: "d2"\n---\n\n# B\n', encoding="utf-8"
     )
+    from publication_read_inputs import publish_fixture
+
+    publish_fixture(tmp_path)
     return tmp_path
 
 

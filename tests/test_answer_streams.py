@@ -1,6 +1,6 @@
 """An HTTP observer keeps the operation's lease until cancelled work settles.
 
-Actual SDK cancellation is covered by test_chat_session. This adapter contract
+Actual SDK cancellation is covered by test_http_disconnect_lifecycle. This adapter contract
 uses an application operation and preparation activity, with no model responses.
 """
 
@@ -14,18 +14,23 @@ import pytest
 async def test_disconnect_waits_for_sdk_cleanup_even_after_repeated_cancel(
     kb_dir, monkeypatch, endpoint
 ):
-    from ultrakb.agent.chat_session import ChatSession, list_sessions, load_session
     from ultrakb.api_helpers import _stream_chat, _stream_query
     from ultrakb.api_models import ChatRequest, QueryRequest
+    from ultrakb.application.conversations import read_conversation
+    from ultrakb.application.sessions import list_conversations
+    from ultrakb.application.views import published_scope
     from ultrakb.locks import async_kb_lock
+    from ultrakb.storage.session_store import SessionStore
 
     stopping, release, finished, acquired = (asyncio.Event() for _ in range(4))
     started, pending = asyncio.Event(), asyncio.Event()
 
     async def operation(root, question=None, *, context, new_session_id=None, **kwargs):
         if endpoint == "chat":
-            session = ChatSession.new(root, "", "", identity=new_session_id)
-            session.save()
+            bound = published_scope(root).knowledge
+            SessionStore(root, bound.identity).create(
+                new_session_id, model="fixture", language="en"
+            )
         async with async_kb_lock(root / ".ultrakb", exclusive=True):
             try:
                 with context.activity("preparing"):
@@ -87,7 +92,8 @@ async def test_disconnect_waits_for_sdk_cleanup_even_after_repeated_cancel(
         assert finished.is_set() and acquired.is_set()
         assert not list((kb_dir / "wiki/explorations").glob("*.md"))
         assert all(
-            load_session(kb_dir, item["id"]).turn_count == 0 for item in list_sessions(kb_dir)
+            read_conversation(kb_dir, item["id"]).total_turns == 0
+            for item in list_conversations(kb_dir)
         )
     finally:
         release.set()

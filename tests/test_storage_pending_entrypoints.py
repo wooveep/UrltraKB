@@ -43,7 +43,7 @@ def test_pending_source_import_delivers_the_same_publication_and_unit_facts(
 
             import ultrakb.cli as cli
 
-            monkeypatch.setattr(cli, "_selected_scope", lambda *args: scope)
+            monkeypatch.setattr(cli, "_selected_scope", lambda *args, **kwargs: scope)
             completed = CliRunner().invoke(cli.cli, ["--kb-dir", str(root), "process-pending"])
             assert completed.exit_code == 0, completed.output
             outcome = json.loads(completed.stdout)["outcomes"][0]
@@ -56,7 +56,7 @@ def test_pending_source_import_delivers_the_same_publication_and_unit_facts(
 
             monkeypatch.delenv("ULTRAKB_API_TOKEN", raising=False)
             monkeypatch.setattr(api_pending, "resolve_kb_alias", lambda *args: root)
-            monkeypatch.setattr(views, "view_scope", lambda *args: scope)
+            monkeypatch.setattr(views, "view_scope", lambda *args, **kwargs: scope)
             with TestClient(create_app()) as client:
                 completed = client.post(
                     "/api/v1/process-pending", json={"kb": "pending-test", "view_id": "legacy"}
@@ -81,7 +81,7 @@ def run(directory, job, dispatch, queue):
     with open_database(root, read_only=True) as db:
         identity = db.identity
     scope = views.storage_scope(root, identity)
-    views.view_scope = lambda *args: scope
+    views.view_scope = lambda *args, **kwargs: scope
     request = RunPendingJob(job, dispatch, view_id="legacy")
     worker = UnitIdentity.create(uuid4().hex, 0, str(root), request, generation=identity.generation)
     queue.put(_execute(request, worker, ExecutionContext()).summary())
@@ -137,7 +137,7 @@ async def test_http_drain_cancellation_waits_for_the_real_send_to_finish(tmp_pat
         )
         scope = storage_scope(root, identity)
         monkeypatch.setattr(api_pending, "resolve_kb_alias", lambda *args: root)
-        monkeypatch.setattr(views, "view_scope", lambda *args: scope)
+        monkeypatch.setattr(views, "view_scope", lambda *args, **kwargs: scope)
         gate.clear()
         task = asyncio.create_task(
             api_pending.drain(api_pending.DrainRequest(kb="pending-test", view_id="legacy"))
@@ -185,13 +185,13 @@ def test_cli_and_http_metadata_do_not_require_the_working_copy_or_model_settings
     )
     (root / ".ultrakb/config.yaml").unlink()
     assert not (root / "wiki").exists()
-    monkeypatch.setattr(cli, "_selected_scope", lambda *args: scope)
+    monkeypatch.setattr(cli, "_selected_scope", lambda *args, **kwargs: scope)
     shown = CliRunner().invoke(cli.cli, ["--kb-dir", str(root), "pending", "list"])
     assert shown.exit_code == 0, shown.output
     assert json.loads(shown.output)["jobs"][0]["id"] == work.intent_id
     monkeypatch.delenv("ULTRAKB_API_TOKEN", raising=False)
     monkeypatch.setattr(api_pending, "resolve_kb_alias", lambda *args: root)
-    monkeypatch.setattr(views, "view_scope", lambda *args: scope)
+    monkeypatch.setattr(views, "view_scope", lambda *args, **kwargs: scope)
     with TestClient(create_app()) as client:
         shown = client.get("/api/v1/pending", params={"kb": "pending-test", "view_id": "legacy"})
         detail = client.get(

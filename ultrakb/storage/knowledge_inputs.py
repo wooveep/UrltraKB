@@ -43,7 +43,9 @@ def image_paths(unit, processing, *, retained=False):
     prefix = f"sources/retained/{unit.unit_revision_id}" if retained else "sources"
     result = []
     for file in processing.files:
-        if PurePosixPath(file.path).suffix.lower() in {
+        if "images" in PurePosixPath(file.path).parts or PurePosixPath(
+            file.path
+        ).suffix.lower() in {
             ".png",
             ".jpg",
             ".jpeg",

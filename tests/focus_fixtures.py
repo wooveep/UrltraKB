@@ -1,74 +1,60 @@
-"""Retained partial workbook and unprocessed source, with zero model sends."""
+"""Explicit native partial-workbook and retained-original fixtures, without a model."""
 
-import hashlib
-import json
-
-from office_publication_fixtures import publish_workbook
 from openpyxl import Workbook
+from processing_fixtures import source_processing_context
 
-from ultrakb.inputs import prepared_input
-from ultrakb.locks import kb_ingest_lock
-from ultrakb.source_catalog import admit_source_revision, read_record
-from ultrakb.unit_publication import (
-    begin_unit_attempt,
-    list_source_units,
-    plan_import_units,
-    record_unit_failure,
-)
+from ultrakb.application.documents import import_document
+from ultrakb.application.views import published_scope
+from ultrakb.locks import atomic_write_text
+from ultrakb.storage.catalog_store import CatalogStore
+from ultrakb.storage.pending_store import PendingStore
 
 
 def partial_workbook(kb, path, *, bundle):
-    from ultrakb.ingest_records import UnitRevision
-    from ultrakb.workbooks.catalog import retain_workbook
+    from native_publication_fixtures import publication_workspace
+
+    from ultrakb.agent.compiler import _write_summary
+    from ultrakb.selected_refresh import _refresh_index
+    from ultrakb.storage.knowledge_inputs import source_paths
 
     workbook = Workbook()
     workbook.active.title = "Alpha"
     workbook.active["A1"] = "Available review policy"
     for name in ("Beta", "Gamma"):
         workbook.create_sheet(name)["A1"] = f"Unavailable {name} policy"
-    with kb_ingest_lock(kb / ".ultrakb"):
-        workbook.save(path)
-        with prepared_input(path) as prepared:
-            admission = admit_source_revision(kb, prepared)
-    published = publish_workbook(
-        kb, path, admission=admission, bundle=bundle, sheet_names=["Alpha"], record_model_task=False
-    )
-    with kb_ingest_lock(kb / ".ultrakb"), prepared_input(path) as prepared:
-        retained = retain_workbook(kb, admission, prepared)
-        [first] = list_source_units(kb, admission.source.source_id)
-        basis = json.loads(
-            read_record(
-                kb, "unit-revisions", first.target_revision_id, UnitRevision
-            ).processing_fingerprint
+    path.parent.mkdir(parents=True, exist_ok=True)
+    workbook.save(path)
+    imported = import_document(kb, path, context=source_processing_context(bundle=bundle))
+    assert imported.source_id is not None, imported
+    catalog = CatalogStore(kb, published_scope(kb).knowledge.identity)
+    from ultrakb.application.sources import source_inventory
+
+    source = next(item for item in source_inventory(kb) if item["source_id"] == imported.source_id)
+    units = {
+        item["name"]: catalog.unit_revision(item["target_revision_id"]) for item in source["units"]
+    }
+    assert "Alpha" in units, source
+    alpha = units["Alpha"]
+    processing = catalog.processing(alpha.processing_id)
+    body = catalog.read_processed(processing.processing_id, processing.body_path).decode()
+    with publication_workspace(kb, alpha.unit_revision_id) as (wiki, target):
+        _write_summary(
+            wiki,
+            target.doc_name,
+            body,
+            description="Available review policy",
+            full_text=source_paths(target, processing)[-1][0],
         )
-        for sheet in retained.sheets:
-            if sheet.name == "Alpha":
-                continue
-            selected = json.dumps(
-                {**basis, "sheet": {"key": sheet.key, "policy": retained.policy}}, sort_keys=True
-            )
-            unit, revision = plan_import_units(
-                kb,
-                admission,
-                selected,
-                key=sheet.key,
-                name=sheet.name,
-                doc_name=admission.source.doc_name
-                + "-sheet-"
-                + hashlib.sha256(sheet.key.encode()).hexdigest()[:12],
-            )
-            if sheet.name == "Beta":
-                state, _ = begin_unit_attempt(kb, unit, revision)
-                record_unit_failure(
-                    kb, state, "conversion", OSError("Local worksheet delivery failed")
-                )
-    return published.source_id
+        _refresh_index(wiki)
+    beta = units["Beta"]
+    pending = PendingStore(kb, catalog.identity)
+    work = pending.enqueue(beta.source_revision_id, unit_revision_id=beta.unit_revision_id)
+    claim = pending.start(pending.claim(intent_id=work.intent_id))
+    pending.finish(claim, status="failed", error_code="LocalWorksheetDeliveryFailed")
+    return imported.source_id
 
 
 def unprocessed_source(kb, path):
-    from ultrakb.locks import atomic_write_text
-
-    with kb_ingest_lock(kb / ".ultrakb"):
-        atomic_write_text(path, "# Retained original\n\nNo normalized body yet.")
-        with prepared_input(path) as prepared:
-            return admit_source_revision(kb, prepared).source.source_id
+    atomic_write_text(path, "# Retained original\n\nNo normalized body yet.")
+    bound = published_scope(kb).knowledge
+    return CatalogStore(kb, bound.identity).admit(path, source_key=str(path.resolve())).source_id

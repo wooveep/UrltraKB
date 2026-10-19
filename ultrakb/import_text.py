@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Iterable
 
+from ultrakb.file_digest import hash_file
 from ultrakb.inputs import (
     CNKI_SOURCE_EXTENSIONS,
     OFFICE_SOURCE_EXTENSIONS,
@@ -20,7 +21,6 @@ from ultrakb.inputs import (
     PreparedInput,
 )
 from ultrakb.pdf_recognition import PDF_RECOGNITION_POLICY, PdfRecognitionError, recognize_pdf
-from ultrakb.state import HashRegistry
 
 if TYPE_CHECKING:
     from ultrakb.workbooks.records import WorkbookSnapshot
@@ -112,13 +112,13 @@ def require_pdf_text(
 ) -> None:
     try:
         assessment = ImportTextAssessment(
-            HashRegistry.hash_file(path),
+            hash_file(path),
             extraction,
             assess_text_parts(pdf_text_parts(path, allow_empty=allow_empty)),
         )
     except PdfRecognitionError as error:
         raise ImportTextRejected(
-            ImportTextAssessment(HashRegistry.hash_file(path), extraction, unavailable=error.reason)
+            ImportTextAssessment(hash_file(path), extraction, unavailable=error.reason)
         ) from error
     if assessment.findings:
         raise ImportTextRejected(assessment)
@@ -162,7 +162,7 @@ def require_normalized_text(path: Path) -> None:
         _structured_text(json.loads(text)) if path.suffix.lower() == ".json" else [("body", text)]
     )
     assessment = ImportTextAssessment(
-        HashRegistry.hash_file(path), "retained normalized text", assess_text_parts(parts)
+        hash_file(path), "retained normalized text", assess_text_parts(parts)
     )
     if assessment.findings:
         raise ImportTextRejected(assessment)
@@ -178,7 +178,7 @@ def preflight_import_text(
 ) -> ImportTextAssessment:
     """Extract frozen bytes in temporary space; write no raw/wiki/catalog artifacts."""
     check_stop()
-    if HashRegistry.hash_file(prepared.path) != prepared.digest:
+    if hash_file(prepared.path) != prepared.digest:
         raise ValueError("Text preflight input failed its frozen digest check")
     if workbook is not None and workbook.digest != prepared.digest:
         raise ValueError("Text preflight workbook belongs to another original")
@@ -313,7 +313,7 @@ def validate_text_preflight(
 ) -> None:
     if assessment.digest != prepared.digest or assessment.policy != TEXT_CHECK_POLICY:
         raise ValueError("Text assessment does not match this frozen input and check policy")
-    if HashRegistry.hash_file(prepared.path) != assessment.digest:
+    if hash_file(prepared.path) != assessment.digest:
         raise ValueError("Text preflight input changed after extraction")
     if retain_only and retainable_without_text(assessment):
         return

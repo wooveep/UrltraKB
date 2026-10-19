@@ -9,8 +9,6 @@ wherever it is run — is still surfaced.
 
 from __future__ import annotations
 
-import json
-import time
 from pathlib import Path
 from typing import Any
 
@@ -19,37 +17,15 @@ from ultrakb.config import kb_root_dir, registered_kbs
 
 
 def _kb_list_item(kb_dir: Path, name: str) -> dict[str, Any]:
-    """Build one KB-list item: name + resolved path + rollup counters.
+    """Read rollup counters from the committed main-store publication."""
+    from ultrakb.application.knowledge_bases import get_kb_status
 
-    ``document_count`` comes from ``.ultrakb/hashes.json`` (0 if absent/corrupt)
-    and ``last_compile`` from the newest ``wiki/summaries/*.md`` mtime.
-    """
-    hashes_file = kb_dir / ".ultrakb" / "hashes.json"
-    doc_count = 0
-    if hashes_file.exists():
-        try:
-            doc_count = len(json.loads(hashes_file.read_text(encoding="utf-8")))
-        except (ValueError, OSError):
-            doc_count = 0
-    last_compile = None
-    summaries_dir = kb_dir / "wiki" / "summaries"
-    if summaries_dir.is_dir():
-        # Guard each stat() (like document_count above): a single unstattable
-        # entry — e.g. a dangling symlink whose target was removed — must not
-        # throw out of the whole /kbs listing and 500 every other KB.
-        mtimes: list[float] = []
-        for p in summaries_dir.glob("*.md"):
-            try:
-                mtimes.append(p.stat().st_mtime)
-            except OSError:
-                continue
-        if mtimes:
-            last_compile = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(max(mtimes)))
+    status = get_kb_status(kb_dir)
     return {
         "name": name,
         "path": str(kb_dir),
-        "document_count": doc_count,
-        "last_compile": last_compile,
+        "document_count": status["total_indexed"],
+        "last_compile": status["last_compile"],
         "has_raw": (kb_dir / "raw").is_dir(),
     }
 

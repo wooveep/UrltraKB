@@ -33,7 +33,7 @@ async def test_import_acceptance_adapters_report_publication_separately_from_pro
             import ultrakb.cli as cli
 
             monkeypatch.setattr(cli, "_find_kb_dir", lambda *args: root)
-            monkeypatch.setattr(cli, "_selected_scope", lambda *args: scope)
+            monkeypatch.setattr(cli, "_selected_scope", lambda *args, **kwargs: scope)
             shown = CliRunner().invoke(cli.cli, ["proposals", "show", proposal.proposal_id])
             assert proposal.version in shown.output and "human annotation" in shown.output
             result = CliRunner().invoke(
@@ -52,7 +52,7 @@ async def test_import_acceptance_adapters_report_publication_separately_from_pro
 
             monkeypatch.delenv("ULTRAKB_API_TOKEN", raising=False)
             monkeypatch.setattr(documents, "_resolve_kb", lambda *args: root)
-            monkeypatch.setattr(views, "view_scope", lambda *args: scope)
+            monkeypatch.setattr(views, "view_scope", lambda *args, **kwargs: scope)
             with TestClient(create_app()) as client:
                 response = client.post(
                     "/api/v1/proposal/accept",
@@ -86,7 +86,7 @@ def run(directory, proposal, version, queue):
     with open_database(root, read_only=True) as db:
         identity = db.identity
     scope = views.storage_scope(root, identity)
-    views.view_scope = lambda *args: scope
+    views.view_scope = lambda *args, **kwargs: scope
     def unavailable(*args, **kwargs):
         raise OSError("The working copy is unavailable")
     ProjectionStore.sync = unavailable

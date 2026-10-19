@@ -18,72 +18,77 @@ def isolated_settings(tmp_path, monkeypatch):
 
 
 def test_failed_creation_restores_existing_files_and_can_be_retried(tmp_path, monkeypatch):
-    from ultrakb.application import knowledge_bases
+    from ultrakb.application import storage_creation
 
     root = tmp_path / "new"
-    (root / "wiki").mkdir(parents=True)
-    (root / "wiki/index.md").write_text("existing notes")
-    (root / "raw").mkdir()
+    (root / "raw").mkdir(parents=True)
     (root / "raw/keep.md").write_text("owned input")
-    original = knowledge_bases.save_config
+    original = storage_creation.save_config
 
     def fail_after_config(*args, **kwargs):
         original(*args, **kwargs)
         raise OSError("injected storage failure")
 
-    monkeypatch.setattr(knowledge_bases, "save_config", fail_after_config)
+    monkeypatch.setattr(storage_creation, "save_config", fail_after_config)
     with pytest.raises(OSError):
         initialize_kb(root)
-    assert (root / "wiki/index.md").read_text() == "existing notes"
+    assert not (root / "wiki").exists()
     assert (root / "raw/keep.md").read_text() == "owned input"
     assert not (root / ".ultrakb/config.yaml").exists()
-    monkeypatch.setattr(knowledge_bases, "save_config", original)
+    monkeypatch.setattr(storage_creation, "save_config", original)
     assert initialize_kb(root)["created"]
 
 
 @pytest.mark.parametrize("entry", ["initialize", "open", "repair"])
-@pytest.mark.parametrize("point", ["config", "intent"])
-def test_creation_crash_recovers_before_explicit_retry(tmp_path, entry, point):
+@pytest.mark.parametrize("point", ["before_install", "after_install"])
+def test_creation_crash_keeps_an_absent_or_complete_native_store(tmp_path, entry, point):
     root = tmp_path / "new"
     code = """
 import os, sys
 from pathlib import Path
-from ultrakb.application import knowledge_bases as kb
-if sys.argv[2] == 'config':
-    original = kb.save_config
-    def crash(*args, **kwargs):
-        original(*args, **kwargs)
-        os._exit(23)
-    kb.save_config = crash
-else:
-    original = Path.unlink
-    def crash(self, *args, **kwargs):
-        original(self, *args, **kwargs)
-        if self.name == 'initializing.json':
+from ultrakb.application import storage_creation as kb
+original = os.replace
+root = Path(sys.argv[1])
+def install(source, target):
+    if Path(target) == root / '.ultrakb':
+        if sys.argv[2] == 'before_install':
             os._exit(23)
-    Path.unlink = crash
-kb.initialize_kb(Path(sys.argv[1]), seed_environment=False)
+        original(source, target)
+        os._exit(23)
+    return original(source, target)
+kb.os.replace = install
+kb.initialize_kb(root, seed_environment=False)
 """
     result = subprocess.run([sys.executable, "-c", code, str(root), point], timeout=20)
     assert result.returncode == 23
-    assert list((root / ".ultrakb/journal").glob("*.json"))
+    installed = point == "after_install"
+    assert (root / ".ultrakb/kb.sqlite").exists() == installed
     if entry == "open":
         from ultrakb.application.knowledge_bases import open_kb
 
-        with pytest.raises(ValueError, match="not initialized"):
-            open_kb(root)
+        if installed:
+            assert open_kb(root) == root
+        else:
+            with pytest.raises(ValueError):
+                open_kb(root)
     elif entry == "repair":
         from ultrakb.application.repair import repair_knowledge_base
 
-        repaired = repair_knowledge_base(root)
-        assert repaired.repaired and not repaired.initialized
-    from ultrakb.application.knowledge_bases import initialization_pending
+        if installed:
+            repaired = repair_knowledge_base(root)
+            assert repaired.initialized and repaired.repaired
+        else:
+            with pytest.raises(ValueError):
+                repair_knowledge_base(root)
+    if installed:
+        from ultrakb.application.views import published_scope
 
-    if entry != "initialize":
-        assert initialization_pending(root)
-    assert initialize_kb(root, seed_environment=False, require_empty=True)["created"]
-    assert not initialization_pending(root)
-    assert not list((root / ".ultrakb/journal").glob("*.json"))
+        assert published_scope(root).knowledge.read("index.md")
+        with pytest.raises(FileExistsError):
+            initialize_kb(root, seed_environment=False)
+    else:
+        assert initialize_kb(root, seed_environment=False, require_empty=True)["created"]
+    assert not (root / ".ultrakb/format.json").exists()
 
 
 def test_concurrent_creation_has_one_owner(tmp_path):

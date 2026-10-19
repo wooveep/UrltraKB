@@ -3,6 +3,7 @@
 import zipfile
 
 import pytest
+from artifact_fixtures import publish_artifacts
 
 
 def test_artifact_export_allows_a_profile_containing_global_lifecycle_state(kb_dir, tmp_path):
@@ -15,27 +16,23 @@ def test_artifact_export_allows_a_profile_containing_global_lifecycle_state(kb_d
     source = kb_dir / "output/result.md"
     source.parent.mkdir(exist_ok=True)
     source.write_text("Complete artifact", encoding="utf-8")
+    publish_artifacts(kb_dir, source.parent)
 
     exported = export_artifact(kb_dir, "output/result.md", destination)
     assert exported.read_text(encoding="utf-8") == "Complete artifact"
 
 
-def test_artifact_export_rejects_an_unfinished_initialization(kb_dir, tmp_path, monkeypatch):
+def test_artifact_export_rejects_a_native_knowledge_base_without_a_wiki_copy(kb_dir, tmp_path):
     from ultrakb.application.artifacts import export_artifact
-    from ultrakb.application.knowledge_bases import initialization_pending, initialize_kb
+    from ultrakb.application.knowledge_bases import initialize_kb
 
-    target = tmp_path.parent / f"{tmp_path.name}-incomplete"
+    target = tmp_path.parent / f"{tmp_path.name}-unmaterialized"
     source = kb_dir / "output/result.md"
     source.parent.mkdir(exist_ok=True)
     source.write_text("Complete artifact", encoding="utf-8")
-
-    def fail_transaction(*args, **kwargs):
-        raise OSError("cannot prepare transaction")
-
-    monkeypatch.setattr("ultrakb.mutation.mutation_scope", fail_transaction)
-    with pytest.raises(OSError, match="cannot prepare"):
-        initialize_kb(target, seed_environment=False, require_empty=True)
-    assert initialization_pending(target)
+    publish_artifacts(kb_dir, source.parent)
+    initialize_kb(target, seed_environment=False)
+    (target / "wiki").rename(target / "saved-working-copy")
     with pytest.raises(ValueError, match="outside every knowledge base"):
         export_artifact(kb_dir, "output/result.md", target)
     assert not (target / "result.md").exists()
@@ -49,6 +46,7 @@ def test_artifact_export_keeps_supporting_files_and_existing_exports(kb_dir, tmp
     (target / "SKILL.md").write_text("# Demo")
     (target / "references").mkdir()
     (target / "references/topic.md").write_text("Supporting knowledge")
+    publish_artifacts(kb_dir, target)
     export_dir = tmp_path.parent / f"{tmp_path.name}-export"
     export_dir.mkdir()
     artifacts = list_artifacts(kb_dir)
@@ -76,12 +74,18 @@ def test_graph_generation_preserves_links_and_replaces_only_its_fixed_artifact(k
 
     (kb_dir / "wiki/concepts/a.md").write_text("# A\n[[concepts/b]]")
     (kb_dir / "wiki/concepts/b.md").write_text("# B")
+    from publication_read_inputs import publish_fixture
+
+    publish_fixture(kb_dir)
     result = generate_graph(kb_dir)
     assert result.path == kb_dir / "output/visualize/graph.html"
     assert result.graph["edges"] == [{"source": "concepts/a", "target": "concepts/b"}]
     assert read_graph(kb_dir) == result.graph
     result.path.write_text("Old graph")
     again = generate_graph(kb_dir)
-    assert again.path == result.path
-    assert "<canvas" in again.path.read_text(encoding="utf-8")
+    assert again.path is None and again.reason_code == "artifact_sync_changed"
+    from ultrakb.application.artifacts import read_artifact
+
+    assert "<canvas" in read_artifact(kb_dir, "output/visualize/graph.html")
+    assert result.path.read_text() == "Old graph"
     assert not list((kb_dir / ".ultrakb/journal").glob("*.json"))

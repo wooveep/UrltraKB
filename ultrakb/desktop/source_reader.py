@@ -1,6 +1,7 @@
 """Read retained original-format artifacts without exposing compilation internals."""
 
 import re
+from threading import Lock
 
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
@@ -18,13 +19,17 @@ from ultrakb.desktop.reader import MarkdownView
 
 
 class SourceReader(QDialog):
-    def __init__(self, window, kb, source):
+    def __init__(self, window, kb, source, *, assets=None, scope=None):
         super().__init__(window)
         self.setWindowTitle(f"原文 · {source['name']}")
         self.setWindowModality(Qt.WindowModality.WindowModal)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.resize(900, 720)
         self.window, self.kb, self.source = window, kb, source
+        self.assets = assets
+        self.scope = scope or getattr(window, "read_scope", None)
+        self._closed, self._files, self._files_lock = False, [], Lock()
+        self.finished.connect(self.close_files)
         layout = QVBoxLayout(self)
         hint = QLabel("导入时保留的原文 · 摘要、概念和实体请在知识页阅读")
         hint.setWordWrap(True)
@@ -72,24 +77,16 @@ class SourceReader(QDialog):
             )
             revision.setWordWrap(True)
             layout.addWidget(revision)
-        if source.get("original_path"):
+        if source.get("unit_revision_id") and self.scope and self.scope.knowledge is not None:
             original = QPushButton("打开导入原件")
             original.setAutoDefault(False)
-            original.clicked.connect(
-                lambda: QDesktopServices.openUrl(
-                    QUrl.fromLocalFile(str(kb / source["original_path"]))
-                )
-            )
+            original.clicked.connect(lambda: self.open_file("original", original))
             layout.addWidget(original)
-        if source.get("internal_pdf_path"):
-            internal_pdf = QPushButton("打开导入时生成的 PDF")
-            internal_pdf.setAutoDefault(False)
-            internal_pdf.clicked.connect(
-                lambda: QDesktopServices.openUrl(
-                    QUrl.fromLocalFile(str(kb / source["internal_pdf_path"]))
-                )
-            )
-            layout.addWidget(internal_pdf)
+            if source.get("office") or source.get("cnki"):
+                internal_pdf = QPushButton("打开导入时生成的 PDF")
+                internal_pdf.setAutoDefault(False)
+                internal_pdf.clicked.connect(lambda: self.open_file("pdf", internal_pdf))
+                layout.addWidget(internal_pdf)
         if source.get("office"):
             office = source["office"]
             substitutions = ", ".join(
@@ -192,6 +189,49 @@ class SourceReader(QDialog):
         layout.addWidget(self.reader, 1)
         self.show_content(source)
 
+    def open_file(self, kind, button):
+        from ultrakb.application.source_files import prepare_source_file
+
+        def obsolete():
+            return self._closed or self.window.io.stopping()
+
+        def prepare():
+            resource = prepare_source_file(
+                self.kb,
+                self.source["source_id"],
+                self.source["unit_revision_id"],
+                kind,
+                identity=self.scope.knowledge.identity,
+                cancelled=obsolete,
+            )
+            with self._files_lock:
+                if obsolete():
+                    resource.close()
+                    return None
+                if not self.window.io.own_resource(resource):
+                    return None
+                self._files.append(resource)
+            return resource
+
+        def loaded(resource, error):
+            button.setEnabled(True)
+            if error:
+                self.coverage.setText(f"无法准备原件副本（{type(error).__name__}）")
+            elif not QDesktopServices.openUrl(QUrl.fromLocalFile(str(resource.path))):
+                self.coverage.setText("无法启动系统阅读器，请检查文件关联。")
+
+        button.setEnabled(False)
+        self.window.io.submit(
+            prepare, loaded, kb=self.kb, snapshot=True, cancelled=obsolete, obsolete=obsolete
+        )
+
+    def close_files(self):
+        with self._files_lock:
+            self._closed = True
+            resources, self._files = self._files, []
+        for resource in resources:
+            self.window.io.close_resource(resource)
+
     def show_content(self, source):
         physical = source.get("unit_kind") == "page"
         numbers = source.get("page_range", [])
@@ -216,7 +256,9 @@ class SourceReader(QDialog):
                 f"字符范围：[{start}, {end}) · 全文 {source['characters']} 字符 / "
                 f"{source['tokens']} tokens\n" + "\n".join(source.get("diagnostics", []))
             )
-        content = source["content"]
+        from ultrakb.application.reading_assets import source_markdown
+
+        content = source_markdown(source)
         if self.source.get("type") == "txt":
             fence = "`" * max(
                 3, 1 + max((len(run) for run in re.findall(r"`+", content)), default=0)
@@ -224,7 +266,7 @@ class SourceReader(QDialog):
             content = f"{fence}\n{content}\n{fence}"
         self.reader.show_markdown(
             content,
-            self.kb / (self.source.get("base_path") or "wiki/sources"),
+            self.assets or self.kb / (self.source.get("base_path") or "wiki/sources"),
             dark=self.window.appearance.dark,
             scale=self.window.zoom.currentData(),
         )
@@ -343,12 +385,19 @@ class SourceReader(QDialog):
             self.coverage.setText(str(exc))
 
     def closeEvent(self, event):
+        self.close_files()
         self.reader.stop_rendering()
         super().closeEvent(event)
 
 
 def show_source(window, kb, source):
-    dialog = SourceReader(window, kb, source)
+    from ultrakb.documents import DocumentView
+
+    dialog = (
+        SourceReader(window, kb, source.source, assets=source.assets, scope=source.scope)
+        if isinstance(source, DocumentView)
+        else SourceReader(window, kb, source)
+    )
     dialog.show()
     return dialog
 

@@ -146,7 +146,12 @@ def retain_unreadable_input(
         source_id=revision.source_id,
         source_revision_id=revision.revision_id,
         input_version=ready.digest,
-        quality=("import_text_rejected", "pdf_recognition_anomaly") if assessment.findings else (),
+        quality=(
+            "blank_original"
+            if catalog.processing(target.processing_id).content_state == "empty"
+            else "no_reliable_text",
+            *(("import_text_rejected", "pdf_recognition_anomaly") if assessment.findings else ()),
+        ),
         units=(
             ImportUnitOutcome(
                 target.unit_id,

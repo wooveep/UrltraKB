@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import queue
 import threading
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
 
@@ -102,17 +102,21 @@ def _execute(
     from ultrakb.application.pages import save_page
     from ultrakb.application.views import view_scope
     from ultrakb.knowledge_scope import resolve_scope
-    from ultrakb.locks import kb_ingest_lock
     from ultrakb.runtime.requests import ViewSelection
 
     root = Path(identity.kb_dir)
     context.usage_task_id = getattr(identity, "task_id", None)
     context.usage_unit_id = getattr(identity, "unit_id", None)
     scope = (
-        view_scope(root, request.view_id)
-        if isinstance(request, ViewSelection) and request.view_id is not None
+        view_scope(root, request.view_id or "legacy", cancelled=context.cancelled)
+        if isinstance(request, ViewSelection)
         else None
     )
+    if scope is not None:
+        assert scope.knowledge is not None
+        if context.storage_identity not in (None, scope.knowledge.identity):
+            raise ValueError("The worker belongs to another knowledge-base generation")
+        context.storage_identity = scope.knowledge.identity
     from ultrakb.runtime.requests import (
         AcceptProposal,
         AcceptRefreshProposal,
@@ -289,10 +293,11 @@ def _execute(
             unfinished=accepted.unfinished,
         )
     if isinstance(request, SavePage):
-        with kb_ingest_lock(
-            root / ".ultrakb", cancelled=context.cancelled, on_wait=context.waiting
-        ):
-            with context.begin(root):
+        from ultrakb.application.storage_execution import begin_storage_operation
+
+        result = None
+        try:
+            with begin_storage_operation(root, context, "save-page"):
                 context.on_event({"stage": "saving"})
                 saved = save_page(
                     root,
@@ -302,16 +307,25 @@ def _execute(
                     scope=scope,
                     publication_id=request.publication_id,
                 )
-                return UnitResult(
+                context._storage_result = "completed" if saved.status == "saved" else "failed"
+                result = UnitResult(
                     "completed" if saved.status == "saved" else "failed",
-                    resources=(str(resolve_scope(root, scope).wiki_dir / f"{saved.page.path}.md"),)
+                    resources=(str(scope.wiki_dir / f"{saved.page.path}.md"),)
                     if saved.page
                     else (),
                     error=None if saved.status == "saved" else saved.status,
                     output=saved.draft or "",
                     revision=saved.page.version if saved.page else None,
                     page=saved.page if saved.status == "saved" else None,
+                    unfinished=("synchronize wiki",)
+                    if saved.projection and saved.projection.status not in {"synced", "obsolete"}
+                    else (),
                 )
+        except Exception:
+            if result is None:
+                raise
+            result = replace(result, unfinished=(*result.unfinished, "confirm execution cleanup"))
+        return result
     if isinstance(request, (DeleteConversation, ExportConversation)):
         from ultrakb.application.sessions import delete_conversation, export_conversation
 
@@ -322,6 +336,7 @@ def _execute(
                 version=request.version,
                 view_id=request.view_id,
                 context=context,
+                scope=scope,
             )
             if isinstance(request, DeleteConversation)
             else export_conversation(
@@ -374,6 +389,7 @@ def _execute(
         from ultrakb.application.generation_results import generation_receipt
         from ultrakb.application.generators import GenerationOptions, generate_artifact
 
+        context.resume_storage_execution_id = request.resume_execution_id
         generated = asyncio.run(
             generate_artifact(
                 root,
@@ -386,6 +402,7 @@ def _execute(
                 ),
                 context=context,
                 scope=scope,
+                pin_scope=False,
             )
         )
         return UnitResult(
@@ -595,7 +612,6 @@ def run_unit(
 ) -> None:
     # Imports stay inside the spawn child. No Qt, Click initialization or SDK
     # configuration runs in the task manager's process.
-    from ultrakb.add_coordinator import DirtyRollbackError
     from ultrakb.application.execution import ExecutionContext
     from ultrakb.application.model_connections import ConnectionRequired
     from ultrakb.inputs import InputChanged, preparation_directory
@@ -604,6 +620,7 @@ def run_unit(
     from ultrakb.locks import LockCancelled
     from ultrakb.mutation import RecoveryRequired
     from ultrakb.runtime.input_store import child_preparation, reap_orphaned_inputs
+    from ultrakb.storage.database import StorageFormatError
 
     if config_location is not None:
         from ultrakb import config
@@ -642,11 +659,11 @@ def run_unit(
             result = UnitResult("stopped", error=f"Task stopped ({type(exc).__name__})", halt=True)
         except LockCancelled:
             result = UnitResult("stopped")
-        except (KnowledgeBaseRemoved, KnowledgeBaseIncomplete):
+        except (KnowledgeBaseRemoved, KnowledgeBaseIncomplete, StorageFormatError):
             result = UnitResult(
                 "blocked", error="Knowledge base is unavailable; reopen or diagnose it", halt=True
             )
-        except (RecoveryRequired, DirtyRollbackError):
+        except RecoveryRequired:
             result = UnitResult("blocked", error="Knowledge base needs repair", halt=True)
         except ConnectionRequired as exc:
             result = UnitResult(

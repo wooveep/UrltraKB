@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterator
 
-from ultrakb.state import HashRegistry
+from ultrakb.file_digest import hash_file
 
 TEXT_SOURCE_EXTENSIONS = {".md", ".markdown", ".txt", ".csv", ".xml", ".html", ".htm"}
 IMAGE_SOURCE_EXTENSIONS = {".md", ".markdown", ".html", ".htm"}
@@ -62,9 +62,9 @@ def _image_inputs(source: Path, base: Path) -> dict[str, Path]:
 
 def current_input_version(source: Path) -> str:
     return input_version(
-        HashRegistry.hash_file(source),
+        hash_file(source),
         {
-            ref: HashRegistry.hash_file(path) if path.is_file() else None
+            ref: hash_file(path) if path.is_file() else None
             for ref, path in local_image_inputs(source).items()
         },
     )
@@ -98,8 +98,8 @@ def copy_stable(source: Path, target: Path) -> str:
     """Copy bytes and verify their version before using them for any processing."""
     before = source.stat()
     shutil.copy2(source, target)
-    digest = HashRegistry.hash_file(target)
-    current = HashRegistry.hash_file(source)
+    digest = hash_file(target)
+    current = hash_file(source)
     after = source.stat()
     if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
         after.st_dev,
@@ -135,7 +135,7 @@ class PreparedInput:
     def is_current(self) -> bool:
         if self.source.resolve() != self.identity:
             return False
-        if HashRegistry.hash_file(self.source) != self.digest:
+        if hash_file(self.source) != self.digest:
             return False
         if self.source.suffix.lower() not in IMAGE_SOURCE_EXTENSIONS:
             return True
@@ -144,7 +144,7 @@ class PreparedInput:
             return False
         for reference, path in paths.items():
             image = self.images[reference]
-            digest = HashRegistry.hash_file(path) if path.is_file() else None
+            digest = hash_file(path) if path.is_file() else None
             if path != image.original or digest != image.digest:
                 return False
         return True

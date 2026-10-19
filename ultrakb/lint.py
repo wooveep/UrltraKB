@@ -381,32 +381,8 @@ def find_orphans(wiki: Path) -> list[str]:
     return sorted(orphans)
 
 
-def find_missing_entries(
-    raw: Path,
-    wiki: Path,
-    *,
-    kb_dir: Path | None = None,
-) -> list[str]:
-    """Find files in raw/ that have no corresponding wiki entries.
-
-    When ``kb_dir`` is provided, each raw file is first resolved through
-    the hash registry (``kb_dir/.ultrakb/hashes.json``): registered files
-    are checked against their ``doc_name`` artifacts, which can differ
-    from the raw stem (watch-mode/URL ingests keep the original filename
-    in raw/ — e.g. ``2509.11420.pdf`` → ``2509-11420.md`` — and collision
-    suffixes rename artifacts too). Files with no registry entry fall back
-    to the stem heuristic: "present" means a sources/ or summaries/ page
-    with the same stem.
-
-    Args:
-        raw: Path to the raw documents directory.
-        wiki: Path to the wiki root directory.
-        kb_dir: Root of the knowledge base. When None, only the legacy
-            stem heuristic is used.
-
-    Returns:
-        List of filenames in raw/ with no wiki entry.
-    """
+def find_missing_entries(raw: Path, wiki: Path) -> list[str]:
+    """Inspect an explicit scratch document directory using matching page stems."""
     sources_dir = wiki / "sources"
     summaries_dir = wiki / "summaries"
 
@@ -416,36 +392,11 @@ def find_missing_entries(
     )
     known_stems = sources_stems | summary_stems
 
-    registry = None
-    if kb_dir is not None:
-        registry_file = kb_dir / ".ultrakb" / "hashes.json"
-        if registry_file.exists():
-            # Deferred import: converter pulls in pymupdf/markitdown,
-            # which lint doesn't otherwise need at import time.
-            from ultrakb.converter import _registry_path
-            from ultrakb.state import HashRegistry
-
-            registry = HashRegistry(registry_file)
-
     missing: list[str] = []
     if raw.exists():
         for f in raw.iterdir():
             if not f.is_file():
                 continue
-            if registry is not None:
-                meta = registry.get_by_path(_registry_path(f, kb_dir))
-                if meta is not None:
-                    # Registered file — the registry's doc_name is the
-                    # single source of truth for artifact names.
-                    doc_name = meta.get("doc_name") or Path(meta.get("name", f.name)).stem
-                    present = (
-                        (sources_dir / f"{doc_name}.md").exists()
-                        or (sources_dir / f"{doc_name}.json").exists()
-                        or (summaries_dir / f"{doc_name}.md").exists()
-                    )
-                    if not present:
-                        missing.append(f.name)
-                    continue
             if f.stem not in known_stems:
                 missing.append(f.name)
 
@@ -612,8 +563,13 @@ def run_structural_lint(kb_dir: Path, *, scope: KnowledgeScope | None = None) ->
         Formatted Markdown string with lint results.
     """
     scope = resolve_scope(kb_dir, scope)
+    if scope.knowledge is not None:
+        from ultrakb.application.storage_lint import preview_stored_lint
+
+        return preview_stored_lint(scope)[1]
+    if scope.private_workspace is None:
+        raise ValueError("Structural inspection requires a committed view or private workspace")
     wiki = scope.wiki_dir
-    raw = kb_dir / "raw"
 
     # Load all wiki pages once and share across both frontmatter checks
     # (avoids 2N disk reads when the wiki is large).
@@ -621,7 +577,6 @@ def run_structural_lint(kb_dir: Path, *, scope: KnowledgeScope | None = None) ->
 
     broken = find_broken_links(wiki)
     orphans = find_orphans(wiki)
-    missing = find_missing_entries(raw, wiki, kb_dir=kb_dir)
     sync_issues = check_index_sync(wiki)
     bad_frontmatter = find_invalid_frontmatter(wiki, pages=wiki_pages)
     missing_okf = find_missing_okf_fields(wiki, pages=wiki_pages)
@@ -646,13 +601,10 @@ def run_structural_lint(kb_dir: Path, *, scope: KnowledgeScope | None = None) ->
         lines.append("No orphaned pages found.")
     lines.append("")
 
-    # Missing entries
-    lines.append(f"### Raw Files Without Wiki Entry ({len(missing)})")
-    if missing:
-        for name in missing:
-            lines.append(f"- {name}")
-    else:
-        lines.append("All raw files have wiki entries.")
+    lines.append("### Source Inputs")
+    lines.append(
+        "Retained inputs belong to this publication; check pending imports for unfinished sources."
+    )
     lines.append("")
 
     # Index sync

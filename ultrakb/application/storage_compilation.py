@@ -21,6 +21,7 @@ from ultrakb.storage.knowledge_store import KnowledgeStore, PublicationConflict
 from ultrakb.storage.pending_store import PendingStore
 from ultrakb.storage.wiki_projection import ProjectionConflict
 
+from .connection_failures import operation_error_message
 from .publications import sync_publication
 from .recompilation import RecompileResult
 from .task_stages import task_stage
@@ -119,7 +120,7 @@ async def recompile_stored(scope, source_id, *, unit_id, context, version, model
                 if isinstance(error, (LockCancelled, asyncio.CancelledError))
                 else "blocked",
                 target.doc_name,
-                message=str(error),
+                message=operation_error_message(error),
                 error_type=type(error).__name__,
                 unfinished=("compilation",),
             )
@@ -254,6 +255,9 @@ async def _compile(scope, target, context, bundle, model, max_concurrency):
                 conditions={"fingerprint": context.executor.fingerprint, "compiler": 3},
                 execution_id=execution.execution_id,
             )
+            from ultrakb.storage.compile_summary_recovery import authorize_summary_recovery
+
+            authorize_summary_recovery(checkpoints)
             with ExitStack() as temporary:
                 with task_stage(
                     context,
@@ -400,7 +404,9 @@ async def _compile(scope, target, context, bundle, model, max_concurrency):
             except Exception:
                 logger.warning("Could not confirm compilation failure", exc_info=True)
         if isinstance(error, (CatalogConflict, PublicationConflict, ProjectionConflict)):
-            return RecompileResult("conflict", target.doc_name, message=str(error))
+            return RecompileResult(
+                "conflict", target.doc_name, message=operation_error_message(error)
+            )
         from ultrakb.agent.page_response import PageResponseError
 
         quality = list(report.quality) if report else []
@@ -429,7 +435,7 @@ async def _compile(scope, target, context, bundle, model, max_concurrency):
             and error.code == "compile_repair_exhausted"
             else "blocked",
             target.doc_name,
-            message=str(error),
+            message=operation_error_message(error),
             error_type=type(error).__name__,
             quality=tuple(dict.fromkeys(quality)),
             quality_known=report is not None and "confirm compiler quality" not in unfinished,

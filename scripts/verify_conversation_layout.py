@@ -14,6 +14,7 @@ def main():
     args = parser.parse_args()
     root = args.output.resolve()
     root.mkdir(parents=True, exist_ok=False)
+    os.environ["ULTRAKB_CONFIG_DIR"] = str(root / "settings")
     if args.headless:
         os.environ["QT_QPA_PLATFORM"] = "offscreen"
     from PySide6.QtCore import QPoint, Qt
@@ -22,10 +23,10 @@ def main():
     from PySide6.QtWidgets import QApplication, QLabel
 
     from ultrakb import config
-    from ultrakb.agent.chat_session import ChatSession
     from ultrakb.application.knowledge_bases import initialize_kb
     from ultrakb.desktop.reader import MarkdownView
     from ultrakb.desktop.verification import create_application
+    from ultrakb.desktop.verification_data import publish_pages, retain_conversation
     from ultrakb.desktop.verification_workbench import button
     from ultrakb.desktop.window import Workbench
     from ultrakb.locks import kb_ingest_lock
@@ -34,13 +35,14 @@ def main():
     config.GLOBAL_CONFIG_PATH = config.GLOBAL_CONFIG_DIR / "global.yaml"
     kb = root / "对话版式库"
     initialize_kb(kb, seed_environment=False)
-    app = create_application()
+    app = create_application(settings_dir=root / "qt-settings")
     app.setQuitOnLastWindowClosed(False)
     assert args.headless or app.platformName() not in {"offscreen", "minimal"}
     image = QImage(2000, 400, QImage.Format.Format_RGB32)
     image.fill(Qt.GlobalColor.blue)
     with kb_ingest_lock(kb / ".ultrakb"):
         image.save(str(kb / "wiki/wide.png"))
+    publish_pages(kb, {"wide.png": (kb / "wiki/wide.png").read_bytes()})
     window = Workbench(history_dir=root / "tasks")
     window.resize(1366, 768)
     window.show()
@@ -65,13 +67,12 @@ def main():
         + "very_long_code_identifier_" * 50
         + "\n```\n\n![宽图](wide.png)\n\n$$a^2+b^2=c^2$$"
     )
-    session = ChatSession.new(kb, "local-ui-sample", "zh")
-    session.record_turn("请说明对话布局", answer, [])
+    session_id, _ = retain_conversation(kb, [("请说明对话布局", answer)])
     try:
         window.open_knowledge_base(kb)
         wait(lambda: window.kb == kb and not window.io._callbacks)
         button(window, "对话").click()
-        window.conversations.open(session.id)
+        window.conversations.open(session_id)
         wait(lambda: answer.splitlines()[0][2:] in window.chat.toPlainText())
         reader = next(entry[4] for entry in window.chat._entries if entry[4])
         wait(
@@ -171,7 +172,7 @@ def main():
         question.submitted.connect(window._ask)
         question.setPlainText("切换后保留的中文草稿")
         window.conversations.new()
-        window.conversations.open(session.id)
+        window.conversations.open(session_id)
         wait(lambda: not window.conversations.active.loading)
         assert question.toPlainText() == "切换后保留的中文草稿"
         checks.append(

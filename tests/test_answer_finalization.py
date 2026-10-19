@@ -274,15 +274,17 @@ async def test_cancellation_after_original_read_never_saves_narration(kb_dir, mo
 async def test_long_conversation_preparation_preserves_the_only_answer_send(
     kb_dir, model_service, monkeypatch
 ):
-    from ultrakb.agent.chat_session import ChatSession
+    from conversation_fixtures import seed_conversation
+
     from ultrakb.application.conversations import continue_conversation
     from ultrakb.application.execution import ExecutionContext
 
     configure(kb_dir, model_service, 1)
     monkeypatch.setattr("ultrakb.context.preparation.RECALL_THRESHOLD_TOKENS", 1)
-    session = ChatSession.new(kb_dir, "deepseek/deepseek-flash", "en")
-    for index in range(9):
-        session.record_turn(f"Preference {index}: quiet indoor workspace.", "Display only.", [])
+    session = seed_conversation(
+        kb_dir,
+        [(f"Preference {index}: quiet indoor workspace.", "Display only.") for index in range(9)],
+    )
     context = ExecutionContext()
     result = await continue_conversation(
         kb_dir, "Confirm my latest preference.", session_id=session.id, context=context

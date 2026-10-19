@@ -1,27 +1,26 @@
 """Nested summary delivery failures retain exact source coverage across restart."""
 
 import json
-from types import SimpleNamespace
 
 import pytest
+from compile_work_fixtures import accepted_payload, checkpoint_record
 
 from ultrakb.agent.document_summary import build_document_summary
 from ultrakb.agent.page_response import PageResponseError
 from ultrakb.agent.source_windows import CompileSourceWindows
-from ultrakb.compile_checkpoints import CompileCheckpoints, digest
+from ultrakb.compile_checkpoints import digest
 from ultrakb.locks import LockCancelled, atomic_write_text
 
 pytestmark = pytest.mark.integration
 
 
 @pytest.mark.asyncio
-async def test_nested_failed_batches_resume_only_missing_children(kb_dir):
+async def test_nested_failed_batches_resume_only_missing_children(kb_dir, compile_work):
     original = "\n\n".join(f"Original condition {i}: keep the inlet closed." for i in range(8))
     atomic_write_text(kb_dir / "wiki/sources/manual.md", original)
     reader = CompileSourceWindows(kb_dir / "wiki", "manual")
     system = {"role": "system", "content": "Preserve original conditions."}
-    task = SimpleNamespace(task_id="a" * 32, parent_task_id=None)
-    checkpoints = CompileCheckpoints(kb_dir, task, {"document": "manual"}, {})
+    checkpoints = compile_work({"document": "manual"}, {})
     checkpoints.prepare_summary_delivery()
     seen = []
 
@@ -51,7 +50,7 @@ async def test_nested_failed_batches_resume_only_missing_children(kb_dir):
             checkpoints=checkpoints,
         )
     assert seen == ["1", "1.1", "1.1.1", "1.1.2"]
-    restored = CompileCheckpoints(kb_dir, task, {"document": "manual"}, {})
+    restored = compile_work({"document": "manual"}, {})
     remaining, supplied = [], []
 
     async def resume(messages, stage, sources, sections):
@@ -86,19 +85,17 @@ async def test_nested_failed_batches_resume_only_missing_children(kb_dir):
         )
         == draft
     )
-    manifest = json.loads(restored.path.read_text())
-    assert manifest["entries"]["summary-split:1.1"]["state"] == "accepted"
+    assert accepted_payload(restored, "summary-split:1.1") is not None
 
 
 @pytest.mark.asyncio
-async def test_received_repair_survives_restart_before_validation(kb_dir):
+async def test_received_repair_survives_restart_before_validation(kb_dir, compile_work):
     from ultrakb.agent.document_summary import summary_messages, window_sections
 
     original = "Keep the inlet closed until inspection is complete."
     atomic_write_text(kb_dir / "wiki/sources/manual.md", original)
     reader = CompileSourceWindows(kb_dir / "wiki", "manual")
-    task = SimpleNamespace(task_id="b" * 32, parent_task_id=None, compiler_request_version=2)
-    checkpoints = CompileCheckpoints(kb_dir, task, {"document": "manual"}, {})
+    checkpoints = compile_work({"document": "manual"}, {})
     checkpoints.prepare_summary_delivery()
     system = {"role": "system", "content": "Retain the source conditions."}
     window = next(reader.iter_document_windows(fits=lambda _: True))
@@ -130,7 +127,7 @@ async def test_received_repair_survives_restart_before_validation(kb_dir):
         code="response_received",
         attempt=2,
     )
-    restored = CompileCheckpoints(kb_dir, task, {"document": "manual"}, {})
+    restored = compile_work({"document": "manual"}, {})
 
     async def forbidden(*args):
         raise AssertionError("The received repair must be validated without another send")
@@ -139,6 +136,6 @@ async def test_received_repair_survives_restart_before_validation(kb_dir):
         reader, system_message=system, generate=forbidden, fits=lambda _: True, checkpoints=restored
     )
     assert original in draft.markdown
-    assert (kb_dir / retained).read_text() == raw
-    entry = json.loads(restored.path.read_text())["entries"]["summary:1"]
-    assert entry["state"] == "accepted" and entry["repair_used"] is True
+    assert retained.startswith("compile-response/")
+    assert accepted_payload(restored, "summary:1") is not None
+    assert checkpoint_record(restored, "summary:1")["repair_used"] is True

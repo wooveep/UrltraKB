@@ -1,92 +1,48 @@
-"""Conversation maintenance through the shared application interface."""
+"""Shared native session maintenance retains concurrent history and unique exports."""
 
-from ultrakb.agent.chat_session import ChatSession, load_session
+from pathlib import Path
+
+import pytest
+
+from ultrakb.application.conversations import read_conversation
+from ultrakb.application.sessions import delete_conversation, export_conversation
+from ultrakb.knowledge_scope import resolve_scope
+from ultrakb.storage.session_store import SessionStore
+
+
+def _session(root):
+    scope = resolve_scope(root)
+    store = SessionStore(root, scope.knowledge.identity)
+    store.create("native-session", model='openai/model"quoted', language="zh")
+    return store, "native-session"
 
 
 def test_confirmed_deletion_rejects_a_new_completed_turn(kb_dir):
-    from ultrakb.application.conversations import read_conversation
-    from ultrakb.application.execution import ExecutionContext
-    from ultrakb.application.sessions import delete_conversation
-
-    session = ChatSession.new(kb_dir, "openai/test", "zh")
-    session.record_turn("First", "First answer", [])
-    preview = read_conversation(kb_dir, session.id)
-    session.record_turn("Second", "Second answer", [])
-    context = ExecutionContext()
-    conflict = delete_conversation(kb_dir, session.id, version=preview.version, context=context)
+    store, session = _session(kb_dir)
+    store.append_exchange(session, "first", "First", "First answer")
+    preview = read_conversation(kb_dir, session)
+    store.append_exchange(session, "second", "Second", "Second answer")
+    conflict = delete_conversation(kb_dir, session, version=preview.version)
     assert conflict.status == "conflict"
-    assert context.snapshot is None
-    assert load_session(kb_dir, session.id).turn_count == 2
-
-    latest = read_conversation(kb_dir, session.id)
-    removed = delete_conversation(kb_dir, session.id, version=latest.version, context=context)
-    assert removed.status == "deleted"
-    assert context.snapshot is not None
-    assert not session.path.exists()
-    assert removed.changes == (f"deleted: .ultrakb/chats/{session.id}.json",)
-    assert delete_conversation(kb_dir, session.id).status == "missing"
-
-
-def test_malformed_conversation_cannot_redirect_its_identity(kb_dir):
-    import json
-
-    import pytest
-
-    from ultrakb.agent.chat_session import list_sessions
-    from ultrakb.application.conversations import read_conversation
-
-    session = ChatSession.new(kb_dir, "openai/test", "zh")
-    session.record_turn("Question", "Answer", [])
-    data = session.to_dict()
-    data["id"] = "another-conversation"
-    session.path.write_text(json.dumps(data))
-    with pytest.raises(ValueError):
-        read_conversation(kb_dir, session.id)
-    assert list_sessions(kb_dir) == []
+    assert len(store.load(session).turns) == 2
+    latest = read_conversation(kb_dir, session)
+    assert delete_conversation(kb_dir, session, version=latest.version).status == "deleted"
+    with pytest.raises(FileNotFoundError):
+        read_conversation(kb_dir, session)
+    assert delete_conversation(kb_dir, session).status == "missing"
 
 
 def test_transcript_exports_latest_completed_history_to_unique_copies(kb_dir):
-    from pathlib import Path
-
-    from ultrakb.application.sessions import export_conversation
-
-    session = ChatSession.new(kb_dir, 'openai/model"quoted', "zh")
-    session.record_turn("First question", "Answer with [[concepts/missing]].", [])
-    old = load_session(kb_dir, session.id)
-    session.record_turn("Second question", "Completed second answer", [])
-    first = export_conversation(kb_dir, old, unique=True)
-    second = export_conversation(kb_dir, session.id, unique=True)
+    store, session = _session(kb_dir)
+    store.append_exchange(session, "first", "First question", "Answer with [[concepts/missing]].")
+    old = read_conversation(kb_dir, session)
+    store.append_exchange(session, "second", "Second question", "Completed second answer")
+    first = export_conversation(kb_dir, session, unique=True)
+    second = export_conversation(kb_dir, session, unique=True)
     assert first.status == second.status == "exported"
     assert first.resources != second.resources
     text = Path(first.resources[0]).read_text()
-    assert "Second question" in text
-    assert "Completed second answer" in text
+    assert "Second question" in text and "Completed second answer" in text
     assert "[[concepts/missing]]" not in text
     assert text == Path(second.resources[0]).read_text()
-    assert load_session(kb_dir, session.id).turn_count == 2
-
-
-def test_unchanged_windows_conversation_can_be_deleted_after_confirmation(kb_dir):
-    from ultrakb.application.conversations import read_conversation
-    from ultrakb.application.sessions import delete_conversation
-
-    session = ChatSession.new(kb_dir, "openai/test", "en")
-    session.record_turn("Question", "Answer", [])
-    session.path.write_bytes(session.path.read_bytes().replace(b"\n", b"\r\n"))
-    preview = read_conversation(kb_dir, session.id)
-    assert delete_conversation(kb_dir, session.id, version=preview.version).status == "deleted"
-
-
-def test_malformed_image_arguments_do_not_hide_completed_history(kb_dir):
-    import json
-
-    from ultrakb.agent.chat_session import list_sessions
-    from ultrakb.application.conversations import read_conversation
-
-    session = ChatSession.new(kb_dir, "openai/test", "zh")
-    session.record_turn("Question", "Answer", [])
-    data = session.to_dict()
-    data["history"] = [{"type": "function_call", "name": "get_image", "arguments": "[]"}]
-    session.path.write_text(json.dumps(data))
-    assert list_sessions(kb_dir)[0]["id"] == session.id
-    assert read_conversation(kb_dir, session.id).turns == (("Question", "Answer"),)
+    assert len(old.turns) == 1 and len(store.load(session).turns) == 2

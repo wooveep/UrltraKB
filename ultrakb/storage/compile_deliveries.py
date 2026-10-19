@@ -160,7 +160,7 @@ def provider_response(db, work, key, signature):
         return None
     work_key = "compile:" + invocation[0]
     row = db.connection.execute(
-        "SELECT r.request_id, p.response_digest FROM ukb_stage_attempts s "
+        "SELECT r.request_id, p.response_digest, r.payload_json FROM ukb_stage_attempts s "
         "JOIN ukb_usage_requests r ON r.stage_attempt_id = s.stage_attempt_id "
         "JOIN ukb_response_receipts p ON p.request_id = r.request_id "
         "WHERE s.work_key = ? ORDER BY r.sequence DESC LIMIT 1",
@@ -182,6 +182,16 @@ def provider_response(db, work, key, signature):
         value = json.loads(read_bytes(db, row[1]))
     except (ValueError, TypeError, KeyError) as error:
         raise RecoveryRequired("The retained compiler response requires explicit repair") from error
+    request = json.loads(row[2])
+    if (
+        request.get("state") == "failed"
+        and isinstance(value, dict)
+        and isinstance(value.get("error"), dict)
+        and "choices" not in value
+    ):
+        # A known provider error is retained in the ledger, but is not a model
+        # delivery. An explicit continuation still spends the original budget.
+        return None
     return value, row[0]
 
 

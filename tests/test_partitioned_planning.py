@@ -15,8 +15,10 @@ from ultrakb.model_tokenizer import ContextCapacityError, TokenMeasure
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_oversized_navigation_completes_every_native_id(kb_dir, monkeypatch):
-    wiki = kb_dir / "wiki"
+async def test_oversized_navigation_completes_every_native_id(
+    kb_dir, monkeypatch, private_compiler_scope
+):
+    wiki = private_compiler_scope.wiki_dir
     source = wiki / "sources/manual.json"
     atomic_write_text(source, json.dumps([{"page": 1, "content": "Original procedure."}]))
     original = source.read_bytes()
@@ -68,7 +70,13 @@ async def test_oversized_navigation_completes_every_native_id(kb_dir, monkeypatc
     monkeypatch.setattr("ultrakb.config.resolve_effective_config", lambda *args: (config, {}))
     with executor.activate():
         await compiler.compile_long_doc(
-            "manual", summary, "document-id", kb_dir, config["model"], navigation=navigation
+            "manual",
+            summary,
+            "document-id",
+            kb_dir,
+            config["model"],
+            navigation=navigation,
+            scope=private_compiler_scope,
         )
     assert covered == ["root", *[f"native-{i}" for i in range(120)]]
     assert source.read_bytes() == original
@@ -77,8 +85,10 @@ async def test_oversized_navigation_completes_every_native_id(kb_dir, monkeypatc
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_oversized_existing_catalog_scans_the_tail_before_creating(kb_dir, monkeypatch):
-    wiki = kb_dir / "wiki"
+async def test_oversized_existing_catalog_scans_the_tail_before_creating(
+    kb_dir, monkeypatch, private_compiler_scope
+):
+    wiki = private_compiler_scope.wiki_dir
     atomic_write_text(
         wiki / "sources/manual.json", json.dumps([{"page": 1, "content": "Original procedure."}])
     )
@@ -149,6 +159,7 @@ async def test_oversized_existing_catalog_scans_the_tail_before_creating(kb_dir,
             kb_dir,
             config["model"],
             navigation=[{"node_id": "native", "title": "Topic", "start_index": 1, "end_index": 1}],
+            scope=private_compiler_scope,
         )
     assert set(examined) == {f"concepts/existing-{i:03}" for i in range(80)}
     assert len(list((wiki / "concepts").glob("*.md"))) == 80
@@ -157,8 +168,10 @@ async def test_oversized_existing_catalog_scans_the_tail_before_creating(kb_dir,
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_short_document_later_plan_overflow_keeps_accepted_summary(kb_dir, monkeypatch):
-    source = kb_dir / "wiki/sources/short.md"
+async def test_short_document_later_plan_overflow_keeps_accepted_summary(
+    kb_dir, monkeypatch, private_compiler_scope
+):
+    source = private_compiler_scope.wiki_dir / "sources/short.md"
     atomic_write_text(source, "The original explains a single necessary topic.\n")
     original = source.read_bytes()
     config = {
@@ -192,16 +205,22 @@ async def test_short_document_later_plan_overflow_keeps_accepted_summary(kb_dir,
     monkeypatch.setattr(compiler, "_llm_call", receive)
     monkeypatch.setattr("ultrakb.config.resolve_effective_config", lambda *args: (config, {}))
     with executor.activate():
-        await compiler.compile_short_doc("short", source, kb_dir, config["model"])
+        await compiler.compile_short_doc(
+            "short", source, kb_dir, config["model"], scope=private_compiler_scope
+        )
     assert stages == ["summary", "concepts-plan-partition"]
     assert source.read_bytes() == original
-    assert "Accepted summary." in (kb_dir / "wiki/summaries/short.md").read_text()
+    assert (
+        "Accepted summary." in (private_compiler_scope.wiki_dir / "summaries/short.md").read_text()
+    )
 
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_known_irreducible_rules_fail_before_paying_for_summary(kb_dir, monkeypatch):
-    source = kb_dir / "wiki/sources/short.md"
+async def test_known_irreducible_rules_fail_before_paying_for_summary(
+    kb_dir, monkeypatch, private_compiler_scope
+):
+    source = private_compiler_scope.wiki_dir / "sources/short.md"
     atomic_write_text(source, "Original text.\n")
     config = {
         "model": "deepseek/deepseek-flash",
@@ -218,13 +237,17 @@ async def test_known_irreducible_rules_fail_before_paying_for_summary(kb_dir, mo
 
     monkeypatch.setattr(compiler, "_llm_call", forbidden)
     with executor.activate(), pytest.raises(ContextCapacityError, match="fixed"):
-        await compiler.compile_short_doc("short", source, kb_dir, config["model"])
+        await compiler.compile_short_doc(
+            "short", source, kb_dir, config["model"], scope=private_compiler_scope
+        )
 
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_oversized_plan_correction_recovers_through_complete_native_work(kb_dir, monkeypatch):
-    wiki = kb_dir / "wiki"
+async def test_oversized_plan_correction_recovers_through_complete_native_work(
+    kb_dir, monkeypatch, private_compiler_scope
+):
+    wiki = private_compiler_scope.wiki_dir
     atomic_write_text(wiki / "sources/manual.json", '[{"page":1,"content":"Original."}]')
     summary = wiki / "summaries/manual.md"
     atomic_write_text(summary, "---\nfull_text: sources/manual.json\n---\nRetained summary.\n")
@@ -269,5 +292,9 @@ async def test_oversized_plan_correction_recovers_through_complete_native_work(k
             kb_dir,
             config["model"],
             navigation=[{"node_id": "native", "title": "Topic", "start_index": 1, "end_index": 1}],
+            scope=private_compiler_scope,
         )
     assert stages == ["concepts-plan", "concepts-plan-partition"]
+
+
+pytest_plugins = ("compiler_scope_fixtures",)

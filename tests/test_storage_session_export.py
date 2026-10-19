@@ -145,7 +145,9 @@ def test_native_worker_keeps_the_committed_export_and_pending_projection(tmp_pat
     store.append_exchange("worker-export", "turn", "Question.", "Answer.")
     ProjectionStore(root, identity).sync()
     begin_external_edit(root, identity)
-    monkeypatch.setattr(views, "view_scope", lambda root, view_id: storage_scope(root, identity))
+    monkeypatch.setattr(
+        views, "view_scope", lambda root, view_id, **kwargs: storage_scope(root, identity)
+    )
     request = ExportConversation("worker-export", view_id="legacy")
     token = UnitIdentity.create("a" * 32, 0, str(root), request, generation=identity.generation)
     result = _execute(request, token, ExecutionContext(storage_identity=identity))

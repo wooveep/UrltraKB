@@ -1,29 +1,28 @@
 """Structured-reference prompts, strict SDK serialization and retained identity."""
 
 import json
-from types import SimpleNamespace
 
 import pytest
+from compile_work_fixtures import (
+    accepted_payload,
+    checkpoint_record,
+    read_work_blob,
+    response_record,
+)
 
 
-def test_fresh_checkpoint_selects_structured_delivery_but_old_requests_are_retained(kb_dir):
-    from ultrakb.compile_checkpoints import CompileCheckpoints
+def test_native_work_keeps_the_current_structured_protocol_on_reopen(compile_work):
+    from ultrakb.compile_checkpoints import digest
 
-    checkpoint = CompileCheckpoints(
-        kb_dir, SimpleNamespace(task_id="d" * 32, parent_task_id=None), {"document": "guide"}, {}
-    )
-    assert checkpoint.structured_summary
-    checkpoint.prepare_summary_delivery()
-    assert checkpoint.structured_summary
-    assert json.loads(checkpoint.path.read_text())["entries"]["protocol:summary"]["version"] == 2
-    legacy = CompileCheckpoints(
-        kb_dir, SimpleNamespace(task_id="e" * 32, parent_task_id=None), {"document": "guide"}, {}
-    )
-    legacy.save("summary:1", "original-request", {"description": "Kept", "sections": []})
-    before = legacy.path.read_bytes()
-    assert not legacy.structured_summary
-    assert legacy.prepare_summary_delivery()
-    assert legacy.path.read_bytes() == before
+    checkpoint = compile_work({"document": "guide"}, {})
+    assert checkpoint.structured_summary and checkpoint.request_version == 3
+    assert checkpoint.prepare_summary_delivery() is False
+    signature = digest("original-request")
+    checkpoint.save("summary:1", signature, {"description": "Kept", "sections": []})
+    reopened = compile_work({"document": "guide"}, {})
+    assert reopened.work_id == checkpoint.work_id
+    assert reopened.structured_summary and reopened.request_version == 3
+    assert reopened.load("summary:1", signature)["description"] == "Kept"
 
 
 def test_structured_summary_prompt_and_schema_use_the_same_supplied_ids():
@@ -96,68 +95,35 @@ async def test_reference_schema_uses_real_sdk_responses_wire_without_an_online_m
         assert executor.calls == 1
 
 
-def test_resolution_receipt_preserves_existing_repair_flags(kb_dir):
-    from ultrakb.compile_checkpoints import CompileCheckpoints
+def test_resolution_receipt_preserves_existing_repair_flags(compile_work):
+    from ultrakb.compile_checkpoints import digest
 
-    checkpoint = CompileCheckpoints(
-        kb_dir, SimpleNamespace(task_id="f" * 32, parent_task_id=None), {"document": "guide"}, {}
+    checkpoint = compile_work({"document": "guide"}, {})
+    signature = digest("retained")
+    checkpoint.claim_repair("summary:3", signature)
+    before = checkpoint_record(checkpoint, "summary:3")
+    blob = checkpoint.record_delivery_resolution(
+        "summary:3", signature, "raw", "assembled", [{"mode": "whitespace"}]
     )
-    checkpoint.claim_repair("summary:3", "retained")
-    before = checkpoint.path.read_text()
-    path = checkpoint.record_delivery_resolution(
-        "summary:3", "retained", "raw", "assembled", [{"mode": "whitespace"}]
-    )
-    assert (kb_dir / path).is_file()
-    old = json.loads(before)["entries"]["summary:3"]
-    new = json.loads(checkpoint.path.read_text())["entries"]["summary:3"]
-    assert all(new[key] == value for key, value in old.items())
-
-
-def test_inherited_v1_protocol_does_not_upgrade_the_child_request(kb_dir):
-    from ultrakb.compile_checkpoints import CompileCheckpoints
-    from ultrakb.config import LlmCredentialBundle
-    from ultrakb.llm_execution import CompletionExecutor, ModelCallPolicy, RoleBindings
-    from ultrakb.locks import atomic_write_json
-    from ultrakb.model_task import TaskJournal
-
-    bindings = RoleBindings("deepseek/deepseek-flash", LlmCredentialBundle())
-    first = TaskJournal(kb_dir, CompletionExecutor(bindings, ModelCallPolicy(max_calls=10)))
-    parent = CompileCheckpoints(kb_dir, first.record, {"document": "guide"}, {})
-    parent.save("summary:1", "retained-request", {"description": "Kept", "sections": []})
-    record = json.loads(parent.path.read_text())
-    record["entries"]["protocol:summary"] = {"version": 1}
-    atomic_write_json(parent.path, record)
-    before = parent.path.read_bytes()
-    expanded = TaskJournal(
-        kb_dir,
-        CompletionExecutor(bindings, ModelCallPolicy(max_calls=20)),
-        resume=first.record.task_id,
-    )
-    child = CompileCheckpoints(kb_dir, expanded.record, parent.identity, parent.conditions)
-    assert not child.structured_summary
-    child.prepare_summary_delivery()
-    assert not child.structured_summary
-    assert child.load("summary:1", "retained-request")["description"] == "Kept"
-    assert parent.path.read_bytes() == before
+    assert read_work_blob(checkpoint, blob)["resolutions"] == [{"mode": "whitespace"}]
+    after = checkpoint_record(checkpoint, "summary:3")
+    assert all(after[key] == value for key, value in before.items())
 
 
 @pytest.mark.asyncio
-async def test_accepted_structured_reference_keeps_its_identity_after_restart(kb_dir):
+async def test_accepted_structured_reference_keeps_its_identity_after_restart(kb_dir, compile_work):
     from ultrakb.agent.compiler import _llm_call_page_async
     from ultrakb.agent.document_summary import build_document_summary
     from ultrakb.agent.page_response import parse_summary
     from ultrakb.agent.source_excerpts import SourceExcerpts
     from ultrakb.agent.source_windows import CompileSourceWindows
-    from ultrakb.compile_checkpoints import CompileCheckpoints
     from ultrakb.locks import atomic_write_text
 
     atomic_write_text(
         kb_dir / "wiki/sources/guide.md",
         "X86 only.\n\nsetting=KEEP\n\nARM only.\n\nsetting=KEEP\n\n",
     )
-    checkpoint = CompileCheckpoints(
-        kb_dir, SimpleNamespace(task_id="c" * 32, parent_task_id=None), {"document": "guide"}, {}
-    )
+    checkpoint = compile_work({"document": "guide"}, {})
     checkpoint.prepare_summary_delivery()
     windows = CompileSourceWindows(kb_dir / "wiki", "guide", navigation=[])
     selected = []
@@ -222,24 +188,23 @@ async def test_accepted_structured_reference_keeps_its_identity_after_restart(kb
     assert first.markdown == restored.markdown
     assert "setting=KEEP" in restored.markdown
     assert "ARM only." in restored.markdown
-    payload = json.loads(next(checkpoint.directory.glob("payload-*.json")).read_text())
-    assert payload["result"]["sections"][0]["parts"][1]["refs"] == selected
-    manifest = json.loads(checkpoint.path.read_text())
-    [receipt] = manifest["entries"]["summary:1"]["delivery_resolutions"]
-    stored = json.loads((kb_dir / receipt).read_text())
+    payload = accepted_payload(checkpoint, "summary:1")
+    assert payload["sections"][0]["parts"][1]["refs"] == selected
+    receipt = checkpoint_record(checkpoint, "summary:1")["delivery_resolution"]
+    stored = read_work_blob(checkpoint, receipt)
     assert stored["resolutions"][0]["source"]["window_span"][0] == 36
 
 
 @pytest.mark.asyncio
-async def test_unknown_reference_keeps_its_position_and_exhausted_repair_gate(kb_dir, monkeypatch):
+async def test_unknown_reference_keeps_its_position_and_exhausted_repair_gate(
+    compile_work, monkeypatch
+):
     from ultrakb.agent.compiler import _llm_call_page_async
     from ultrakb.agent.page_response import PageResponseError
     from ultrakb.agent.source_excerpts import SourceExcerpts
-    from ultrakb.compile_checkpoints import CompileCheckpoints, digest
+    from ultrakb.compile_checkpoints import digest
 
-    checkpoint = CompileCheckpoints(
-        kb_dir, SimpleNamespace(task_id="b" * 32, parent_task_id=None), {"document": "guide"}, {}
-    )
+    checkpoint = compile_work({"document": "guide"}, {})
     excerpts = SourceExcerpts(["setting=1\n"], request_format=checkpoint.request_version)
     messages = excerpts.messages(
         [{"role": "user", "content": "The retained third batch"}], structured=True
@@ -270,12 +235,11 @@ async def test_unknown_reference_keeps_its_position_and_exhausted_repair_gate(kb
             checkpoints=checkpoint,
             checkpoint_key="summary:3",
         )
-    [sidecar] = checkpoint.failure_directory.glob("*.json")
-    record = json.loads(sidecar.read_text())
+    response, record = response_record(checkpoint, "summary:3")
     [issue] = record["field_errors"]
     assert issue["path"] == "$.sections[0].parts[0].refs[0]"
     assert issue["rule"] == "excerpt_unknown_reference"
-    assert (kb_dir / record["response_file"]).read_text() == raw
+    assert response == raw
 
 
 @pytest.mark.asyncio

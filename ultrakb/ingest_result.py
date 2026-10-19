@@ -54,6 +54,19 @@ class IngestResult:
     projection_pending: bool = False
 
 
+def requires_storage_repair(units: tuple[ImportUnitOutcome, ...]) -> bool:
+    return any(
+        unit.error_type
+        in {
+            "RecoveryRequired",
+            "StorageFormatError",
+            "KnowledgeBaseRemoved",
+            "KnowledgeBaseIncomplete",
+        }
+        for unit in units
+    )
+
+
 def describe_ingest(result: IngestResult) -> tuple[str, ...]:
     """Plain-text projection shared by CLI add and watch."""
     if not result.source_id:

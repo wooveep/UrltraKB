@@ -1,28 +1,20 @@
-"""Protected artifact generation, consent, archives, and durable outcome facts."""
+"""Validated generation options and shared native generator entry points."""
 
 from __future__ import annotations
 
-import asyncio
-import hashlib
-import json
-import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from ultrakb.agent.skills import PreparedSkill, prepare_skill
 from ultrakb.application.execution import ExecutionContext
-from ultrakb.application.file_state import changed_files, contained_paths, file_versions
-from ultrakb.artifact_history import preserve_artifact_history
-from ultrakb.config import DEFAULT_CONFIG, LlmCredentialBundle, resolve_effective_config
+from ultrakb.config import LlmCredentialBundle
 from ultrakb.knowledge_scope import KnowledgeScope, resolve_scope
-from ultrakb.locks import LockCancelled, async_kb_lock, kb_read_lock
-from ultrakb.mutation import RecoveryRequired, mutation_scope
 from ultrakb.schema import PAGE_CONTENT_DIRS
 from ultrakb.skill import validate_skill_name as validate_name
 
 if TYPE_CHECKING:
     from ultrakb.skill.generator import AnyValidationResult
+
 
 TargetType = Literal["skill", "deck"]
 
@@ -70,97 +62,11 @@ class GenerationOptions:
             raise ValueError("Unknown artifact replacement policy")
 
 
-def _paths(
-    kb_dir: Path,
-    target_type: TargetType,
-    name: str,
-    prepared: PreparedSkill | None = None,
-    *,
-    scope: KnowledgeScope | None = None,
-) -> tuple[Path, list[Path]]:
-    scope = resolve_scope(kb_dir, scope)
-    target = kb_dir / "output" / ("skills" if target_type == "skill" else "decks") / name
-    if prepared and prepared.output_path:
-        output = prepared.output_path
-        target = (
-            output
-            if output.parent in {kb_dir / "output", scope.wiki_dir / "explorations"}
-            else output.parent
-        )
-    # Deck skills can write anywhere in the runner's two allowed zones.
-    # Include those zones in both consent and crash recovery, including custom skills.
-    roots = (
-        [target, kb_dir / ".claude-plugin/marketplace.json"]
-        if target_type == "skill"
-        else [kb_dir / "output", scope.wiki_dir / "explorations"]
-    )
-    if scope.read_only:
-        roots = [path for path in roots if not path.is_relative_to(scope.wiki_dir)]
-    if scope.knowledge is None:
-        contained_paths(kb_dir, [target, *roots])
-    return target, roots
-
-
-def _version(kb_dir: Path, roots: list[Path], prepared: PreparedSkill | None = None) -> str:
-    files = file_versions(kb_dir, roots)
-    # Missing, empty directory, and a regular file are different consent states.
-    directories = []
-    for root in roots:
-        for path in [root, *sorted(root.rglob("*"))] if root.is_dir() else [root]:
-            contained_paths(kb_dir, [path])
-            if path.is_dir():
-                directories.append(path.relative_to(kb_dir).as_posix())
-    definition = (
-        [prepared.name, prepared.body, prepared.metadata, str(prepared.output_path)]
-        if prepared
-        else None
-    )
-    return hashlib.sha256(
-        json.dumps([files, directories, definition], sort_keys=True, default=str).encode()
-    ).hexdigest()
-
-
 @dataclass(frozen=True)
 class GenerationPreview:
     target: Path
     exists: bool
     version: str
-
-
-def preview_generation(
-    kb_dir: Path,
-    target_type: TargetType,
-    name: str,
-    *,
-    skill_name: str | None = None,
-    scope: KnowledgeScope | None = None,
-) -> GenerationPreview:
-    scope = resolve_scope(kb_dir, scope)
-    GenerationOptions(target_type, name, "preview")
-    kb_dir = kb_dir.resolve()
-    if scope.knowledge is not None:
-        from .storage_generators import preview_stored_generation
-
-        return preview_stored_generation(scope, target_type, name, skill_name=skill_name)
-    with kb_read_lock(kb_dir / ".ultrakb"):
-        prepared = _prepare(kb_dir, target_type, name, skill_name, scope=scope)
-        target, roots = _paths(kb_dir, target_type, name, prepared, scope=scope)
-        return GenerationPreview(target, target.exists(), _version(kb_dir, roots, prepared))
-
-
-def _prepare(
-    kb_dir: Path,
-    target_type: TargetType,
-    name: str,
-    skill_name: str | None,
-    *,
-    scope: KnowledgeScope | None = None,
-):
-    if target_type == "deck":
-        from ultrakb.deck import DEFAULT_DECK_SKILL
-
-        return prepare_skill(kb_dir, skill_name or DEFAULT_DECK_SKILL, slug=name, scope=scope)
-    return None
 
 
 @dataclass(frozen=True)
@@ -185,189 +91,81 @@ class GenerationResult:
     model_usage: dict | None = field(default=None, compare=False, repr=False)
 
 
-def _archive(kb_dir: Path, target: Path) -> Path:
-    workspace = target.with_name(f"{target.name}-workspace")
-    contained_paths(kb_dir, [workspace])
-    file_versions(kb_dir, [target, workspace])  # Reject escaping links before copying/removing.
-    existing = [
-        int(p.name.removeprefix("iteration-"))
-        for p in workspace.glob("iteration-*")
-        if p.name.removeprefix("iteration-").isdigit()
-    ]
-    dest = workspace / f"iteration-{max(existing, default=0) + 1}"
-    with mutation_scope(kb_dir, [target, dest], operation="archive-artifact"):
-        if target.is_dir():
-            shutil.copytree(target, dest)
-            shutil.rmtree(target)
-        else:
-            dest.mkdir(parents=True)
-            shutil.copy2(target, dest / target.name)
-            target.unlink()
-    return dest
+def preview_generation(kb_dir, target_type, name, *, skill_name=None, scope=None):
+    from .storage_generators import preview_stored_generation
+
+    GenerationOptions(target_type, name, "preview")
+    return preview_stored_generation(
+        resolve_scope(kb_dir, scope), target_type, name, skill_name=skill_name
+    )
 
 
 async def generate_artifact(
     kb_dir: Path,
     options: GenerationOptions,
     *,
+    scope: KnowledgeScope | None = None,
     context: ExecutionContext | None = None,
     bundle: LlmCredentialBundle | None = None,
     model: str | None = None,
-    scope: KnowledgeScope | None = None,
+    pin_scope: bool = True,
 ) -> GenerationResult:
-    """Hold the complete read/generate/write lease and retain successful stages.
+    import asyncio
+    from threading import Event
 
-    Every adapter begins its immutable context after recovery and consent
-    checks. Ordinary model failures commit files already produced; interruption before commit rolls
-    back this generation while preserving the independently committed archive.
-    """
-    query_scope = scope
+    from ultrakb.context.workers import run_blocking
+    from ultrakb.mutation import RecoveryRequired
+    from ultrakb.storage.coordination import storage_stage
+
+    from .generation_results import with_generation_usage
+    from .generation_scope import previous_generation_execution, restore_generation_scope
+    from .storage_generators import generate_stored_artifact
+    from .views import published_scope
+
     context = context or ExecutionContext()
-    scope = resolve_scope(kb_dir, scope)
-    kb_dir = kb_dir.resolve()
-    if scope.knowledge is not None:
-        from .generation_results import with_generation_usage
-        from .storage_generators import generate_stored_artifact
+    explicit = pin_scope and scope is not None and scope.publication_id is not None
+    stopped, original_cancelled = Event(), context.cancelled
+    context.cancelled = lambda: stopped.is_set() or original_cancelled()
+    completed = None
 
+    def generate():
+        nonlocal completed
+        selected = scope or published_scope(kb_dir, cancelled=context.cancelled)
         previous = context.storage_execution
-        result = await generate_stored_artifact(scope, options, context, bundle=bundle, model=model)
-        return with_generation_usage(scope, context, result, previous)
-    async with async_kb_lock(
-        kb_dir / ".ultrakb",
-        exclusive=True,
-        cancelled=context.cancelled,
-        on_wait=context.waiting,
-    ):
-        error = preflight_generation(kb_dir, options.name, scope=query_scope)
-        if error:
-            return GenerationResult("invalid", message=error)
         try:
-            prepared = _prepare(
-                kb_dir, options.target_type, options.name, options.skill_name, scope=scope
+            with storage_stage(
+                selected.kb_dir,
+                selected.knowledge.identity,
+                read_only=True,
+                cancelled=context.cancelled,
+            ):
+                selected = resolve_scope(kb_dir, selected)
+                previous = previous_generation_execution(selected, context)
+                selected = restore_generation_scope(selected, options, context, explicit=explicit)
+        except RecoveryRequired as error:
+            completed = with_generation_usage(
+                selected,
+                context,
+                GenerationResult(
+                    "blocked",
+                    message=str(error),
+                    error_type=type(error).__name__,
+                    unfinished=("restore generation inputs",),
+                ),
+                previous,
             )
-        except (ValueError, RuntimeError, OSError) as exc:
-            return GenerationResult("invalid", message=str(exc), error_type=type(exc).__name__)
-        target, roots = _paths(kb_dir, options.target_type, options.name, prepared, scope=scope)
-        if scope.read_only and target.is_relative_to(scope.wiki_dir):
-            return GenerationResult("blocked", message="Knowledge revisions are read-only")
-        if options.version is not None and _version(kb_dir, roots, prepared) != options.version:
-            return GenerationResult(
-                "conflict", message="Artifacts changed; review and confirm again"
-            )
-        file_target = prepared is not None and prepared.output_path == target
-        if target.exists() and (
-            options.overwrite == "refuse" or (not file_target and not target.is_dir())
-        ):
-            return GenerationResult(
-                "conflict", message="Artifact already exists; rename or confirm replacement"
-            )
-        before = file_versions(kb_dir, roots)
-        with context.begin(kb_dir) as captured_credentials:
-            credentials = bundle if bundle is not None else captured_credentials
-            from ultrakb.skill.generator import Generator
+            return
+        completed = asyncio.run(
+            generate_stored_artifact(selected, options, context, bundle=bundle, model=model)
+        )
+        completed = with_generation_usage(selected, context, completed, previous)
 
-            if model is None:
-                config = (await asyncio.to_thread(resolve_effective_config, kb_dir))[0]
-                model = config.get("model", DEFAULT_CONFIG["model"])
-            archive = None
-            archive_changes: tuple[str, ...] = ()
-            try:
-                if target.exists() and options.overwrite == "archive":
-                    archive = _archive(kb_dir, target)
-                    archive_changes = (f"archived: {archive.relative_to(kb_dir).as_posix()}",)
-                gen = Generator(
-                    target_type=options.target_type,
-                    name=options.name,
-                    intent=options.intent,
-                    kb_dir=kb_dir,
-                    model=model,
-                    critique=options.critique,
-                    skill_name=options.skill_name,
-                    bundle=credentials,
-                    scope=query_scope,
-                    **({"prepared": prepared} if prepared is not None else {}),
-                )
-                failure: Exception | None = None
-                quality_diff_failed = False
-                context.on_event({"stage": "generating"})
-                from ultrakb.model_outputs import model_output_scope
-
-                with (
-                    mutation_scope(kb_dir, roots, operation="generate-artifact"),
-                    model_output_scope(kb_dir),
-                    preserve_artifact_history(kb_dir, target=target) as history,
-                ):
-                    try:
-                        await gen.run()
-                    except (LockCancelled, RecoveryRequired):
-                        raise
-                    except Exception as exc:
-                        failure = exc
-                    if failure is None and archive and options.target_type == "skill":
-                        from ultrakb.skill.workspace import write_diff
-
-                        # Diff is independent and best effort, as in the existing CLI.
-                        try:
-                            with mutation_scope(
-                                kb_dir, [archive / "diff.md"], operation="artifact-diff"
-                            ):
-                                write_diff(archive, target, archive / "diff.md")
-                        except RecoveryRequired:
-                            raise
-                        except Exception:
-                            quality_diff_failed = True
-                    changes = archive_changes + changed_files(kb_dir, roots, before)
-                    resources = tuple(
-                        str(kb_dir / path)
-                        for path, version in file_versions(kb_dir, roots).items()
-                        if before.get(path) != version
-                    )
-                    if archive:
-                        resources += (str(archive),)
-                    artifact_path = prepared.output_path if prepared else target / "SKILL.md"
-                    if (
-                        artifact_path
-                        and artifact_path.is_file()
-                        and str(artifact_path) not in resources
-                    ):
-                        resources += (str(artifact_path),)
-                    quality = history.issues + (
-                        ["archive_diff_failed"] if quality_diff_failed else []
-                    )
-                    if gen.validation is not None:
-                        if gen.validation.errors:
-                            quality.append("validation_errors")
-                        if gen.validation.warnings:
-                            quality.append("validation_warnings")
-                return GenerationResult(
-                    "failed" if failure else "completed",
-                    target.parent if file_target else target,
-                    archive,
-                    gen.validation,
-                    resources,
-                    changes,
-                    tuple(quality),
-                    (
-                        gen.stage
-                        if gen.stage in {"generation", "validation", "marketplace"}
-                        else "generation",
-                    )
-                    if failure
-                    else (),
-                    f"Generation failed ({type(failure).__name__})" if failure else None,
-                    type(failure).__name__ if failure else None,
-                    artifact_path=artifact_path,
-                )
-            except (LockCancelled, asyncio.CancelledError):
-                raise
-            except Exception as exc:
-                return GenerationResult(
-                    "blocked" if isinstance(exc, RecoveryRequired) else "failed",
-                    target,
-                    archive,
-                    resources=(str(archive),) if archive else (),
-                    changes=archive_changes,
-                    unfinished=("generation",),
-                    error_type=type(exc).__name__,
-                    message=f"Generation failed ({type(exc).__name__})",
-                )
+    try:
+        await run_blocking(generate, on_cancel=stopped.set)
+    except asyncio.CancelledError:
+        if completed is None:
+            raise
+    finally:
+        context.cancelled = original_cancelled
+    assert completed is not None
+    return completed

@@ -2,23 +2,20 @@
 
 from __future__ import annotations
 
-import asyncio
 import datetime
 import hashlib
 import json
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Literal
 
 from ultrakb.application.execution import ExecutionContext
-from ultrakb.application.file_state import changed_files, contained_paths, file_versions
-from ultrakb.config import LlmCredentialBundle, resolve_effective_config
+from ultrakb.application.file_state import contained_paths, file_versions
+from ultrakb.config import LlmCredentialBundle
 from ultrakb.knowledge_scope import KnowledgeScope, resolve_scope
-from ultrakb.lint import fix_broken_links, run_structural_lint
-from ultrakb.locks import LockCancelled, async_kb_lock, atomic_write_text, kb_read_lock
+from ultrakb.locks import atomic_write_text
 from ultrakb.log import append_log
-from ultrakb.mutation import RecoveryRequired, mutation_scope
-from ultrakb.published_knowledge import knowledge_operation
+from ultrakb.mutation import mutation_scope
 
 
 @dataclass(frozen=True)
@@ -59,14 +56,13 @@ def _wiki_version(scope: KnowledgeScope) -> str:
 
 def preview_link_repair(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> tuple[str, str]:
     """Bind overwrite consent to the existing wiki and show its structural issues."""
-    root = kb_dir.resolve()
-    scope = resolve_scope(root, scope)
-    if scope.knowledge is not None:
-        from .storage_lint import preview_stored_lint
+    scope = resolve_scope(kb_dir, scope)
+    if scope.knowledge is None:
+        raise ValueError("This operation requires a main-store knowledge base")
+    kb_dir.resolve()
+    from .storage_lint import preview_stored_lint
 
-        return preview_stored_lint(scope)
-    with kb_read_lock(root / ".ultrakb"):
-        return _wiki_version(scope), run_structural_lint(root, scope=scope)
+    return preview_stored_lint(scope)
 
 
 async def check_knowledge(
@@ -78,111 +74,14 @@ async def check_knowledge(
     on_event: Callable[[dict], None] | None = None,
     scope: KnowledgeScope | None = None,
 ) -> LintResult:
+    scope = resolve_scope(kb_dir, scope)
+    if scope.knowledge is None:
+        raise ValueError("This operation requires a main-store knowledge base")
     context = context or ExecutionContext(on_event=on_event or (lambda event: None))
-    root = kb_dir.resolve()
-    scope = resolve_scope(root, scope)
-    if scope.knowledge is not None:
-        from .storage_lint import check_stored_knowledge
+    kb_dir.resolve()
+    from .storage_lint import check_stored_knowledge
 
-        return await check_stored_knowledge(scope, options, context, bundle=bundle)
-    scope = resolve_scope(root, scope, writable=True)
-    wiki = scope.wiki_dir
-    cancelled = context.cancelled
-    on_wait = context.waiting
-    emit = context.on_event
-    async with async_kb_lock(
-        root / ".ultrakb", exclusive=True, cancelled=cancelled, on_wait=on_wait
-    ):
-        if options.version is not None and _wiki_version(scope) != options.version:
-            return LintResult("conflict")
-        registry = root / ".ultrakb/hashes.json"
-        hashes = json.loads(registry.read_text(encoding="utf-8")) if registry.exists() else {}
-        if not isinstance(hashes, dict) or any(
-            not isinstance(meta, dict) for meta in hashes.values()
-        ):
-            raise ValueError("Invalid document registry")
-        if not hashes and options.semantic and not options.fix:
-            return LintResult("skipped")
-        # Validate paths before snapshotting or executing a repair. Link repair
-        # may change any Markdown page except the core's established exclusions.
-        pages = contained_paths(root, list(wiki.rglob("*.md")))
-        result = LintResult("completed")
-        stage = "link_repair" if options.fix else "structural_lint"
-        pending = ["link_repair"] if options.fix else []
-        pending.append("structural_lint")
-        if options.semantic:
-            pending.append("semantic_lint")
-        pending.append("report")
-        with (
-            context.begin(root) as captured_bundle,
-            knowledge_operation(root, operation="maintain-knowledge"),
-        ):
-            active_bundle = bundle if bundle is not None else captured_bundle
-            try:
-                if options.fix:
-                    emit({"stage": stage})
-                    before = file_versions(root, pages)
-                    with mutation_scope(root, pages, operation="repair-links"):
-                        files, ghosts = fix_broken_links(wiki)
-                        changes = changed_files(root, pages, before)
-                    result = replace(
-                        result, files_changed=files, ghosts_removed=ghosts, changes=changes
-                    )
-                    pending.remove("link_repair")
-                    emit({"stage": "links_repaired", "files": files, "ghosts": ghosts})
-                if not hashes and options.semantic:
-                    return replace(result, status="skipped")
-                stage = "structural_lint"
-                emit({"stage": stage})
-                result = replace(result, structural_report=run_structural_lint(root, scope=scope))
-                pending.remove("structural_lint")
-                emit({"stage": "structural_report", "report": result.structural_report})
-                if options.semantic:
-                    stage = "semantic_lint"
-                    emit({"stage": stage})
-                    from ultrakb.agent.linter import run_knowledge_lint
-                    from ultrakb.agent.query import build_run_config_from_bundle
-
-                    config = (await asyncio.to_thread(resolve_effective_config, root))[0]
-                    model = config["model"]
-                    issues: list[str] = []
-                    try:
-                        knowledge = await run_knowledge_lint(
-                            root,
-                            model,
-                            bundle=active_bundle,
-                            run_config=build_run_config_from_bundle(model, active_bundle),
-                            on_issue=issues.append,
-                            scope=scope,
-                        )
-                    except Exception as exc:
-                        knowledge = f"Knowledge lint failed ({type(exc).__name__})"
-                        issues.append("semantic_lint_failed")
-                    if issues:
-                        result = replace(
-                            result, quality=tuple(issues), unfinished=("semantic_lint",)
-                        )
-                    result = replace(result, knowledge_report=knowledge)
-                    pending.remove("semantic_lint")
-                    emit({"stage": "semantic_report", "report": knowledge})
-                stage = "report"
-                emit({"stage": "saving_report"})
-                report_path = _save_report(scope, result, unique=options.unique_report)
-                return replace(
-                    result,
-                    report_path=str(report_path),
-                    resources=(str(report_path),),
-                    changes=(*result.changes, f"saved: {report_path.relative_to(root).as_posix()}"),
-                )
-            except LockCancelled:
-                raise
-            except Exception as exc:
-                return replace(
-                    result,
-                    status="blocked" if isinstance(exc, RecoveryRequired) else "failed",
-                    error_type=type(exc).__name__,
-                    unfinished=tuple(dict.fromkeys((*result.unfinished, *pending))),
-                )
+    return await check_stored_knowledge(scope, options, context, bundle=bundle)
 
 
 def _save_report(scope: KnowledgeScope, result: LintResult, *, unique: bool) -> Path:

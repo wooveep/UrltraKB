@@ -75,24 +75,6 @@ def document_inventory(
         for doc in documents:
             doc = dict(doc)
             identity = DocumentIdentity.from_inventory(doc)
-            if identity.kind == "source" and scope.knowledge is None:
-                from ultrakb.source_catalog import read_source, read_source_revision
-
-                if scope.publication is not None:
-                    from ultrakb.source_catalog import read_record
-                    from ultrakb.source_records import Source, SourceRevision
-
-                    metadata = scope.publication.metadata_dir
-                    source = read_record(metadata, "sources", identity.value, Source)
-                    target = read_record(
-                        metadata, "source-revisions", source.target_revision_id, SourceRevision
-                    )
-                else:
-                    source = read_source(kb_dir, identity.value)
-                    target = read_source_revision(kb_dir, source.target_revision_id)
-                doc["location"] = source.identity
-                doc["target_source_revision_id"] = source.target_revision_id
-                doc["original_kind"] = target.original_kind
             units = doc.get("units", [])
             read = False
             body_names = []
@@ -107,15 +89,19 @@ def document_inventory(
                         identity.value,
                         scope=scope,
                         unit_id=unit["unit_id"] if unit else None,
+                        unit_revision_id=unit["target_revision_id"]
+                        if unit and not unit.get("successful_revision_id")
+                        else None,
                     )
                     available = (
                         value
-                        and value.get("content", "").strip()
+                        and (value.get("content", "").strip() or value.get("images"))
                         and (
                             identity.kind == "legacy"
                             or value.get("knowledge_revision_id")
                             or value.get("units")
                             or value.get("unit_kind")
+                            or value.get("images")
                         )
                     )
                     read = read or bool(available)

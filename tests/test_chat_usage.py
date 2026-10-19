@@ -2,7 +2,6 @@
 
 import pytest
 
-from ultrakb.agent.chat_session import ChatSession, load_session
 from ultrakb.agent.token_usage import TokenUsage, add_usage
 
 pytest_plugins = ("test_vendor_sdk",)
@@ -32,29 +31,28 @@ def test_usage_keeps_unknown_details_and_does_not_double_count_reasoning():
 @pytest.mark.asyncio
 async def test_sdk_response_usage_accumulates_all_requests(model_service, kb_dir):
     from agents import RunConfig, function_tool
+    from native_usage_fixtures import aggregate_usage, observe_executor
     from test_llm_execution import executor_for
     from test_managed_agent import agent_for
 
     from ultrakb.agent.query import iter_agent_response_events
-    from ultrakb.llm_usage import aggregate_usage
-    from ultrakb.llm_usage_execution import import_usage_execution
 
     @function_tool
     def read_original() -> str:
         """Read the retained original budget fact."""
         return "The approved personal budget is 17 credits."
 
-    with import_usage_execution(kb_dir, "answer"):
-        executor = executor_for(model_service, max_calls=4)
-        agent = agent_for(executor, [read_original])
-        agent.instructions = "Call read_original exactly once; then report its approved budget."
-        agent.model_settings.max_tokens = 128
-        events = [
-            event
-            async for event in iter_agent_response_events(
-                agent, "What is the approved budget?", run_config=RunConfig(tracing_disabled=True)
-            )
-        ]
+    executor = executor_for(model_service, max_calls=4)
+    observe_executor(kb_dir, executor)
+    agent = agent_for(executor, [read_original])
+    agent.instructions = "Call read_original exactly once; then report its approved budget."
+    agent.model_settings.max_tokens = 128
+    events = [
+        event
+        async for event in iter_agent_response_events(
+            agent, "What is the approved budget?", run_config=RunConfig(tracing_disabled=True)
+        )
+    ]
     starts = [index for index, event in enumerate(events) if event["event"] == "answer_start"]
     usages = [index for index, event in enumerate(events) if event["event"] == "usage"]
     assert len(starts) == len(usages) == executor.calls == len(model_service.requests) == 2
@@ -73,21 +71,6 @@ async def test_sdk_response_usage_accumulates_all_requests(model_service, kb_dir
     ).to_dict()
     assert total == expected
     assert total == events[usages[-1]]["data"]
-
-
-@pytest.mark.parametrize("complete", [True, False])
-def test_usage_persists_once_even_if_a_turn_is_stopped(kb_dir, complete):
-    session = ChatSession.new(kb_dir, "deepseek/deepseek-flash", "en")
-    receipt = TokenUsage(60, 40, 25, 10).to_dict()
-    session.record_turn("old", "answer", [], usage=receipt)
-    baseline = session.token_usage
-    session.record_usage(receipt, baseline=baseline)
-    session.record_usage(receipt, baseline=baseline)
-    if complete:
-        session.record_turn("next question", "next answer", [])
-    restored = load_session(kb_dir, session.id)
-    assert restored.token_usage == TokenUsage(120, 80, 50, 20).to_dict()
-    assert restored.turn_count == (2 if complete else 1)
 
 
 def test_streaming_reasoning_tags_are_hidden_at_every_chunk_boundary():

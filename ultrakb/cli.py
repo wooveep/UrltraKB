@@ -54,7 +54,7 @@ from ultrakb.config import (
     set_timeout,
     resolve_per_request_overrides,
 )
-from ultrakb.locks import kb_ingest_lock, kb_read_lock
+from ultrakb.locks import kb_ingest_lock
 from ultrakb.log import append_log
 from ultrakb.application import documents as document_use_cases
 from ultrakb.application.knowledge_bases import initialize_kb
@@ -373,7 +373,7 @@ def _selected_scope(ctx, kb_dir):
 
 
 def _with_kb_lock(*, exclusive: bool):
-    """Wrap a Click command in the appropriate KB lock when a KB exists."""
+    """Keep the directory alive; shared operations own their storage stages."""
 
     def decorator(fn):
         @wraps(fn)
@@ -381,10 +381,9 @@ def _with_kb_lock(*, exclusive: bool):
             kb_dir = _find_kb_dir(ctx.obj.get("kb_dir_override"))
             if kb_dir is None:
                 return fn(ctx, *args, **kwargs)
-            if exclusive:
-                with kb_ingest_lock(kb_dir / ".ultrakb"):
-                    return fn(ctx, *args, **kwargs)
-            with kb_read_lock(kb_dir / ".ultrakb"):
+            from ultrakb.lifecycle import read_lifecycle
+
+            with read_lifecycle(kb_dir):
                 return fn(ctx, *args, **kwargs)
 
         return wrapper
@@ -696,9 +695,6 @@ def query(ctx, question, save, raw):
 
 # Transitional private exports for existing CLI integrations. Business lives in application.
 from ultrakb.application.removal import (  # noqa: E402
-    _build_remove_plan as _build_remove_plan,
-    _execute_remove_plan as _execute_remove_plan,
-    _resolve_doc_identifier as _resolve_doc_identifier,
     run_remove_for_api as run_remove_for_api,
 )
 
@@ -1089,7 +1085,7 @@ def chat(ctx, resume, list_sessions_flag, delete_id, no_color, raw):
         click.echo("No knowledge base found. Run `ultrakb init` first.")
         return
 
-    from ultrakb.agent.chat_session import relative_time
+    from ultrakb.presentation_time import relative_time
     from ultrakb.application.sessions import (
         delete_conversation,
         list_conversations,
@@ -1182,9 +1178,15 @@ def watch(ctx):
         expected_generation,
     )
     from ultrakb.mutation import RecoveryRequired
+    from ultrakb.storage.database import StorageFormatError, open_database
+    from ultrakb.application.views import storage_scope
+    from ultrakb.application.execution import ExecutionContext
+    from ultrakb.ingest_result import requires_storage_repair
     from ultrakb.watcher import watch_directory
 
     kb_dir = kb_dir.resolve()
+    with open_database(kb_dir, read_only=True) as db:
+        identity = db.identity
     generation = current_generation(kb_dir)
     raw_dir = kb_dir / "raw"
     with expected_generation(kb_dir, generation), kb_ingest_lock(kb_dir / ".ultrakb"):
@@ -1208,7 +1210,15 @@ def watch(ctx):
                     stop("knowledge base configuration is unavailable")
                 elif raw_dir.resolve() != raw_dir:
                     stop("raw directory moved outside its knowledge base")
-            except (RecoveryRequired, KnowledgeBaseRemoved, KnowledgeBaseIncomplete) as exc:
+                else:
+                    with open_database(kb_dir, expected=identity, read_only=True):
+                        pass
+            except (
+                RecoveryRequired,
+                KnowledgeBaseRemoved,
+                KnowledgeBaseIncomplete,
+                StorageFormatError,
+            ) as exc:
                 stop(str(exc))
         return stopped.is_set()
 
@@ -1227,13 +1237,26 @@ def watch(ctx):
                 try:
                     with expected_generation(kb_dir, generation):
                         result = document_use_cases.import_document(
-                            kb_dir, fp, source_root=raw_dir, report=click.echo
+                            kb_dir,
+                            fp,
+                            source_root=raw_dir,
+                            report=click.echo,
+                            scope=storage_scope(kb_dir, identity),
+                            context=ExecutionContext(storage_identity=identity),
                         )
                         from ultrakb.ingest_result import describe_ingest
 
                         for line in describe_ingest(result):
                             click.echo(line)
-                except (RecoveryRequired, KnowledgeBaseRemoved, KnowledgeBaseIncomplete) as exc:
+                        if requires_storage_repair(result.units):
+                            stop(result.message or "knowledge base requires storage repair")
+                            return
+                except (
+                    RecoveryRequired,
+                    KnowledgeBaseRemoved,
+                    KnowledgeBaseIncomplete,
+                    StorageFormatError,
+                ) as exc:
                     stop(str(exc))
                     return
                 except (OSError, ValueError) as exc:

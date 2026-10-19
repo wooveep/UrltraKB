@@ -14,16 +14,28 @@ import threading
 import time
 from pathlib import Path
 
+_APPLICATION = None
 
-def create_application():
+
+def create_application(*, settings_dir=None):
     """Use Qt-owned dialogs so acceptance can drive them on every desktop host."""
-    from PySide6.QtCore import Qt
+    from PySide6.QtCore import QSettings, Qt
     from PySide6.QtWidgets import QApplication
 
     from ultrakb.desktop.fonts import application_arguments
 
-    QApplication.setAttribute(Qt.ApplicationAttribute.AA_DontUseNativeDialogs, True)
-    return QApplication(application_arguments([]))
+    global _APPLICATION
+    if settings_dir is None:
+        settings_dir = os.environ.get("ULTRAKB_VERIFY_QT_SETTINGS_DIR")
+    if settings_dir is not None:
+        os.environ["ULTRAKB_VERIFY_QT_SETTINGS_DIR"] = str(settings_dir)
+        QSettings.setDefaultFormat(QSettings.Format.IniFormat)
+        QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, str(settings_dir))
+    _APPLICATION = QApplication.instance()
+    if _APPLICATION is None:
+        QApplication.setAttribute(Qt.ApplicationAttribute.AA_DontUseNativeDialogs, True)
+        _APPLICATION = QApplication(application_arguments([]))
+    return _APPLICATION
 
 
 def main() -> int:
@@ -51,6 +63,7 @@ def main() -> int:
         parser.error("Use scripts/verify_desktop_model.py to supply the budgeted real model")
     root = args.output.expanduser().resolve()
     root.mkdir(parents=True, exist_ok=False)
+    os.environ["ULTRAKB_CONFIG_DIR"] = str(root / "settings")
 
     from PySide6.QtCore import QTimer
     from PySide6.QtWidgets import QMessageBox
@@ -58,8 +71,8 @@ def main() -> int:
     from ultrakb import config
     from ultrakb.application.knowledge_bases import initialize_kb
     from ultrakb.application.pages import read_page, save_page
-    from ultrakb.locks import atomic_write_text, kb_ingest_lock
-    from ultrakb.mutation import mutation_scope
+    from ultrakb.desktop.verification_data import publish_pages
+    from ultrakb.locks import kb_ingest_lock
 
     config.GLOBAL_CONFIG_DIR = root / "settings"
     config.GLOBAL_CONFIG_PATH = root / "settings/global.yaml"
@@ -74,7 +87,10 @@ def main() -> int:
     from ultrakb.desktop.verification_dialogs import visible_dialogs
     from ultrakb.desktop.window import Workbench
 
-    app = create_application()
+    app = create_application(
+        settings_dir=(Path(args.workbench_restart) if args.workbench_restart else root)
+        / "qt-settings"
+    )
     app.setQuitOnLastWindowClosed(False)
     app.setApplicationName("UltraKB Verification")
     if args.startup:
@@ -123,11 +139,7 @@ flowchart LR
 print("UltraKB")  # fenced_code 中文知识
 ```
 """
-    with (
-        kb_ingest_lock(first / ".ultrakb"),
-        mutation_scope(first, [page_path], operation="verify-native-page"),
-    ):
-        atomic_write_text(page_path, source)
+    publish_pages(first, {"concepts/原生阅读.md": source.encode()})
     window = Workbench(history_dir=root / "tasks")
     window.show()
     evidence: dict[str, object] = {"checks": []}
@@ -382,9 +394,9 @@ print("UltraKB")  # fenced_code 中文知识
             if args.url:
                 from PySide6.QtWidgets import QInputDialog
 
+                from ultrakb.application.sources import read_admitted_source, source_inventory
                 from ultrakb.desktop.documents import DocumentsDialog
                 from ultrakb.desktop.verification_workbench import management_page
-                from ultrakb.state import HashRegistry
 
                 documents = management_page(window, other, "资料", DocumentsDialog, wait_until)
 
@@ -408,11 +420,10 @@ print("UltraKB")  # fenced_code 中文知识
                 wait_until(
                     lambda: documents.table.rowCount() == len(get_kb_list(other)["documents"])
                 )
-                entries = HashRegistry(other / ".ultrakb/hashes.json").all_entries()
-                entry = next(m for m in entries.values() if m.get("origin") == "url")
-                assert entry["path"] == args.url
-                assert (other / entry["raw_path"]).is_file()
-                assert (other / entry["source_path"]).is_file()
+                entry = next(
+                    item for item in source_inventory(other) if item["location"] == args.url
+                )
+                assert read_admitted_source(other, entry["source_id"]) is not None
                 assert result.results[0].unfinished == ("acquisition",)
                 checks.append(
                     "real HTTP URL acquisition, provenance, dedup and ordinary-failure continuation"

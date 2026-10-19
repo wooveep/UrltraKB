@@ -171,7 +171,8 @@ def show_task_details(task, parent):
             task.kb_dir,
             parent,
             execution_id=executions[-1] if executions else None,
-            select_first=bool(executions),
+            application_task_id=task.id,
+            select_first=False,
         ).exec()
         return
     TaskDetailsDialog(task, parent).exec()

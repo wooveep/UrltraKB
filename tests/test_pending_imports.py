@@ -3,18 +3,21 @@
 import json
 
 import pytest
+from test_pending_empty_html import html_model_transport  # noqa: F401
 
 pytest_plugins = ("pending_fixtures",)
+pytestmark = pytest.mark.integration
 
 
 def test_frozen_container_discovers_one_actual_object_and_imports_an_independent_source(
-    kb_dir, embedded_docx, office_runtime, pdf_model
+    kb_dir, embedded_docx, office_runtime
 ):
+    from native_catalog_fixtures import list_sources
+
     from ultrakb.application.documents import import_document
-    from ultrakb.application.pending import pending_status, process_pending
+    from ultrakb.application.pending import pending_status, process_pending, read_pending_job
     from ultrakb.application.removal import remove_document
     from ultrakb.documents import read_document_source
-    from ultrakb.source_catalog import list_sources
 
     parent = import_document(
         kb_dir,
@@ -30,11 +33,12 @@ def test_frozen_container_discovers_one_actual_object_and_imports_an_independent
         source for source in list_sources(kb_dir) if source.source_id != parent.source_id
     )
     body = read_document_source(kb_dir, recovered.source_id)
-    assert recovered.name == "Recovered.docx" and "First section hello" in body["content"]
+    assert recovered.label == "Recovered.docx" and "First section hello" in body["content"]
     assert "version_metadata" not in body
     inventory = pending_status(kb_dir)
-    receipt = next(job for job in inventory["jobs"] if job["kind"] == "import")["result"]
-    assert receipt["quality_known"] is True and receipt["quality"] == []
+    receipt_job = next(job for job in inventory["jobs"] if job["filename"] == "Recovered.docx")
+    receipt = read_pending_job(kb_dir, receipt_job["id"])["result"]
+    assert receipt_job["quality_known"] is True and receipt["quality"] == ()
     assert receipt["model_usage"]["current"]["requests"] > 0
     assert inventory["groups"][0]["model_usage"]["requests"] == (
         parent.model_usage["current"]["requests"] + receipt["model_usage"]["current"]["requests"]
@@ -42,36 +46,7 @@ def test_frozen_container_discovers_one_actual_object_and_imports_an_independent
     assert process_pending(kb_dir)["processed"] == 0
 
 
-def test_checkpoint_failure_commits_neither_cursor_budget_nor_import_intent(
-    kb_dir, embedded_docx, pdf_model, monkeypatch
-):
-    from ultrakb.application.documents import import_document
-    from ultrakb.application.pending import pending_status, process_pending, retry_pending_job
-    from ultrakb.mutation import MutationSnapshot
-
-    import_document(kb_dir, embedded_docx)
-    commit = MutationSnapshot.mark_committed
-
-    def unavailable(snapshot):
-        if snapshot.operation == "discovery-checkpoint":
-            raise OSError("Fixture unavailable commit marker")
-        commit(snapshot)
-
-    monkeypatch.setattr(MutationSnapshot, "mark_committed", unavailable)
-    process_pending(kb_dir)
-    inventory = pending_status(kb_dir)
-    assert inventory["imports_pending"] == 0
-    discovery = next(job for job in inventory["jobs"] if job["kind"] == "discovery")
-    assert discovery["cursor"] == 0 and discovery["status"] == "failed"
-    assert inventory["groups"][0]["sources"] == 1
-    monkeypatch.setattr(MutationSnapshot, "mark_committed", commit)
-    retry_pending_job(kb_dir, discovery["id"])
-    assert process_pending(kb_dir, max_jobs=1)["imports_pending"] == 1
-
-
-def test_budget_raise_resumes_checkpoint_and_group_cancel_is_durable(
-    kb_dir, embedded_docx, pdf_model
-):
+def test_budget_raise_resumes_checkpoint_and_group_cancel_is_durable(kb_dir, embedded_docx):
     from ultrakb.application.documents import import_document
     from ultrakb.application.pending import (
         cancel_execution_group,
@@ -94,90 +69,20 @@ def test_budget_raise_resumes_checkpoint_and_group_cancel_is_durable(
     assert pending_status(kb_dir)["groups"][0]["cancelled"]
 
 
-@pytest.mark.parametrize("mode", ["valid", "normalized", "repaired", "malformed"])
-def test_plan_contract_controls(kb_dir, mode):
-    from ultrakb.agent.compile_plan import normalize_plan
-    from ultrakb.agent.compiler import _sanitize_concept_name
-    from ultrakb.application.pending import pending_result
-    from ultrakb.compilation_report import CompileReport
-    from ultrakb.ingest_result import ImportUnitOutcome, IngestResult
-    from ultrakb.pending.imports import build_pending_import_result
-    from ultrakb.pending.records import JobAttempt
-    from ultrakb.source_catalog import read_record, record_path, write_record
-
-    options = dict(
-        existing={"concepts": set(), "entities": set()},
-        entity_types=frozenset({"other"}),
-        sanitize=_sanitize_concept_name,
-    )
-    raw = (
-        {"concepts": [], "entities": []}
-        if mode == "normalized"
-        else {"concepts": {}, "entities": {}}
-    )
-    if mode in {"malformed", "repaired"}:
-        with pytest.raises(ValueError):
-            normalize_plan({"concepts": "malformed"}, **options)
-    if mode != "malformed":
-        plan = normalize_plan(raw, **options)
-        assert plan.normalized == (mode == "normalized")
-    expected_quality = {
-        "valid": [],
-        "normalized": ["compile_plan_normalized"],
-        "repaired": ["compile_plan_repaired"],
-        "malformed": ["malformed_plan_items"],
-    }[mode]
-    unfinished = ["concepts", "entities"] if mode == "malformed" else []
-    successful = mode != "malformed"
-    delivered = IngestResult(
-        "recovered:source",
-        "added" if successful else "failed",
-        (),
-        quality=tuple(expected_quality),
-        unfinished=tuple(unfinished),
-        units=(
-            ImportUnitOutcome(
-                unit_id="a" * 32,
-                target_revision_id="b" * 32,
-                status="completed" if successful else "failed",
-                knowledge_revision_id="c" * 32 if successful else None,
-            ),
-        ),
-    )
-    receipt = build_pending_import_result(
-        delivered,
-        CompileReport(quality=list(expected_quality), unfinished=unfinished),
-        attempt_id="d" * 32,
-        source_id="e" * 32,
-        source_revision_id="f" * 32,
-    )
-    job = JobAttempt(
-        attempt_id="d" * 32,
-        intent_id="1" * 32,
-        kind="import",
-        status="completed" if successful else "failed",
-        result=receipt,
-    )
-    write_record(record_path(kb_dir, "pending-attempts", job.attempt_id), job)
-    reread = read_record(kb_dir, "pending-attempts", job.attempt_id, JobAttempt)
-    public = pending_result("import", reread, kb_dir)
-    assert reread == job and reread.result == receipt
-    assert public["quality_known"] is True
-    assert public["quality"] == expected_quality
-    assert public["unfinished"] == unfinished
-    assert public["status"] == ("completed" if successful else "failed")
-    assert sum(bool(unit.knowledge_revision_id) for unit in receipt.units) == int(successful)
-    assert pending_result("import", reread, kb_dir) == public
-
-
 def test_failed_import_receipt_stays_with_its_attempt_when_retried(
-    kb_dir, embedded_docx, office_runtime, pdf_model, monkeypatch
+    kb_dir, embedded_docx, office_runtime, monkeypatch
 ):
+    from native_catalog_fixtures import catalog
+
     from ultrakb.agent import compiler
     from ultrakb.application.documents import import_document
-    from ultrakb.application.pending import pending_status, process_pending, retry_pending_job
-    from ultrakb.pending.records import JobAttempt
-    from ultrakb.source_catalog import read_record
+    from ultrakb.application.pending import (
+        pending_status,
+        process_pending,
+        read_pending_job,
+        retry_pending_job,
+    )
+    from ultrakb.storage.pending_store import PendingStore
 
     import_document(kb_dir, embedded_docx)
     process_pending(kb_dir, max_jobs=1)
@@ -188,24 +93,35 @@ def test_failed_import_receipt_stays_with_its_attempt_when_retried(
 
     monkeypatch.setattr(compiler, "_write_summary", unavailable)
     process_pending(kb_dir, max_jobs=1)
-    job = next(job for job in pending_status(kb_dir)["jobs"] if job["kind"] == "import")
+    job = next(job for job in pending_status(kb_dir)["jobs"] if job["filename"] == "Recovered.docx")
+    job = read_pending_job(kb_dir, job["id"])
     assert job["status"] in {"failed", "partial", "interrupted"}
     assert job["result"] is not None
-    previous = read_record(kb_dir, "pending-attempts", job["attempt_id"], JobAttempt)
+    attempts = PendingStore(kb_dir, catalog(kb_dir).identity)
+    previous = next(
+        attempt
+        for attempt in attempts.attempts(job["id"])
+        if attempt.attempt_id == job["attempt_id"]
+    )
     monkeypatch.setattr(compiler, "_write_summary", publish_summary)
     retry_pending_job(kb_dir, job["id"])
-    queued = next(job for job in pending_status(kb_dir)["jobs"] if job["kind"] == "import")
+    queued = next(row for row in pending_status(kb_dir)["jobs"] if row["id"] == job["id"])
     assert queued["result"] is None and queued["quality_known"] is False
     process_pending(kb_dir)
-    completed = next(job for job in pending_status(kb_dir)["jobs"] if job["kind"] == "import")
+    completed = read_pending_job(kb_dir, job["id"])
     assert completed["status"] == "completed"
     assert completed["attempt_id"] != previous.attempt_id
-    assert read_record(kb_dir, "pending-attempts", previous.attempt_id, JobAttempt) == previous
+    assert (
+        next(
+            attempt
+            for attempt in attempts.attempts(job["id"])
+            if attempt.attempt_id == previous.attempt_id
+        )
+        == previous
+    )
 
 
 def test_pending_receipt_validates_units_and_their_model_usage():
-    import pytest
-
     from ultrakb.pending.records import PendingImportResult
 
     receipt = {

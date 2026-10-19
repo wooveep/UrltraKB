@@ -53,7 +53,7 @@ class GenerationAcceptance:
     error: Exception | None = None
 
 
-def generation_request(scope, options):
+def generation_request(scope, options, *, unit_id=None):
     return digest(
         {
             "operation": "generate-v1",
@@ -66,6 +66,7 @@ def generation_request(scope, options):
             "version": options.version,
             "critique": options.critique,
             "skill_name": options.skill_name,
+            **({"unit_id": unit_id} if unit_id is not None else {}),
         }
     )
 

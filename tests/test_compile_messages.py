@@ -1,6 +1,7 @@
 """The actual compiler transport retains native sparse and partial cell observations."""
 
 import json
+from contextlib import contextmanager
 
 import pytest
 from test_compile_windows import _page_request
@@ -8,19 +9,19 @@ from test_compile_windows import _page_request
 pytest_plugins = ("processing_fixtures",)
 
 
+@contextmanager
 def retained_reader(kb_dir, retained):
     from ultrakb.agent.source_windows import CompileSourceWindows
-    from ultrakb.ingest_records import UnitRevision
-    from ultrakb.normalization import normalization_id, read_normalization
-    from ultrakb.source_catalog import read_record
-    from ultrakb.unit_publication import list_source_units
+    from ultrakb.application.views import published_scope
+    from ultrakb.storage.catalog_store import CatalogStore
+    from ultrakb.storage.compile_inputs import materialize_inputs
+    from ultrakb.storage.compile_workspace import materialize_baseline
 
-    [unit] = list_source_units(kb_dir, retained.source_id)
-    revision = read_record(kb_dir, "unit-revisions", unit.target_revision_id, UnitRevision)
-    directory, _ = read_normalization(
-        kb_dir, normalization_id(revision.source_revision_id, revision.processing_fingerprint)
-    )
-    return CompileSourceWindows(directory / "wiki", unit.doc_name)
+    base = published_scope(kb_dir).knowledge
+    unit = CatalogStore(kb_dir, base.identity).unit_revision(retained.unit_revision_id)
+    with materialize_baseline(base, ()) as baseline:
+        materialize_inputs(base, baseline, unit)
+        yield CompileSourceWindows(baseline.directory, unit.doc_name)
 
 
 def original_payload(messages, prefix):
@@ -42,41 +43,43 @@ def original_payload(messages, prefix):
 def test_csv_page_input_retains_ragged_records_and_physical_lines(kb_dir, processing_only):
     source = kb_dir / "equipment.csv"
     source.write_text('"Rotor\nAlpha",7,,41\nRotorBeta,9\n')
-    reader = retained_reader(kb_dir, processing_only(source))
-    page = _page_request(reader, {"name": "rotor", "type": "product"}, kind="entities")
-    original = original_payload(page, "Current original:")
-    rows = original["csv_rows"]
-    assert [(row["row"], len(row["cells"])) for row in rows] == [(1, 4), (2, 2)]
-    assert [cell["column"] for cell in rows[0]["cells"]] == [1, 2, 3, 4]
-    assert rows[0]["cells"][0]["observations"][0]["value"] == "Rotor\nAlpha"
-    assert rows[0]["cells"][0]["observations"][0]["physical_lines"] == [1, 2]
-    assert rows[0]["cells"][2]["observations"][0]["value"] == ""
-    assert "RotorBeta" not in str(rows[0])
+    with retained_reader(kb_dir, processing_only(source)) as reader:
+        page = _page_request(reader, {"name": "rotor", "type": "product"}, kind="entities")
+        original = original_payload(page, "Current original:")
+        rows = original["csv_rows"]
+        assert [(row["row"], len(row["cells"])) for row in rows] == [(1, 4), (2, 2)]
+        assert [cell["column"] for cell in rows[0]["cells"]] == [1, 2, 3, 4]
+        assert rows[0]["cells"][0]["observations"][0]["value"] == "Rotor\nAlpha"
+        assert rows[0]["cells"][0]["observations"][0]["physical_lines"] == [1, 2]
+        assert rows[0]["cells"][2]["observations"][0]["value"] == ""
+        assert "RotorBeta" not in str(rows[0])
 
 
 def test_partial_csv_page_input_does_not_refill_an_unread_value(kb_dir, processing_only):
     source = kb_dir / "equipment.csv"
     source.write_text("RotorAlpha,17\nRotorBeta,23\n")
-    reader = retained_reader(kb_dir, processing_only(source))
-    raw = json.loads((reader.wiki / reader.original_path).read_text())
-    first = next(origin for origin in raw["origins"] if origin.get("csv", {}).get("column") == 1)
-    start = first["normalized_span"][0]
-    page = _page_request(
-        reader,
-        {
-            "name": "rotor",
-            "type": "product",
-            "reading_locations": {"chars": f"{start}:{start + 4}"},
-        },
-        kind="entities",
-        long=True,
-    )
-    windows = original_payload(page, "Original source windows (bounded, frozen):")
-    observation = windows[0]["csv_rows"][0]["cells"][0]["observations"][0]
-    assert observation["value_complete"] is False
-    assert "value" not in observation
-    assert "RotorAlpha" not in str(page)
-    assert "RotorBeta" not in str(page)
+    with retained_reader(kb_dir, processing_only(source)) as reader:
+        raw = json.loads((reader.wiki / reader.original_path).read_text())
+        first = next(
+            origin for origin in raw["origins"] if origin.get("csv", {}).get("column") == 1
+        )
+        start = first["normalized_span"][0]
+        page = _page_request(
+            reader,
+            {
+                "name": "rotor",
+                "type": "product",
+                "reading_locations": {"chars": f"{start}:{start + 4}"},
+            },
+            kind="entities",
+            long=True,
+        )
+        windows = original_payload(page, "Original source windows (bounded, frozen):")
+        observation = windows[0]["csv_rows"][0]["cells"][0]["observations"][0]
+        assert observation["value_complete"] is False
+        assert "value" not in observation
+        assert "RotorAlpha" not in str(page)
+        assert "RotorBeta" not in str(page)
 
 
 @pytest.mark.parametrize("native", ["pages", "text"])

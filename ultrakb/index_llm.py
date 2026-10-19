@@ -73,7 +73,12 @@ class PageIndexLLM:
     def retained_response(self, messages, *, stage):
         """Read an exact frozen request's delivered response without sending it."""
         self.executor.policy.check()
-        cached = self.checkpoints.load(self._key(messages, stage)) if self.checkpoints else None
+        key = self._key(messages, stage)
+        with self._response_lock:
+            pending = self._responses.get(key)
+        if pending is not None:
+            return pending.result() if pending.done() else None
+        cached = self._load(key)
         return IndexResponse(**cached) if cached is not None else None
 
     def _claim(self, key):
@@ -115,19 +120,21 @@ class PageIndexLLM:
 
     def complete(self, messages, *, stage):
         key = self._key(messages, stage)
-        if cached := self._load(key):
-            return IndexResponse(**cached)
+        self.executor.policy.check()
         future, owner = self._claim(key)
         if owner:
             try:
-                with self._request_binding(key, stage):
-                    result = self._response(
-                        self.executor.complete(
-                            "document_index",
-                            self._request(messages, stage),
-                            on_response=self._receive(key),
+                if (cached := self._load(key)) is not None:
+                    result = IndexResponse(**cached)
+                else:
+                    with self._request_binding(key, stage):
+                        result = self._response(
+                            self.executor.complete(
+                                "document_index",
+                                self._request(messages, stage),
+                                on_response=self._receive(key),
+                            )
                         )
-                    )
             except BaseException as error:
                 future.set_exception(error)
                 raise
@@ -136,20 +143,22 @@ class PageIndexLLM:
 
     async def acomplete(self, messages, *, stage):
         key = self._key(messages, stage)
-        if cached := self._load(key):
-            return IndexResponse(**cached)
+        self.executor.policy.check()
         future, owner = self._claim(key)
         if not owner:
             return await asyncio.shield(asyncio.wrap_future(future))
         try:
-            with self._request_binding(key, stage):
-                result = self._response(
-                    await self.executor.acomplete(
-                        "document_index",
-                        self._request(messages, stage),
-                        on_response=self._receive(key),
+            if (cached := self._load(key)) is not None:
+                result = IndexResponse(**cached)
+            else:
+                with self._request_binding(key, stage):
+                    result = self._response(
+                        await self.executor.acomplete(
+                            "document_index",
+                            self._request(messages, stage),
+                            on_response=self._receive(key),
+                        )
                     )
-                )
         except BaseException as error:
             future.set_exception(error)
             raise

@@ -20,48 +20,42 @@ def main():
     root = args.output.resolve()
     root.mkdir(parents=True, exist_ok=True)
     os.environ["XDG_CONFIG_HOME"] = str(root / "profile")
+    os.environ["ULTRAKB_CONFIG_DIR"] = str(root / "settings")
     from PySide6.QtCore import QPoint, Qt, QTimer
     from PySide6.QtTest import QTest
-    from PySide6.QtWidgets import QAbstractButton, QDialog, QPlainTextEdit
+    from PySide6.QtWidgets import QAbstractButton
 
     from ultrakb import config
     from ultrakb.application.knowledge_bases import initialize_kb
+    from ultrakb.application.views import published_scope
     from ultrakb.desktop.source_reader import SourceReader
     from ultrakb.desktop.verification import create_application
+    from ultrakb.desktop.verification_data import publish_pages, retain_document
     from ultrakb.desktop.verification_workbench import button
     from ultrakb.desktop.window import Workbench
-    from ultrakb.locks import atomic_write_text, kb_ingest_lock
-    from ultrakb.mutation import mutation_scope
-    from ultrakb.published_knowledge import read_publication
+    from ultrakb.locks import kb_ingest_lock
     from ultrakb.runtime.records import TaskView, UnitResult
-    from ultrakb.state import HashRegistry
 
     config.GLOBAL_CONFIG_DIR = root / "settings"
     config.GLOBAL_CONFIG_PATH = config.GLOBAL_CONFIG_DIR / "global.yaml"
     kb = root / "交互验收库"
     initialize_kb(kb, seed_environment=False)
-    seed_paths = [
-        *(kb / f"wiki/concepts/{name}.md" for name in ("第一知识", "第二知识")),
-        kb / "wiki/sources/原文.md",
-        kb / ".ultrakb/hashes.json",
-    ]
-    with (
-        kb_ingest_lock(kb / ".ultrakb"),
-        mutation_scope(kb, seed_paths, operation="verify-interaction-inputs"),
-    ):
-        for name in ("第一知识", "第二知识"):
-            atomic_write_text(kb / f"wiki/concepts/{name}.md", f"# {name}\n\n{name}正文。")
-        atomic_write_text(kb / "wiki/sources/原文.md", "# 原文\n\n可读资料正文。")
-        HashRegistry(kb / ".ultrakb/hashes.json").add(
-            "a" * 64, {"name": "可读资料.md", "doc_name": "原文", "type": "md"}
-        )
-    app = create_application()
+    publish_pages(
+        kb,
+        {
+            f"concepts/{name}.md": f"# {name}\n\n{name}正文。".encode()
+            for name in ("第一知识", "第二知识")
+        },
+    )
+    retain_document(kb, "可读资料.md", "原文", "# 原文\n\n可读资料正文。")
+    app = create_application(settings_dir=root / "qt-settings")
     app.setQuitOnLastWindowClosed(False)
     logging.disable(logging.CRITICAL)
     window = Workbench(history_dir=root / "tasks")
     window.resize(1366, 768)
     window.show()
     restorations = []
+    model_sends = 0
 
     def pump(ms=100):
         deadline = time.monotonic() + ms / 1000
@@ -98,7 +92,7 @@ def main():
         setattr(obj, attr, value)
 
     try:
-        publication_id = read_publication(kb).publication_id
+        publication_id = published_scope(kb).publication_id
         window.open_knowledge_base(kb)
         wait(
             lambda: window.kb == kb
@@ -218,7 +212,7 @@ def main():
                             )
                         )
                     else:
-                        wait(lambda: "等待" in panel.status.text())
+                        wait(lambda: window.question.isVisible())
                 if label == "阅读":
                     wait(lambda: any(r.isVisible() for r in window.findChildren(SourceReader)))
                     next(r for r in window.findChildren(SourceReader) if r.isVisible()).close()
@@ -236,8 +230,43 @@ def main():
                 window.manager, "get", lambda identity: next(t for t in current if t.id == identity)
             )
             if args.scenario == "progress":
-                from test_gui_task_progress import model_usage_receipt
+                import litellm
+                from error_transport import ErrorTransport
+                from native_usage_fixtures import native_usage_execution
 
+                from ultrakb.config import LlmCredentialBundle
+                from ultrakb.desktop.knowledge_tasks import KnowledgeTasksDialog
+                from ultrakb.llm_execution import (
+                    CompletionExecutor,
+                    ModelCallPolicy,
+                    ModelRequest,
+                    RoleBindings,
+                )
+
+                # Drive the actual SDK through a local error, then inspect its durable
+                # native receipt. The application task list is a presentation seam.
+                with ErrorTransport(status=400) as service:
+                    executor = CompletionExecutor(
+                        RoleBindings(
+                            "openai/gpt-4o-mini",
+                            LlmCredentialBundle(api_key="offline-test-key", base_url=service.url),
+                        ),
+                        ModelCallPolicy(retries=0),
+                    )
+                    with native_usage_execution(kb, "model_task", task_id=current[0].id):
+                        try:
+                            executor.complete(
+                                "compile",
+                                ModelRequest(
+                                    [{"role": "user", "content": "Local error receipt."}],
+                                    operation="compile",
+                                    stage="summary",
+                                ),
+                            )
+                        except litellm.BadRequestError:
+                            pass
+                    assert len(service.requests) == 1
+                    model_sends = 1
                 window.shell.navigate("资料")
                 panel = window.workspaces.panels["资料"][0]
                 wait(lambda: panel.table.rowCount() == 1)
@@ -245,77 +274,41 @@ def main():
                 progress.track(kb, current[0].id)
                 pump(350)
                 before = progress.status.text()
-                with (
-                    kb_ingest_lock(kb / ".ultrakb"),
-                    mutation_scope(
-                        kb,
-                        [kb / "wiki/sources/第二份.md", kb / ".ultrakb/hashes.json"],
-                        operation="verify-interaction-progress",
-                    ),
-                ):
-                    atomic_write_text(kb / "wiki/sources/第二份.md", "# 新资料\n\n已保留。")
-                    HashRegistry(kb / ".ultrakb/hashes.json").add(
-                        "b" * 64, {"name": "第二份.md", "doc_name": "第二份", "type": "md"}
-                    )
-                completed_usage = model_usage_receipt()
-                completed_usage["model_tasks"][0]["actual_sends"] = 16
+                retain_document(kb, "第二份.md", "第二份", "# 新资料\n\n已保留。")
                 current[0] = replace(
                     current[0],
-                    results=(
-                        UnitResult(
-                            "completed",
-                            model_usage=completed_usage,
-                            changes=("模型任务累计发送：16 / 1000；任务：" + "a" * 32,),
-                        ),
-                    ),
+                    results=(UnitResult("completed"),),
                     current_source="第二份.docx",
-                    model_usage=model_usage_receipt(),
+                    stage="compiling",
                 )
                 pump(750)
-                assert progress.status.text() != before, "Completed count did not refresh"
+                assert progress.status.text() != before
                 assert "1 / 3" in progress.status.text()
-                assert "converting" not in progress.status.text()
                 wait(lambda: panel.table.rowCount() == 2)
                 observed = []
 
-                def advance():
-                    receipt = model_usage_receipt()
-                    receipt["model_tasks"][0]["actual_sends"] = 272
-                    current[0] = replace(current[0], stage="compiling", model_usage=receipt)
-
-                QTimer.singleShot(100, advance)
-
                 def inspect():
-                    dialog = next(
-                        d
-                        for d in window.findChildren(QDialog)
-                        if d.isVisible() and d.windowTitle() == "任务结果"
-                    )
-                    observed.append(dialog.findChild(QPlainTextEdit).toPlainText())
-                    assert dialog.progress.maximum() == 3 and dialog.progress.value() == 1
-                    assert "已发送 272 次" in dialog.budget.text()
-                    assert "上限 1000 次" in dialog.budget.text()
-                    assert "剩余 728 次" in dialog.budget.text()
-                    assert "不代表资料完成进度" in dialog.budget.text()
-                    assert "模型调用预算" not in observed[-1]
-                    assert "16 / 1000" not in observed[-1]
-                    assert "第 2 项：正在执行" in observed[-1]
-                    assert "第 3 项：等待执行" in observed[-1]
-                    for theme in ("浅色", "深色"):
-                        window.theme.setCurrentText(theme)
-                        for width in (820, 720):
-                            dialog.resize(width, 620)
-                            pump(50)
-                            assert (
-                                dialog.budget.visibleRegion().boundingRect() == dialog.budget.rect()
-                            )
-                            dialog.grab().save(str(root / f"task-details-{theme}-{width}.png"))
-                    dialog.grab().save(str(root / "task-details.png"))
-                    dialog.accept()
+                    for dialog in app.topLevelWidgets():
+                        if (
+                            isinstance(dialog, KnowledgeTasksDialog)
+                            and dialog.isVisible()
+                            and not dialog._busy
+                            and dialog.detail is not None
+                        ):
+                            detail = dialog.detail
+                            assert detail.execution.application_task_id == current[0].id
+                            assert len(detail.requests) == 1
+                            assert detail.execution_usage.actual_sends == 1
+                            observed.append(detail.execution.execution_id)
+                            dialog.grab().save(str(root / "task-details.png"))
+                            dialog.accept()
 
-                QTimer.singleShot(700, inspect)
+                timer = QTimer()
+                timer.timeout.connect(inspect)
+                timer.start(80)
                 progress.show_details()
-                assert "编译" in observed[0] and "转换" not in observed[0]
+                timer.stop()
+                assert observed
                 window.grab().save(str(root / "progress.png"))
             elif args.scenario == "tasks":
                 current.extend(
@@ -341,7 +334,7 @@ def main():
                     ]
                 )
                 stopped = []
-                patch(window.manager, "stop", stopped.append)
+                patch(window.manager, "stop", lambda identity, **options: stopped.append(identity))
                 window.shell.navigate("任务")
                 pump(250)
                 tasks = window.workspaces.task_workspace
@@ -392,7 +385,7 @@ def main():
         window.workspaces.import_progress.task_id = None
         window.request_quit()
         wait(window.shutdown_complete)
-    print(json.dumps({"scenario": args.scenario, "passed": True, "model_sends": 0}))
+    print(json.dumps({"scenario": args.scenario, "passed": True, "model_sends": model_sends}))
 
 
 def task_batches(window, kb, root, current, patch, pump, wait):

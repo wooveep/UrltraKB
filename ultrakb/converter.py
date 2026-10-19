@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import re
 import shutil
@@ -21,11 +20,9 @@ from ultrakb.locks import (
     PrivateMaterialization,
     atomic_write_json,
     atomic_write_text,
-    kb_ingest_lock,
 )
 from ultrakb.processing_policy import ProcessingDecision, classify_pdf
 from ultrakb.source_records import TextDecoding
-from ultrakb.state import HashRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -47,16 +44,6 @@ class ConvertResult:
     cnki_path: Path | None = None
 
 
-def _registry_path(path: Path, kb_dir: Path) -> str:
-    """Portable path string used as the registry's identity key.
-
-    Relative-to-KB posix when the file lives inside the KB (stable across
-    machines/checkouts), absolute posix otherwise. Both paths are fully
-    resolved (symlinks followed) before comparison.
-    """
-    return _portable_path(path.resolve(), kb_dir.resolve())
-
-
 def _portable_path(resolved_path: Path, resolved_kb: Path) -> str:
     """Format already resolved identities without consulting live symlinks."""
     if resolved_path.is_relative_to(resolved_kb):
@@ -71,84 +58,6 @@ _SUFFIX_LEN = 8
 def _sanitize_stem(stem: str) -> str:
     normalized = unicodedata.normalize("NFKC", stem)
     return _SAFE_STEM_RE.sub("-", normalized).strip("-") or "document"
-
-
-def _name_taken(candidate: str, registry: HashRegistry) -> bool:
-    """True when ``candidate`` is claimed by another registered document.
-
-    The registry is the single authority on ownership: artifacts on disk
-    without a registry entry are either leftovers of a failed ingest of
-    this same source (must be adoptable so a retry keeps its clean name)
-    or out-of-contract manual drops — both are overwritten, matching
-    pre-collision-fix behaviour for unclaimed files.
-    """
-    for meta in registry.all_entries().values():
-        entry_name = meta.get("doc_name") or Path(meta.get("name", "")).stem
-        if unicodedata.normalize("NFKC", entry_name) == candidate:
-            return True
-    return False
-
-
-def resolve_doc_name(
-    src: Path,
-    kb_dir: Path,
-    registry: HashRegistry,
-    *,
-    persist_legacy: bool = True,
-    path_key: str | None = None,
-) -> str:
-    """Resolve the stable wiki name for ``src`` (Scheme A).
-
-    Identity is keyed by path: a source we've seen before (same path, even
-    with new content) keeps its name so re-ingest overwrites in place.
-    Legacy registry entries (written before the path index) are matched by
-    stem and backfilled with the path. A brand-new source keeps the clean
-    sanitized stem unless another document already owns that name, in which
-    case it gets a deterministic ``-{sha256(path)[:8]}`` suffix.
-    """
-    path_key = path_key if path_key is not None else _registry_path(src, kb_dir)
-
-    known = registry.get_by_path(path_key)
-    if known is not None:
-        stored = known.get("doc_name") or Path(known.get("name", "")).stem
-        if stored:
-            return stored
-
-    legacy = registry.find_legacy_by_stem(src.stem)
-    if legacy is not None:
-        file_hash, meta = legacy
-        meta = dict(meta)
-        name = meta.get("doc_name") or Path(meta.get("name", "")).stem
-        if persist_legacy:
-            meta["doc_name"] = name
-            meta["path"] = path_key
-            registry.add(file_hash, meta)  # backfill + persist
-        return name
-
-    return resolve_doc_name_from_key(src.stem, path_key, registry)
-
-
-def resolve_doc_name_from_key(stem: str, path_key: str, registry: HashRegistry) -> str:
-    """Collision-resistant wiki name for a synthetic identity ``path_key``.
-
-    Same rules as :func:`resolve_doc_name` minus the legacy-by-stem
-    backfill (a filesystem-migration concern that must not fire for sources
-    with no real path, e.g. cloud imports). A source already registered
-    under ``path_key`` keeps its stored ``doc_name``; otherwise the
-    sanitized ``stem`` is used, with a deterministic
-    ``-{sha256(path_key)[:8]}`` suffix when another document owns it.
-    """
-    known = registry.get_by_path(path_key)
-    if known is not None:
-        stored = known.get("doc_name") or Path(known.get("name", "")).stem
-        if stored:
-            return stored
-
-    candidate = _sanitize_stem(stem)
-    if _name_taken(candidate, registry):
-        digest = hashlib.sha256(path_key.encode("utf-8")).hexdigest()[:_SUFFIX_LEN]
-        return f"{candidate}-{digest}"
-    return candidate
 
 
 def get_pdf_page_count(path: Path) -> int:
@@ -172,6 +81,15 @@ def convert_document(
     private_workspace: PrivateMaterialization | None = None,
 ) -> ConvertResult:
     """Convert a fixed input version while retaining its original identity."""
+    if (
+        private_workspace is None
+        or staging_dir is None
+        or doc_name is None
+        or not private_workspace.permits_scope(staging_dir)
+    ):
+        raise ValueError(
+            "Private conversion requires its owned workspace and explicit document name"
+        )
     from ultrakb.inputs import prepared_input
 
     if prepared is not None:
@@ -218,16 +136,7 @@ def _convert_prepared_document(
     cnki_identity=None,
     private_workspace: PrivateMaterialization | None = None,
 ) -> ConvertResult:
-    """Convert a document and integrate it into the knowledge base.
-
-    Steps:
-    1. Hash-check — skip if already known.
-    2. Copy source to ``raw/``.
-    3. If PDF and page count >= threshold → return :attr:`ConvertResult.is_long_doc`.
-    4. If ``.md`` — read, process relative images, save to ``wiki/sources/``.
-    5. Otherwise — run MarkItDown, extract base64 images, save to ``wiki/sources/``.
-    6. Register hash in the registry.
-    """
+    """Convert retained input bytes into an owned private materialization."""
     prepared, file_hash = ready.path, ready.digest
     from ultrakb.import_text import preflight_import_text, validate_text_preflight
 
@@ -236,43 +145,14 @@ def _convert_prepared_document(
         preflight_import_text(kb_dir, ready, check_stop=check_stop, cnki_identity=cnki_identity),
     )
     source_identity = _portable_path(ready.identity, kb_dir.resolve())
-    if private_workspace is not None and (
-        staging_dir is None or doc_name is None or not private_workspace.permits_scope(staging_dir)
-    ):
-        raise ValueError(
-            "Private conversion requires its owned workspace and explicit document name"
-        )
-    with nullcontext() if private_workspace is not None else kb_ingest_lock(kb_dir / ".ultrakb"):
+    with nullcontext():
         # ------------------------------------------------------------------
         # Load config & state
         # ------------------------------------------------------------------
-        ultrakb_dir = kb_dir / ".ultrakb"
         config = resolve_effective_config(kb_dir)[0]
         processing = None
         artifact_root = staging_dir if staging_dir is not None else kb_dir
-        registry = HashRegistry(ultrakb_dir / "hashes.json") if doc_name is None else None
-
-        # ------------------------------------------------------------------
-        # 1. Hash check + identity resolution
-        # ------------------------------------------------------------------
-        if registry is not None and registry.is_known(file_hash):
-            logger.info("Skipping already-known file: %s", src.name)
-            stored = registry.get(file_hash) or {}
-            return ConvertResult(
-                skipped=True,
-                file_hash=file_hash,
-                doc_name=stored.get("doc_name") or Path(stored.get("name", src.name)).stem,
-            )
-        if doc_name is None:
-            assert registry is not None
-            doc_name = resolve_doc_name(
-                src,
-                kb_dir,
-                registry,
-                persist_legacy=staging_dir is None,
-                path_key=source_identity,
-            )
-        if _sanitize_stem(doc_name) != doc_name:
+        if not isinstance(doc_name, str) or _sanitize_stem(doc_name) != doc_name:
             raise ValueError("Invalid normalized document name")
 
         # ------------------------------------------------------------------

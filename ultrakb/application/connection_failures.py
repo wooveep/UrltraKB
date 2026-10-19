@@ -114,6 +114,20 @@ def connection_failure(error: BaseException) -> ConnectionFailure:
     return failure_for_code(code)
 
 
+def operation_error_message(error: BaseException) -> str:
+    """Keep provider bodies and credentials out of durable application feedback."""
+    if type(error).__module__.split(".")[0] in {
+        "litellm",
+        "openai",
+        "anthropic",
+        "google",
+        "botocore",
+        "httpx",
+    }:
+        return connection_failure(error).message
+    return str(error)
+
+
 def shared_model_failure(errors) -> ConnectionFailure | None:
     """Only errors observed at the model port can halt other document work."""
     for error in errors:

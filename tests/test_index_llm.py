@@ -110,7 +110,7 @@ def test_ultrakb_factory_disables_the_legacy_observer():
 def test_runtime_upgrade_keeps_normalization_content_identity(kb_dir, monkeypatch, sdk_version):
     from importlib import metadata
 
-    from ultrakb.normalization import normalization_fingerprint
+    from ultrakb.normalization import normalization_policy
 
     original = metadata.version
     monkeypatch.setattr(
@@ -118,13 +118,13 @@ def test_runtime_upgrade_keeps_normalization_content_identity(kb_dir, monkeypatc
         "version",
         lambda name: "0.3.0.dev3+urltrakb.5" if name == "pageindex" else original(name),
     )
-    before = normalization_fingerprint(kb_dir)
+    before = normalization_policy(kb_dir)
     monkeypatch.setattr(
         metadata,
         "version",
         lambda name: sdk_version if name == "pageindex" else original(name),
     )
-    assert normalization_fingerprint(kb_dir) == before
+    assert normalization_policy(kb_dir) == before
 
 
 def test_injected_pdf_structure_summary_and_description(

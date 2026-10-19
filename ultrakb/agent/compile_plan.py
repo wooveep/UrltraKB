@@ -203,6 +203,9 @@ def request_compile_plan(
     correction = None
     if checkpoints:
         cached = checkpoints.load("plan", request_digest)
+        if cached is None and (reader := getattr(checkpoints, "accepted_plan", None)):
+            if retained := reader():
+                request_digest, cached = retained
         if cached is not None:
             try:
                 return parse_compile_plan(

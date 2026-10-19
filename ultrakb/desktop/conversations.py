@@ -3,14 +3,14 @@
 from dataclasses import dataclass, field
 from hashlib import sha256
 from pathlib import Path
+from uuid import uuid4
 
 from ultrakb.agent.answer_text import visible_answer
-from ultrakb.agent.chat_session import ChatSession
 from ultrakb.application.conversations import read_conversation
 from ultrakb.desktop.chat_outbox import ChatOutbox
 from ultrakb.desktop.conversation_activity import failure_status, task_status
 from ultrakb.desktop.io import _defer_wait
-from ultrakb.knowledge_scope import live_scope
+from ultrakb.knowledge_scope import KnowledgeScope, live_scope
 from ultrakb.runtime.records import TERMINAL, TaskView
 from ultrakb.runtime.requests import ContinueConversation
 
@@ -42,6 +42,17 @@ class Chat:
     answers: tuple = ()
     focus: tuple = ()
     request_focus: tuple = ()
+    scope: KnowledgeScope | None = None
+
+    def belongs_to(self, scope):
+        return bool(
+            self.scope
+            and scope
+            and self.scope.knowledge
+            and scope.knowledge
+            and self.scope.knowledge.identity == scope.knowledge.identity
+            and self.view_id == scope.view_id
+        )
 
 
 class Conversations:
@@ -72,6 +83,8 @@ class Conversations:
         self.active = self.recent.get(
             (self.window.kb, getattr(self.window, "view_id", None) or "legacy")
         )
+        if self.active and not self.active.belongs_to(self.window.scope):
+            self.active = None
         self.awaiting_catalog = bool(self.window.kb and self.active is None)
         self.render()
 
@@ -124,6 +137,8 @@ class Conversations:
             self.new()
 
     def select(self, chat):
+        if chat.scope is None:
+            chat.scope = self.window.scope
         if self.active:
             self.active.draft = self.window.question.toPlainText()
         self.active = chat
@@ -147,6 +162,8 @@ class Conversations:
         if not root or root in self.window._deleting_kbs:
             return
         chat = self.saved.get((root, identity))
+        if chat and not chat.belongs_to(self.window.scope):
+            chat = None
         if chat is None:
             chat = Chat(
                 root,
@@ -161,6 +178,11 @@ class Conversations:
             self.load(chat)
 
     def load(self, chat):
+        captured_scope = chat.scope or (
+            self.window.scope
+            if self.window.kb == chat.root
+            else live_scope(chat.root, chat.view_id)
+        )
         chat.generation += 1
         generation = chat.generation
         chat.loading = True
@@ -203,7 +225,9 @@ class Conversations:
                             stopped=latest.state == "stopped",
                         )
                 chat.persisted = True
-                chat.completed_count = len(session.turns)
+                chat.completed_count = (
+                    session.total_turns if session.total_turns is not None else len(session.turns)
+                )
                 chat.usage = session.usage
                 chat.pending_usage = None
                 chat.answer_outcome = (
@@ -213,9 +237,12 @@ class Conversations:
                 self.render(restore_draft=False)
 
         self.window.io.submit(
-            lambda: read_conversation(chat.root, chat.identity, view_id=chat.view_id),
+            lambda: read_conversation(
+                chat.root, chat.identity, view_id=chat.view_id, scope=captured_scope
+            ),
             loaded,
             kb=chat.root,
+            snapshot=True,
             obsolete=obsolete,
         )
 
@@ -263,7 +290,7 @@ class Conversations:
         accepted = None
         try:
             if chat.identity is None:
-                chat.identity = ChatSession.new(chat.root, "", "").id
+                chat.identity = uuid4().hex
                 chat.title = question.splitlines()[0][:60]
                 self.saved[chat.root, chat.identity] = chat
             accepted = self.outbox.accept(
@@ -273,6 +300,7 @@ class Conversations:
                 new=not chat.persisted,
                 after_turn=chat.completed_count,
                 view_id=chat.view_id,
+                database_identity=w.read_scope.knowledge.identity if w.read_scope else None,
             )
             chat.attempt = accepted.id
             request = ContinueConversation(
@@ -415,7 +443,7 @@ class Conversations:
             pending = (chat.question, chat.answer) if chat.question else None
             w.chat.show_turns(
                 chat.turns,
-                live_scope(chat.root, chat.view_id).wiki_dir,
+                (chat.scope or live_scope(chat.root, chat.view_id)).wiki_dir,
                 pending=pending,
                 identity=id(chat),
                 answers=chat.answers,

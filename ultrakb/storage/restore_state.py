@@ -19,6 +19,12 @@ def interrupt_work(db):
             "status = 'interrupted', finished_at = NULL, error_code = 'restored_snapshot'",
         ),
         ("ukb_import_intents", "status IN ('dispatched', 'started')", "status = 'interrupted'"),
+        (
+            "ukb_artifact_heads",
+            "applied_digest IS NOT NULL OR pending_revision_id IS NOT NULL "
+            "OR pending_base_digest IS NOT NULL",
+            "applied_digest = NULL, pending_revision_id = NULL, pending_base_digest = NULL",
+        ),
     ):
         # Only a private restoration calls this. Each statement has a fixed row budget.
         while True:

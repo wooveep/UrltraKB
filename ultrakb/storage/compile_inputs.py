@@ -4,8 +4,9 @@ import hashlib
 import io
 import json
 import posixpath
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import PurePosixPath
+from typing import TYPE_CHECKING
 
 from ultrakb.agent.page_figures import split_gallery
 from ultrakb.figure_assets import asset_path
@@ -17,12 +18,17 @@ from .catalog_store import CatalogStore
 from .coordination import storage_stage
 from .knowledge_inputs import image_paths, source_paths
 
+if TYPE_CHECKING:
+    from .knowledge_store import BoundKnowledge
+
 
 @dataclass
 class CompileInputs:
     identities: dict
     originals: dict
     assets: dict
+    knowledge: "BoundKnowledge | None" = field(default=None, repr=False)
+    _navigation: dict = field(default_factory=dict, repr=False)
 
     def identity(self, path):
         return dict(self.identities.get(path, {}))
@@ -32,6 +38,23 @@ class CompileInputs:
 
     def figure_asset(self, source, path):
         return self.assets.get((source, path), path)
+
+    def navigation(self, path):
+        """Read navigation only from this source's retained main-store index."""
+        if path not in self._navigation:
+            from .index_store import IndexStore
+
+            bound = self.knowledge
+            revision = self.identity(path).get("processing_revision_id")
+            structure = []
+            if bound is not None and revision is not None:
+                indexes = IndexStore(bound.root, bound.identity)
+                for identity in bound.index_revisions():
+                    if indexes.revision(identity).unit_revision_id == revision:
+                        structure = indexes.document(identity)["structure"]
+                        break
+            self._navigation[path] = structure
+        return self._navigation[path]
 
 
 def _required_attachments(baseline):
@@ -193,6 +216,7 @@ def materialize_inputs(
         identities,
         {page: sorted({native[unit] for unit in revisions}) for page, revisions in basis.items()},
         assets,
+        knowledge=base,
     )
 
 

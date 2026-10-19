@@ -43,3 +43,21 @@ def read_refresh_generation(connection, revision_id):
         "SELECT catalog_generation FROM ukb_revision_refresh WHERE revision_id = ?", (revision_id,)
     ).fetchone()
     return row[0] if row else None
+
+
+def protected_knowledge_pages(
+    base_pages: dict[str, str], generated: dict[str, str], generated_baselines: dict[str, str]
+) -> set[str]:
+    """Identify candidates that would overwrite or recreate manually changed pages."""
+    changed = {
+        name
+        for name in base_pages.keys() | generated.keys()
+        if base_pages.get(name) != generated.get(name)
+    }
+    return {
+        name
+        for name in changed
+        if name.split("/")[0] in {"summaries", "concepts", "entities"}
+        and (name in base_pages or name in generated_baselines)
+        and generated_baselines.get(name) != base_pages.get(name)
+    }

@@ -202,20 +202,38 @@ def read_kb_file(path: str, kb_root: str, *, scope: KnowledgeScope | None = None
     """
     if not path:
         return "Access denied: empty path."
+    from ultrakb.storage.wiki_paths import wiki_path
+
+    try:
+        wiki_path(path)
+    except ValueError:
+        return "Access denied: use a logical relative file path."
     root = Path(kb_root).resolve()
     scope = resolve_scope(root, scope)
-    full_path = (root / path).resolve()
-    if not full_path.is_relative_to(root):
-        return "Access denied: path escapes KB root."
-    rel = full_path.relative_to(root)
+    rel = Path(path)
     if not rel.parts:
         return "Access denied: KB root itself is not readable."
     if rel.parts[0] not in ("wiki", "output", "skills"):
         return "Access denied: path must be under wiki/, output/, or skills/."
     if rel.parts[0] == "wiki":
-        full_path = scope.wiki_dir.joinpath(*rel.parts[1:]).resolve()
-        if not full_path.is_relative_to(scope.wiki_dir):
-            return "Access denied: path escapes wiki root."
+        from ultrakb.knowledge_scope import read_wiki_bytes
+
+        try:
+            return read_wiki_bytes(scope, Path(*rel.parts[1:]).as_posix()).decode(
+                "utf-8", errors="replace"
+            )
+        except FileNotFoundError:
+            return f"File not found: {path}"
+    if rel.parts[0] == "output" and scope.knowledge is not None:
+        from ultrakb.application.storage_model_outputs import read_storage_model_output
+
+        try:
+            return read_storage_model_output(scope, path).decode("utf-8", errors="replace")
+        except FileNotFoundError:
+            return f"File not found: {path}"
+    full_path = (root / rel).resolve()
+    if not full_path.is_relative_to(root / rel.parts[0]):
+        return "Access denied: path escapes its read zone."
     if not full_path.is_file():
         return f"File not found: {path}"
     return full_path.read_text(encoding="utf-8", errors="replace")
@@ -275,25 +293,12 @@ def write_kb_file(
 
     if not history_write_allowed(full_path):
         return "Access denied: archived artifact versions are read-only."
-    from ultrakb.model_outputs import write_model_output
-
-    if not write_model_output(root, full_path, content):
-        _write_tool_file(root, full_path, content)
+    if scope.private_workspace is None or not full_path.is_relative_to(
+        scope.private_workspace.directory
+    ):
+        return "Access denied: file outputs require an active private materialization."
+    atomic_write_text(full_path, content)
     return f"Written: {path}"
-
-
-def _write_tool_file(kb_dir: Path, target: Path, content: str) -> None:
-    if (kb_dir / ".ultrakb/config.yaml").is_file():
-        from ultrakb.locks import kb_ingest_lock
-        from ultrakb.mutation import mutation_scope
-
-        with kb_ingest_lock(kb_dir / ".ultrakb"):
-            with mutation_scope(kb_dir, [target], operation="tool-file-write"):
-                atomic_write_text(target, content)
-    else:
-        # Unmanaged scratch directories are also supported by this low-level
-        # utility. Managed knowledge always uses the journaled public protocol.
-        atomic_write_text(target, content)
 
 
 def write_wiki_file(path: str, content: str, wiki_root: str) -> str:
@@ -318,16 +323,8 @@ def write_wiki_file(path: str, content: str, wiki_root: str) -> str:
         None,
     )
     if kb_dir is not None:
-        from ultrakb.knowledge_scope import KnowledgeScope
-        from ultrakb.model_outputs import write_model_output
-
-        scope = KnowledgeScope(kb_dir, root)
-        if scope.read_only:
-            return "Access denied: knowledge revisions and proposals are read-only."
-        if not write_model_output(kb_dir, full_path, content):
-            _write_tool_file(kb_dir, full_path, content)
-    else:
-        atomic_write_text(full_path, content)
+        return "Access denied: public knowledge writes require the shared application publisher."
+    atomic_write_text(full_path, content)
     return f"Written: {path}"
 
 

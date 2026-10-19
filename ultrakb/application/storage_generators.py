@@ -3,6 +3,7 @@
 import asyncio
 import json
 from dataclasses import asdict, replace
+from pathlib import Path
 
 from agents import RunConfig, Runner
 from agents.model_settings import ModelSettings
@@ -10,9 +11,11 @@ from agents.model_settings import ModelSettings
 from ultrakb.agent.checkpoint_model import CheckpointAgentModel, raise_checkpoint_failure
 from ultrakb.agent.page_response import PageResponseError
 from ultrakb.agent.query_evidence import restrict_query_agent
+from ultrakb.agent.skills import PreparedSkill, SkillNotFoundError, prepare_skill
 from ultrakb.compile_checkpoints import digest
 from ultrakb.config import LlmCredentialBundle
 from ultrakb.context.workers import run_blocking
+from ultrakb.knowledge_scope import KnowledgeScope, resolve_scope
 from ultrakb.locks import LockCancelled
 from ultrakb.mutation import RecoveryRequired
 from ultrakb.skill.creator import build_skill_create_agent, finish_skill_create
@@ -22,12 +25,56 @@ from ultrakb.storage.artifact_store import ArtifactStore
 from ultrakb.storage.checkpoint_store import CompileCheckpointStore
 from ultrakb.storage.compile_binding import compile_binding
 from ultrakb.storage.compile_workspace import materialize_baseline
-from ultrakb.storage.generation_store import GenerationDetails, GenerationStore, generation_request
+from ultrakb.storage.generation_store import GenerationDetails, GenerationStore
 
 from .generation_acceptance import accept_generation
-from .generators import GenerationPreview, GenerationResult, _paths, _prepare, preflight_generation
+from .generators import GenerationPreview, GenerationResult, TargetType, preflight_generation
 from .query_views import resolve_query_views
 from .task_stages import task_stage
+
+
+def _paths(
+    kb_dir: Path,
+    target_type: TargetType,
+    name: str,
+    prepared: PreparedSkill | None = None,
+    *,
+    scope: KnowledgeScope | None = None,
+) -> tuple[Path, list[Path]]:
+    scope = resolve_scope(kb_dir, scope)
+    target = kb_dir / "output" / ("skills" if target_type == "skill" else "decks") / name
+    if prepared and prepared.output_path:
+        output = prepared.output_path
+        target = (
+            output
+            if output.parent in {kb_dir / "output", scope.wiki_dir / "explorations"}
+            else output.parent
+        )
+    # Deck skills can write anywhere in the runner's two allowed zones.
+    # Include those zones in both consent and crash recovery, including custom skills.
+    roots = (
+        [target, kb_dir / ".claude-plugin/marketplace.json"]
+        if target_type == "skill"
+        else [kb_dir / "output", scope.wiki_dir / "explorations"]
+    )
+    if scope.read_only:
+        roots = [path for path in roots if not path.is_relative_to(scope.wiki_dir)]
+    return target, roots
+
+
+def _prepare(
+    kb_dir: Path,
+    target_type: TargetType,
+    name: str,
+    skill_name: str | None,
+    *,
+    scope: KnowledgeScope | None = None,
+):
+    if target_type == "deck":
+        from ultrakb.deck import DEFAULT_DECK_SKILL
+
+        return prepare_skill(kb_dir, skill_name or DEFAULT_DECK_SKILL, slug=name, scope=scope)
+    return None
 
 
 def _selection(scope, target_type, name, *, skill_name=None):
@@ -94,20 +141,47 @@ async def generate_stored_artifact(scope, options, context, *, bundle=None, mode
             raise ValueError("Generator credentials differ from the active executor")
         context.credential_bundle = LlmCredentialBundle(**asdict(bundle))
     store = GenerationStore(root, base.identity)
-    request_key = generation_request(scope, options)
-    previous = context.storage_execution
-    if previous is None and context.resume_storage_execution_id is not None:
-        from ultrakb.storage.execution_store import ExecutionStore
+    from .generation_scope import generation_request_key, previous_generation_execution
 
-        previous = ExecutionStore(root, base.identity).execution(
-            context.resume_storage_execution_id
-        )
+    request_key = generation_request_key(scope, options, context)
+    previous = previous_generation_execution(scope, context)
     retained = store.find(previous.model_budget_id, request_key) if previous is not None else None
-    if retained is not None and not store.has_pending(retained):
-        return accept_generation(scope, retained, context)
+    if retained is not None:
+        if not store.has_pending(retained):
+            return await run_blocking(lambda: accept_generation(scope, retained, context))
+        from .storage_execution import begin_retained_execution
+
+        recovered = None
+
+        def accept_retained():
+            nonlocal recovered
+            recovered = accept_generation(scope, retained, context)
+
+        try:
+            with begin_retained_execution(root, context, previous):
+                await run_blocking(accept_retained)
+            return recovered
+        except (Exception, asyncio.CancelledError) as recovery_error:
+            if recovered is not None:
+                return replace(
+                    recovered, unfinished=(*recovered.unfinished, "confirm execution cleanup")
+                )
+            if isinstance(recovery_error, (LockCancelled, asyncio.CancelledError)):
+                raise
+            return GenerationResult(
+                "blocked" if isinstance(recovery_error, RecoveryRequired) else "failed",
+                error_type=type(recovery_error).__name__,
+                message=str(recovery_error),
+                unfinished=("accept retained generation",),
+            )
     error = preflight_generation(root, options.name, scope=scope)
     if error:
         return GenerationResult("invalid", message=error)
+    if previous is None:
+        try:
+            _prepare(root, options.target_type, options.name, options.skill_name, scope=scope)
+        except (OSError, ValueError, SkillNotFoundError) as error:
+            return GenerationResult("invalid", message=str(error))
     result, archived = None, None
 
     async def execute(credentials):
@@ -115,6 +189,9 @@ async def generate_stored_artifact(scope, options, context, *, bundle=None, mode
         if retained is not None:
             result = accept_generation(scope, retained, context)
             return
+        from .generation_scope import retain_generation_scope
+
+        retain_generation_scope(scope, options, context)
         captured = context.snapshot.values()["effective"]["model"]
         if model is not None and model != captured:
             raise ValueError("Generator model differs from the captured execution")

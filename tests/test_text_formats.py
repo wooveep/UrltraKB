@@ -16,12 +16,12 @@ def test_txt_freezes_encoding_and_original_unicode_positions(kb_dir, tmp_path, p
     result = processing_only(path)
     assert result.source_id is not None
     path.unlink()
-    saved = read_document_source(
-        kb_dir, result.source_id, source_revision_id=result.source_revision_id
-    )
+    saved = read_document_source(kb_dir, result.source_id, unit_revision_id=result.unit_revision_id)
     assert saved["content"] == original and not saved["assets"]
     assert saved["encoding"]["name"] == "utf-16-le" and saved["encoding"]["basis"] == "bom"
-    selected = read_document_source(kb_dir, result.source_id, chars="3:5")
+    selected = read_document_source(
+        kb_dir, result.source_id, chars="3:5", unit_revision_id=result.unit_revision_id
+    )
     assert selected["content"] == "e\u0301"
     assert selected["origin_locators"][0]["original_span"] == [4, 6]
 
@@ -34,7 +34,7 @@ def test_csv_retains_quoted_multiline_empty_and_literal_cells(kb_dir, tmp_path, 
     path = tmp_path / "data.csv"
     path.write_bytes(original.encode())
     result = processing_only(path)
-    saved = read_document_source(kb_dir, result.source_id)
+    saved = read_document_source(kb_dir, result.source_id, unit_revision_id=result.unit_revision_id)
     cells = [item for item in saved["origin_locators"] if item.get("csv")]
     assert [item["csv"]["value"] for item in cells] == [
         "code",
@@ -124,7 +124,15 @@ def test_parse_failures_keep_the_source_without_publishing_empty_knowledge(
     assert result.status == "failed" and error in result.message
     saved = read_document_source(kb_dir, result.source_id)
     assert saved["knowledge_revision_id"] is None
-    assert (kb_dir / saved["original_path"]).read_bytes() == raw
+    from ultrakb.application.views import published_scope
+    from ultrakb.storage.catalog_store import CatalogStore
+
+    assert (
+        CatalogStore(kb_dir, published_scope(kb_dir).knowledge.identity).read_original(
+            result.source_revision_id
+        )
+        == raw
+    )
 
 
 def test_watched_csv_does_not_reimport_its_managed_normalization(kb_dir, pdf_model):
@@ -215,10 +223,12 @@ def test_large_csv_cell_keeps_exact_value_without_repeating_it_in_range_reads(
     with path.open("w", encoding="utf-8", newline="") as output:
         csv.writer(output).writerow([value])
     result = processing_only(path)
-    saved = read_document_source(kb_dir, result.source_id)
+    saved = read_document_source(kb_dir, result.source_id, unit_revision_id=result.unit_revision_id)
     cells = [item["csv"] for item in saved["origin_locators"] if item.get("csv")]
     assert [cell["value"] for cell in cells] == [value]
-    selected = read_document_source(kb_dir, result.source_id, blocks="2")
+    selected = read_document_source(
+        kb_dir, result.source_id, blocks="2", unit_revision_id=result.unit_revision_id
+    )
     assert any(item["kind"] == "table_header" for item in selected["units"][0]["display_context"])
     cell = next(item["csv"] for item in selected["origin_locators"] if item.get("csv"))
     assert "value" not in cell and cell["value_complete"] is False

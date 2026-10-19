@@ -142,33 +142,3 @@ def read_history(ctx, knowledge_revision_id, page):
     root, scope = _selection(ctx)
     value, _ = read_history_page(root, knowledge_revision_id, page, scope=scope)
     click.echo(json.dumps(asdict(value), ensure_ascii=False))
-
-
-@refresh.command("references")
-@click.pass_context
-def references(ctx):
-    from ultrakb.artifact_references import list_artifact_references
-
-    root, _ = _selection(ctx)
-    found = list_artifact_references(root)
-    click.echo(
-        json.dumps(
-            {
-                "complete": found.complete,
-                "paths": [str(p) for p in sorted(found.paths)],
-                "index_documents": sorted(found.index_documents),
-            },
-            ensure_ascii=False,
-        )
-    )
-
-
-@refresh.command("cleanup")
-@click.argument("paths", nargs=-1, required=True)
-@click.pass_context
-def cleanup(ctx, paths):
-    """Delete selected managed artifacts only if a complete inventory proves no references."""
-    from ultrakb.application.refresh import cleanup_unreferenced_artifacts
-
-    root, _ = _selection(ctx)
-    click.echo(json.dumps(cleanup_unreferenced_artifacts(root, list(paths)), ensure_ascii=False))

@@ -18,6 +18,7 @@ from ultrakb.application.storage_maintenance import (
     discard_storage_candidate,
     list_storage_candidates,
     preview_storage_maintenance,
+    repair_knowledge_navigation,
     repair_knowledge_receipts,
     repair_knowledge_usage,
     restore_knowledge,
@@ -30,11 +31,14 @@ from ultrakb.storage.database import DatabaseIdentity, StorageFormatError
 storage_router = APIRouter(prefix="/api/v1/storage", dependencies=[Depends(require_bearer_token)])
 
 
-class MaintenanceRequest(BaseModel):
+class StorageIdentityRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     kb: str = Field(min_length=1)
     kb_id: str = Field(min_length=1, max_length=256)
     generation: str = Field(min_length=1, max_length=256)
+
+
+class MaintenanceRequest(StorageIdentityRequest):
     max_items: int = Field(default=128, ge=1, le=1000)
     max_bytes: int = Field(default=64 * 1024**2, ge=1)
 
@@ -132,6 +136,16 @@ async def collect(request: MaintenanceRequest):
 @storage_router.post("/repair-receipts")
 async def repair(request: MaintenanceRequest):
     return await _maintain(repair_knowledge_receipts, request)
+
+
+@storage_router.post("/repair-navigation")
+async def repair_navigation(request: StorageIdentityRequest):
+    return await _call(
+        lambda: repair_knowledge_navigation(
+            resolve_kb_alias(request.kb),
+            identity=DatabaseIdentity(request.kb_id, request.generation),
+        )
+    )
 
 
 async def _cancellable(operation, kb, **options):

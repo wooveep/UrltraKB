@@ -3,6 +3,10 @@
 import json
 
 import pytest
+from compile_work_fixtures import accepted_payload
+from test_page_link_capacity import model_send  # noqa: F401
+
+pytest_plugins = ("compile_work_fixtures",)
 
 
 @pytest.mark.asyncio
@@ -80,16 +84,17 @@ async def test_indivisible_evidence_capacity_fails_before_expensive_suffix_reads
 
 
 @pytest.mark.parametrize("resume", [False, True])
-def test_large_necessary_update_merges_two_proposals_without_overwriting(kb_dir, resume):
+def test_large_necessary_update_merges_two_proposals_without_overwriting(
+    kb_dir, resume, compile_work
+):
     from dataclasses import replace
-    from types import SimpleNamespace
 
     from publication_inputs import update_inputs
     from test_update_capacity_groups import _request_scope
 
     from ultrakb.agent.update_generation import prepare_update_requests
     from ultrakb.agent.update_proposals import UpdateProposal, merge_proposals
-    from ultrakb.compile_checkpoints import CompileCheckpoints, digest
+    from ultrakb.compile_checkpoints import digest
 
     original = "# Conditions\n\nOld winter.\n\nOld summer.\n"
     source = "Winter exception.\n\nSummer condition."
@@ -111,10 +116,7 @@ def test_large_necessary_update_merges_two_proposals_without_overwriting(kb_dir,
         patch, originals, reader, messages=messages, fits=fits, scoped=scoped
     )
     assert len(requests) == 2
-    task = SimpleNamespace(task_id="a" * 32, parent_task_id=None)
-    checkpoints = CompileCheckpoints(
-        kb_dir, task, {"document": "manual"}, {"protocol": "page-edits"}
-    )
+    checkpoints = compile_work({"document": "manual"}, {"protocol": "page-edits"})
     proposals = [
         {
             "base_sha256": patch.digest,
@@ -127,9 +129,7 @@ def test_large_necessary_update_merges_two_proposals_without_overwriting(kb_dir,
         checkpoints.save(f"page:batch:{index}", digest(messages(batch, editable)), proposal)
         if resume and index == 0:
             assert page.read_text() == original
-            checkpoints = CompileCheckpoints(
-                kb_dir, task, {"document": "manual"}, checkpoints.conditions
-            )
+            checkpoints = compile_work({"document": "manual"}, {"protocol": "page-edits"})
     restored = [
         UpdateProposal(
             index, checkpoints.load(f"page:batch:{index}", digest(messages(batch, editable)))
@@ -144,13 +144,11 @@ def test_large_necessary_update_merges_two_proposals_without_overwriting(kb_dir,
     assert "".join(window["content"] for batch, _ in requests for window in batch) == source
 
 
-def test_resolved_conflict_is_restored_without_new_sends(kb_dir):
-    from types import SimpleNamespace
-
+def test_resolved_conflict_is_restored_without_new_sends(kb_dir, compile_work):
     from publication_inputs import update_inputs
 
     from ultrakb.agent.update_proposals import UpdateProposal, merge_proposals
-    from ultrakb.compile_checkpoints import CompileCheckpoints, digest
+    from ultrakb.compile_checkpoints import digest
 
     original = "# Conditions\n\nOld winter.\n\nUnchanged background.\n"
     source = "Winter exception.\n\nSummer exception."
@@ -185,13 +183,10 @@ def test_resolved_conflict_is_restored_without_new_sends(kb_dir):
         ],
     }
     patch.apply(json.dumps(resolved), current=page.read_text())
-    task = SimpleNamespace(task_id="a" * 32, parent_task_id=None)
-    checkpoints = CompileCheckpoints(
-        kb_dir, task, {"document": "manual"}, {"protocol": "page-edits"}
-    )
+    checkpoints = compile_work({"document": "manual"}, {"protocol": "page-edits"})
     checkpoints.save("page:conflict:0", digest(conflict_input), resolved)
-    before = checkpoints.path.read_bytes()
-    restored = CompileCheckpoints(kb_dir, task, {"document": "manual"}, checkpoints.conditions)
+    before = accepted_payload(checkpoints, "page:conflict:0")
+    restored = compile_work({"document": "manual"}, {"protocol": "page-edits"})
     result = patch.apply(
         json.dumps(restored.load("page:conflict:0", digest(conflict_input))),
         current=page.read_text(),
@@ -200,7 +195,8 @@ def test_resolved_conflict_is_restored_without_new_sends(kb_dir):
     assert "Winter exception." in json.dumps(conflict_input) and "Summer exception." in json.dumps(
         conflict_input
     )
-    assert checkpoints.path.read_bytes() == before and page.read_text() == original
+    assert accepted_payload(checkpoints, "page:conflict:0") == before
+    assert page.read_text() == original
 
 
 def test_old_page_partition_does_not_force_a_redundant_metadata_conflict(kb_dir):
@@ -242,17 +238,13 @@ def test_old_page_partition_does_not_force_a_redundant_metadata_conflict(kb_dir)
 
 @pytest.mark.asyncio
 async def test_short_update_partitions_complete_current_and_linked_originals_and_reuses_results(
-    kb_dir, monkeypatch
+    kb_dir,
+    model_send,  # noqa: F811
 ):
-    from litellm import ModelResponse
-
     from ultrakb.agent.page_updates import PageUpdate, UnchangedPage
     from ultrakb.agent.source_windows import CompileSourceWindows
     from ultrakb.agent.update_generation import generate_page_update
-    from ultrakb.application.execution import ExecutionContext
-    from ultrakb.config import LlmCredentialBundle
-    from ultrakb.llm_execution import CompletionExecutor, ModelCallPolicy, RoleBindings
-    from ultrakb.locks import atomic_write_text, kb_ingest_lock
+    from ultrakb.locks import atomic_write_text
 
     wiki = kb_dir / "wiki"
     current = "\n\n".join(f"Rule {i}: retain its independent condition." for i in range(240))
@@ -267,7 +259,8 @@ async def test_short_update_partitions_complete_current_and_linked_originals_and
     patch = PageUpdate(old)
     observed = []
 
-    async def complete(**kwargs):
+    def complete(messages):
+        kwargs = {"messages": messages}
         assert len(json.dumps(kwargs["messages"], ensure_ascii=False).encode()) < 40000
         assert not any(
             isinstance(message["content"], str)
@@ -291,34 +284,15 @@ async def test_short_update_partitions_complete_current_and_linked_originals_and
             and message["content"].startswith("Temporary editable page blocks:\n")
         )
         observed.append((batch, json.JSONDecoder().raw_decode(editable)[0]["blocks"]))
-        return ModelResponse(
-            model="unused",
-            choices=[
-                {
-                    "index": 0,
-                    "finish_reason": "stop",
-                    "message": {
-                        "role": "assistant",
-                        "content": json.dumps(
-                            {
-                                "status": "unchanged",
-                                "base_sha256": patch.digest,
-                                "reason": "The supplied conditions are already represented.",
-                            }
-                        ),
-                    },
-                }
-            ],
-            usage={"prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20},
+        return json.dumps(
+            {
+                "status": "unchanged",
+                "base_sha256": patch.digest,
+                "reason": "The supplied conditions are already represented.",
+            }
         )
 
-    monkeypatch.setattr("litellm.acompletion", complete)
-    context = ExecutionContext(
-        executor=CompletionExecutor(
-            RoleBindings("unused", LlmCredentialBundle(api_key="local-test-key")),
-            ModelCallPolicy(max_calls=30, retries=0),
-        )
-    )
+    model_send.respond = complete
     options = dict(
         patch=patch,
         originals=originals,
@@ -332,7 +306,7 @@ async def test_short_update_partitions_complete_current_and_linked_originals_and
         task_message={"role": "user", "content": "Update all necessary conditions as JSON."},
         fits=lambda messages: len(json.dumps(messages, ensure_ascii=False).encode()) < 40000,
     )
-    with kb_ingest_lock(kb_dir / ".ultrakb"), context.begin(kb_dir):
+    with model_send.executor.activate():
         result = await generate_page_update(**options)
         assert isinstance(result, UnchangedPage)
         assert len(observed) > 1

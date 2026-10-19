@@ -37,10 +37,12 @@ def test_inventory_failure_survives_import_and_keeps_old_body(
     )
     assert failed.status == "failed"
     read = read_document_source(kb_dir, first.source_id, unit_id=first.units[0].unit_id)
-    assert read["status"] == "failed" and "inventory" in read["message"].lower()
+    assert read["status"] == "completed" and "ALPHA_SHEET" in read["content"]
     assert read["source_revision_id"] == first.source_revision_id
     assert read["target_source_revision_id"] == failed.source_revision_id
-    assert source_inventory(kb_dir)[0]["status"] == "failed"
+    inventory = source_inventory(kb_dir)[0]
+    assert inventory["status"] == "failed"
+    assert "inventory" in inventory["message"].lower()
     assert all(unit["status"] == "completed" for unit in source_inventory(kb_dir)[0]["units"])
     explicit = read_document_source(
         kb_dir,
@@ -48,14 +50,19 @@ def test_inventory_failure_survives_import_and_keeps_old_body(
         unit_id=first.units[0].unit_id,
         source_revision_id=failed.source_revision_id,
     )
-    assert explicit["status"] == "failed" and "inventory" in explicit["message"].lower()
+    assert explicit is None
+    from ultrakb.application.views import published_scope
+    from ultrakb.storage.catalog_store import CatalogStore
+
+    catalog = CatalogStore(kb_dir, published_scope(kb_dir).knowledge.identity)
+    assert catalog.read_original(failed.source_revision_id) == three_sheets.read_bytes()
     old = read_document_source(
         kb_dir,
         first.source_id,
         unit_id=first.units[0].unit_id,
         source_revision_id=first.source_revision_id,
     )
-    assert old["status"] == "completed" and old["message"] is None
+    assert old["status"] == "completed" and old.get("message") is None
 
 
 def test_invalid_xlsx_cell_coordinate_never_publishes(kb_dir, tmp_path):

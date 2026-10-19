@@ -383,18 +383,24 @@ def test_source_resolution_cannot_select_another_publications_input(tmp_path):
         scope.knowledge.read_source(unit.unit_revision_id, "body.md")
 
 
-def test_existing_page_context_does_not_scan_unrelated_binary_assets(kb_dir, tmp_path):
+def test_existing_page_context_does_not_scan_unrelated_binary_assets(tmp_path):
+    from ultrakb.application.knowledge_bases import initialize_kb
     from ultrakb.application.reading import read_page_context
-    from ultrakb.locks import atomic_write_text
+    from ultrakb.knowledge_scope import resolve_scope
+    from ultrakb.storage.knowledge_store import KnowledgeStore
 
-    atomic_write_text(kb_dir / "wiki/concepts/one.md", "# One\n")
-    assets = kb_dir / "wiki/sources/images"
+    root = tmp_path / "kb"
+    initialize_kb(root, seed_environment=False)
+    scope = resolve_scope(root)
+    store = KnowledgeStore(root, scope.knowledge.identity)
+    store.publish(store.prepare_changes(scope.knowledge, {"concepts/one.md": b"# One\n"}))
+    assets = root / "wiki/sources/images"
     assets.mkdir(parents=True, exist_ok=True)
     (assets / "large.bin").write_bytes(b"An unrelated large asset" * 100_000)
     outside = tmp_path / "outside.png"
     outside.write_bytes(b"An unrelated external asset")
     (assets / "external.png").symlink_to(outside)
-    assert read_page_context(kb_dir, "concepts/one").page.body == "# One\n"
+    assert read_page_context(root, "concepts/one").page.body == "# One\n"
 
 
 @pytest.mark.parametrize("failure", ["missing", "identity"])

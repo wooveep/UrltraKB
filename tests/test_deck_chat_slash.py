@@ -8,79 +8,46 @@ import pytest
 from prompt_toolkit.styles import Style
 
 from ultrakb.agent.chat import _handle_slash
-from ultrakb.agent.chat_session import ChatSession
+from ultrakb.terminal_chat_state import TerminalConversation
 
 
 def _make_kb(tmp_path):
-    (tmp_path / ".ultrakb").mkdir()
-    (tmp_path / ".ultrakb" / "config.yaml").write_text("model: gpt-4o-mini\n")
-    from kb_fixtures import mark_current_kb
+    from ultrakb.application.knowledge_bases import initialize_kb
+    from ultrakb.desktop.verification_data import publish_pages
 
-    mark_current_kb(tmp_path)
-    (tmp_path / ".ultrakb" / "chats").mkdir()
-    (tmp_path / "wiki" / "concepts").mkdir(parents=True)
-    (tmp_path / "wiki" / "summaries").mkdir(parents=True)
-    (tmp_path / "wiki" / "index.md").write_text("# index\n")
-    # Populate so wiki-content gate accepts
-    (tmp_path / "wiki" / "concepts" / "demo.md").write_text("# demo\n")
-    (tmp_path / "wiki" / "summaries" / "demo.md").write_text("# demo\n")
+    initialize_kb(tmp_path, seed_environment=False)
+    publish_pages(tmp_path, {"concepts/demo.md": b"# Demo\n", "summaries/demo.md": b"# Demo\n"})
     return tmp_path
 
 
 @pytest.mark.asyncio
-async def test_slash_deck_new_invokes_generator(tmp_path):
+@pytest.mark.parametrize("critique", [False, True])
+async def test_slash_deck_new_invokes_the_shared_generator(tmp_path, critique):
+    from types import SimpleNamespace
+
     kb = _make_kb(tmp_path)
-    session = ChatSession.new(kb, "gpt-4o-mini", "en")
+    session = TerminalConversation.new(kb, "gpt-4o-mini", "en")
     style = Style.from_dict({})
-
-    fake_validation = type("V", (), {"errors": [], "warnings": [], "ok": True})()
-
-    with patch("ultrakb.skill.generator.Generator") as gen_cls:
-        gen = gen_cls.return_value
-        gen.run = AsyncMock(return_value=kb / "output" / "decks" / "demo")
-        gen.validation = fake_validation
-        gen.output_dir = kb / "output" / "decks" / "demo"
-
-        action = await _handle_slash('/deck new demo "test intent"', kb, session, style)
-
-    assert action is None  # continues chat session
-    gen_cls.assert_called_once()
-    kwargs = gen_cls.call_args.kwargs
-    assert kwargs["target_type"] == "deck"
-    assert kwargs["name"] == "demo"
-    assert kwargs["intent"] == "test intent"
-    assert kwargs["kb_dir"] == kb
-    assert kwargs["critique"] is False
-
-
-@pytest.mark.asyncio
-async def test_slash_deck_new_with_critique_flag(tmp_path):
-    kb = _make_kb(tmp_path)
-    session = ChatSession.new(kb, "gpt-4o-mini", "en")
-    style = Style.from_dict({})
-
-    fake_validation = type("V", (), {"errors": [], "warnings": [], "ok": True})()
-
-    with patch("ultrakb.skill.generator.Generator") as gen_cls:
-        gen = gen_cls.return_value
-        gen.run = AsyncMock(return_value=kb / "output" / "decks" / "demo")
-        gen.validation = fake_validation
-        gen.output_dir = kb / "output" / "decks" / "demo"
-
-        action = await _handle_slash('/deck new --critique demo "test intent"', kb, session, style)
-
+    result = SimpleNamespace(status="completed", validation=None)
+    with patch(
+        "ultrakb.application.generators.generate_artifact",
+        new_callable=AsyncMock,
+        return_value=result,
+    ) as generate:
+        flag = "--critique " if critique else ""
+        action = await _handle_slash(f'/deck new {flag}demo "test intent"', kb, session, style)
     assert action is None
-    gen_cls.assert_called_once()
-    kwargs = gen_cls.call_args.kwargs
-    assert kwargs["target_type"] == "deck"
-    assert kwargs["name"] == "demo"
-    assert kwargs["critique"] is True
+    generate.assert_awaited_once()
+    called_root, options = generate.call_args.args
+    assert called_root == kb
+    assert options.target_type == "deck" and options.name == "demo"
+    assert options.intent == "test intent" and options.critique is critique
 
 
 @pytest.mark.asyncio
 async def test_slash_deck_new_reports_usage_when_args_missing(tmp_path):
     kb = _make_kb(tmp_path)
-    session = ChatSession.new(kb, "gpt-4o-mini", "en")
+    session = TerminalConversation.new(kb, "gpt-4o-mini", "en")
     style = Style.from_dict({})
 
     action = await _handle_slash("/deck new", kb, session, style)
@@ -92,7 +59,7 @@ async def test_slash_deck_new_reports_usage_when_args_missing(tmp_path):
 @pytest.mark.asyncio
 async def test_slash_deck_unknown_subcommand(tmp_path):
     kb = _make_kb(tmp_path)
-    session = ChatSession.new(kb, "gpt-4o-mini", "en")
+    session = TerminalConversation.new(kb, "gpt-4o-mini", "en")
     style = Style.from_dict({})
     action = await _handle_slash("/deck list", kb, session, style)
     assert action is None
@@ -101,19 +68,12 @@ async def test_slash_deck_unknown_subcommand(tmp_path):
 @pytest.mark.asyncio
 async def test_slash_deck_new_rejects_empty_wiki(tmp_path):
     """Chat / slash command must catch freshly-init'd KBs (no compiled content)."""
+    from ultrakb.application.knowledge_bases import initialize_kb
+
     kb = tmp_path
-    (kb / ".ultrakb").mkdir()
-    (kb / ".ultrakb" / "config.yaml").write_text("model: gpt-4o-mini\n")
-    from kb_fixtures import mark_current_kb
+    initialize_kb(kb, seed_environment=False)
 
-    mark_current_kb(kb)
-    (kb / ".ultrakb" / "chats").mkdir()
-    # Empty wiki/ — exactly what `ultrakb init` creates
-    (kb / "wiki" / "concepts").mkdir(parents=True)
-    (kb / "wiki" / "summaries").mkdir(parents=True)
-    (kb / "wiki" / "index.md").write_text("# index\n")
-
-    session = ChatSession.new(kb, "gpt-4o-mini", "en")
+    session = TerminalConversation.new(kb, "gpt-4o-mini", "en")
     style = Style.from_dict({})
 
     action = await _handle_slash('/deck new demo "intent"', kb, session, style)
@@ -128,7 +88,7 @@ async def test_slash_deck_new_rejects_when_target_exists(tmp_path):
     (kb / "output" / "decks" / "demo").mkdir(parents=True)
     (kb / "output" / "decks" / "demo" / "stale.html").write_text("old")
 
-    session = ChatSession.new(kb, "gpt-4o-mini", "en")
+    session = TerminalConversation.new(kb, "gpt-4o-mini", "en")
     style = Style.from_dict({})
 
     action = await _handle_slash('/deck new demo "intent"', kb, session, style)

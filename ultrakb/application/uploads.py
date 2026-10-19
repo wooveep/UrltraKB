@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
+import os
+import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterator
 
-from ultrakb.artifact_references import list_artifact_references
+from ultrakb.file_digest import hash_file
 from ultrakb.inputs import copy_stable
-from ultrakb.locks import LockCancelled, kb_ingest_lock
-from ultrakb.mutation import mutation_scope
-from ultrakb.state import HashRegistry
+from ultrakb.locks import LockCancelled, durable_unlink, kb_ingest_lock, sync_file_and_parents
 
 
 @dataclass(frozen=True)
@@ -22,13 +22,17 @@ class PublishedInput:
 
     def discard_if_unregistered(self) -> None:
         """A dedup response never authorizes removing a retained registry source."""
-        references = list_artifact_references(self.kb_dir)
-        if not references.complete or self.path.resolve() in references.paths:
-            return
-        if not self.path.is_file() or HashRegistry.hash_file(self.path) != self.digest:
-            return
-        with mutation_scope(self.kb_dir, [self.path], operation="discard-duplicate-upload"):
-            self.path.unlink()
+        from ultrakb.storage.catalog_store import CatalogStore
+        from ultrakb.storage.database import open_database
+
+        with kb_ingest_lock(self.kb_dir / ".ultrakb"):
+            with open_database(self.kb_dir, read_only=True) as db:
+                catalog = CatalogStore(self.kb_dir, db.identity)
+            if catalog.has_source_key(str(self.path.resolve())):
+                return
+            if not self.path.is_file() or hash_file(self.path) != self.digest:
+                return
+            durable_unlink(self.path)
 
 
 @contextmanager
@@ -61,6 +65,23 @@ def published_input(
             raise ValueError("Upload target is outside the raw directory")
         if cancelled and cancelled():
             raise LockCancelled("Upload cancelled before publication")
-        with mutation_scope(kb_dir, [target], operation="publish-upload"):
-            digest = copy_stable(source, target)
-        yield PublishedInput(kb_dir, target, digest)
+        descriptor, temporary = tempfile.mkstemp(prefix=".ultrakb-upload-", suffix=".tmp", dir=raw)
+        os.close(descriptor)
+        private = Path(temporary)
+        try:
+            digest = copy_stable(source, private)
+            if cancelled and cancelled():
+                raise LockCancelled("Upload cancelled before publication")
+            # A new link exposes only verified bytes and cannot replace an
+            # external file created after the initial name reservation.
+            while True:
+                try:
+                    os.link(private, target)
+                    break
+                except FileExistsError:
+                    target = raw / f"{Path(name).stem}-{number}{Path(name).suffix}"
+                    number += 1
+            sync_file_and_parents(target, ancestor=kb_dir)
+        finally:
+            private.unlink(missing_ok=True)
+    yield PublishedInput(kb_dir, target, digest)

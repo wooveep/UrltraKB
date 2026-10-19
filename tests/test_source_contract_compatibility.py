@@ -8,10 +8,9 @@ from pathlib import Path
 import pytest
 from native_source_fixtures import LITERAL_TABLE
 from pageindex import IndexConfig
-from test_answer_evidence_regression import agent_for, invoke
 from test_index_llm import RecordingIndexLLM
 
-from ultrakb.agent.evidence_payload import project_evidence, slice_evidence
+from ultrakb.agent.evidence_payload import project_evidence
 from ultrakb.condb_storage import ConDBPageIndexStorage
 from ultrakb.index_client import create_index_client
 from ultrakb.index_pdf import NativePdfParser
@@ -122,35 +121,6 @@ def test_missing_legacy_cache_uses_its_recorded_parser_without_model_calls(
     assert path.read_bytes() == original
 
 
-@pytest.mark.asyncio
-async def test_unproved_legacy_page_preserves_text_and_asset_availability(kb_dir):
-    path = "sources/images/legacy.png"
-    literal = f"![Printed caption]({path})"
-    page = {
-        "page": 1,
-        "unit_kind": "page",
-        "content": LITERAL_TABLE + "\n" + literal,
-        "images": [{"path": path}],
-    }
-    target = kb_dir / "wiki/sources/legacy.json"
-    atomic_write_json(target, [page])
-    original = target.read_bytes()
-    selected = read_page_selection([page])
-    whole = project_evidence(selected)
-    assert LITERAL_TABLE in whole["content"]
-    assert "native_tables" not in whole
-    assert whole["units"][0]["images"] == page["images"]
-    assert whole["units"][0]["image_position_coverage"] == "unconfirmed"
-    start = selected["content"].index(literal)
-    excerpt = slice_evidence(selected, start, len(selected["content"]))
-    assert not excerpt["units"][0]["images"]
-    response = await invoke(agent_for(kb_dir), "get_page_content", doc_name="legacy", pages="1")
-    public = json.loads(response.split("\n\n", 1)[1].split("\nSource context: ", 1)[0])
-    assert public["content"] == whole["content"]
-    assert "native_tables" not in public
-    assert target.read_bytes() == original
-
-
 def test_previous_generated_image_spans_remain_readable_in_original_domain():
     path = "sources/images/old.png"
     body = f"![image]({path})"
@@ -217,68 +187,3 @@ def test_previous_html_policy_keeps_its_native_heading_proof(kb_dir, tmp_path):
     selected = read_text_selection(raw)
     assert selected["_qualified_headings"][0]["title"] == "Original heading"
     assert json.dumps(raw) == before
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "literal",
-    ["![Printed example](images/legacy.png)", "![Printed example](data:image/png;base64,AA==)"],
-)
-async def test_bare_legacy_text_cannot_mint_figure_roles_or_demand_reprocessing(kb_dir, literal):
-    from figure_fixtures import png_bytes
-
-    from ultrakb.agent.source_windows import CompileSourceWindows
-    from ultrakb.figure_assets import freeze_figures
-
-    wiki = kb_dir / "wiki"
-    asset = wiki / "sources/images/legacy.png"
-    atomic_write_bytes(asset, png_bytes())
-    path = "sources/legacy.md"
-    text = "Printed syntax example:\n" + literal + "\n"
-    atomic_write_text(wiki / path, text)
-    before = {path: (wiki / path).read_bytes(), "asset": asset.read_bytes()}
-    assert freeze_figures(wiki, path, text, {}) == []
-    windows = CompileSourceWindows(wiki, "legacy")
-    assert not windows.page_figures().figures
-    (compiled,) = windows.read_selection(path, {"chars": f"0:{len(text)}"})
-    assert compiled["content"] == text and "figure_interpretation" not in compiled
-    public = await invoke(agent_for(kb_dir), "read_file", path=path)
-    assert literal in public and "figure_interpretation" not in public
-    assert (wiki / path).read_bytes() == before[path]
-    assert asset.read_bytes() == before["asset"]
-    assert not (wiki / "sources/figure-records").exists()
-
-
-def test_bare_legacy_compilation_keeps_accepted_checkpoint_and_page_base(kb_dir):
-    import hashlib
-    from types import SimpleNamespace
-
-    from figure_fixtures import png_bytes
-
-    from ultrakb.compile_checkpoints import CompileCheckpoints
-    from ultrakb.locks import kb_ingest_lock
-    from ultrakb.unit_publication import prepare_compile_view
-
-    wiki = kb_dir / "wiki"
-    atomic_write_bytes(wiki / "sources/images/legacy.png", png_bytes())
-    atomic_write_text(wiki / "sources/legacy.md", "![Printed example](images/legacy.png)\n")
-    page = "concepts/legacy.md"
-    body = "---\nsources: [sources/legacy.md]\n---\nRetained rule. See `legacy.png`.\n"
-    atomic_write_text(wiki / page, body)
-    before = (wiki / page).read_bytes()
-    checkpoint = CompileCheckpoints(
-        kb_dir,
-        SimpleNamespace(task_id="b" * 32, parent_task_id=None),
-        {"document": "legacy"},
-        {"protocol": "retained"},
-    )
-    checkpoint.bind_page(page, hashlib.sha256(before).hexdigest())
-    checkpoint.save("summary:1", "retained-request", {"content": "Retained draft"})
-    cached = checkpoint.path.read_bytes()
-    with kb_ingest_lock(kb_dir / ".ultrakb"), prepare_compile_view(kb_dir) as view:
-        assert (view.scope.wiki_dir / page).read_bytes() == before
-        assert checkpoint.load("summary:1", "retained-request") == {"content": "Retained draft"}
-        assert checkpoint.path.read_bytes() == cached
-        assert not (view.scope.wiki_dir / "sources/figure-records").exists()
-    assert (wiki / page).read_bytes() == before
-    assert checkpoint.path.read_bytes() == cached

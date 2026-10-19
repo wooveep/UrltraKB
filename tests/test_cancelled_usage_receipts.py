@@ -26,13 +26,13 @@ def provider_receipt(model_service):
 async def test_async_cancel_preserves_late_receipt_without_publishing(
     model_service, kb_dir, provider_receipt, delay, known
 ):
-    from ultrakb.llm_usage import aggregate_usage, read_requests
-    from ultrakb.llm_usage_execution import import_usage_execution
+    from native_usage_fixtures import aggregate_usage, native_usage_execution, read_requests
+
     from ultrakb.locks import LockCancelled
 
     stop = threading.Event()
     model_service.delay = delay
-    with import_usage_execution(kb_dir, "cancelled"):
+    with native_usage_execution(kb_dir, "cancelled"):
         executor = executor_for(model_service, retries=2, cancelled=stop.is_set)
         task = asyncio.create_task(executor.acomplete("compile", request()))
         while not model_service.requests:
@@ -51,17 +51,13 @@ async def test_async_cancel_preserves_late_receipt_without_publishing(
 
 
 def test_cancelled_without_delivered_receipt_remains_unknown(kb_dir):
-    from ultrakb.llm_usage import (
-        UsageScope,
-        aggregate_usage,
-        begin_request,
-        finish_request,
-        read_requests,
-    )
+    from native_usage_fixtures import aggregate_usage, native_usage_execution, read_requests
 
-    scope = UsageScope(kb_dir, "a" * 32)
-    identity = begin_request("deepseek/deepseek-flash", "answer", scope=scope)
-    finish_request(identity, scope=scope, state="cancelled", business_state="cancelled")
+    from ultrakb.llm_usage import begin_request, finish_request
+
+    with native_usage_execution(kb_dir, "cancelled-unconfirmed") as scope:
+        identity = begin_request("deepseek/deepseek-flash", "answer", scope=scope)
+        finish_request(identity, scope=scope, state="cancelled", business_state="cancelled")
     [record] = read_requests(kb_dir)
     assert record.business_state == "cancelled"
     assert record.input_total is None and record.output_total is None
@@ -72,11 +68,12 @@ def test_cancelled_without_delivered_receipt_remains_unknown(kb_dir):
 async def test_repeated_cancel_and_duplicate_receipts_do_not_lose_or_duplicate_usage(
     model_service, kb_dir, provider_receipt
 ):
-    from ultrakb.llm_usage import aggregate_usage, finish_request, read_requests
-    from ultrakb.llm_usage_execution import import_usage_execution
+    from native_usage_fixtures import aggregate_usage, native_usage_execution, read_requests
+
+    from ultrakb.llm_usage import finish_request
 
     model_service.delay = 0.08
-    with import_usage_execution(kb_dir, "cancelled") as scope:
+    with native_usage_execution(kb_dir, "cancelled") as scope:
         executor = executor_for(model_service)
         task = asyncio.create_task(executor.acomplete("compile", request()))
         while not model_service.requests:
@@ -101,9 +98,8 @@ async def test_repeated_cancel_and_duplicate_receipts_do_not_lose_or_duplicate_u
 @pytest.mark.asyncio
 async def test_cancelled_stream_headers_drain_only_usage(model_service, kb_dir, live_llm):
     import httpx
+    from native_usage_fixtures import native_usage_execution, read_requests
 
-    from ultrakb.llm_usage import read_requests
-    from ultrakb.llm_usage_execution import import_usage_execution
     from ultrakb.llm_usage_transport import observe_model_call
 
     payload = {
@@ -120,7 +116,7 @@ async def test_cancelled_stream_headers_drain_only_usage(model_service, kb_dir, 
     await warmed.aclose()
     model_service.requests.clear()
     model_service.delay = 0.06
-    with import_usage_execution(kb_dir, "stream"):
+    with native_usage_execution(kb_dir, "stream"):
         async with httpx.AsyncClient() as client:
             with observe_model_call("deepseek/deepseek-flash", "answer"):
                 pending = asyncio.create_task(
@@ -150,16 +146,20 @@ async def test_cancelled_stream_headers_drain_only_usage(model_service, kb_dir, 
 def test_budget_and_phase_receipt_survive_runtime_serialization(kb_dir, model_service):
     import json
 
+    from native_catalog_fixtures import catalog
+
     from ultrakb.application.execution import ExecutionContext
     from ultrakb.ingest_result import ImportUnitOutcome
-    from ultrakb.llm_usage import usage_receipt
     from ultrakb.locks import kb_ingest_lock
     from ultrakb.runtime.records import UnitResult
+    from ultrakb.storage.usage_store import UsageStore
 
     context = ExecutionContext(executor=executor_for(model_service, max_calls=5))
     with kb_ingest_lock(kb_dir / ".ultrakb"), context.begin(kb_dir):
         context.executor.complete("compile", request())
-        receipt = usage_receipt(kb_dir)
+        receipt = UsageStore(kb_dir, catalog(kb_dir).identity).receipt(
+            execution_id=context.storage_execution.execution_id
+        )
     result = UnitResult(
         "failed",
         model_usage=receipt,

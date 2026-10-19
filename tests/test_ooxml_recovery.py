@@ -6,6 +6,7 @@ from pathlib import Path
 from zipfile import ZipFile
 
 import pytest
+from native_catalog_fixtures import original_bytes
 from openpyxl import Workbook
 
 pytest_plugins = ("pending_fixtures", "processing_fixtures")
@@ -23,12 +24,12 @@ def test_chart_workbook_in_any_host_uses_actual_payload_type_and_frozen_bytes(
     processing_context,
     live_llm,
 ):
+    from native_catalog_fixtures import list_sources
     from processing_fixtures import finish_recovered_sources
 
     from ultrakb.application.pending import pending_status
     from ultrakb.application.removal import remove_document
     from ultrakb.documents import read_document_source
-    from ultrakb.source_catalog import list_sources
 
     path = tmp_path / ("host." + host)
     if host == "docx":
@@ -54,10 +55,10 @@ def test_chart_workbook_in_any_host_uses_actual_payload_type_and_frozen_bytes(
     finish_recovered_sources(kb_dir, parent.source_id, processing_context)
     recovered = next(s for s in list_sources(kb_dir) if s.source_id != parent.source_id)
     source = read_document_source(kb_dir, recovered.source_id)
-    assert recovered.name == "chart-data.xlsx"
+    assert recovered.label == "chart-data.xlsx"
     assert source["status"] == "completed"
     assert "Recovered independent marker" in source["content"]
-    assert (kb_dir / source["original_path"]).read_bytes() == payload.getvalue()
+    assert original_bytes(kb_dir, source["source_revision_id"]) == payload.getvalue()
     assert pending_status(kb_dir)["runnable"] == 0
     assert len(live_llm.calls) == calls_before
 
@@ -65,11 +66,11 @@ def test_chart_workbook_in_any_host_uses_actual_payload_type_and_frozen_bytes(
 def test_distinct_parts_keep_identity_and_diagnostics_do_not_hide_complete_files(
     kb_dir, writer_document, physical_pdf, pdf_model, processing_only, processing_context, live_llm
 ):
+    from native_catalog_fixtures import list_sources
     from processing_fixtures import finish_recovered_sources
 
     from ultrakb.application.pending import pending_status
     from ultrakb.documents import read_document_source
-    from ultrakb.source_catalog import list_sources
 
     with ZipFile(writer_document, "a") as package:
         package.writestr("word/embeddings/first.pdf", physical_pdf.read_bytes())
@@ -95,12 +96,12 @@ def test_distinct_parts_keep_identity_and_diagnostics_do_not_hide_complete_files
     result = finish_recovered_sources(kb_dir, parent.source_id, processing_context)
     assert result["imports_pending"] == 0
     recovered = [s for s in list_sources(kb_dir) if s.source_id != parent.source_id]
-    assert sorted(s.name for s in recovered) == ["first.pdf", "second.pdf"]
+    assert sorted(s.label for s in recovered) == ["first.pdf", "second.pdf"]
     assert len({s.source_id for s in recovered}) == 2
     for source in recovered:
         saved = read_document_source(kb_dir, source.source_id)
         assert saved["status"] == "completed"
-        assert (kb_dir / saved["original_path"]).read_bytes() == physical_pdf.read_bytes()
+        assert original_bytes(kb_dir, saved["source_revision_id"]) == physical_pdf.read_bytes()
     statuses = {c["outcome"] for c in pending_status(kb_dir)["checkpoints"]}
     assert statuses == {
         "recovered",
@@ -115,10 +116,10 @@ def test_distinct_parts_keep_identity_and_diagnostics_do_not_hide_complete_files
 def test_complete_binary_workbook_in_ooxml_is_detected_as_xls(
     kb_dir, writer_document, pdf_model, processing_only, processing_context, live_llm
 ):
+    from native_catalog_fixtures import list_sources
     from processing_fixtures import finish_recovered_sources
 
     from ultrakb.documents import read_document_source
-    from ultrakb.source_catalog import list_sources
 
     payload = (Path(__file__).parent / "fixtures/office/typed-sheets.xls").read_bytes()
     with ZipFile(writer_document, "a") as package:
@@ -128,10 +129,10 @@ def test_complete_binary_workbook_in_ooxml_is_detected_as_xls(
     result = finish_recovered_sources(kb_dir, parent.source_id, processing_context)
     assert result["imports_pending"] == 0
     recovered = next(s for s in list_sources(kb_dir) if s.source_id != parent.source_id)
-    assert recovered.name == "old.xls"
+    assert recovered.label == "old.xls"
     saved = read_document_source(kb_dir, recovered.source_id)
     assert saved["status"] == "completed"
-    assert (kb_dir / saved["original_path"]).read_bytes() == payload
+    assert original_bytes(kb_dir, saved["source_revision_id"]) == payload
     assert len(live_llm.calls) == calls_before
 
 
@@ -139,10 +140,10 @@ def test_complete_binary_workbook_in_ooxml_is_detected_as_xls(
 def test_real_ole_package_preserves_counted_native_text_file(
     kb_dir, pdf_model, host, processing_only, processing_context, live_llm
 ):
+    from native_catalog_fixtures import list_sources
     from processing_fixtures import finish_recovered_sources
 
     from ultrakb.documents import read_document_source
-    from ultrakb.source_catalog import list_sources
 
     calls_before = len(live_llm.calls)
     parent = processing_only(Path(__file__).parent / ("fixtures/office/package-text." + host))
@@ -157,5 +158,5 @@ def test_real_ole_package_preserves_counted_native_text_file(
     )
     assert saved["content"] == expected
     assert saved["status"] == "completed"
-    assert (kb_dir / saved["original_path"]).read_text("ascii") == expected
+    assert original_bytes(kb_dir, saved["source_revision_id"]).decode("ascii") == expected
     assert len(live_llm.calls) == calls_before

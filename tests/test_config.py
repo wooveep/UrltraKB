@@ -502,7 +502,16 @@ def test_converter_uses_global_threshold(_isolated_global, tmp_path, monkeypatch
     pdf.save(str(src))
     pdf.close()
 
-    result = conv.convert_document(src, kb_dir)
+    from ultrakb.locks import PrivateMaterialization
+
+    with PrivateMaterialization() as workspace:
+        result = conv.convert_document(
+            src,
+            kb_dir,
+            staging_dir=workspace.directory,
+            private_workspace=workspace,
+            doc_name="doc",
+        )
 
     # The resolver seam was actually invoked by convert_document, with this KB.
     assert calls == [kb_dir]
@@ -663,6 +672,7 @@ def _make_kb_dir(path: Path) -> Path:
     from kb_fixtures import mark_current_kb
 
     mark_current_kb(path)
+    (path / ".ultrakb/config.yaml").write_text("{}\n")
     (path / "wiki").mkdir(parents=True)
     return path
 

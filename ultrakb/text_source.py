@@ -153,8 +153,8 @@ def freeze_markdown(
     additional_image_edits: list[tuple[int, int, str]] | None = None,
     references=None,
 ) -> FrozenText:
+    from ultrakb.file_digest import hash_file
     from ultrakb.images import copy_relative_images, extract_base64_images
-    from ultrakb.state import HashRegistry
 
     if original is None:
         original = prepared.path.read_bytes().decode("utf-8")
@@ -215,7 +215,7 @@ def freeze_markdown(
     )
     text = "".join(chunks)
     assets = {
-        path.relative_to(wiki).as_posix(): HashRegistry.hash_file(path)
+        path.relative_to(wiki).as_posix(): hash_file(path)
         for path in images.rglob("*")
         if path.is_file()
     }

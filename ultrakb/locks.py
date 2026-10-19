@@ -239,14 +239,7 @@ def kb_lock(
                 time.sleep(0.05)
             if lease.first:
                 if exclusive:
-                    from ultrakb.catalog_schema import (
-                        upgrade_catalog_writer,
-                        validate_catalog_writer,
-                    )
-
-                    validate_catalog_writer(ultrakb_dir.parent)
                     _drain_pending_journals(ultrakb_dir)
-                    upgrade_catalog_writer(ultrakb_dir.parent)
                 elif _pending_recovery(ultrakb_dir):
                     # Release the read lease before independent exclusive recovery;
                     # never upgrade a held shared lock in place.
@@ -305,14 +298,7 @@ async def async_kb_lock(
                 await asyncio.sleep(0.05)
             if lease.first:
                 if exclusive:
-                    from ultrakb.catalog_schema import (
-                        upgrade_catalog_writer,
-                        validate_catalog_writer,
-                    )
-
-                    validate_catalog_writer(ultrakb_dir.parent)
                     _drain_pending_journals(ultrakb_dir)
-                    upgrade_catalog_writer(ultrakb_dir.parent)
                 elif _pending_recovery(ultrakb_dir):
                     lease.release()
                     async with async_kb_lock(

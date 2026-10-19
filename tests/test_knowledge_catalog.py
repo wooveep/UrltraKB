@@ -12,6 +12,9 @@ def test_knowledge_catalog_uses_titles_descriptions_and_excludes_internal_files(
     )
     atomic_write_text(kb_dir / "wiki/explorations/note.md", "# 探索结论")
     atomic_write_text(kb_dir / "wiki/concepts/.hidden.md", "# Hidden")
+    from publication_read_inputs import publish_fixture
+
+    publish_fixture(kb_dir)
     values = list_knowledge(kb_dir)
     assert {v.path for v in values} == {"concepts/file-slug.md", "explorations/note.md"}
     concept = next(v for v in values if v.section == "concepts")

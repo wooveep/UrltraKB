@@ -123,15 +123,18 @@ class WorksheetsDialog(QDialog):
 
     def read(self):
         from ultrakb.desktop.source_reader import show_source
-        from ultrakb.documents import read_document_source
+        from ultrakb.documents import read_document_view
 
         unit = self.selected()
         if unit:
             self.operate(
-                lambda: read_document_source(
+                lambda: read_document_view(
                     self.kb,
                     self.source["source_id"],
                     unit_id=unit["unit_id"],
+                    unit_revision_id=unit["target_revision_id"]
+                    if not unit.get("successful_revision_id")
+                    else None,
                     scope=self.read_scope or self.scope,
                 ),
                 lambda source: show_source(self.window, self.kb, source),

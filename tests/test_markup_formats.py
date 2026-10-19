@@ -2,6 +2,7 @@
 
 import pytest
 from figure_fixtures import png_bytes
+from native_catalog_fixtures import original_bytes
 
 pytest_plugins = ("test_pdf_readback", "block_fixtures", "processing_fixtures")
 
@@ -30,10 +31,17 @@ def test_xml_freezes_structure_without_interpreting_business_values(
     result = processing_only(path)
     assert result.source_id is not None
     path.unlink()
-    saved = read_document_source(kb_dir, result.source_id)
+    saved = read_document_source(
+        kb_dir, result.source_id, unit_revision_id=getattr(result, "unit_revision_id", None)
+    )
     assert saved["content"] == "```xml\n" + original + "\n```\n"
     assert saved["encoding"]["name"] == "utf-16-le"
-    selected = read_document_source(kb_dir, result.source_id, chars="7:28")
+    selected = read_document_source(
+        kb_dir,
+        result.source_id,
+        unit_revision_id=getattr(result, "unit_revision_id", None),
+        chars="7:28",
+    )
     assert selected["content"] == '<?xml version="1.0"?>'
     assert selected["origin_locators"][0]["original_span"] == [1, 22]
 
@@ -51,7 +59,9 @@ def test_xml_honors_encoding_signatures_and_declarations(
     path = tmp_path / "declared.xml"
     path.write_bytes(text.encode(codec))
     result = processing_only(path)
-    saved = read_document_source(kb_dir, result.source_id)
+    saved = read_document_source(
+        kb_dir, result.source_id, unit_revision_id=getattr(result, "unit_revision_id", None)
+    )
     assert saved["content"] == "```xml\n" + text + "\n```\n"
     assert saved["encoding"]["basis"] == basis
 
@@ -79,7 +89,9 @@ def test_html_keeps_structure_and_freezes_local_and_data_images(kb_dir, tmp_path
     assert result.source_id is not None
     path.unlink()
     image.unlink()
-    saved = read_document_source(kb_dir, result.source_id)
+    saved = read_document_source(
+        kb_dir, result.source_id, unit_revision_id=getattr(result, "unit_revision_id", None)
+    )
     assert "# Guide" in saved["content"] and "**body**" in saved["content"]
     assert "* One" in saved["content"] and "<td>Thing</td><td>001</td>" in saved["content"]
     assert "not_body" not in saved["content"] and "p{color" not in saved["content"]
@@ -123,15 +135,30 @@ def test_html_download_policy_freezes_assets_and_single_false_overrides_kb(
         '<h1>hello</h1><p>Body.<img src="https://example.test/chart.svg"></p>', encoding="utf-8"
     )
     imported = processing_only(path)
-    saved = read_document_source(kb_dir, imported.source_id)
+    saved = read_document_source(
+        kb_dir, imported.source_id, unit_revision_id=imported.unit_revision_id
+    )
     assert saved["resource_policy"] == {"download_remote_assets": True, "source": "kb"}
     assert len(requested) == 1 and saved["resources"][0]["status"] == "retained"
     resource = saved["resources"][0]
+    from ultrakb.application.storage_sources import read_source_image
+    from ultrakb.application.views import published_scope
+
     assert (
-        kb_dir / saved["base_path"] / resource["path"].removeprefix("sources/")
-    ).read_bytes() == payload
+        read_source_image(
+            kb_dir,
+            imported.source_id,
+            imported.unit_revision_id,
+            resource["path"],
+            identity=published_scope(kb_dir).knowledge.identity,
+        )[0]
+        == payload
+    )
     again = read_document_source(
-        kb_dir, imported.source_id, source_revision_id=imported.source_revision_id
+        kb_dir,
+        imported.source_id,
+        unit_revision_id=imported.unit_revision_id,
+        source_revision_id=imported.source_revision_id,
     )
     assert (
         again["normalized_fingerprint"] == saved["normalized_fingerprint"] and len(requested) == 1
@@ -139,7 +166,9 @@ def test_html_download_policy_freezes_assets_and_single_false_overrides_kb(
     other = tmp_path / "disabled.html"
     other.write_bytes(path.read_bytes())
     disabled = processing_only(other, download_remote_assets=False)
-    blocked = read_document_source(kb_dir, disabled.source_id)
+    blocked = read_document_source(
+        kb_dir, disabled.source_id, unit_revision_id=disabled.unit_revision_id
+    )
     assert blocked["resource_policy"] == {"download_remote_assets": False, "source": "single"}
     assert blocked["resources"][0]["status"] == "not_requested" and len(requested) == 1
 
@@ -166,9 +195,9 @@ def test_import_override_reports_network_failure_without_losing_html_body(
     path.write_text('<p>Kept body.<img src="https://example.test/image.png"></p>', encoding="utf-8")
     if adapter == "cli":
         from click.testing import CliRunner
+        from native_catalog_fixtures import list_sources
 
         from ultrakb.cli import cli
-        from ultrakb.source_catalog import list_sources
 
         output = CliRunner().invoke(
             cli, ["--kb-dir", str(kb_dir), "add", str(path), "--download-remote-assets"]
@@ -241,7 +270,12 @@ def test_markup_uses_frozen_blocks_and_original_anchors(
     result = import_document(kb_dir, path)
     assert result.status == "added", result.message
     path.unlink()
-    saved = read_document_source(kb_dir, result.source_id, blocks="1")
+    saved = read_document_source(
+        kb_dir,
+        result.source_id,
+        unit_revision_id=getattr(result, "unit_revision_id", None),
+        blocks="1",
+    )
     assert saved["content"] == expected
     assert saved["unit_kind"] == "block" and saved["processing"]["length_class"] == "short"
     assert saved["origin_locators"][0]["original_span"][0] == 0
@@ -256,9 +290,11 @@ def test_xml_rejects_entities_and_retains_original_for_diagnosis(kb_dir, tmp_pat
     path.write_bytes(raw)
     result = import_document(kb_dir, path)
     assert result.status == "failed" and "DTDForbidden" in result.message
-    saved = read_document_source(kb_dir, result.source_id)
+    saved = read_document_source(
+        kb_dir, result.source_id, unit_revision_id=getattr(result, "unit_revision_id", None)
+    )
     assert saved["knowledge_revision_id"] is None
-    assert (kb_dir / saved["original_path"]).read_bytes() == raw
+    assert original_bytes(kb_dir, saved["source_revision_id"]) == raw
 
 
 def test_xml_rejects_declaration_that_disagrees_with_actual_encoding(kb_dir, tmp_path, pdf_model):
@@ -269,7 +305,9 @@ def test_xml_rejects_declaration_that_disagrees_with_actual_encoding(kb_dir, tmp
     path.write_bytes('<?xml version="1.0" encoding="UTF-8"?><root>café</root>'.encode("utf-16"))
     result = import_document(kb_dir, path)
     assert result.status == "failed" and "encoding declaration" in result.message
-    source = read_document_source(kb_dir, result.source_id)
+    source = read_document_source(
+        kb_dir, result.source_id, unit_revision_id=getattr(result, "unit_revision_id", None)
+    )
     assert source["encoding"]["basis"] == "bom" and source["knowledge_revision_id"] is None
 
 
@@ -284,7 +322,9 @@ def test_indented_html_images_use_html_rules_and_base_urls(kb_dir, tmp_path, pro
     )
     (tmp_path / "chart.png").write_bytes(b"wrong local file")
     result = processing_only(path)
-    saved = read_document_source(kb_dir, result.source_id)
+    saved = read_document_source(
+        kb_dir, result.source_id, unit_revision_id=getattr(result, "unit_revision_id", None)
+    )
     assert not saved["assets"]
     assert len(saved["resources"]) == 1
     assert saved["resources"][0]["resolved_reference"] == "https://example.test/docs/chart.png"
@@ -302,11 +342,24 @@ def test_html_percent_encoded_image_is_available_offline(kb_dir, tmp_path, proce
         encoding="utf-8",
     )
     result = processing_only(path)
-    source = read_document_source(kb_dir, result.source_id)
+    source = read_document_source(
+        kb_dir, result.source_id, unit_revision_id=getattr(result, "unit_revision_id", None)
+    )
     image = source["resources"][0]
     assert image["status"] == "retained"
-    retained = kb_dir / source["base_path"] / image["path"].removeprefix("sources/")
-    assert retained.read_bytes() == b'<svg xmlns="http://www.w3.org/2000/svg"/>'
+    from ultrakb.application.storage_sources import read_source_image
+    from ultrakb.application.views import published_scope
+
+    assert (
+        read_source_image(
+            kb_dir,
+            result.source_id,
+            result.unit_revision_id,
+            image["path"],
+            identity=published_scope(kb_dir).knowledge.identity,
+        )[0]
+        == b'<svg xmlns="http://www.w3.org/2000/svg"/>'
+    )
 
 
 @pytest.mark.parametrize(
@@ -342,7 +395,9 @@ def test_html_download_policy_preserves_explicit_false_and_inheritance(
     path = tmp_path / "precedence.html"
     path.write_text('<p>Diagram <img src="https://example.test/image.svg"></p>', encoding="utf-8")
     result = processing_only(path, download_remote_assets=single)
-    saved = read_document_source(kb_dir, result.source_id)
+    saved = read_document_source(
+        kb_dir, result.source_id, unit_revision_id=getattr(result, "unit_revision_id", None)
+    )
     assert saved["resource_policy"] == {"source": basis, "download_remote_assets": expected}
     assert len(requested) == int(expected)
 
@@ -377,9 +432,14 @@ def test_watched_html_local_image_change_retains_both_source_revisions(kb_dir, p
         assert second.status == "added", second.message
         sink.finish("1", revision=second.input_version)
         before = read_document_source(
-            kb_dir, first.source_id, source_revision_id=first.source_revision_id
+            kb_dir,
+            first.source_id,
+            unit_revision_id=first.unit_revision_id,
+            source_revision_id=first.source_revision_id,
         )
-        after = read_document_source(kb_dir, second.source_id)
+        after = read_document_source(
+            kb_dir, second.source_id, unit_revision_id=second.unit_revision_id
+        )
         assert (
             first.source_id == second.source_id
             and first.source_revision_id != second.source_revision_id
@@ -416,7 +476,9 @@ def test_html_preserves_enclosing_and_base_relative_links(
     path.write_text(markup, encoding="utf-8")
     result = import_document(kb_dir, path)
     assert result.status == "added", result.message
-    saved = read_document_source(kb_dir, result.source_id)
+    saved = read_document_source(
+        kb_dir, result.source_id, unit_revision_id=getattr(result, "unit_revision_id", None)
+    )
     assert label in saved["content"] and f"]({target})" in saved["content"]
     from markdown_it import MarkdownIt
 
@@ -446,7 +508,9 @@ def test_html_heading_and_table_images_remain_readable(kb_dir, tmp_path):
         bundle=resolve_credential_bundle(kb_dir),
     )
     assert result.status == "added", result.message
-    source = read_document_source(kb_dir, result.source_id)
+    source = read_document_source(
+        kb_dir, result.source_id, unit_revision_id=getattr(result, "unit_revision_id", None)
+    )
     assert (
         "![architecture](images/" in source["content"]
         and 'alt="diagram" src="images/' in source["content"]

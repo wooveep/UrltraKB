@@ -1,4 +1,4 @@
-"""Inspect retained phase events without scanning usage records on the live path.
+"""Inspect a bounded native execution page, including persisted phase timings.
 
 Example: uv run python scripts/analyze_execution_timing.py /path/to/kb --execution ID
 """
@@ -10,20 +10,20 @@ import json
 import sys
 from pathlib import Path
 
-from ultrakb.execution_timing import timing_report
+from ultrakb.application.knowledge_tasks import read_knowledge_execution
 from ultrakb.locks import atomic_write_json
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("knowledge_base", type=Path)
-    parser.add_argument("--execution", action="append", dest="execution_ids")
-    parser.add_argument("--source", dest="source_id")
+    parser.add_argument("--execution", required=True, help="Native execution identity")
+    parser.add_argument("--limit", type=int, default=63, help="Maximum records per detail page")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
-    report = timing_report(
-        args.knowledge_base, execution_ids=args.execution_ids, source_id=args.source_id
-    )
+    report = read_knowledge_execution(
+        args.knowledge_base, args.execution, limit=args.limit
+    ).model_dump(mode="json")
     if args.output:
         atomic_write_json(args.output, report)
     else:

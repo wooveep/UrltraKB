@@ -40,7 +40,13 @@ def retained_input(catalog, revision):
 
 
 def retry_stored_source(
-    scope, source_id, *, unit_id, context, source_revision_id, unit_revision_id
+    scope,
+    source_id,
+    *,
+    unit_id,
+    context,
+    source_revision_id,
+    unit_revision_id,
 ):
     root, identity = scope.kb_dir, scope.knowledge.identity
     catalog = CatalogStore(root, identity)
@@ -78,7 +84,10 @@ def retry_stored_source(
         )
     result = None
     try:
-        with context.begin(root) as bundle, retained_input(catalog, revision) as ready:
+        with (
+            context.begin(root) as bundle,
+            retained_input(catalog, revision) as ready,
+        ):
             result = process_admitted(
                 scope, ready, context, bundle, None, catalog, revision, unit_id=unit_id
             )

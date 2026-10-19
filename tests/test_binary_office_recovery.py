@@ -47,11 +47,12 @@ def test_orphan_and_historical_complete_files_survive_container_removal(
     processing_only,
     processing_context,
 ):
+    from native_catalog_fixtures import list_sources
+
     from ultrakb.application.pending import process_pending
     from ultrakb.application.removal import remove_document
     from ultrakb.application.sources import source_inventory
     from ultrakb.documents import read_document_source
-    from ultrakb.source_catalog import list_sources
 
     original = tmp_path / fixture
     shutil.copyfile(FIXTURES / fixture, original)
@@ -61,7 +62,7 @@ def test_orphan_and_historical_complete_files_survive_container_removal(
     result = process_pending(kb_dir, context=processing_context)
     assert processing_context.executor.calls == 0
     children = [s for s in list_sources(kb_dir) if s.source_id != parent.source_id]
-    assert {s.name.rsplit(".", 1)[-1] for s in children} == extensions, result
+    assert {s.label.rsplit(".", 1)[-1] for s in children} == extensions, result
     units = {item["source_id"]: item["units"] for item in source_inventory(kb_dir)}
     text = "\n".join(
         read_document_source(kb_dir, s.source_id, unit_id=unit["unit_id"])["content"]
@@ -76,13 +77,13 @@ def test_orphan_and_historical_complete_files_survive_container_removal(
 def test_compressed_ppt_waits_for_shared_budget_then_resumes_once(
     kb_dir, pdf_model, processing_context
 ):
+    from native_catalog_fixtures import list_sources
     from processing_fixtures import publish_processed_text
 
     from ultrakb.application.documents import import_document
     from ultrakb.application.pending import process_pending, update_execution_budget
     from ultrakb.application.settings import apply_kb_config_patch
     from ultrakb.application.settings_data import KbConfigPatchRequest
-    from ultrakb.source_catalog import list_sources
 
     apply_kb_config_patch(
         kb_dir,
@@ -144,47 +145,3 @@ def test_non_file_objects_have_specific_diagnostics(
     outcomes = {c["outcome"] for c in result["checkpoints"]}
     assert {"external_reference", "preview", "private_object"} <= outcomes
     assert result["groups"][0]["sources"] == (2 if host == "ppt" else 1)
-
-
-@pytest.mark.parametrize("corrupt_policy", [False, True])
-def test_legacy_discovery_keeps_recursive_host_coverage(
-    kb_dir,
-    pdf_model,
-    office_runtime,
-    prepared_cfb_helper,
-    corrupt_policy,
-    processing_only,
-    processing_context,
-):
-    import json
-
-    from ultrakb.application.pending import pending_status, process_pending
-    from ultrakb.documents import read_document_source
-    from ultrakb.source_catalog import list_sources
-
-    parent = processing_only(FIXTURES / "legacy-nested-xls.doc")
-    job = pending_status(kb_dir)["jobs"][0]
-    path = kb_dir / ".ultrakb/catalog/discovery-intents" / (job["id"] + ".json")
-    saved = json.loads(path.read_text())
-    saved["policy"] = "office-embedded-files-v2"
-    path.write_text(json.dumps(saved))  # Persisted state from the previous release.
-    process_pending(kb_dir, max_jobs=1, context=processing_context)
-    if corrupt_policy:
-        child = next(
-            j for j in pending_status(kb_dir)["jobs"] if j.get("filename", "").endswith(".xls")
-        )
-        checkpoint = kb_dir / ".ultrakb/catalog/discovery-checkpoints" / (child["id"] + ".json")
-        altered = json.loads(checkpoint.read_text())
-        altered["policy"] = "office-embedded-files-v3"
-        checkpoint.write_text(json.dumps(altered))
-    result = process_pending(kb_dir, context=processing_context)
-    assert processing_context.executor.calls == 0
-    children = [s for s in list_sources(kb_dir) if s.source_id != parent.source_id]
-    docs = [s for s in children if s.name.endswith(".doc")]
-    assert len(docs) == 1 and result["groups"][0]["sources"] == 3, result
-    if corrupt_policy:
-        assert next(j for j in result["jobs"] if j["id"] == child["id"])["status"] == "failed"
-    assert (
-        "EMBEDDED_WRITER_STANDARD_MARKER"
-        in read_document_source(kb_dir, docs[0].source_id)["content"]
-    )

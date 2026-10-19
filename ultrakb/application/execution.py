@@ -14,12 +14,11 @@ from typing import TYPE_CHECKING, Any, Callable, Iterator, Literal
 from uuid import uuid4
 
 from ultrakb.config import LlmCredentialBundle
-from ultrakb.config_state import ConfigSnapshot, capture_config
-from ultrakb.llm_execution import CompletionExecutor, executor_from_snapshot
+from ultrakb.config_state import ConfigSnapshot
+from ultrakb.llm_execution import CompletionExecutor
 from ultrakb.locks import LockCancelled
 
 if TYPE_CHECKING:
-    from ultrakb.model_task import TaskJournal
     from ultrakb.storage.database import DatabaseIdentity
     from ultrakb.storage.execution_store import Execution
 
@@ -37,8 +36,6 @@ class ExecutionContext:
     parent_usage_task_id: str | None = None
     require_verified_connection: bool = False
     executor: CompletionExecutor | None = field(default=None, repr=False)
-    resume_model_task_id: str | None = None
-    model_task: TaskJournal | None = field(default=None, repr=False)
     storage_identity: DatabaseIdentity | None = field(default=None, repr=False)
     credential_bundle: LlmCredentialBundle | None = field(default=None, repr=False)
     resume_storage_execution_id: str | None = None
@@ -162,10 +159,6 @@ class ExecutionContext:
                 )
             )
 
-    def bind_model_input(self, source_id: str, revision_id: str) -> None:
-        if self.model_task is not None:
-            self.model_task.bind(source_id, revision_id)
-
     def check_stop(self) -> None:
         if self.cancelled():
             raise LockCancelled("Stopped before starting the next operation")
@@ -178,65 +171,16 @@ class ExecutionContext:
     @contextmanager
     def begin(self, kb_dir: Path) -> Iterator[LlmCredentialBundle]:
         self.check_stop()
-        if self.storage_identity is not None:
-            from .storage_execution import begin_storage_execution
+        if self.storage_identity is None:
+            from ultrakb.storage.database import open_database
 
-            with begin_storage_execution(kb_dir, self) as bundle:
-                yield bundle
-            return
-        from ultrakb.kb_format import require_current_kb
+            with open_database(kb_dir, read_only=True) as db:
+                self.storage_identity = db.identity
+        from .storage_execution import begin_storage_execution
 
-        require_current_kb(kb_dir)
-        if self.snapshot is None:
-            with self.activity("preparing"):
-                self.snapshot = capture_config(
-                    kb_dir, cancelled=self.cancelled, on_wait=self.waiting
-                )
-            # The worker's control channel acknowledges this before any
-            # business work, so later batch units cannot silently re-resolve.
-            self.on_snapshot(self.snapshot)
-        if self.snapshot.kb_dir != str(kb_dir.resolve()):
-            raise ValueError("Execution context belongs to another knowledge base")
-        if self.require_verified_connection:
-            from ultrakb.application.model_connections import require_verified_connection
-
-            require_verified_connection(self.snapshot)
-        if self.install_process_settings:
-            self.snapshot.install_worker_environment()
-        if self.executor is None:
-            self.executor = executor_from_snapshot(self.snapshot, self.cancelled)
-        if self.model_task is None:
-            from ultrakb.model_task import TaskJournal
-
-            self.model_task = TaskJournal(
-                kb_dir,
-                self.executor,
-                resume=self.resume_model_task_id,
-                policy=self.snapshot.values()["effective"].get("model_policy", {}),
-                execution_task_id=self.usage_task_id,
-                parent_execution_task_id=self.parent_usage_task_id,
-            )
-        from ultrakb.llm_usage_execution import import_usage_execution
-
-        with (
-            import_usage_execution(
-                kb_dir, "model_task", task_id=self.usage_task_id, on_event=self.on_event
-            ),
-            self.snapshot.activate(),
-            self.executor.activate(),
-            _activate_context(self),
-        ):
-            from ultrakb.llm_usage_execution import bind_model_task
-
-            bind_model_task(self.model_task.record.task_id)
-            self.check_stop()
-            previous_images = self.executor.image_deliveries.snapshot()
-            try:
-                yield LlmCredentialBundle(**self.snapshot.values()["credentials"])
-            finally:
-                images = self.executor.image_deliveries.finish()
-                if images and images != previous_images:
-                    self.on_event({"event": "image_coverage", "data": {"images": list(images)}})
+        with begin_storage_execution(kb_dir, self) as bundle:
+            yield bundle
+        return
 
 
 _ACTIVE_CONTEXT: ContextVar[ExecutionContext | None] = ContextVar("ultrakb_execution", default=None)

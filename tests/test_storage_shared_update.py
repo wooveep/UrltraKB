@@ -38,6 +38,7 @@ def shared_update_input(tmp_path):
             },
             expected=store.bind().publication_id,
             unit_revisions=(old.unit_revision_id,),
+            generated_paths=("summaries/fixture.md", "concepts/value.md"),
         )
     )
     catalog = CatalogStore(root, identity)

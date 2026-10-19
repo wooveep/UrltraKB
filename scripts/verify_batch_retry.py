@@ -16,6 +16,7 @@ def main():
     args = parser.parse_args()
     root = args.output.resolve()
     root.mkdir(parents=True, exist_ok=False)
+    os.environ["ULTRAKB_CONFIG_DIR"] = str(root / "settings")
     os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "true"
     os.environ["OPENAI_AGENTS_DISABLE_TRACING"] = "1"
     if args.headless:
@@ -24,7 +25,7 @@ def main():
     from batch_retry_fixtures import retain_failure
     from publication_fixtures import publish_document
     from PySide6.QtCore import QTimer
-    from PySide6.QtWidgets import QDialog, QMessageBox, QPlainTextEdit
+    from PySide6.QtWidgets import QMessageBox
 
     from ultrakb import config
     from ultrakb.application.knowledge_bases import initialize_kb
@@ -37,7 +38,6 @@ def main():
     from ultrakb.desktop.window import Workbench
     from ultrakb.locks import atomic_write_text, kb_ingest_lock
     from ultrakb.runtime.records import TERMINAL
-    from ultrakb.source_catalog import read_source_revision
 
     live = boundary = None
     if args.real:
@@ -59,7 +59,14 @@ def main():
     os.environ["OPENAI_API_BASE"] = credentials.base_url
     config.GLOBAL_CONFIG_DIR = root / "settings"
     config.GLOBAL_CONFIG_PATH = config.GLOBAL_CONFIG_DIR / "global.yaml"
-    apply_global_config_patch(GlobalConfigPatchRequest(config={"model": model}))
+    apply_global_config_patch(
+        GlobalConfigPatchRequest(
+            config={
+                "model": model,
+                "model_capacity": {"max_input_tokens": 65536, "tokenizer_model": "gpt-4o-mini"},
+            }
+        )
+    )
     kb = root / "批量重试库"
     initialize_kb(kb, seed_environment=False)
     sources = []
@@ -74,15 +81,11 @@ def main():
     with kb_ingest_lock(kb / ".ultrakb"):
         atomic_write_text(finished, "# Finished\n\nPreviously committed operating policy.")
     publish_document(kb, finished, "Previously committed summary.", bundle=credentials)
-    # A genuine missing retained original creates an independent local failure.
     sources.sort(key=lambda source: source.source_id)
-    original = kb / read_source_revision(kb, sources[0].target_revision_id).original
-    with kb_ingest_lock(kb / ".ultrakb"):
-        original.unlink()
     assert verify_model_connection(kb).state == "passed"
     if boundary:
         boundary.select("quota")
-    app = create_application()
+    app = create_application(settings_dir=root / "qt-settings")
     app.setQuitOnLastWindowClosed(False)
     assert args.headless or app.platformName() not in {"offscreen", "minimal"}
     window = Workbench(history_dir=root / "tasks")
@@ -129,50 +132,45 @@ def main():
         task = window.manager.tasks()[0]
         wait(lambda: window.manager.get(task.id).state in TERMINAL, timeout=60)
         task = window.manager.get(task.id)
-        assert task.results[0].status == "failed" and not task.results[0].halt
         assert len(task.not_applicable) == 1 and "已完成" in task.not_applicable[0].name
         if args.real:
-            assert len(task.results) == 2 and task.succeeded == 1 and task.state == "partial", task
+            assert len(task.results) == len(sources) and task.succeeded == len(sources), task
+            assert task.state == "completed", task
             checks.append(
-                "A10 real service: missing original failed; next unfinished source committed; "
+                "A10 real service: every selected unfinished source committed; "
                 "finished source excluded"
             )
         else:
-            assert len(task.results) == 2 and task.results[1].halt and task.total == 3
+            assert len(task.results) == 1 and task.results[0].halt and task.total == 3, task
             assert task.state == "blocked" and "额度" in task.error
-            checks.append(
-                "A10/A11 boundary: local failure continued, SDK quota halted third unstarted source"
-            )
+            checks.append("A10/A11 boundary: SDK quota halts the unstarted remainder of this batch")
         assert task.processes_reaped
         checked_details = []
 
         def inspect_details():
-            dialog = next(
-                (
-                    w
-                    for w in app.topLevelWidgets()
-                    if isinstance(w, QDialog) and w.windowTitle() == "任务结果" and w.isVisible()
-                ),
-                None,
-            )
-            if dialog:
-                text = dialog.findChild(QPlainTextEdit).toPlainText()
-                checked_details.append(text)
-                dialog.grab().save(str(root / "task-details.png"))
-                dialog.accept()
+            from ultrakb.desktop.knowledge_tasks import KnowledgeTasksDialog
+
+            for dialog in app.topLevelWidgets():
+                if (
+                    isinstance(dialog, KnowledgeTasksDialog)
+                    and dialog.isVisible()
+                    and not dialog._busy
+                ):
+                    if dialog.detail is not None:
+                        checked_details.append(dialog.detail)
+                        dialog.grab().save(str(root / "task-details.png"))
+                        dialog.accept()
 
         inspect = QTimer()
         inspect.timeout.connect(inspect_details)
         inspect.start(20)
         show_task_details(task, window)
         inspect.stop()
-        assert checked_details
-        assert "不适用（未提交）" in checked_details[0]
-        if not args.real:
-            assert "第 3 项：未执行" in checked_details[0]
+        assert len(checked_details) == 1
+        assert checked_details[0].execution.application_task_id == task.id
+        assert checked_details[0].execution_usage.actual_sends > 0
         checks.append(
-            "Task detail distinguishes attempted failure, "
-            "excluded completed input and not-run remainder"
+            "Native paged details correlate the actual SDK execution with this application task"
         )
         for theme in ("浅色", "深色"):
             window.theme.setCurrentText(theme)
@@ -188,7 +186,9 @@ def main():
             "headless": args.headless,
             "checks": checks,
             "service": "official DeepSeek" if live else "loopback SDK quota boundary",
-            "fixture": "zero-send retained state and one deliberately removed frozen original",
+            "fixture": (
+                "native retained originals and local preparation failures; no initial model sends"
+            ),
         }
         if live:
             report["cost"] = live.budget.report()

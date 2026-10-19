@@ -32,15 +32,18 @@ from typing import Any
 from watchdog.observers import Observer
 
 from ultrakb.application.documents import _add_for_api
+from ultrakb.ingest_result import requires_storage_repair
 from ultrakb.inputs import SUPPORTED_EXTENSIONS
 from ultrakb.lifecycle import (
     KnowledgeBaseIncomplete,
     KnowledgeBaseRemoved,
     current_generation,
     expected_generation,
+    read_lifecycle,
 )
 from ultrakb.locks import LockCancelled, kb_ingest_lock
 from ultrakb.mutation import RecoveryRequired
+from ultrakb.storage.database import DatabaseIdentity, StorageFormatError, open_database
 from ultrakb.watcher import start_watch
 
 # How many recent events to retain per KB for status() and SSE replay.
@@ -65,6 +68,7 @@ class WatcherState:
         default_factory=lambda: {"added": 0, "skipped": 0, "failed": 0}
     )
     generation: str | None = None
+    database_identity: DatabaseIdentity | None = None
     receiving: bool = True
     _seq: int = 0
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
@@ -72,6 +76,8 @@ class WatcherState:
 
     def __post_init__(self) -> None:
         if self.kb_dir is not None:
+            with open_database(self.kb_dir, expected=self.database_identity, read_only=True) as db:
+                self.database_identity = db.identity
             self.generation = current_generation(self.kb_dir)
         self.running.set()
 
@@ -110,9 +116,12 @@ def _run_worker(state: WatcherState) -> None:
             if paths is None:
                 return
             for raw_path in paths:
-                with expected_generation(state.kb_dir, state.generation):
+                with (
+                    expected_generation(state.kb_dir, state.generation),
+                    read_lifecycle(state.kb_dir, database_identity=state.database_identity),
+                ):
                     _process_file(state, raw_path)
-    except (RecoveryRequired, KnowledgeBaseRemoved, KnowledgeBaseIncomplete):
+    except (RecoveryRequired, KnowledgeBaseRemoved, KnowledgeBaseIncomplete, StorageFormatError):
         _record_event(
             state,
             "error",
@@ -161,10 +170,22 @@ def _process_file(state: WatcherState, raw_path: str) -> None:
         },
     )
     try:
-        with kb_ingest_lock(state.kb_dir / ".ultrakb"):
+        from ultrakb.application.execution import ExecutionContext
+        from ultrakb.application.views import storage_scope
+
+        assert state.database_identity is not None
+        with read_lifecycle(state.kb_dir, database_identity=state.database_identity):
             if state.raw_dir.resolve() != state.kb_dir / "raw":
                 raise ValueError("Watched input moved outside the knowledge-base raw directory")
-            result = _add_for_api(path, state.kb_dir, source_root=state.kb_dir / "raw")
+            result = _add_for_api(
+                path,
+                state.kb_dir,
+                source_root=state.kb_dir / "raw",
+                context=ExecutionContext(storage_identity=state.database_identity),
+                scope=storage_scope(state.kb_dir, state.database_identity),
+            )
+            if requires_storage_repair(result.units):
+                raise RecoveryRequired(result.message)
     except Exception as exc:  # worker must never die
         _record_event(
             state,
@@ -176,7 +197,10 @@ def _process_file(state: WatcherState, raw_path: str) -> None:
             },
         )
         _inc(state, "failed")
-        if isinstance(exc, (RecoveryRequired, KnowledgeBaseRemoved, KnowledgeBaseIncomplete)):
+        if isinstance(
+            exc,
+            (RecoveryRequired, KnowledgeBaseRemoved, KnowledgeBaseIncomplete, StorageFormatError),
+        ):
             raise
         return
     status = result.status
@@ -264,12 +288,15 @@ class WatchRegistry:
         self, kb: str, kb_dir: Path, debounce: float, cancelled: threading.Event
     ) -> WatcherState:
         root = kb_dir.expanduser().resolve()
+        with open_database(root, read_only=True) as db:
+            identity = db.identity
         generation = current_generation(root)
         if not (root / ".ultrakb/config.yaml").is_file():
             raise ValueError("Open a knowledge base before watching")
         # No registry mutex is held while waiting for another KB operation.
         with (
             expected_generation(root, generation),
+            read_lifecycle(root, database_identity=identity),
             kb_ingest_lock(root / ".ultrakb", cancelled=cancelled.is_set),
         ):
             if not (root / ".ultrakb/config.yaml").is_file():
@@ -288,6 +315,7 @@ class WatchRegistry:
                     debounce=debounce,
                     started_at=time.time(),
                     events=deque(maxlen=self._max_events),
+                    database_identity=identity,
                 )
 
                 def on_new_files(paths: list[str]) -> None:

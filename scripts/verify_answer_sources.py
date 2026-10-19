@@ -22,22 +22,24 @@ def main():
         os.environ["QT_QPA_PLATFORM"] = "offscreen"
     os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "true"
     os.environ["OPENAI_AGENTS_DISABLE_TRACING"] = "1"
+    os.environ["ULTRAKB_CONFIG_DIR"] = str(root / "settings")
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tests"))
     from focus_fixtures import partial_workbook, unprocessed_source
-    from publication_fixtures import publish_document
+    from processing_fixtures import publish_processed_source, source_processing_context
     from PySide6.QtCore import Qt, QUrl
     from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QLabel, QPushButton
     from test_answer_citations import read_originals
 
     from ultrakb import config
-    from ultrakb.agent.chat_session import ChatSession
     from ultrakb.application.answer_citations import capture_answer_citations
     from ultrakb.application.conversations import read_conversation
     from ultrakb.application.document_actions import DocumentIdentity
+    from ultrakb.application.documents import import_document
     from ultrakb.application.knowledge_bases import initialize_kb
     from ultrakb.application.model_connections import verify_model_connection
     from ultrakb.application.query_views import resolve_query_views
+    from ultrakb.application.views import published_scope
     from ultrakb.config import LlmCredentialBundle
     from ultrakb.desktop.answer_actions import AnswerActions
     from ultrakb.desktop.document_rows import row_command
@@ -46,7 +48,8 @@ def main():
     from ultrakb.desktop.window import Workbench
     from ultrakb.locks import atomic_write_text, kb_ingest_lock
     from ultrakb.runtime.records import TERMINAL
-    from ultrakb.source_catalog import read_source
+    from ultrakb.storage.session_result import reference_trace
+    from ultrakb.storage.session_store import SessionStore
 
     config.GLOBAL_CONFIG_DIR = root / "settings"
     config.GLOBAL_CONFIG_PATH = config.GLOBAL_CONFIG_DIR / "global.yaml"
@@ -83,10 +86,13 @@ def main():
         path = kb / "raw" / f"{name}.md"
         with kb_ingest_lock(kb / ".ultrakb"):
             atomic_write_text(path, f"# {name}\n\n{body}")
-        published.append(publish_document(kb, path, body, bundle=credentials))
+        retained = import_document(kb, path, context=source_processing_context(bundle=credentials))
+        assert retained.source_id is not None, retained
+        publish_processed_source(kb, retained.source_id)
+        published.append(retained)
     partial = partial_workbook(kb, kb / "raw/部分工作簿.xlsx", bundle=credentials)
     missing = unprocessed_source(kb, kb / "raw/未处理.md")
-    names = [read_source(kb, item.source_id).doc_name for item in published]
+    names = [item.units[0].doc_name for item in published]
     selection = resolve_query_views(kb)
     actual_reader = read_originals(kb, selection, names)
     sample = (
@@ -94,21 +100,33 @@ def main():
         f"Archive is quarterly. [[sources/{names[1]}.content.json]]\n\n"
         f"Again [[sources/{names[1]}.content.json]]"
     )
-    sample_session = ChatSession.new(kb, "stored-ui-sample", "zh")
-    sample_session.record_turn(
+    sessions = SessionStore(kb, published_scope(kb).knowledge.identity)
+    sessions.create("sample-session", model="stored-ui-sample", language="zh")
+    sessions.append_exchange(
+        "sample-session",
+        "sample-turn",
         "核对评审和归档",
         sample,
-        [],
-        citations=capture_answer_citations(sample, selection, actual_reader.returned_reads),
+        metadata={
+            "schema": 1,
+            "trace": reference_trace([], sample),
+            "result": {
+                "citations": capture_answer_citations(
+                    sample, selection, actual_reader.returned_reads
+                )
+            },
+        },
     )
-    legacy = ChatSession.new(kb, "stored-ui-sample", "zh")
-    legacy.record_turn("旧回答", "[[summaries/评审]]", [])
+    sessions.create("unknown-snapshot", model="stored-ui-sample", language="zh")
+    sessions.append_exchange(
+        "unknown-snapshot", "unknown-turn", "旧回答", f"[[summaries/{names[0]}]]"
+    )
     if live:
         # Compiler fixtures can import CLI dotenv; recapture the measured gateway.
         os.environ["LLM_API_KEY"] = credentials.api_key
         os.environ["OPENAI_API_BASE"] = credentials.base_url
         assert verify_model_connection(kb).state == "passed"
-    app = create_application()
+    app = create_application(settings_dir=root / "qt")
     app.setQuitOnLastWindowClosed(False)
     assert args.headless or app.platformName() == "xcb"
     window = Workbench(history_dir=root / "tasks")
@@ -211,17 +229,17 @@ def main():
                 "full-KB retrieval preserved"
             )
         else:
-            window.conversations.open(sample_session.id)
+            window.conversations.open("sample-session")
             wait(
                 lambda: any(
-                    action.isVisible() and action.data.identity == sample_session.turns[0].turn_id
+                    action.isVisible() and action.data.identity == "sample-turn"
                     for action in window.chat.findChildren(AnswerActions)
                 )
             )
             actions = next(
                 action
                 for action in window.chat.findChildren(AnswerActions)
-                if action.isVisible() and action.data.identity == sample_session.turns[0].turn_id
+                if action.isVisible() and action.data.identity == "sample-turn"
             )
         assert len(actions.sources.groups) >= 2
         wait(lambda: "正在核对" not in window.focus_caption.text())
@@ -286,17 +304,17 @@ def main():
             "A23: stable source dedup/count; keyboard/footer and body links open captured original;"
             " return scroll preserved"
         )
-        window.conversations.open(legacy.id)
+        window.conversations.open("unknown-snapshot")
         wait(
             lambda: any(
-                action.isVisible() and action.data.identity == legacy.turns[0].turn_id
+                action.isVisible() and action.data.identity == "unknown-turn"
                 for action in window.chat.findChildren(AnswerActions)
             )
         )
         old = next(
             action
             for action in window.chat.findChildren(AnswerActions)
-            if action.isVisible() and action.data.identity == legacy.turns[0].turn_id
+            if action.isVisible() and action.data.identity == "unknown-turn"
         )
         old.sources.toggle.click()
         assert old.sources.groups[0].historical_unknown

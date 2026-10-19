@@ -198,6 +198,12 @@ class UsageStore:
 
         return combine_usage(self, receipts)
 
+    def application_receipt(self, task_id, *, receipts=()):
+        """Recover one application's results and sends from its indexed budget bindings."""
+        from .usage_selection import application_usage
+
+        return application_usage(self, task_id, receipts=receipts)
+
     def selected_summary(self, parts, *, subtract=(), database=None):
         """Sum disjoint scope buckets, subtracting selected execution intersections."""
         if database is None:

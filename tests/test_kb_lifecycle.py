@@ -12,6 +12,9 @@ from ultrakb.locks import kb_ingest_lock, session_lock
 
 @pytest.fixture(autouse=True)
 def isolated_global_config(tmp_path, monkeypatch):
+    directory = tmp_path.with_name(tmp_path.name + "-global")
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", directory)
+    monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_LOCK_PATH", directory / ".lock")
     monkeypatch.setattr(
         "ultrakb.config.GLOBAL_CONFIG_PATH", tmp_path.with_name(tmp_path.name + "-global.yaml")
     )
@@ -138,6 +141,9 @@ def test_queued_native_request_cannot_write_into_recreated_kb(kb_dir, tmp_path):
 
     target = kb_dir / "wiki/concepts/note.md"
     target.write_text("# Original\n")
+    from ultrakb.desktop.verification_data import publish_pages
+
+    publish_pages(kb_dir, {"concepts/note.md": b"# Original\n"})
     original = read_page(kb_dir, "concepts/note")
     manager = TaskManager(history_dir=kb_dir.with_name(kb_dir.name + "-history"))
     try:
@@ -148,7 +154,7 @@ def test_queued_native_request_cannot_write_into_recreated_kb(kb_dir, tmp_path):
             )
             delete_kb(kb_dir)
             initialize_kb(kb_dir, seed_environment=False)
-            target.write_text("# Original\n")  # Same page CAS; directory identity must still win.
+            publish_pages(kb_dir, {"concepts/note.md": b"# Original\n"})
         result = manager.wait(task, timeout=20)
         assert result.state == "blocked"
         assert result.started_at is None

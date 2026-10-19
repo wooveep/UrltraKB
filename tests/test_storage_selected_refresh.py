@@ -378,7 +378,9 @@ def test_selected_summary_has_the_same_partial_outcome_in_each_adapter(
             import ultrakb.cli as cli
 
             monkeypatch.setattr(cli, "_find_kb_dir", lambda *args: root)
-            monkeypatch.setattr(cli, "_selected_scope", lambda *args: storage_scope(root, identity))
+            monkeypatch.setattr(
+                cli, "_selected_scope", lambda *args, **kwargs: storage_scope(root, identity)
+            )
             result = CliRunner().invoke(
                 cli.cli,
                 ["refresh", "run", "--source", target.source_id, "--page", "summaries/fixture.md"],
@@ -417,7 +419,9 @@ def test_selected_summary_has_the_same_partial_outcome_in_each_adapter(
             from ultrakb.runtime.requests import RefreshKnowledge
             from ultrakb.runtime.worker import _execute
 
-            monkeypatch.setattr(views, "view_scope", lambda *args: storage_scope(root, identity))
+            monkeypatch.setattr(
+                views, "view_scope", lambda *args, **kwargs: storage_scope(root, identity)
+            )
             request = RefreshKnowledge(
                 source_ids=(target.source_id,),
                 page_paths=("summaries/fixture.md",),

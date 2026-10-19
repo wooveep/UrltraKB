@@ -4,6 +4,7 @@ import io
 
 import pymupdf
 import pytest
+from native_catalog_fixtures import original_bytes
 from PIL import Image
 
 
@@ -15,7 +16,6 @@ def test_scan_only_pdf_is_retained_without_knowledge_or_model_sends(
     from ultrakb.application.execution import ExecutionContext
     from ultrakb.config import LlmCredentialBundle
     from ultrakb.markdown_images import image_references
-    from ultrakb.source_catalog import read_source_revision
 
     data = io.BytesIO()
     Image.new("RGB", (100, 100), "green").save(data, format="PNG")
@@ -69,12 +69,12 @@ def test_scan_only_pdf_is_retained_without_knowledge_or_model_sends(
         finally:
             manager.shutdown(stop=True)
             assert manager.join(10)
+    from native_catalog_fixtures import list_sources
+
     from ultrakb.documents import read_document_source
-    from ultrakb.source_catalog import list_sources
 
     admitted = list_sources(kb_dir)[0]
-    saved = read_source_revision(kb_dir, admitted.target_revision_id)
-    assert (kb_dir / saved.original).read_bytes() == source.read_bytes()
+    assert original_bytes(kb_dir, admitted.revision_id) == source.read_bytes()
     viewed = read_document_source(kb_dir, admitted.source_id, pages="1")
     assert viewed["status"] == "blocked"
     assert "资料已保存，未生成知识" in viewed["content"]
@@ -196,18 +196,18 @@ def test_retention_keeps_remote_asset_policy(kb_dir, model_service, monkeypatch)
 def test_image_only_replacement_keeps_previous_success_and_explicit_new_original(
     kb_dir, pdf_model, live_llm
 ):
+    from native_catalog_fixtures import publication
     from publication_fixtures import publish_document
 
     from ultrakb.application.documents import import_document
     from ultrakb.documents import read_document_source
-    from ultrakb.unit_publication import read_head
 
     source = kb_dir / "guide.md"
     Image.new("RGB", (32, 32), "blue").save(kb_dir / "diagram.png")
     source.write_text("# Setup\nDisconnect before service.\n![Figure](diagram.png)")
     first = publish_document(kb_dir, source, None, bundle=live_llm.credentials)
     assert first.status == "added", first.message
-    head = read_head(kb_dir)
+    head = publication(kb_dir)
     previous = (kb_dir / "wiki/summaries/guide.md").read_bytes()
     before = len(live_llm.calls)
     source.write_text("![Figure](diagram.png)")
@@ -215,7 +215,7 @@ def test_image_only_replacement_keeps_previous_success_and_explicit_new_original
     assert replacement.status == "blocked"
     assert replacement.source_id == first.source_id
     assert replacement.units[0].successful_revision_id == first.units[0].successful_revision_id
-    assert read_head(kb_dir).knowledge_revision_id == head.knowledge_revision_id
+    assert publication(kb_dir).revision_id == head.revision_id
     assert (kb_dir / "wiki/summaries/guide.md").read_bytes() == previous
     assert "Disconnect" in read_document_source(kb_dir, first.source_id)["content"]
     latest = read_document_source(

@@ -3,16 +3,15 @@
 import json
 
 import pytest
+from compile_work_fixtures import new_compile_work
 
 from ultrakb.agent.compile_capacity import CompileCapacity
 from ultrakb.agent.partition_planning import partitioned_plan
 from ultrakb.agent.source_windows import CompileSourceWindows
-from ultrakb.compile_checkpoints import CompileCheckpoints
 from ultrakb.config import LlmCredentialBundle
 from ultrakb.execution_capacity import capacity_policy, require_request_capacity
 from ultrakb.llm_execution import CompletionExecutor, RoleBindings
 from ultrakb.locks import atomic_write_text
-from ultrakb.model_task import TaskJournal
 from ultrakb.model_tokenizer import TokenMeasure
 
 pytestmark = pytest.mark.integration
@@ -43,8 +42,7 @@ def test_partitioned_plan_resumes_only_missing_native_work(kb_dir):
         )
     )
     fits = CompileCapacity(executor, measure)
-    task = TaskJournal(kb_dir, executor)
-    checkpoints = CompileCheckpoints(kb_dir, task.record, {"document": "manual"}, {"protocol": 1})
+    checkpoints = new_compile_work(kb_dir, {"document": "manual"}, {"protocol": 1})
     accepted = []
     failed = False
 
@@ -84,7 +82,6 @@ def test_partitioned_plan_resumes_only_missing_native_work(kb_dir):
     result = run()
     assert accepted == [f"node-{i}" for i in range(10)]
     assert not result.concepts.create and not result.entities.create
-    assert checkpoints.path.is_file()
 
 
 def test_capacity_diagnostic_reports_wire_totals_without_provider_usage():
@@ -113,7 +110,7 @@ def test_capacity_diagnostic_reports_wire_totals_without_provider_usage():
 
 
 def test_received_valid_partition_survives_checkpoint_disk_failure(kb_dir, monkeypatch):
-    import ultrakb.compile_checkpoints as checkpoint_storage
+    import ultrakb.storage.checkpoint_store as checkpoint_storage
 
     wiki = kb_dir / "wiki"
     atomic_write_text(wiki / "sources/manual.json", '[{"page":1,"content":"Original."}]')
@@ -126,9 +123,7 @@ def test_received_valid_partition_survives_checkpoint_disk_failure(kb_dir, monke
             {"node_id": "native", "title": "Topic", "start_index": 1, "end_index": 1},
         ],
     )
-    executor = CompletionExecutor(RoleBindings("deepseek/deepseek-flash", LlmCredentialBundle()))
-    task = TaskJournal(kb_dir, executor)
-    checkpoints = CompileCheckpoints(kb_dir, task.record, {"document": "manual"}, {"protocol": 1})
+    checkpoints = new_compile_work(kb_dir, {"document": "manual"}, {"protocol": 1})
     received = []
 
     def send(messages, stage):
@@ -149,15 +144,15 @@ def test_received_valid_partition_survives_checkpoint_disk_failure(kb_dir, monke
             checkpoints=checkpoints,
         )
 
-    write = checkpoint_storage.atomic_write_json
+    write = checkpoint_storage.put_blob
 
-    def disk_failure(path, value):
-        if path.parent == checkpoints.directory and path.name.startswith("payload-"):
+    def disk_failure(db, payload):
+        if isinstance(json.loads(payload), str):
             raise OSError("Checkpoint disk failure after response was received")
-        return write(path, value)
+        return write(db, payload)
 
     with monkeypatch.context() as failure:
-        failure.setattr(checkpoint_storage, "atomic_write_json", disk_failure)
+        failure.setattr(checkpoint_storage, "put_blob", disk_failure)
         with pytest.raises(OSError, match="disk failure"):
             run()
     result = run()

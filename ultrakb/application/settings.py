@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
-from contextlib import nullcontext
+from contextlib import contextmanager
 from pathlib import Path
 
 import yaml
@@ -33,7 +33,7 @@ from ultrakb.config import (
     resolve_entity_types,
     save_config,
 )
-from ultrakb.locks import atomic_write_text, kb_ingest_lock, kb_read_lock
+from ultrakb.locks import atomic_write_text
 from ultrakb.mutation import mutation_scope
 
 logger = logging.getLogger(__name__)
@@ -423,34 +423,53 @@ def _write_global_env(request: GlobalConfigPatchRequest, fields_set: set[str]) -
 
 
 def read_global_config() -> GlobalConfigResponse:
-    with _with_global_config_lock():
+    with _settings_read(None):
         return _read_global_config()
 
 
 def read_kb_config(kb_dir: Path) -> KbConfigResponse:
     """Read one consistent settings version without returning a secret value."""
-    with kb_read_lock(kb_dir / ".ultrakb"):
-        with _with_global_config_lock():
-            return _read_kb_config(kb_dir)
+    with _settings_read(kb_dir):
+        return _read_kb_config(kb_dir)
 
 
 def apply_kb_config_patch(kb_dir: Path, request: KbConfigPatchRequest) -> None:
     """Save config and credentials together, or restore both on failure."""
-    if not (kb_dir / ".ultrakb/config.yaml").is_file():
-        raise FileNotFoundError(f"Knowledge base not found: {kb_dir}")
-    with kb_ingest_lock(kb_dir / ".ultrakb"):
-        with mutation_scope(
-            kb_dir, [kb_dir / ".ultrakb/config.yaml", kb_dir / ".env"], operation="settings"
-        ):
-            _apply_kb_config_patch(kb_dir, request)
+    from ultrakb.storage.database import open_database
+
+    from .execution_configuration import patch_storage_config
+
+    with open_database(kb_dir, read_only=True) as db:
+        identity = db.identity
+    patch_storage_config(kb_dir, identity, request)
+
+
+@contextmanager
+def _settings_read(kb_dir):
+    from contextlib import ExitStack
+
+    from ultrakb.config_state import live_configuration
+    from ultrakb.configuration_lock import configuration_lock_path, require_prepared_configuration
+    from ultrakb.lifecycle import read_lifecycle
+    from ultrakb.locks import file_write_lock
+    from ultrakb.storage.database import open_database
+
+    with ExitStack() as stack:
+        if kb_dir is not None:
+            with open_database(kb_dir, read_only=True) as db:
+                identity = db.identity
+            stack.enter_context(read_lifecycle(kb_dir, database_identity=identity))
+            stack.enter_context(file_write_lock(configuration_lock_path(kb_dir)))
+            require_prepared_configuration(kb_dir)
+        stack.enter_context(_with_global_config_lock(recover=False))
+        require_prepared_configuration(_config_module.GLOBAL_CONFIG_DIR)
+        stack.enter_context(live_configuration())
+        yield
 
 
 def read_settings_view(kb_dir: Path | None = None) -> SettingsView:
     """Read native settings with field origins, retaining existing API responses."""
-    with (
-        kb_read_lock(kb_dir / ".ultrakb") if kb_dir else nullcontext(),
-        _with_global_config_lock(),
-    ):
+    with _settings_read(kb_dir):
         values = _read_kb_config(kb_dir) if kb_dir else _read_global_config()
         global_config = _load_global_config_unlocked()
         sources: dict[str, str] = (

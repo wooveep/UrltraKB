@@ -4,6 +4,7 @@ import shutil
 from pathlib import Path
 
 import pytest
+from native_catalog_fixtures import original_bytes
 
 pytest_plugins = ("test_presentation_import",)
 
@@ -43,7 +44,7 @@ def test_binary_ppt_keeps_hidden_page_notes_and_offline_recompilation(
     assert "HIDDEN_SLIDE_BODY" in saved["units"][1]["parts"]["body"]
     assert saved["units"][1]["parts"]["notes"] == "Hidden speaker note"
     assert saved["processing"]["pdf_limit"]["short_max_pages"] == limit
-    assert (kb_dir / saved["original_path"]).read_bytes() == source.read_bytes()
+    assert original_bytes(kb_dir, saved["source_revision_id"]) == source.read_bytes()
     source.unlink()
     apply_kb_config_patch(
         kb_dir,
@@ -95,6 +96,7 @@ def test_ppt_upload_and_cli_read_use_the_same_physical_slides(kb_dir, office_run
     from click.testing import CliRunner
     from fastapi import UploadFile
     from fastapi.testclient import TestClient
+    from native_catalog_fixtures import read_source
     from publication_fixtures import publish_document
 
     from ultrakb.api import create_app
@@ -103,7 +105,6 @@ def test_ppt_upload_and_cli_read_use_the_same_physical_slides(kb_dir, office_run
     from ultrakb.cli import cli
     from ultrakb.config import LlmCredentialBundle, register_kb_alias
     from ultrakb.documents import read_document_source
-    from ultrakb.source_catalog import read_source
 
     original = (Path(__file__).parent / "fixtures/office/slides.ppt").read_bytes()
     upload = UploadFile(filename="legacy.ppt", file=io.BytesIO(original))
@@ -121,10 +122,10 @@ def test_ppt_upload_and_cli_read_use_the_same_physical_slides(kb_dir, office_run
         _cleanup_uploads(ready)
     assert imported.status == "added", imported.message
     admitted = read_source(kb_dir, imported.source_id)
-    assert admitted.identity == owned.path.relative_to(kb_dir).as_posix()
-    assert admitted.target_revision_id == imported.source_revision_id
+    assert admitted.source_key == str(owned.path.resolve())
+    assert admitted.revision_id == imported.source_revision_id
     full = read_document_source(kb_dir, imported.source_id)
-    assert (kb_dir / full["original_path"]).read_bytes() == original
+    assert original_bytes(kb_dir, full["source_revision_id"]) == original
     assert full["pages"] == 3
     assert full["office"]["slides"][1]["hidden"]
     assert "HIDDEN_SLIDE_BODY" in full["units"][1]["parts"]["body"]
@@ -164,7 +165,6 @@ def test_ppt_upload_and_cli_read_use_the_same_physical_slides(kb_dir, office_run
         "part",
         "units",
         "office",
-        "original_path",
         "processing",
         "target_processing",
     ):

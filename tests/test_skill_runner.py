@@ -33,9 +33,9 @@ from ultrakb.agent.skill_runner import (
 
 
 def _make_kb(tmp_path: Path) -> Path:
-    """Minimal KB layout so build_query_agent inside run_skill can boot."""
-    (tmp_path / "wiki").mkdir()
-    (tmp_path / "wiki" / "AGENTS.md").write_text("schema", encoding="utf-8")
+    from kb_fixtures import mark_current_kb
+
+    mark_current_kb(tmp_path)
     return tmp_path
 
 

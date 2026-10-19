@@ -5,18 +5,26 @@ import asyncio
 import pytest
 from agents import Runner
 from application_llm_fixtures import real_application_model  # noqa: F401
+from test_chat_slash_commands import _record_turn
 
-from ultrakb.agent.chat_session import ChatSession, load_session
-from ultrakb.application.conversations import continue_conversation
+from ultrakb.application.conversations import continue_conversation, read_conversation
 from ultrakb.application.execution import ExecutionContext
+from ultrakb.application.sessions import list_conversations
+from ultrakb.terminal_chat_state import TerminalConversation
 
 
 @pytest.fixture(autouse=True)
 def original_for_conversation(kb_dir):
     from ultrakb.config import load_config, save_config
-    from ultrakb.locks import atomic_write_text
+    from ultrakb.desktop.verification_data import retain_document
 
-    atomic_write_text(kb_dir / "wiki/sources/fixture.md", "The recorded answer is 42.")
+    retain_document(
+        kb_dir,
+        "fixture.md",
+        "fixture",
+        "The recorded answer is 42.",
+        summary="# Measurement\n\nThe recorded answer is 42.",
+    )
     path = kb_dir / ".ultrakb/config.yaml"
     config = load_config(path)
     config.update(model="deepseek/deepseek-flash", language="en")
@@ -27,8 +35,8 @@ def original_for_conversation(kb_dir):
 @pytest.mark.asyncio
 async def test_concurrent_continuations_reload_completed_history(kb_dir, monkeypatch):
     first_running, finish_first, second_waiting = asyncio.Event(), asyncio.Event(), asyncio.Event()
-    session = ChatSession.new(kb_dir, "deepseek/deepseek-flash", "en")
-    session.record_turn("Original", "Saved", [])
+    session = TerminalConversation.new(kb_dir, "deepseek/deepseek-flash", "en")
+    _record_turn(session, "Original", "Saved")
     inputs = []
     genuine_run = Runner.run_streamed
 
@@ -67,8 +75,8 @@ async def test_concurrent_continuations_reload_completed_history(kb_dir, monkeyp
     assert content[-1]["text"] == "Second"
     assert '"text": "First"' in content[0]["text"]
     assert "Saved" not in content[0]["text"]
-    saved = load_session(kb_dir, session.id)
-    assert saved.user_turns == ["Original", "First", "Second"]
+    saved = read_conversation(kb_dir, session.id)
+    assert [user for user, _ in saved.turns] == ["Original", "First", "Second"]
     assert saved.model == "deepseek/deepseek-flash"
     assert saved.language == "en"
 
@@ -133,7 +141,7 @@ async def test_interrupted_submission_survives_reopen_without_a_completed_model_
     restored = read_conversation(kb_dir, result.session_id)
     assert restored.turns == ()
     assert restored.timeline == (("请保留这个问题", "这次回答未完成，可以继续提问。"),)
-    assert load_session(kb_dir, result.session_id).history == []
+    assert read_conversation(kb_dir, result.session_id).turns == ()
 
     stopped = False
     result = await continue_conversation(kb_dir, "接着问", session_id=result.session_id)
@@ -149,19 +157,19 @@ def test_queued_question_survives_restart_without_replaying_model_work(kb_dir, t
     from ultrakb.desktop.chat_outbox import ChatOutbox
     from ultrakb.locks import kb_ingest_lock
 
-    session = ChatSession.new(kb_dir, "", "")
+    session = TerminalConversation.new(kb_dir, "", "")
     directory = tmp_path / "desktop-outbox"
     # Accepting a question must not wait for the long-running model's KB lease.
     with kb_ingest_lock(kb_dir / ".ultrakb"):
         ChatOutbox(directory).accept(kb_dir, session.id, "排队后被停止的问题", new=True)
-        assert not session.path.exists()
+        assert not any(row["id"] == session.id for row in list_conversations(kb_dir))
     restarted = ChatOutbox(directory)
     restarted.recover(kb_dir)
     restarted.recover(kb_dir)
     saved = read_conversation(kb_dir, session.id)
     assert saved.turns == ()
     assert saved.timeline == (("排队后被停止的问题", "这次回答未完成，可以继续提问。"),)
-    assert load_session(kb_dir, session.id).history == []
+    assert read_conversation(kb_dir, session.id).turns == ()
 
 
 @pytest.mark.parametrize("new", [False, True])
@@ -169,20 +177,19 @@ def test_outbox_recovery_deduplicates_committed_answer_and_respects_deletion(kb_
     from ultrakb.application.sessions import delete_conversation
     from ultrakb.desktop.chat_outbox import ChatOutbox
 
-    session = ChatSession.new(kb_dir, "openai/test", "zh")
+    session = TerminalConversation.new(kb_dir, "openai/test", "zh")
     outbox = ChatOutbox(tmp_path / "outbox")
     attempt = outbox.accept(kb_dir, session.id, "已回答的问题", new=True)
-    session.begin_attempt("已回答的问题", identity=attempt.id, submission_order=attempt.order)
-    session.record_turn("已回答的问题", "已确认的回答", [], attempt_id=attempt.id)
+    _record_turn(session, "已回答的问题", "已确认的回答", attempt_id=attempt.id)
     # Simulate a crash after the KB commit but before desktop acknowledgement.
     outbox.recover(kb_dir)
-    saved = load_session(kb_dir, session.id)
-    assert saved.incomplete == []
-    assert saved.user_turns == ["已回答的问题"]
+    saved = read_conversation(kb_dir, session.id)
+    assert saved.incomplete == ()
+    assert saved.turns == (("已回答的问题", "已确认的回答"),)
     outbox.accept(kb_dir, session.id, "等待中的问题", new=new)
-    delete_conversation(kb_dir, session.id, version=saved._version)
+    delete_conversation(kb_dir, session.id, version=saved.version)
     outbox.recover(kb_dir)
-    assert not session.path.exists()
+    assert not any(row["id"] == session.id for row in list_conversations(kb_dir))
 
 
 def test_recovered_submissions_keep_acceptance_order_and_original_turn_position(
@@ -194,8 +201,8 @@ def test_recovered_submissions_keep_acceptance_order_and_original_turn_position(
     from ultrakb.application.sessions import export_conversation
     from ultrakb.desktop.chat_outbox import ChatOutbox
 
-    session = ChatSession.new(kb_dir, "openai/test", "zh")
-    session.record_turn("原始问题", "原始回答", [])
+    session = TerminalConversation.new(kb_dir, "openai/test", "zh")
+    _record_turn(session, "原始问题", "原始回答")
     identities = iter(["f" * 32, "0" * 32])
     monkeypatch.setattr(
         "ultrakb.desktop.chat_outbox.uuid4", lambda: SimpleNamespace(hex=next(identities))
@@ -203,7 +210,7 @@ def test_recovered_submissions_keep_acceptance_order_and_original_turn_position(
     outbox = ChatOutbox(tmp_path / "outbox")
     outbox.accept(kb_dir, session.id, "先提交", new=False, after_turn=1)
     outbox.accept(kb_dir, session.id, "后提交", new=False, after_turn=1)
-    session.record_turn("后来的完整问题", "后来的回答", [])
+    _record_turn(session, "后来的完整问题", "后来的回答")
     outbox.recover(kb_dir)
     assert [q for q, _ in read_conversation(kb_dir, session.id).timeline] == [
         "原始问题",
@@ -220,22 +227,24 @@ def test_recovered_submissions_keep_acceptance_order_and_original_turn_position(
 
 
 def test_old_kb_submissions_do_not_block_recreated_kb_history(kb_dir, tmp_path, tmp_path_factory):
-    import shutil
-
     from ultrakb.application.conversations import read_conversation
     from ultrakb.desktop.chat_outbox import ChatOutbox
 
-    old = ChatSession.new(kb_dir, "", "")
+    old = TerminalConversation.new(kb_dir, "", "")
     outbox = ChatOutbox(tmp_path_factory.mktemp("chat-settings"))
     outbox.accept(kb_dir, old.id, "旧知识库问题", new=True)
     retired = tmp_path.with_name(tmp_path.name + "-retired")
     kb_dir.rename(retired)
-    shutil.copytree(retired, kb_dir)
-    current = ChatSession.new(kb_dir, "", "")
+    from ultrakb.application.storage_maintenance import backup_knowledge, restore_knowledge
+
+    backup = tmp_path_factory.mktemp("native-copy") / "backup"
+    backup_knowledge(retired, backup)
+    restore_knowledge(backup, kb_dir)
+    current = TerminalConversation.new(kb_dir, "", "")
     outbox.accept(kb_dir, current.id, "新知识库问题", new=True)
     outbox.recover(kb_dir)
     outbox.recover(kb_dir)
-    assert not old.path.exists()
+    assert not any(row["id"] == old.id for row in list_conversations(kb_dir))
     assert read_conversation(kb_dir, current.id).timeline[0][0] == "新知识库问题"
 
 
@@ -243,12 +252,16 @@ def test_deferred_recovery_orders_question_before_already_started_later_attempt(
     from ultrakb.application.conversations import read_conversation
     from ultrakb.desktop.chat_outbox import ChatOutbox
 
-    session = ChatSession.new(kb_dir, "openai/test", "zh")
-    session.record_turn("之前的问题", "之前的回答", [])
+    session = TerminalConversation.new(kb_dir, "openai/test", "zh")
+    _record_turn(session, "之前的问题", "之前的回答")
     outbox = ChatOutbox(tmp_path / "outbox")
     outbox.accept(kb_dir, session.id, "先提交后恢复", new=False, after_turn=1)
     later = outbox.accept(kb_dir, session.id, "后提交先执行", new=False, after_turn=1)
-    session.begin_attempt("后提交先执行", identity=later.id, submission_order=later.order)
+    from ultrakb.storage.session_store import SessionStore
+
+    SessionStore(kb_dir, session.scope.knowledge.identity).queue_submission(
+        session.id, later.id, "后提交先执行", view_id="legacy", order=later.order, after_turn=1
+    )
     outbox.discard(kb_dir, later.id)
     outbox.recover(kb_dir)
     assert [q for q, _ in read_conversation(kb_dir, session.id).timeline] == [
@@ -263,7 +276,7 @@ async def test_retry_recovered_submission_keeps_initial_model_binding(kb_dir, tm
     from ultrakb.config import resolve_effective_config
     from ultrakb.desktop.chat_outbox import ChatOutbox
 
-    session = ChatSession.new(kb_dir, "", "")
+    session = TerminalConversation.new(kb_dir, "", "")
     outbox = ChatOutbox(tmp_path / "outbox")
     accepted = outbox.accept(kb_dir, session.id, "重试排队的问题", new=True)
     outbox.recover(kb_dir)
@@ -276,7 +289,7 @@ async def test_retry_recovered_submission_keeps_initial_model_binding(kb_dir, tm
     )
     assert result.status == "completed", result.error
     config = resolve_effective_config(kb_dir)[0]
-    saved = load_session(kb_dir, session.id)
+    saved = read_conversation(kb_dir, session.id)
     assert (saved.model, saved.language) == (config["model"], config["language"])
-    assert saved.incomplete == []
-    assert saved.turn_count == 1
+    assert saved.incomplete == ()
+    assert saved.total_turns == 1

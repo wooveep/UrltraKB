@@ -8,7 +8,6 @@ import argparse
 import hashlib
 import json
 import logging
-import shutil
 import time
 import uuid
 from collections import Counter
@@ -18,11 +17,31 @@ from unittest.mock import patch
 
 
 def file_hashes(root):
+    from ultrakb.storage.database import database_path
+
+    database = database_path(root)
+    coordination = {
+        database,
+        database.with_name(database.name + "-wal"),
+        database.with_name(database.name + "-shm"),
+    }
     return {
         str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest()
         for p in root.rglob("*")
-        if p.is_file() and not p.is_symlink()
+        if p.is_file()
+        and not p.is_symlink()
+        and p not in coordination
+        and not p.name.endswith(".lock")
     }
+
+
+def database_fingerprint(root, identity):
+    from ultrakb.storage.coordination import storage_stage
+
+    with storage_stage(root, identity, read_only=True) as db:
+        db.connection.execute("BEGIN")
+        content = "\n".join(db.connection.iterdump()).encode()
+    return hashlib.sha256(content).hexdigest()
 
 
 def main():
@@ -40,42 +59,45 @@ def main():
     litellm.suppress_debug_info = True
     from ultrakb.application.execution import ExecutionContext
     from ultrakb.application.source_retry import retry_source
-    from ultrakb.compile_checkpoints import CompileCheckpoints
     from ultrakb.config import resolve_credential_bundle
     from ultrakb.execution_capacity import request_input
-    from ultrakb.index_stages import IndexStages
     from ultrakb.llm_execution import CompletionExecutor
-    from ultrakb.locks import LockCancelled, atomic_write_json, kb_ingest_lock, kb_read_lock
+    from ultrakb.locks import LockCancelled, atomic_write_json
     from ultrakb.model_log_secrets import redact_model_logs
     from ultrakb.request_budget import input_limit
+    from ultrakb.storage.checkpoint_store import CompileWork
+    from ultrakb.storage.index_checkpoints import StoredIndexStages
 
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
     logging.disable(logging.DEBUG)
+    from ultrakb.application.storage_maintenance import backup_knowledge, restore_knowledge
+    from ultrakb.storage.database import open_database
+
     original = args.kb.resolve()
+    with open_database(original, read_only=True) as db:
+        original_identity = db.identity
     output = args.output.resolve()
+    if output.is_relative_to(original):
+        raise ValueError("Verification output must be outside the original knowledge base")
     output.mkdir(parents=True, exist_ok=True)
     kb = output / "kb"
     baseline = output / "original-files.json"
     if not baseline.exists():
-        with kb_read_lock(original / ".ultrakb"):
-            atomic_write_json(baseline, file_hashes(original))
-            shutil.copytree(original, kb, symlinks=True)
+        before = {
+            "files": file_hashes(original),
+            "database": database_fingerprint(original, original_identity),
+        }
+        backup = backup_knowledge(original, output / "baseline-backup", identity=original_identity)
+        if backup.status != "completed":
+            raise RuntimeError("A complete verified backup is required before model work")
+        restore_knowledge(output / "baseline-backup", kb)
+        atomic_write_json(baseline, before)
     elif not kb.is_dir():
         raise RuntimeError("Verification copy is missing")
-    # A filesystem copy has a distinct lifecycle identity. Rebind only the
-    # verification copy's mutable task ownership; keep every paid count and ID.
-    from ultrakb.lifecycle import current_generation
-
-    with kb_ingest_lock(kb / ".ultrakb"):
-        generation = current_generation(kb)
-        for path in (kb / ".ultrakb/model-tasks").glob("*.json"):
-            task = json.loads(path.read_text())
-            if task["kb_generation"] != generation:
-                task["kb_generation"] = generation
-                atomic_write_json(path, task)
-    before_ids = {p.stem for p in (kb / ".ultrakb/usage/requests").glob("*.json")}
+    with open_database(kb, read_only=True) as db:
+        copy_identity = db.identity
     task_id = uuid.uuid4().hex
     for kind in ("result", "requests"):
         previous = output / f"{args.phase}-{kind}.json"
@@ -87,8 +109,8 @@ def main():
     injection = {"triggered": False, "index_nodes": 0}
     measured = []
     save_index, save_compile, kwargs = (
-        IndexStages.save,
-        CompileCheckpoints.save,
+        StoredIndexStages.save,
+        CompileWork.save,
         CompletionExecutor._kwargs,
     )
 
@@ -130,8 +152,8 @@ def main():
     context.on_event = event
     result, error = None, None
     with (
-        patch.object(IndexStages, "save", index_saved),
-        patch.object(CompileCheckpoints, "save", compile_saved),
+        patch.object(StoredIndexStages, "save", index_saved),
+        patch.object(CompileWork, "save", compile_saved),
         patch.object(CompletionExecutor, "_kwargs", prepared),
         redact_model_logs(resolve_credential_bundle(kb)),
     ):
@@ -141,15 +163,40 @@ def main():
             error = "LockCancelled"
         except Exception as failure:
             error = type(failure).__name__ + ": " + str(failure)
-    requests = []
-    for path in (kb / ".ultrakb/usage/requests").glob("*.json"):
-        if path.stem not in before_ids:
-            record = json.loads(path.read_text())
-            if record.get("source_id") == args.source:
-                requests.append(record)
-    after = file_hashes(original)
+    from ultrakb.application.task_usage import task_usage_receipt
+    from ultrakb.storage.usage_store import UsageStore
+
+    receipt = task_usage_receipt(kb, task_id, identity=copy_identity) or {}
+    execution_ids = {
+        item["execution_id"] for item in receipt.get("selections", []) if item.get("execution_id")
+    }
+    if context.storage_execution is not None:
+        execution_ids.add(context.storage_execution.execution_id)
+    requests, usage = [], UsageStore(kb, copy_identity)
+    for execution_id in execution_ids:
+        cursor = 0
+        while True:
+            page = usage.requests(execution_id=execution_id, after=cursor, limit=128)
+            requests.extend(
+                record.model_dump(mode="json")
+                for record in page.records
+                if record.source_id == args.source
+            )
+            if page.next_after is None:
+                break
+            cursor = page.next_after
+    after = {
+        "files": file_hashes(original),
+        "database": database_fingerprint(original, original_identity),
+    }
     expected = json.loads(baseline.read_text())
-    changed = [name for name in set(after) | set(expected) if after.get(name) != expected.get(name)]
+    changed = [
+        name
+        for name in set(after["files"]) | set(expected["files"])
+        if after["files"].get(name) != expected["files"].get(name)
+    ]
+    if after["database"] != expected["database"]:
+        changed.append("committed database state")
     evidence = {
         "phase": args.phase,
         "usage_task_id": task_id,
@@ -174,7 +221,7 @@ def main():
         raise SystemExit(1)
     if args.phase != "complete" and not injection["triggered"]:
         raise AssertionError("Required checkpoint interruption was not reached")
-    if args.phase == "complete" and (result is None or result.status != "added"):
+    if args.phase == "complete" and (result is None or result.status not in {"added", "completed"}):
         raise SystemExit(1)
 
 

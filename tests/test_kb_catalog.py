@@ -16,6 +16,7 @@ def test_catalog_includes_root_children_and_same_named_registered_paths(tmp_path
         from kb_fixtures import mark_current_kb
 
         mark_current_kb(path)
+        (path / ".ultrakb/config.yaml").write_text("{}\n")
         (path / "wiki").mkdir()
     global_path = tmp_path / "global.yaml"
     monkeypatch.setattr(config, "GLOBAL_CONFIG_PATH", global_path)
@@ -40,6 +41,9 @@ def test_old_unverified_process_summary_does_not_block_directory_management(tmp_
     from ultrakb.runtime.tasks import TaskManager
 
     root, history = tmp_path / "kb", tmp_path / "history"
+    from ultrakb.application.knowledge_bases import initialize_kb
+
+    initialize_kb(root, seed_environment=False)
     history.mkdir()
     view = TaskView(
         uuid.uuid4().hex, str(root), "SavePage", "running", "saving", 1, (), False, False
@@ -69,6 +73,7 @@ def test_catalog_keeps_unfinished_deletion_at_its_original_path(tmp_path, monkey
         from kb_fixtures import mark_current_kb
 
         mark_current_kb(path)
+        (path / ".ultrakb/config.yaml").write_text("{}\n")
         (path / "wiki").mkdir()
     global_path = tmp_path / "global.yaml"
     monkeypatch.setattr(config, "GLOBAL_CONFIG_PATH", global_path)
@@ -107,6 +112,7 @@ def test_partial_delete_of_unregistered_root_child_remains_discoverable(tmp_path
     from kb_fixtures import mark_current_kb
 
     mark_current_kb(root)
+    (root / ".ultrakb/config.yaml").write_text("{}\n")
     (root / "wiki").mkdir()
     monkeypatch.setattr(config, "GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
     monkeypatch.setenv("ULTRAKB_KB_ROOT", str(root.parent))
@@ -131,7 +137,7 @@ def test_partial_delete_of_unregistered_root_child_remains_discoverable(tmp_path
 
 
 @pytest.mark.parametrize("entry", ["cli", "rest"])
-def test_partial_root_deletion_retry_never_selects_another_same_named_kb(
+def test_partial_native_deletion_retry_keeps_the_original_root_identity(
     tmp_path, monkeypatch, entry
 ):
     import asyncio
@@ -146,6 +152,7 @@ def test_partial_root_deletion_retry_never_selects_another_same_named_kb(
         from kb_fixtures import mark_current_kb
 
         mark_current_kb(path)
+        (path / ".ultrakb/config.yaml").write_text("{}\n")
         (path / "wiki").mkdir()
     monkeypatch.setattr(config, "GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
     monkeypatch.setenv("ULTRAKB_KB_ROOT", str(root.parent))
@@ -168,18 +175,11 @@ def test_partial_root_deletion_retry_never_selects_another_same_named_kb(
         from ultrakb.cli import cli
 
         result = CliRunner().invoke(cli, ["delete-kb", "notes", "--yes"])
-        assert "Unfinished deletion" in result.output
+        assert result.exit_code == 0, result.output
     else:
-        from fastapi import HTTPException
-
         from ultrakb.api_kbs_router import delete_kb_endpoint
         from ultrakb.api_models import KbDeleteRequest
 
-        with pytest.raises(HTTPException, match="Unfinished deletion"):
-            asyncio.run(delete_kb_endpoint(KbDeleteRequest(kb="notes", confirm_name="notes")))
-    assert root.is_dir()
-    assert (other / "wiki").is_dir()
-    # Explicit path selection in the native catalog can finish the original deletion.
-    delete_kb(root)
+        asyncio.run(delete_kb_endpoint(KbDeleteRequest(kb="notes", confirm_name="notes")))
     assert not root.exists()
     assert (other / "wiki").is_dir()

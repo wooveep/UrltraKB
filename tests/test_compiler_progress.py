@@ -45,7 +45,17 @@ def test_failed_model_call_stops_progress_before_next_cli_response(
     try:
         with pytest.raises(error_type):
             compiler._llm_call("gpt-4o-mini", [{"role": "user", "content": "Fixture"}], "fixture")
-        result = CliRunner().invoke(cli, ["--kb-dir", str(kb_dir), "source", first.source_id])
+        result = CliRunner().invoke(
+            cli,
+            [
+                "--kb-dir",
+                str(kb_dir),
+                "source",
+                first.source_id,
+                "--unit-revision",
+                first.unit_revision_id,
+            ],
+        )
         assert result.exit_code == 0, result.output
         assert json.loads(result.output)["source_id"] == first.source_id
         assert all(not item._thread.is_alive() for item in spinners)

@@ -48,37 +48,33 @@ def test_markdown_counts_rendered_text_including_code_and_tables():
 
 
 def test_single_usage_persists_without_using_cumulative_and_notices_have_no_answer(kb_dir):
-    from ultrakb.agent.chat_session import ChatSession, load_session
     from ultrakb.application.conversations import read_conversation
+    from ultrakb.application.views import published_scope
+    from ultrakb.storage.session_result import reference_trace
+    from ultrakb.storage.session_store import SessionStore
 
-    session = ChatSession.new(kb_dir, "stored-ui-sample", "zh")
-    first = {"input_cached": 100, "input_uncached": 20, "output": 10, "reasoning": 2}
-    second = {"input_cached": 0, "input_uncached": 5, "output": 3, "reasoning": None}
-    session.record_turn("first", "# 第一条\n\n[[summaries/policy]]", [], usage=first)
-    session.record_turn("second", "第二条", [], usage=second)
-    session.record_usage(
-        {"input_cached": 5, "input_uncached": 6, "output": 7, "reasoning": 0},
-        baseline=session.token_usage,
+    store = SessionStore(kb_dir, published_scope(kb_dir).knowledge.identity)
+    store.create("ui-sample", model="stored-ui-sample", language="zh")
+    usage = {"input_cached": 100, "input_uncached": 20, "output": 10, "reasoning": 2}
+    answer = "# 第一条\n\n[[summaries/policy]]"
+    store.append_exchange(
+        "ui-sample",
+        "first-turn",
+        "first",
+        answer,
+        metadata={
+            "schema": 1,
+            "trace": reference_trace([], answer),
+            "result": {"usage": usage},
+        },
     )
-    session.record_turn("incremental", "已逐次记账的第三条", [], usage=None, turn_usage=second)
-    session.begin_attempt("尚未完成")
-    view = read_conversation(kb_dir, session.id)
-    assert view.answers[0].usage == first and view.answers[1].usage == second
-    assert view.answers[2].usage == second
+    store.append_exchange("ui-sample", "second-turn", "second", "没有已有单条用量。")
+    store.queue_submission("ui-sample", "unfinished", "尚未完成", view_id="legacy", after_turn=2)
+    view = read_conversation(kb_dir, "ui-sample")
+    assert view.answers[0].usage == usage and view.answers[1].usage is None
     assert view.timeline_answers[-1] is None
     assert view.answers[0].markdown.endswith("[[summaries/policy]]")
-    assert view.answers[0].identity == load_session(kb_dir, session.id).turns[0].turn_id
-    # Existing persisted v2 exchanges can omit the optional per-turn receipt.
-    raw = json.loads(session.path.read_text())
-    for turn in raw["turns"]:
-        turn.pop("usage", None)
-    from ultrakb.locks import atomic_write_json, kb_ingest_lock
-
-    with kb_ingest_lock(kb_dir / ".ultrakb"):
-        atomic_write_json(session.path, raw)
-    restored = read_conversation(kb_dir, session.id)
-    assert all(answer.usage is None for answer in restored.answers)
-    assert restored.usage is not None
+    assert view.answers[0].identity == store.load("ui-sample").turns[0]["turn_id"]
 
 
 def test_native_answer_actions_and_clipboard(tmp_path):

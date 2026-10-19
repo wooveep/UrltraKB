@@ -102,29 +102,10 @@ def live_configuration() -> Iterator[None]:
 
 
 def capture_config(kb_dir: Path, **wait_options) -> ConfigSnapshot:
-    """Capture settings after KB recovery while holding execution permission.
+    """Capture one prepared native database's immutable execution settings."""
+    from ultrakb.application.execution_configuration import capture_storage_config
+    from ultrakb.storage.database import open_database
 
-    Global saves use their existing lock. Before/after byte comparisons also
-    reject a racing external edit instead of mixing files from two versions.
-    """
-    from ultrakb import config
-    from ultrakb.locks import kb_ingest_lock_held
-
-    kb_dir = kb_dir.resolve()
-    if not kb_ingest_lock_held(kb_dir / ".ultrakb"):
-        raise RuntimeError("Configuration is fixed only after acquiring execution permission")
-    from ultrakb.config_snapshot import initialize_sdk_environment, read_snapshot
-
-    initialize_sdk_environment()
-    from ultrakb.capacity_migration import migrate_settings
-
-    credentials = config.resolve_credential_bundle(kb_dir)
-    effective_before, sources_before = config.resolve_effective_config(kb_dir)
-    if sources_before.get("model_capacity") == "global":
-        global_credentials, _ = config.resolve_connection_credentials(
-            model=effective_before["model"]
-        )
-        if global_credentials.base_url == credentials.base_url:
-            migrate_settings(None, base_url=global_credentials.base_url)
-    migrate_settings(kb_dir, base_url=credentials.base_url)
-    return read_snapshot(kb_dir, **wait_options)
+    with open_database(kb_dir, read_only=True) as db:
+        identity = db.identity
+    return capture_storage_config(kb_dir, identity, **wait_options)

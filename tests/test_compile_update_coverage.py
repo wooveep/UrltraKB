@@ -198,14 +198,16 @@ def test_no_current_long_window_keeps_existing_multisource_page(kb_dir, processi
     from ultrakb.agent.compile_delivery import publish_compile_results
     from ultrakb.agent.page_updates import PageUpdate
     from ultrakb.agent.source_windows import CompileSourceWindows
+    from ultrakb.application.views import published_scope
     from ultrakb.compilation_report import collect_compile_report
-    from ultrakb.unit_publication import read_head
 
+    summaries = []
     for name, action in [("old-a", "create"), ("old-b", "update")]:
         source = kb_dir / f"{name}.txt"
         source.write_text(f"{name}: a supported condition.\n")
         retained = processing_only(source)
         with _publication(kb_dir, retained) as (wiki, doc):
+            summaries.append(f"summaries/{doc}.md")
             plan = _plan(wiki, {action: [{"name": "orchard"}]})
             if action == "create":
                 body = "# Orchard\n\nold-a: a supported condition."
@@ -237,8 +239,8 @@ def test_no_current_long_window_keeps_existing_multisource_page(kb_dir, processi
             )
     wiki = kb_dir / "wiki"
     old = (wiki / "concepts/orchard.md").read_bytes()
-    assert "summaries/old-a.md" in old.decode() and "summaries/old-b.md" in old.decode()
-    head = read_head(kb_dir)
+    assert all(summary in old.decode() for summary in summaries)
+    head = published_scope(kb_dir).publication_id
     atomic_write_text(
         wiki / "sources/current.json",
         json.dumps(
@@ -263,7 +265,7 @@ def test_no_current_long_window_keeps_existing_multisource_page(kb_dir, processi
             )
         else:
             assert windows.validate_updates(proposal, long=True) is not None
-            assert read_head(kb_dir) == head
+            assert published_scope(kb_dir).publication_id == head
     assert (wiki / "concepts/orchard.md").read_bytes() == old
     if repair == "related":
         assert "[[concepts/orchard]]" in (wiki / "summaries/current.md").read_text()

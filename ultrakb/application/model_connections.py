@@ -27,8 +27,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from ultrakb import config
 from ultrakb.application.connection_failures import connection_failure, failure_for_code
 from ultrakb.config import LlmCredentialBundle
-from ultrakb.config_state import ConfigSnapshot, capture_config
-from ultrakb.locks import atomic_write_json, atomic_write_text, file_write_lock, kb_ingest_lock
+from ultrakb.config_state import ConfigSnapshot
+from ultrakb.locks import atomic_write_json, atomic_write_text, file_write_lock
 
 CAPABILITIES = ("文本响应", "一次工具调用及结果回读")
 _RUNNING: set[str] = set()
@@ -181,9 +181,15 @@ def _from_values(values: dict) -> Connection:
 
 
 def capture_connection(kb_dir: Path | None = None) -> Connection:
-    with kb_ingest_lock(kb_dir / ".ultrakb") if kb_dir else nullcontext():
+    with nullcontext():
         if kb_dir:
-            return connection_from_snapshot(capture_config(kb_dir))
+            from ultrakb.storage.database import open_database
+
+            from .execution_configuration import capture_storage_config
+
+            with open_database(kb_dir, read_only=True) as db:
+                identity = db.identity
+            return connection_from_snapshot(capture_storage_config(kb_dir, identity))
         from dotenv import dotenv_values
 
         with config._with_global_config_lock():

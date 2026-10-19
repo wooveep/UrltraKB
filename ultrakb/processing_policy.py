@@ -29,6 +29,7 @@ class ProcessingDecision(Record):
     length_class: Literal["short", "long"]
     execution_mode: Literal["full", "segmented"]
     measurement_value: int = Field(ge=0, strict=True)
+    characters: int | None = Field(default=None, ge=0, strict=True)
     measurement_unit: Literal["physical_page", "token"] = "physical_page"
     measurement_fingerprint: str = "pdf-physical-pages-v1"
     pdf_limit: PdfLimit | None = None

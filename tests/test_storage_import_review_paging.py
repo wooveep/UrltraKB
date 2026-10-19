@@ -74,7 +74,7 @@ async def test_review_pages_are_complete_through_shared_cli_http_and_real_qt_io(
     import ultrakb.cli as cli
 
     monkeypatch.setattr(cli, "_find_kb_dir", lambda *args: root)
-    monkeypatch.setattr(cli, "_selected_scope", lambda *args: scope)
+    monkeypatch.setattr(cli, "_selected_scope", lambda *args, **kwargs: scope)
     shown = CliRunner().invoke(cli.cli, ["proposals", "list"])
     assert shown.exit_code == 0 and first.next_after in shown.output, shown.output
     remaining = CliRunner().invoke(cli.cli, ["proposals", "list", "--after", first.next_after])
@@ -88,7 +88,7 @@ async def test_review_pages_are_complete_through_shared_cli_http_and_real_qt_io(
 
     monkeypatch.delenv("ULTRAKB_API_TOKEN", raising=False)
     monkeypatch.setattr(documents, "_resolve_kb", lambda *args: root)
-    monkeypatch.setattr(views, "view_scope", lambda *args: scope)
+    monkeypatch.setattr(views, "view_scope", lambda *args, **kwargs: scope)
     with TestClient(create_app()) as client:
         response = client.get("/api/v1/proposals", params={"kb": str(root), "view_id": "legacy"})
         assert response.status_code == 200 and len(response.json()) == 63, response.text

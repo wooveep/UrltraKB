@@ -2,30 +2,16 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
-import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Literal
 
 from ultrakb.application.execution import ExecutionContext
-from ultrakb.application.file_state import changed_files, contained_paths, file_versions
-from ultrakb.application.removal import _resolve_doc_identifier
 from ultrakb.config import (
     LlmCredentialBundle,
 )
 from ultrakb.ingest_result import ImportUnitOutcome
 from ultrakb.knowledge_scope import KnowledgeScope, resolve_scope
-from ultrakb.llm_usage_execution import track_import_usage
-from ultrakb.locks import (
-    async_kb_lock,
-    atomic_write_text,
-    kb_ingest_lock,
-    kb_read_lock,
-)
-from ultrakb.mutation import mutation_scope
-from ultrakb.state import HashRegistry
 
 LONG_DOC_TYPES = frozenset({"long_pdf", "pageindex_cloud"})
 
@@ -60,141 +46,22 @@ def select_recompilation(
     scope: KnowledgeScope | None = None,
     unit_id: str | None = None,
 ) -> RecompileSelection:
-    selected_scope = scope
     scope = resolve_scope(kb_dir, scope)
     if bool(identifier) == all_docs or (unit_id is not None and all_docs):
         return RecompileSelection("invalid")
-    if scope.knowledge is not None:
-        from .storage_recompilation import select_retained
+    from .storage_recompilation import select_retained
 
-        return select_retained(
-            scope, identifier, all_docs=all_docs, confirmation=confirmation, unit_id=unit_id
-        )
-    with kb_read_lock(kb_dir / ".ultrakb"):
-        from ultrakb.application.sources import source_inventory
-
-        admitted = source_inventory(kb_dir, scope=selected_scope)
-        from ultrakb.source_catalog import list_sources
-
-        mapped = {source.legacy_hash for source in list_sources(kb_dir) if source.legacy_hash}
-        registry = HashRegistry(kb_dir / ".ultrakb/hashes.json")
-        for meta in registry.all_entries().values():
-            _validate_metadata(meta)
-        matches = (
-            list(registry.all_entries().items())
-            if all_docs
-            else _resolve_doc_identifier(registry, identifier or "")
-        )
-        matched_legacy = {file_hash for file_hash, _ in matches}
-        targets = tuple(
-            RecompileTarget(
-                h,
-                m.get("name") or "?",
-                m.get("doc_name") or m.get("name") or "?",
-                "long" if is_long_doc(m) else "short",
-            )
-            for h, m in matches
-            if h not in mapped
-        )
-        targets += tuple(
-            RecompileTarget(
-                item["source_id"],
-                item["name"],
-                item["doc_name"],
-                item["length_class"] or "unknown",
-                item["execution_mode"],
-            )
-            for item in admitted
-            if all_docs
-            or item["legacy_hash"] in matched_legacy
-            or identifier
-            in {item["source_id"], item["name"], item["doc_name"], item["legacy_hash"]}
-        )
-        if unit_id is not None:
-            from dataclasses import replace
-
-            by_id = {item["source_id"]: item for item in admitted}
-            selected_targets = []
-            for target in targets:
-                unit = next(
-                    (
-                        item
-                        for item in by_id.get(target.file_hash, {}).get("units", [])
-                        if item["unit_id"] == unit_id
-                    ),
-                    None,
-                )
-                if unit:
-                    selected_targets.append(
-                        replace(
-                            target,
-                            name=unit["name"],
-                            doc_name=unit["doc_name"],
-                            kind=unit.get("length_class") or "unknown",
-                            execution_mode=unit.get("execution_mode"),
-                            unit_id=unit_id,
-                        )
-                    )
-            targets = tuple(selected_targets)
-        if not targets:
-            return RecompileSelection("empty" if all_docs else "not_found")
-        if not all_docs and len(targets) > 1:
-            return RecompileSelection("multiple", targets)
-        return RecompileSelection(
-            "ready", targets, _version(kb_dir, scope=selected_scope) if confirmation else None
-        )
-
-
-def _version(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> str:
-    """Version every file the compiler may replace, plus document identities.
-
-    Includes absent targets and newly created files. A successful unit returns
-    its resulting version so its own batch can continue without authorizing
-    intervening changes made by another operation.
-    """
-    selected = resolve_scope(kb_dir, scope)
-    if selected.knowledge is not None:
-        from .storage_recompilation import confirmation_version
-
-        return confirmation_version(selected)
-    roots = [
-        kb_dir / ".ultrakb/hashes.json",
-        kb_dir / ".ultrakb/catalog",
-        kb_dir / ".ultrakb/knowledge/legacy/head.json",
-    ] + [selected.wiki_dir / name for name in ("summaries", "concepts", "entities", "index.md")]
-    values = file_versions(kb_dir, roots)
-    return hashlib.sha256(json.dumps(values, sort_keys=True).encode()).hexdigest()
-
-
-def _validate_metadata(meta: object) -> None:
-    if not isinstance(meta, dict) or any(
-        meta.get(field) is not None and not isinstance(meta[field], str)
-        for field in ("name", "doc_name", "type", "doc_id")
-    ):
-        raise ValueError("Invalid document registry metadata")
+    return select_retained(
+        scope, identifier, all_docs=all_docs, confirmation=confirmation, unit_id=unit_id
+    )
 
 
 def refresh_schema(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> bool:
-    """Atomically keep the legacy .bak and install the current schema."""
-    selected = resolve_scope(kb_dir, scope)
-    if selected.knowledge is not None:
-        from .storage_recompilation import refresh_compilation_schema
+    """Explicitly publish the current schema through the main-store protocol."""
+    from .storage_recompilation import refresh_compilation_schema
 
-        return refresh_compilation_schema(selected)[2]
-    scope = resolve_scope(kb_dir, scope, writable=True)
-    from ultrakb.schema import AGENTS_MD
-
-    with kb_ingest_lock(kb_dir / ".ultrakb"):
-        current, backup = contained_paths(
-            kb_dir, [scope.wiki_dir / "AGENTS.md", scope.wiki_dir / "AGENTS.md.bak"]
-        )
-        if not current.exists() or current.read_text(encoding="utf-8") == AGENTS_MD:
-            return False
-        previous = current.read_text(encoding="utf-8")
-        with mutation_scope(kb_dir, [current, backup], operation="refresh-schema"):
-            atomic_write_text(backup, previous)
-            atomic_write_text(current, AGENTS_MD)
-        return True
+    _, _, changed = refresh_compilation_schema(resolve_scope(kb_dir, scope))
+    return changed
 
 
 @dataclass(frozen=True)
@@ -221,7 +88,6 @@ class RecompileResult:
     proposal_id: str | None = None
 
 
-@track_import_usage
 async def recompile_document(
     kb_dir: Path,
     file_hash: str,
@@ -238,134 +104,24 @@ async def recompile_document(
 
     Every entrypoint captures settings under the lease. A batch reuses its context.
     """
-    requested_scope = scope
+    scope = resolve_scope(kb_dir, scope)
     context = context or ExecutionContext()
-    if scope is not None and scope.knowledge is not None:
-        from .storage_compilation import recompile_stored
+    if bundle is not None:
+        if context.snapshot is not None and context.snapshot.values()["credentials"] != asdict(
+            bundle
+        ):
+            raise ValueError("Recompilation credentials differ from the captured execution")
+        if context.executor is not None and context.executor.bindings.credentials() != bundle:
+            raise ValueError("Recompilation credentials differ from the active executor")
+        context.credential_bundle = LlmCredentialBundle(**asdict(bundle))
+    from .storage_compilation import recompile_stored
 
-        return await recompile_stored(
-            resolve_scope(kb_dir, scope),
-            file_hash,
-            unit_id=unit_id,
-            context=context,
-            version=version,
-            model=model,
-            max_concurrency=max_concurrency,
-        )
-    scope = resolve_scope(kb_dir, scope, writable=True)
-    kb_dir = kb_dir.resolve()
-    async with async_kb_lock(
-        kb_dir / ".ultrakb",
-        exclusive=True,
-        cancelled=context.cancelled,
-        on_wait=context.waiting,
-    ):
-        if version is not None and _version(kb_dir, scope=requested_scope) != version:
-            return RecompileResult(
-                "conflict",
-                message="Knowledge changed after confirmation; review and confirm again",
-                unfinished=("compilation",),
-            )
-        from ultrakb.application.source_recompilation import recompile_source
-        from ultrakb.legacy_sources import admit_legacy_snapshot
-        from ultrakb.source_catalog import list_sources
-
-        started = time.monotonic()
-        registry = HashRegistry(kb_dir / ".ultrakb/hashes.json")
-        meta = registry.get(file_hash)
-        admitted = next(
-            (
-                source
-                for source in list_sources(kb_dir)
-                if file_hash == source.source_id
-                or (source.legacy_hash == file_hash and meta is not None)
-            ),
-            None,
-        )
-        if admitted is None or admitted.legacy_hash:
-            meta = registry.get(admitted.legacy_hash) if admitted and admitted.legacy_hash else meta
-            if meta is None and admitted is not None:
-                meta = {"name": admitted.name, "doc_name": admitted.doc_name}
-            if meta is None:
-                return RecompileResult(
-                    "skipped", message="document is no longer indexed.", version=version
-                )
-            _validate_metadata(meta)
-            name = meta.get("doc_name") or Path(meta.get("name") or "").stem
-            kind = "long" if is_long_doc(meta) else "short"
-            if kind == "long" and not meta.get("doc_id"):
-                return RecompileResult(
-                    "skipped",
-                    name,
-                    kind,
-                    message="legacy long-doc entry without a doc_id; re-add to refresh.",
-                    version=version,
-                )
-            try:
-                admitted = admit_legacy_snapshot(
-                    kb_dir,
-                    admitted.legacy_hash if admitted and admitted.legacy_hash else file_hash,
-                    meta,
-                )
-            except (OSError, ValueError) as exc:
-                from ultrakb.ingest_diagnostics import failure_reason
-
-                return RecompileResult(
-                    "blocked",
-                    name,
-                    kind,
-                    message=failure_reason(exc),
-                    error_type=type(exc).__name__,
-                    version=version,
-                )
-        from ultrakb.knowledge_scope import live_scope
-
-        scope = requested_scope or live_scope(kb_dir, "legacy")
-        roots = [scope.wiki_dir]
-        before = file_versions(kb_dir, roots)
-        result = await recompile_source(
-            kb_dir,
-            admitted.source_id,
-            unit_id=unit_id,
-            context=context,
-            bundle=bundle,
-            model=model,
-            max_concurrency=max_concurrency,
-            scope=scope,
-        )
-        status: Literal[
-            "compiled", "skipped", "failed", "rejected", "blocked", "stopped", "partial"
-        ] = "blocked"
-        if result.status == "added":
-            status = "compiled"
-        elif result.status == "skipped":
-            status = "skipped"
-        elif result.status == "failed":
-            status = "failed"
-        elif result.status == "rejected":
-            status = "rejected"
-        elif result.status == "partial":
-            status = "partial"
-        elif result.status == "stopped":
-            status = "stopped"
-        summary = scope.wiki_dir / "summaries" / f"{admitted.doc_name}.md"
-        kind = (result.units[0].length_class if result.units else None) or "unknown"
-        return RecompileResult(
-            status,
-            (result.units[0].name or admitted.doc_name)
-            if unit_id and result.units
-            else admitted.doc_name,
-            kind,
-            message=result.message,
-            error_type=result.units[0].error_type if result.units else None,
-            elapsed=time.monotonic() - started,
-            resources=((str(summary),) if status == "compiled" and summary.exists() else ())
-            + result.resources,
-            changes=changed_files(kb_dir, roots, before),
-            unfinished=result.unfinished,
-            version=_version(kb_dir, scope=requested_scope) if version is not None else None,
-            quality=result.quality,
-            execution_mode=result.units[0].execution_mode if result.units else None,
-            units=result.units,
-            model_usage=result.model_usage,
-        )
+    return await recompile_stored(
+        scope,
+        file_hash,
+        unit_id=unit_id,
+        context=context,
+        version=version,
+        model=model,
+        max_concurrency=max_concurrency,
+    )

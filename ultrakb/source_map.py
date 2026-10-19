@@ -3,10 +3,10 @@
 import json
 from pathlib import Path
 
+from ultrakb.file_digest import hash_file
 from ultrakb.file_state import contained_paths
 from ultrakb.ingest_records import SourceMap
 from ultrakb.source_pages import read_page_selection
-from ultrakb.state import HashRegistry
 
 
 def freeze_pdf_map(wiki: Path, doc_name: str, original: Path) -> SourceMap:
@@ -24,10 +24,8 @@ def freeze_pdf_map(wiki: Path, doc_name: str, original: Path) -> SourceMap:
             relative = image["path"]
             target = wiki / relative
             contained_paths(wiki, [target])
-            assets[relative] = HashRegistry.hash_file(target)
-    return SourceMap(
-        path=path, digest=HashRegistry.hash_file(wiki / path), unit_count=expected, assets=assets
-    )
+            assets[relative] = hash_file(target)
+    return SourceMap(path=path, digest=hash_file(wiki / path), unit_count=expected, assets=assets)
 
 
 def read_source_map(
@@ -47,7 +45,7 @@ def read_source_map(
         raise ValueError("Source map belongs to another processing unit")
     target = wiki / reference.path
     contained_paths(wiki, [target, *(wiki / name for name in reference.assets)])
-    if HashRegistry.hash_file(target) != reference.digest:
+    if hash_file(target) != reference.digest:
         raise ValueError("Source map digest changed")
     raw = json.loads(target.read_text("utf-8"))
     if reference.unit_kind in {"text", "block"}:
@@ -69,7 +67,7 @@ def read_source_map(
         if body.read_bytes().decode("utf-8") != raw["text"] or raw["assets"] != reference.assets:
             raise ValueError("Frozen text or its asset map changed")
         for path, digest in reference.assets.items():
-            if HashRegistry.hash_file(wiki / path) != digest:
+            if hash_file(wiki / path) != digest:
                 raise ValueError("Source map image digest changed")
         return selected
     if chars is not None or blocks is not None:
@@ -82,7 +80,7 @@ def read_source_map(
     if {image["path"] for page in raw for image in page.get("images", [])} != set(reference.assets):
         raise ValueError("Source map asset references changed")
     for path, digest in reference.assets.items():
-        if HashRegistry.hash_file(wiki / path) != digest:
+        if hash_file(wiki / path) != digest:
             raise ValueError("Source map image digest changed")
     return selected
 
@@ -94,7 +92,7 @@ def freeze_text_map(wiki: Path, doc_name: str) -> SourceMap:
     raw = FrozenText.model_validate_json((wiki / path).read_text("utf-8"))
     reference = SourceMap(
         path=path,
-        digest=HashRegistry.hash_file(wiki / path),
+        digest=hash_file(wiki / path),
         unit_kind=raw.unit_kind,
         unit_count=len(raw.blocks) if raw.blocks else 1,
         assets=raw.assets,

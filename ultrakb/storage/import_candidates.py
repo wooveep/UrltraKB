@@ -4,12 +4,12 @@ from pydantic import BaseModel, ConfigDict, TypeAdapter
 
 from ultrakb.compile_checkpoints import digest
 from ultrakb.source_records import RecordId, RelativePath
-from ultrakb.unit_publication import protected_knowledge_pages
 
 from .blobs import put_blob, read_bytes, retain_blob
 from .catalog_store import CatalogConflict
 from .coordination import storage_stage
 from .execution_store import require_active_execution
+from .generated_baselines import protected_knowledge_pages
 from .knowledge_store import KnowledgeStore, PreparedRevision, PublicationConflict
 from .pending_store import PendingStore
 from .publication_guards import require_import_claim

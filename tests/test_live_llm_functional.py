@@ -125,8 +125,7 @@ async def test_real_multiturn_conversation_restores_intent_and_applies_a_later_c
 ):
     import yaml
 
-    from ultrakb.agent.chat_session import load_session
-    from ultrakb.application.conversations import continue_conversation
+    from ultrakb.application.conversations import continue_conversation, read_conversation
     from ultrakb.application.execution import ExecutionContext
 
     live_llm.install(monkeypatch)
@@ -149,8 +148,8 @@ async def test_real_multiturn_conversation_restores_intent_and_applies_a_later_c
         context=ExecutionContext(on_event=events.append),
     )
     assert first.status == "completed", first.error
-    session = load_session(kb_dir, first.session_id)
-    assert session.turn_count == 1 and session.turns[0].assistant_text == first.answer
+    session = read_conversation(kb_dir, first.session_id)
+    assert session.total_turns == 1 and session.turns[0][1] == first.answer
     second = await continue_conversation(
         kb_dir,
         "Which room do I prefer? Answer in one short sentence.",
@@ -167,8 +166,8 @@ async def test_real_multiturn_conversation_restores_intent_and_applies_a_later_c
     )
     assert third.status == "completed", third.error
     assert "garden" in third.answer.lower()
-    restored = load_session(kb_dir, first.session_id)
-    assert restored.turn_count == 3
+    restored = read_conversation(kb_dir, first.session_id)
+    assert restored.total_turns == 3
     assert restored.turns[0] == session.turns[0]
-    assert restored.turns[-1].assistant_text == third.answer
+    assert restored.turns[-1][1] == third.answer
     assert any(event.get("event") == "delta" for event in events)

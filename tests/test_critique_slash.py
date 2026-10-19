@@ -1,142 +1,85 @@
-"""Direct unit tests for ``ultrakb.agent.chat._handle_slash_critique``.
-
-The ``/critique <path>`` slash command is the user-facing entry point
-for the html-critic skill. It does path resolution, file-not-found
-gating, and translates SkillNotFoundError / RuntimeError into
-user-visible error messages — none of that was exercised before.
-"""
-
-from __future__ import annotations
-
-from pathlib import Path
-from unittest.mock import AsyncMock, patch
+"""Critique reads accepted artifacts and delivers through the actual SDK boundary."""
 
 import pytest
+from artifact_fixtures import publish_artifacts
+from error_transport import ErrorTransport
 from prompt_toolkit.styles import Style
+from stream_transport import StreamTransport
+from test_storage_deck_generation import tool_response
 
 from ultrakb.agent.chat import _handle_slash_critique
-from ultrakb.agent.skill_runner import SkillNotFoundError
-
-
-def _make_kb_with_config(tmp_path: Path) -> Path:
-    """Critique needs a config.yaml to read the model from."""
-    (tmp_path / ".ultrakb").mkdir()
-    (tmp_path / ".ultrakb" / "config.yaml").write_text(
-        "model: openai/gpt-4o\nlanguage: en\n", encoding="utf-8"
-    )
-    from kb_fixtures import mark_current_kb
-
-    mark_current_kb(tmp_path)
-    return tmp_path
-
+from ultrakb.application.views import published_scope
+from ultrakb.storage.artifact_store import ArtifactStore
 
 _STYLE = Style.from_dict({})
+_TARGET = "output/decks/real/index.html"
 
 
-@pytest.mark.asyncio
-async def test_critique_no_arg_prints_usage(tmp_path: Path, capsys):
-    """``/critique`` with no arg must print Usage and NOT call run_skill."""
-    kb_dir = _make_kb_with_config(tmp_path)
-    with patch("ultrakb.agent.skill_runner.run_skill", new=AsyncMock()) as run_skill:
-        await _handle_slash_critique("", kb_dir, _STYLE)
-        # whitespace only — same as empty
-        await _handle_slash_critique("   ", kb_dir, _STYLE)
-
-    out = capsys.readouterr().out
-    assert "Usage" in out or "usage" in out
-    run_skill.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_critique_missing_file_prints_error(tmp_path: Path, capsys):
-    """When the target file doesn't exist, print an ERROR and skip
-    run_skill — no point asking the critic to read a nonexistent file."""
-    kb_dir = _make_kb_with_config(tmp_path)
-    with patch("ultrakb.agent.skill_runner.run_skill", new=AsyncMock()) as run_skill:
-        await _handle_slash_critique("output/decks/ghost/index.html", kb_dir, _STYLE)
-
-    out = capsys.readouterr().out
-    assert "[ERROR]" in out
-    assert "not found" in out.lower() or "ghost" in out
-    run_skill.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_critique_invokes_html_critic_skill(tmp_path: Path, capsys):
-    """Happy path: file exists → run_skill called with the html-critic
-    skill name and a path that includes the relative target."""
-    kb_dir = _make_kb_with_config(tmp_path)
-    target = kb_dir / "output" / "decks" / "real" / "index.html"
+def accepted_artifact(kb):
+    target = kb / _TARGET
     target.parent.mkdir(parents=True)
-    target.write_text("<html>existing deck</html>", encoding="utf-8")
-
-    with patch("ultrakb.agent.skill_runner.run_skill", new=AsyncMock()) as run_skill:
-        await _handle_slash_critique("output/decks/real/index.html", kb_dir, _STYLE)
-
-    run_skill.assert_called_once()
-    kwargs = run_skill.call_args.kwargs
-    assert kwargs["skill_name"] == "ultrakb-html-critic"
-    assert "output/decks/real/index.html" in kwargs["intent"]
-    assert kwargs["kb_dir"] == kb_dir
-    out = capsys.readouterr().out
-    assert "Critique pass complete" in out
+    target.write_text("<html>Accepted original</html>")
+    publish_artifacts(kb, target.parent)
+    target.unlink()
+    return target
 
 
 @pytest.mark.asyncio
-async def test_critique_accepts_absolute_path_inside_kb(tmp_path: Path):
-    """Absolute paths under the KB are accepted and converted to the
-    relative form for the skill's intent."""
-    kb_dir = _make_kb_with_config(tmp_path)
-    target = kb_dir / "output" / "decks" / "abs" / "index.html"
+async def test_critique_no_arg_prints_usage(kb_dir, capsys):
+    await _handle_slash_critique("", kb_dir, _STYLE)
+    await _handle_slash_critique("   ", kb_dir, _STYLE)
+    assert "Usage" in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_critique_missing_artifact_prints_error(kb_dir, capsys):
+    await _handle_slash_critique("output/decks/missing/index.html", kb_dir, _STYLE)
+    assert "[ERROR]" in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("absolute", [False, True])
+async def test_critique_reads_the_committed_artifact_without_a_projection(
+    kb_dir, monkeypatch, capsys, absolute
+):
+    target = accepted_artifact(kb_dir)
+    replacement = "<html>Reviewed retained artifact</html>"
+    responses = [
+        tool_response("read_output_or_skill_file", {"path": _TARGET}, "read-original"),
+        tool_response("write_file", {"path": _TARGET, "content": replacement}, "review"),
+        {"content": "Reviewed."},
+    ]
+    with StreamTransport(responses) as service:
+        monkeypatch.setenv("LLM_API_KEY", "offline-critique-key")
+        monkeypatch.setenv("OPENAI_API_BASE", service.url)
+        await _handle_slash_critique(str(target) if absolute else _TARGET, kb_dir, _STYLE)
+        assert len(service.requests) == 3
+        assert "Accepted original" in str(service.requests[1])
+    scope = published_scope(kb_dir)
+    assert ArtifactStore(kb_dir, scope.knowledge.identity).read(_TARGET) == replacement.encode()
+    assert "Critique pass complete" in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_critique_refuses_an_unaccepted_working_copy(kb_dir, monkeypatch, capsys):
+    target = kb_dir / _TARGET
     target.parent.mkdir(parents=True)
-    target.write_text("<html></html>", encoding="utf-8")
-
-    with patch("ultrakb.agent.skill_runner.run_skill", new=AsyncMock()) as run_skill:
-        await _handle_slash_critique(str(target), kb_dir, _STYLE)
-
-    run_skill.assert_called_once()
-    intent = run_skill.call_args.kwargs["intent"]
-    # Either the relative-to-kb form or the absolute path is in the
-    # intent — implementation may choose either, both reach the skill.
-    assert "abs/index.html" in intent or str(target) in intent
+    target.write_text("<html>Unaccepted local draft</html>")
+    with ErrorTransport(status=400) as service:
+        monkeypatch.setenv("OPENAI_API_BASE", service.url)
+        await _handle_slash_critique(_TARGET, kb_dir, _STYLE)
+        assert service.requests == []
+    assert "[ERROR]" in capsys.readouterr().out
+    assert target.read_text() == "<html>Unaccepted local draft</html>"
 
 
 @pytest.mark.asyncio
-async def test_critique_catches_skill_not_found(tmp_path: Path, capsys):
-    """If the ultrakb-html-critic skill is missing, surface a friendly
-    [ERROR] line instead of crashing the chat turn."""
-    kb_dir = _make_kb_with_config(tmp_path)
-    target = kb_dir / "output" / "test.html"
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text("<html></html>", encoding="utf-8")
-
-    async def missing(**_):
-        raise SkillNotFoundError("Skill 'ultrakb-html-critic' not found. Available: foo.")
-
-    with patch("ultrakb.agent.skill_runner.run_skill", new=AsyncMock(side_effect=missing)):
-        # Should NOT raise — chat turn must survive
-        await _handle_slash_critique(str(target), kb_dir, _STYLE)
-
-    out = capsys.readouterr().out
-    assert "[ERROR]" in out
-    assert "ultrakb-html-critic" in out or "not found" in out.lower()
-
-
-@pytest.mark.asyncio
-async def test_critique_catches_runtime_error_from_run_skill(tmp_path: Path, capsys):
-    """RuntimeError from run_skill (e.g. MaxTurnsExceeded translation)
-    is surfaced as [ERROR] not propagated."""
-    kb_dir = _make_kb_with_config(tmp_path)
-    target = kb_dir / "output" / "test.html"
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text("<html></html>", encoding="utf-8")
-
-    async def hits_cap(**_):
-        raise RuntimeError("Skill 'ultrakb-html-critic' hit the 40-step cap")
-
-    with patch("ultrakb.agent.skill_runner.run_skill", new=AsyncMock(side_effect=hits_cap)):
-        await _handle_slash_critique(str(target), kb_dir, _STYLE)
-
-    out = capsys.readouterr().out
-    assert "[ERROR]" in out
-    assert "step cap" in out or "step" in out.lower()
+async def test_critique_reports_an_actual_provider_error(kb_dir, monkeypatch, capsys):
+    accepted_artifact(kb_dir)
+    with ErrorTransport(status=400) as service:
+        monkeypatch.setenv("LLM_API_KEY", "offline-critique-key")
+        monkeypatch.setenv("OPENAI_API_BASE", service.url)
+        await _handle_slash_critique(_TARGET, kb_dir, _STYLE)
+        assert len(service.requests) == 1
+    output = capsys.readouterr().out
+    assert "[ERROR]" in output and "offline-critique-key" not in output

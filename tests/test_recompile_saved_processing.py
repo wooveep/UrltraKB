@@ -1,12 +1,11 @@
 """Ordinary recompilation consumes saved processing, independent of today's adapters."""
 
 import asyncio
-import hashlib
-import shutil
 import zipfile
 
 import pytest
 import test_presentation_import as slide_fixtures
+from native_catalog_fixtures import processing_snapshot
 from openpyxl import Workbook
 
 from ultrakb.application.recompilation import recompile_document, select_recompilation
@@ -70,11 +69,7 @@ def test_recompile_reuses_slide_processing_with_no_office_or_new_tree(
     )
     assert imported.status == "added", imported.message
     before = read_document_source(kb_dir, imported.source_id)
-    normalized = {
-        str(p): hashlib.sha256(p.read_bytes()).hexdigest()
-        for p in (kb_dir / ".ultrakb/normalized").rglob("*")
-        if p.is_file()
-    }
+    normalized = processing_snapshot(kb_dir)
     tree_calls = sum("PHYSICAL SLIDE STRUCTURE" in str(r) for r in single_slide_model)
     calls = []
 
@@ -98,11 +93,7 @@ def test_recompile_reuses_slide_processing_with_no_office_or_new_tree(
     for field in ("content", "processing", "office", "source_revision_id"):
         assert after[field] == before[field]
     assert after["knowledge_revision_id"] != before["knowledge_revision_id"]
-    assert normalized == {
-        str(p): hashlib.sha256(p.read_bytes()).hexdigest()
-        for p in (kb_dir / ".ultrakb/normalized").rglob("*")
-        if p.is_file()
-    }
+    assert normalized == processing_snapshot(kb_dir)
 
 
 def test_recompile_uses_retained_cnki_without_preparing_original_again(
@@ -135,50 +126,16 @@ def test_recompile_uses_retained_cnki_without_preparing_original_again(
         assert after[field] == before[field]
 
 
-def test_missing_saved_index_does_not_rebuild_from_the_original(
-    kb_dir, tmp_path, frozen_slide_conversion, single_slide_model, monkeypatch
-):
-    from saved_processing_publication import publish_saved_processing
-
-    from ultrakb.config import resolve_credential_bundle
-
-    apply_kb_config_patch(
-        kb_dir, KbConfigPatchRequest(kb=str(kb_dir), config={"pdf_short_max_pages": 0})
-    )
-    path = frozen_slide_conversion(tmp_path / "manual.pptx", "Original rule.")
-    imported = publish_saved_processing(
-        kb_dir, path, bundle=resolve_credential_bundle(kb_dir), indexed=True
-    )
-    assert imported.status == "added", imported.message
-    unit = imported.units[0]
-    snapshot = (
-        kb_dir / ".ultrakb/knowledge" / unit.view_id / "revisions" / unit.knowledge_revision_id
-    )
-    summary = (kb_dir / f"wiki/summaries/{unit.doc_name}.md").read_bytes()
-    calls = len(single_slide_model)
-    shutil.rmtree(snapshot / "index")
-
-    def forbidden(*args, **kwargs):
-        pytest.fail("A missing saved index cannot authorize original processing")
-
-    monkeypatch.setattr("ultrakb.office.convert.convert_office", forbidden)
-    monkeypatch.setattr("ultrakb.office.runtime.processing_identity", forbidden)
-    result = asyncio.run(recompile_document(kb_dir, imported.source_id))
-    assert result.status == "failed", result.message
-    assert len(single_slide_model) == calls
-    assert (kb_dir / f"wiki/summaries/{unit.doc_name}.md").read_bytes() == summary
-
-
 def test_docx_recompile_uses_saved_writer_pdf_with_no_office(
     kb_dir, tmp_path, frozen_slide_conversion, block_model, monkeypatch
 ):
     from saved_processing_publication import publish_saved_processing
 
     from ultrakb.config import resolve_credential_bundle
+    from ultrakb.file_digest import hash_file
     from ultrakb.locks import atomic_write_text
     from ultrakb.office.convert import convert_office
     from ultrakb.office.records import OfficeConversion
-    from ultrakb.state import HashRegistry
 
     # A fixed external Office result, with real retained provenance/digest checks.
     template = frozen_slide_conversion(tmp_path / "output-template.pptx", "hello Writer rule.")
@@ -187,7 +144,7 @@ def test_docx_recompile_uses_saved_writer_pdf_with_no_office(
         receipt = convert_office(kb_dir, template, output, **kwargs)
         record = OfficeConversion.model_validate_json(receipt.read_text()).model_copy(
             update={
-                "input_digest": HashRegistry.hash_file(source),
+                "input_digest": hash_file(source),
                 "filter": "writer_pdf_Export",
                 "detected_filter": "MS Word 2007 XML",
                 "print_hidden_text": False,

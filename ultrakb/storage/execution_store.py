@@ -276,6 +276,29 @@ class ExecutionStore:
             ).fetchone()
             return Execution(*row)
 
+    def application_operation(self, application_task_id: str) -> Execution | None:
+        """Find the latest correlated operation without claiming a model budget."""
+        _application_identity(application_task_id, None)
+        with storage_stage(self.root, self.identity, read_only=True) as db:
+            row = db.connection.execute(
+                "SELECT task_id, execution_id, model_budget_id FROM ukb_executions "
+                "WHERE application_task_id = ? ORDER BY sequence DESC LIMIT 1",
+                (application_task_id,),
+            ).fetchone()
+            return Execution(*row) if row is not None else None
+
+    def application_unit_execution(self, task_id: str, unit_id: str | None) -> Execution | None:
+        """Resolve the latest execution of this exact application work unit."""
+        _application_identity(task_id, unit_id)
+        with storage_stage(self.root, self.identity, read_only=True) as db:
+            row = db.connection.execute(
+                "SELECT task_id, execution_id, model_budget_id FROM ukb_executions "
+                "WHERE application_task_id = ? AND application_unit_id IS ? "
+                "ORDER BY sequence DESC LIMIT 1",
+                (task_id, unit_id),
+            ).fetchone()
+            return Execution(*row) if row else None
+
     def budget(self, model_budget_id: str) -> ModelBudget:
         with storage_stage(self.root, self.identity, read_only=True) as db:
             row = db.connection.execute(
@@ -298,6 +321,38 @@ class ExecutionStore:
             if row is None:
                 raise KeyError(execution_id)
             return Execution(*row)
+
+    def execution_unit(self, execution_id: str) -> str | None:
+        """Read the original unit ordinal when an explicit retry renumbers its work."""
+        with storage_stage(self.root, self.identity, read_only=True) as db:
+            row = db.connection.execute(
+                "SELECT application_unit_id FROM ukb_executions WHERE execution_id = ?",
+                (execution_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(execution_id)
+            return row[0]
+
+    def continue_local(self, execution_id, **correlation):
+        """Continue retained storage work under the unchanged original model policy."""
+        with storage_stage(self.root, self.identity, read_only=True) as db:
+            row = db.connection.execute(
+                "SELECT t.operation, b.fingerprint, b.max_calls, b.deadline_at "
+                "FROM ukb_executions e JOIN ukb_tasks t ON t.task_id = e.task_id "
+                "JOIN ukb_model_budgets b ON b.model_budget_id = e.model_budget_id "
+                "WHERE e.execution_id = ?",
+                (execution_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(execution_id)
+        return self.begin(
+            row[0],
+            fingerprint=row[1],
+            max_calls=row[2],
+            deadline_at=row[3],
+            resume=execution_id,
+            **correlation,
+        )
 
     def status(self, execution_id: str) -> str:
         with storage_stage(self.root, self.identity, read_only=True) as db:

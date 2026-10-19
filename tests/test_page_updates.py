@@ -240,11 +240,13 @@ def test_unclosed_generated_fence_cannot_consume_retained_page_content():
 
 @pytest.mark.parametrize("stale", [False, True])
 def test_compiler_patch_repair_is_bounded_at_transport(kb_dir, stale):
+    from compile_work_fixtures import checkpoint_record
     from test_compile_windows import _checkpoints
 
     from ultrakb.agent.page_delivery import validate_page_delivery
     from ultrakb.agent.page_response import PageResponseError, page_repair_message
     from ultrakb.agent.page_updates import PageUpdate
+    from ultrakb.compile_checkpoints import digest
 
     original = "# Conditions\n\nWinter rule.\n"
     update = PageUpdate(original)
@@ -262,11 +264,11 @@ def test_compiler_patch_repair_is_bounded_at_transport(kb_dir, stale):
             initial, page_update=update, read_current=lambda: "Human change." if stale else original
         )
     if stale:
-        assert not checkpoints.path.exists()
+        assert checkpoint_record(checkpoints, "page") == {}
     else:
         correction = page_repair_message(failure.value.code, str(failure.value), page_update=True)
         assert "captured base_sha256" in correction["content"]
-        checkpoints.claim_repair("page", "same-request")
+        checkpoints.claim_repair("page", digest("same-request"))
         result = json.loads(
             validate_page_delivery(
                 json.dumps({"base_sha256": data["base_sha256"], "edits": [edit]}),
@@ -277,4 +279,4 @@ def test_compiler_patch_repair_is_bounded_at_transport(kb_dir, stale):
         assert "Winter rule." in result["content"]
         assert "New supported condition." in result["content"]
         with pytest.raises(PageResponseError, match="compile_repair_exhausted"):
-            checkpoints.claim_repair("page", "same-request")
+            checkpoints.claim_repair("page", digest("same-request"))

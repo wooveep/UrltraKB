@@ -16,6 +16,7 @@ def main():
     args = parser.parse_args()
     root = args.output.resolve()
     root.mkdir(parents=True, exist_ok=False)
+    os.environ["ULTRAKB_CONFIG_DIR"] = str(root / "settings")
     os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "true"
     os.environ["OPENAI_AGENTS_DISABLE_TRACING"] = "1"
     for key in ("LLM_API_KEY", "OPENAI_API_KEY", "DEEPSEEK_API_KEY", "OPENAI_API_BASE"):
@@ -23,6 +24,7 @@ def main():
     if args.headless:
         os.environ["QT_QPA_PLATFORM"] = "offscreen"
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tests"))
+    from focus_fixtures import unprocessed_source
     from publication_fixtures import fail_document, publish_document
     from PySide6.QtCore import Qt, QTimer
     from PySide6.QtGui import QContextMenuEvent
@@ -32,15 +34,14 @@ def main():
     from ultrakb import config
     from ultrakb.application.document_batches import preview_document_batch
     from ultrakb.application.knowledge_bases import initialize_kb
+    from ultrakb.application.removal import remove_document
     from ultrakb.config import LlmCredentialBundle
     from ultrakb.desktop.document_rows import IDENTITY_ROLE
     from ultrakb.desktop.verification import create_application
     from ultrakb.desktop.verification_workbench import button
     from ultrakb.desktop.window import Workbench
     from ultrakb.locks import atomic_write_text, kb_ingest_lock
-    from ultrakb.mutation import mutation_scope
     from ultrakb.runtime.records import TERMINAL
-    from ultrakb.state import HashRegistry
 
     config.GLOBAL_CONFIG_DIR = root / "settings"
     config.GLOBAL_CONFIG_PATH = config.GLOBAL_CONFIG_DIR / "global.yaml"
@@ -59,11 +60,9 @@ def main():
         published.append(publish_document(kb, path, body, bundle=bundle).source_id)
     with kb_ingest_lock(kb / ".ultrakb"):
         atomic_write_text(kb / "raw/未完成.md", "# Unfinished input\n\nLocal delivery interrupted.")
-        HashRegistry(kb / ".ultrakb/hashes.json").add(
-            "f" * 64, {"name": "正文缺失.pdf", "doc_name": "missing", "type": "pdf"}
-        )
+    missing = unprocessed_source(kb, kb / "raw/正文缺失.pdf")
     fail_document(kb, kb / "raw/未完成.md", bundle=bundle)
-    app = create_application()
+    app = create_application(settings_dir=root / "qt-settings")
     app.setQuitOnLastWindowClosed(False)
     assert args.headless or app.platformName() not in {"offscreen", "minimal"}
     window = Workbench(history_dir=root / "tasks")
@@ -156,24 +155,35 @@ def main():
         reviewed = preview_document_batch(kb, tuple(panel.selection.checked), scope=panel.scope)
         assert {identity.value for identity in reviewed.approved} == set(published)
         assert len(reviewed.skipped) == 2 and all(skip.reason for skip in reviewed.skipped)
-        assert {target.name for target in reviewed.targets} and all(
-            "项目" in target.name for target in reviewed.targets
-        )
+        assert len(reviewed.targets) == 2
+        assert all(target.name for target in reviewed.targets)
         panel.grab().save(str(root / "mixed-selection.png"))
         checks.append("A09: selected 4/applicable 2; exact typed subset and per-item skip reasons")
-        with kb_ingest_lock(kb / ".ultrakb"):
-            with mutation_scope(kb, [kb / ".ultrakb/hashes.json"], operation="fixture-remove"):
-                HashRegistry(kb / ".ultrakb/hashes.json").remove_by_hash("f" * 64)
+        assert remove_document(kb, missing).status == "removed"
+        from ultrakb.application.views import published_scope
+        from ultrakb.storage.catalog_store import CatalogStore
+
+        assert CatalogStore(kb, published_scope(kb).knowledge.identity).source(missing).removed
         panel.reload()
-        wait(lambda: panel.table.rowCount() == 3 and len(panel.selection.checked) == 3)
-        assert len(panel.selection.checked) == 3 and "消失资料" in panel.status.text()
+        wait(
+            lambda: any(
+                row.identity.value == missing and row.document.get("removed")
+                for row in panel.rows.values()
+            )
+        )
+        assert panel.table.rowCount() == 4 and len(panel.selection.checked) == 4
+        withdrawn = next(row for row in panel.rows.values() if row.identity.value == missing)
+        assert withdrawn.document["removed"] and not withdrawn.actions["recompile"].allowed, (
+            withdrawn.document
+        )
         panel.state_filter.setCurrentText("未完成")
         assert not panel.selection.checked and "清空勾选" in panel.status.text()
         panel.select_visible_button.click()
         assert len(panel.selection.checked) == 1 and not panel.bulk_recompile.isEnabled()
         assert panel.bulk_remove.isEnabled()
         checks.append(
-            "A08/A09: disappeared target removed, filter clears and ineligible-only batch disabled"
+            "A08/A09: withdrawn source retains history, filter clears "
+            "and ineligible-only batch disabled"
         )
         panel.state_filter.setCurrentText("全部")
         panel.select_visible_button.click()
@@ -215,7 +225,7 @@ def main():
             panel.bulk_recompile.click()
             wait(lambda: window.onboarding.dialog is not None)
             timer.stop()
-            assert len(confirmation) == 1 and "选中 3 项，仅执行 2 项" in confirmation[0]
+            assert len(confirmation) == 1 and "选中 4 项，仅执行 2 项" in confirmation[0]
             editor = window.onboarding.dialog.editors[0]
             wait(lambda: editor.form.isEnabled())
             for key, value in (

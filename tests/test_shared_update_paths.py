@@ -7,8 +7,9 @@ import asyncio
 import json
 
 import pytest
+from stream_transport import StreamTransport
 
-from ultrakb.agent import compiler, update_generation
+from ultrakb.agent import update_generation
 from ultrakb.config import LlmCredentialBundle
 from ultrakb.locks import atomic_write_text, kb_ingest_lock
 
@@ -24,13 +25,12 @@ def test_application_paths_share_bounded_coordination_and_safe_patch_assembly(
     from ultrakb.application.refresh import refresh_selected_sources, refresh_status
     from ultrakb.application.reprocessing import preview_reprocessing, reprocess_source
     from ultrakb.application.views import view_scope
-    from ultrakb.unit_publication import read_head
 
     bundle = LlmCredentialBundle(api_key="offline-protocol-fixture")
     with kb_ingest_lock(kb_dir / ".ultrakb"):
         atomic_write_text(
             kb_dir / ".ultrakb/config.yaml",
-            "model: deepseek/deepseek-flash\n"
+            "model: openai/gpt-4o-mini\n"
             "language: en\nmodel_policy:\n  max_calls: 100\n  retries: 0\n"
             "model_capacity:\n  max_input_bytes: 100000\n",
         )
@@ -58,8 +58,17 @@ def test_application_paths_share_bounded_coordination_and_safe_patch_assembly(
             second_path,
             summer,
             bundle=bundle,
+        )
+        publish_document(
+            kb_dir,
+            second_path,
+            summer,
+            bundle=bundle,
             shared_body=body,
-            shared_sources=["summaries/manual.md", "summaries/summer.md"],
+            shared_sources=[
+                f"summaries/{first.units[0].doc_name}.md",
+                f"summaries/{second.units[0].doc_name}.md",
+            ],
         )
         path.write_text(winter + "Updated winter scope.\n")
         publish_document(kb_dir, path, path.read_text(), bundle=bundle)
@@ -67,7 +76,7 @@ def test_application_paths_share_bounded_coordination_and_safe_patch_assembly(
         publish_document(kb_dir, second_path, second_path.read_text(), bundle=bundle)
 
     scope = view_scope(kb_dir, first.units[0].view_id)
-    before = read_head(kb_dir)
+    before = scope.publication_id
     calls, bounded_targets = [], set()
 
     def fits(messages):
@@ -145,32 +154,43 @@ def test_application_paths_share_bounded_coordination_and_safe_patch_assembly(
             }
         return json.dumps(result)
 
-    async def arespond(*args, **kwargs):
-        return respond(*args, **kwargs)
-
-    monkeypatch.setattr(compiler, "_llm_call", respond)
-    monkeypatch.setattr(compiler, "_llm_call_async", arespond)
-    if operation == "import":
-        incoming = kb_dir / "summer.md"
-        incoming.write_text(summer)
-        result = import_document(kb_dir, incoming)
-    elif operation == "reprocess":
-        preview = preview_reprocessing(kb_dir, first.source_id)
-        result = reprocess_source(kb_dir, first.source_id, version=preview["version"])
-    else:
-        result = asyncio.run(
-            refresh_selected_sources(
-                kb_dir,
-                [first.source_id, second.source_id],
-                scope=scope,
-                page_paths=["concepts/shared.md"],
-            )
+    def deliver(payload, index):
+        messages = payload["messages"]
+        text = json.dumps(messages)
+        stage = (
+            "update"
+            if "Temporary editable page blocks:" in text
+            else "concepts-plan"
+            if "decide how to update" in text
+            else "summary"
         )
+        return {"content": respond("openai/gpt-4o-mini", messages, stage)}
+
+    with StreamTransport(deliver) as service:
+        (kb_dir / ".env").write_text(
+            f"LLM_API_KEY=offline-protocol-fixture\nOPENAI_API_BASE={service.url}\n"
+        )
+        if operation == "import":
+            incoming = kb_dir / "summer.md"
+            incoming.write_text(summer)
+            result = import_document(kb_dir, incoming)
+        elif operation == "reprocess":
+            preview = preview_reprocessing(kb_dir, first.source_id)
+            result = reprocess_source(kb_dir, first.source_id, version=preview["version"])
+        else:
+            result = asyncio.run(
+                refresh_selected_sources(
+                    kb_dir,
+                    [first.source_id, second.source_id],
+                    scope=scope,
+                    page_paths=["concepts/shared.md"],
+                )
+            )
     assert result.status in {"added", "completed", "partial"}, result.message
-    after = read_head(kb_dir)
-    assert after.knowledge_revision_id != before.knowledge_revision_id
-    page = (scope.wiki_dir / "concepts/shared.md").read_text()
-    assert "Updated paragraph.\n\n    command" in page
+    scope = view_scope(kb_dir, first.units[0].view_id)
+    assert scope.publication_id != before
+    page = scope.knowledge.read("concepts/shared.md").decode()
+    assert "Updated paragraph.\n\n    command" in page, (result, calls, bounded_targets)
     assert "Winter and summer rules" in page
     assert () in bounded_targets, "Every application path must reach bounded metadata coordination"
     assert "concepts/shared.md" not in refresh_status(kb_dir, scope=scope)["needs_refresh"]

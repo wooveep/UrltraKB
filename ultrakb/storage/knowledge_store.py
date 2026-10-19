@@ -412,6 +412,7 @@ class KnowledgeStore:
         check_cancelled: Callable[[], None] = lambda: None,
         execution_id: str | None = None,
         review_version: str | None = None,
+        on_wait: Callable[[], None] | None = None,
     ) -> Publication:
         def cancelled():
             check_cancelled()
@@ -419,8 +420,10 @@ class KnowledgeStore:
 
         with (
             storage_stage(self.root, self.identity) as db,
-            projection_lock(self.root, cancelled=cancelled),
-            file_write_lock(self.root / ".ultrakb/ingest.lock", cancelled=cancelled),
+            projection_lock(self.root, cancelled=cancelled, on_wait=on_wait),
+            file_write_lock(
+                self.root / ".ultrakb/ingest.lock", cancelled=cancelled, on_wait=on_wait
+            ),
             db.transaction() as connection,
         ):
             record = connection.execute(
@@ -581,6 +584,13 @@ class KnowledgeStore:
     def bind(
         self, publication_id: str | None = None, *, view_id: str = "legacy", cancelled=None
     ) -> BoundKnowledge:
+        return self._bind(publication_id, view_id, cancelled, require_ready_navigation=True)
+
+    def diagnostic_publication(self, *, view_id: str = "legacy") -> BoundKnowledge:
+        """Inspect committed content even when navigation needs explicit recovery."""
+        return self._bind(None, view_id, None, require_ready_navigation=False)
+
+    def _bind(self, publication_id, view_id, cancelled, *, require_ready_navigation):
         with storage_stage(self.root, self.identity, read_only=True, cancelled=cancelled) as db:
             if publication_id is None:
                 head = db.connection.execute(
@@ -595,9 +605,31 @@ class KnowledgeStore:
             ).fetchone()
             if not row:
                 raise FileNotFoundError("This knowledge publication is unavailable")
-            require_navigation(db, row[0])
+            if require_ready_navigation:
+                require_navigation(db, row[0])
             return BoundKnowledge(
                 self.root, self.identity, Publication(publication_id, row[0], view_id)
+            )
+
+    def bind_revision(
+        self, revision_id: str, *, view_id="legacy", cancelled=None
+    ) -> BoundKnowledge:
+        from pydantic import TypeAdapter
+
+        from ultrakb.source_records import RecordId, ViewId
+
+        TypeAdapter(RecordId).validate_python(revision_id)
+        TypeAdapter(ViewId).validate_python(view_id)
+        with storage_stage(self.root, self.identity, read_only=True, cancelled=cancelled) as db:
+            row = db.connection.execute(
+                "SELECT publication_id FROM ukb_publications WHERE revision_id = ? AND view_id = ?",
+                (revision_id, view_id),
+            ).fetchone()
+            if row is None:
+                raise FileNotFoundError("This retained knowledge revision was never published")
+            require_navigation(db, revision_id)
+            return BoundKnowledge(
+                self.root, self.identity, Publication(row[0], revision_id, view_id)
             )
 
     def repair_navigation(self, publication_id: str, *, view_id: str = "legacy"):

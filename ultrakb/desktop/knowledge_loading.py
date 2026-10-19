@@ -15,10 +15,14 @@ def display_context(
     page = context.page
     root, request_id = window.kb, window._page_request_id
     open_id = window._open_request_id
+    from ultrakb.lifecycle import current_generation
+
+    generation = current_generation(root)
 
     def current():
         from ultrakb.lifecycle import current_generation
         from ultrakb.mutation import RecoveryRequired
+        from ultrakb.storage.database import open_database
 
         if (
             window.kb != root
@@ -28,7 +32,10 @@ def display_context(
         ):
             return False
         try:
-            return current_generation(root) == scope.publication.generation
+            if current_generation(root) != generation or scope.knowledge is None:
+                return False
+            with open_database(root, expected=scope.knowledge.identity, read_only=True):
+                return True
         except (OSError, ValueError, RecoveryRequired):
             return False
 

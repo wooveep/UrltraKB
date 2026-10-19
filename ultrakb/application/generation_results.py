@@ -66,6 +66,8 @@ def with_generation_usage(scope, context, result, previous):
     identity = (
         execution.execution_id
         if execution is not None and (execution is not previous or result.generation_id is not None)
+        else previous.execution_id
+        if previous is not None
         else context.resume_storage_execution_id
         if result.generation_id is not None
         else None

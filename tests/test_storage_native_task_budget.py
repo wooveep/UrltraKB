@@ -18,7 +18,6 @@ pytestmark = pytest.mark.integration
 
 
 def _native_unit(root, task_id, ordinal, parent_task_id):
-    import ultrakb.application.views as views
     from ultrakb.application.execution import ExecutionContext
     from ultrakb.application.generators import preview_generation
     from ultrakb.application.views import storage_scope
@@ -30,15 +29,13 @@ def _native_unit(root, task_id, ordinal, parent_task_id):
     with open_database(root, read_only=True) as db:
         scope = storage_scope(root, db.identity)
     name = f"value-{ordinal}"
-    with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(views, "view_scope", lambda *args: scope)
-        version = preview_generation(root, "deck", name, scope=scope).version
-        request = GenerateArtifact("deck", name, "Present value.", version, view_id="legacy")
-        result = _execute(
-            request,
-            UnitIdentity.create(task_id, ordinal, str(root), request),
-            ExecutionContext(parent_usage_task_id=parent_task_id),
-        )
+    version = preview_generation(root, "deck", name, scope=scope).version
+    request = GenerateArtifact("deck", name, "Present value.", version, view_id="legacy")
+    result = _execute(
+        request,
+        UnitIdentity.create(task_id, ordinal, str(root), request),
+        ExecutionContext(parent_usage_task_id=parent_task_id),
+    )
     (root.parent / f"native-{ordinal}.json").write_text(json.dumps(result.summary()))
 
 

@@ -2,6 +2,7 @@
 
 import pymupdf
 import pytest
+from native_catalog_fixtures import retained_pdf_bytes
 
 pytest_plugins = ("cnki_fixtures", "test_pdf_readback")
 
@@ -24,7 +25,7 @@ def test_cnki_preflight_and_publication_use_one_conversion(kb_dir, monkeypatch, 
     from ultrakb.application.documents import import_document
     from ultrakb.cnki.convert import convert_cnki
     from ultrakb.documents import read_document_source
-    from ultrakb.state import HashRegistry
+    from ultrakb.file_digest import hash_file
 
     with pymupdf.open() as pdf:
         pdf.new_page().insert_text((72, 72), "Original CNKI content.")
@@ -35,7 +36,7 @@ def test_cnki_preflight_and_publication_use_one_conversion(kb_dir, monkeypatch, 
         b"KDH 2.00".ljust(254, b"\0")
         + bytes(byte ^ key[i % len(key)] for i, byte in enumerate(data))
     )
-    original_digest = HashRegistry.hash_file(source)
+    original_digest = hash_file(source)
     calls = []
 
     def conversion(*args, **kwargs):
@@ -46,14 +47,14 @@ def test_cnki_preflight_and_publication_use_one_conversion(kb_dir, monkeypatch, 
     result = import_document(kb_dir, source)
     assert result.status == "added", result.message
     assert len(calls) == 1
-    assert HashRegistry.hash_file(source) == original_digest
+    assert hash_file(source) == original_digest
     assert not source.with_suffix(".pdf").exists()
     retained = read_document_source(kb_dir, result.source_id, pages="1")
     assert retained["name"] == source.name
     assert retained["cnki"]["internal_format"] == "KDH"
     assert "office" not in retained
     assert "Original CNKI content." in retained["content"]
-    assert (kb_dir / retained["internal_pdf_path"]).is_file()
+    assert retained_pdf_bytes(kb_dir, retained).startswith(b"%PDF-")
     assert retained["cnki"]["input_digest"] == original_digest
     repeated = import_document(kb_dir, source)
     assert repeated.status == "skipped"
@@ -111,12 +112,13 @@ def test_changed_converter_requires_explicit_reprocessing_and_history_keeps_old_
     assert len(conversions) == 2
     now = read_document_source(kb_dir, first.source_id)
     history = read_document_source(
-        kb_dir, first.source_id, source_revision_id=first.source_revision_id
+        kb_dir, first.source_id, unit_revision_id=before["unit_revision_id"]
     )
-    assert now["source_revision_id"] != before["source_revision_id"]
+    assert now["unit_revision_id"] != before["unit_revision_id"]
+    assert now["source_revision_id"] == before["source_revision_id"]
     assert now["cnki"]["processing_identity"]["policy"] == "cnki-pdf-fixture-next"
     assert history["cnki"] == before["cnki"]
-    assert history["internal_pdf_path"] == before["internal_pdf_path"]
+    assert retained_pdf_bytes(kb_dir, history) == retained_pdf_bytes(kb_dir, before)
     assert history["content"] == before["content"]
     assert len(conversions) == 2
 
@@ -136,11 +138,14 @@ def test_conversion_failure_retains_original_without_publishing_knowledge(
         message = "CNKI runtime is unavailable"
     original = cnki_source.read_bytes()
     result = import_document(kb_dir, cnki_source)
-    assert result.status == "failed" and message in result.message
-    saved = read_document_source(kb_dir, result.source_id)
-    assert saved["knowledge_revision_id"] is None
-    assert "internal_pdf_path" not in saved and "cnki" not in saved
-    assert (kb_dir / saved["original_path"]).read_bytes() == original
+    assert result.status == "blocked" and message in result.message
+    assert read_document_source(kb_dir, result.source_id) is None
+    from ultrakb.application.views import published_scope
+    from ultrakb.storage.catalog_store import CatalogStore
+
+    catalog = CatalogStore(kb_dir, published_scope(kb_dir).knowledge.identity)
+    assert catalog.read_original(result.source_revision_id) == original
+    assert catalog.source_units(result.source_id) == ()
 
 
 def test_pending_recovered_cnki_shares_one_conversion(
@@ -148,10 +153,11 @@ def test_pending_recovered_cnki_shares_one_conversion(
 ):
     from zipfile import ZipFile
 
+    from native_catalog_fixtures import list_sources
+
     from ultrakb.application.documents import import_document
     from ultrakb.application.pending import pending_status, process_pending
     from ultrakb.documents import read_document_source
-    from ultrakb.source_catalog import list_sources
 
     outer = tmp_path / "container.docx"
     with ZipFile(outer, "w") as package:

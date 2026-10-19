@@ -1,14 +1,40 @@
 """Explicit current-format state for tests that assemble minimal KBs by hand."""
 
-import json
-
 
 def mark_current_kb(root):
-    from ultrakb.kb_format import KB_FORMAT
+    """Explicitly create an empty native test store; future file edits stay drafts."""
+    from ultrakb.storage.database import create_database, database_path, open_database
+    from ultrakb.storage.knowledge_store import KnowledgeStore
+
+    if database_path(root).is_file():
+        with open_database(root, read_only=True):
+            return
+    # Some callers assembled only configuration before explicitly requesting
+    # a native fixture. Preserve that input, never interpret an old registry.
+    import os
+    import tempfile
+    from pathlib import Path
 
     state = root / ".ultrakb"
-    state.mkdir(parents=True, exist_ok=True)
-    (state / "format.json").write_text(json.dumps(KB_FORMAT))
+    entries = {path.name for path in state.iterdir()} if state.exists() else set()
+    if entries - {"config.yaml"}:
+        raise ValueError("Native test fixtures cannot migrate existing state")
+    with tempfile.TemporaryDirectory(prefix="native-fixture-config-", dir=root.parent) as name:
+        config = state / "config.yaml"
+        saved = Path(name) / "config.yaml"
+        if config.exists():
+            os.replace(config, saved)
+        try:
+            identity = create_database(root)
+        finally:
+            if saved.exists():
+                os.replace(saved, config)
+    if not config.exists():
+        from ultrakb.config import save_config
+
+        save_config(config, {})
+    store = KnowledgeStore(root, identity)
+    store.publish(store.prepare_revision({}, expected=None))
 
 
 def seed_document_index(root, identity, name):

@@ -119,7 +119,7 @@ LiteLLM `.2` 验证（2026-10-06）：开发与独立 wheel 环境分别通过 2
 
 编译通过 `ultrakb/llm_execution.py`，在 KB 租约取得后由 `ExecutionContext` 冻结角色模型、凭据和政策。默认所有角色继承 `model`；可选 `conversation_model`、`retrieval_model` 只覆盖模型名，共享同一凭据与端点。运行中编辑配置只影响新任务。API key 在快照中缺失时，API key 认证路径在发送前失败，不能读取之后加入的环境或 SDK 全局 key；订阅登录、工作负载身份和本地 Ollama 保留 SDK 自有认证路径。
 
-KB 的 `model_policy` 可设置 `max_calls`（默认 `null`，无固定总上限）、`concurrency`（5）、`retries`（2）、`backoff`（0.25 秒）及可选 `deadline_seconds`。计数跨角色、修复和重试共用。文档索引同时遵守已有 `concurrency` / `IndexConfig.max_concurrency`，实际并发不会超过任一限制。普通 completion 的网络重试只有执行器负责，首次发送就关闭 SDK 自动重试；没有可观察 HTTPX 发送的失败不自动重试，也不声称传输观测完整。取消或过期后保留已花费的用量，丢弃迟到结果。
+KB 的 `model_policy` 可设置 `max_calls`（默认 `null`，无固定总上限）、`concurrency`（5）、`retries`（2）、`backoff`（0.25 秒）及可选 `deadline_seconds`。计数跨角色、修复和重试共用。文档索引同时遵守已有 `concurrency` / `IndexConfig.max_concurrency`，实际并发不会超过任一限制。普通 completion 的网络重试只有执行器负责，首次发送就关闭 SDK 自动重试；没有可观察 HTTPX 发送的失败不自动重试，也不声称传输观测完整。取消或过期后保留已花费的用量和收到的响应，过期执行不能发布迟到结果。
 
 PageIndex `.17` 保留原始编号、父范围及逐分片定位恢复，并增加独立节点校验和摘要的
 有界批处理。`IndexConfig.node_batch_size` 默认 8，可设为 1 恢复逐节点；该调度设置不进入
@@ -129,7 +129,7 @@ PageIndex `.17` 保留原始编号、父范围及逐分片定位恢复，并增�
 [默认容量与执行限制](default-limits.md)。发送预算与已处理资料数量分别展示，
 发送次数不用于估算导入完成百分比；当前 `model_policy` 不在全局配置继承白名单中。
 
-账本区分逻辑调用、发送尝试、父调用与 operation/stage/prompt version，只保存模型/政策摘要，不保存请求正文或凭据。HTTPX 观察更新同一条发送记录；应用缓存命中与供应商缓存 token 分开。独立算法客户端将通过各自窄协议使用同一执行器。Agent、PageIndex 和 ChatIndex 的迁移分别验证，不代表技能及幻灯片生成等所有旧入口已迁移。
+账本区分逻辑调用、发送尝试、父调用与 operation/stage/prompt version，只保存模型/政策摘要，不保存请求正文或凭据。HTTPX 观察更新同一条发送记录；应用缓存命中与供应商缓存 token 分开。Agent、PageIndex、ChatIndex、技能及幻灯片生成通过各自窄协议使用同一执行器与主库请求账本。生成计划、已接受模型成果和产物发布具有独立的耐久边界；恢复沿用原始知识输入与累计预算。CLI、桌面 worker 和 HTTP 调用同一共享用例。
 
 Agent answers use `ManagedAgentModel` with Agents SDK `ModelRetrySettings`.
 The SDK retains responsibility for tool execution and replay safety. Every
@@ -139,20 +139,21 @@ counts, and stream cleanup completes before application leases are released.
 
 ## 新版知识库与文档索引
 
-新建知识库在 `.ultrakb/format.json` 声明 `ultrakb.context-kb` 版本 1。
-共享应用入口在写入和模型调用前拒绝没有标记的旧库及未知格式，不迁移旧数据。
+新建知识库在 `.ultrakb/kb.sqlite` 声明 `ultrakb.context-kb` 版本 2、库身份和运行代次。
+共享应用入口在建表、恢复、写入和模型调用前拒绝旧库及未知格式，不迁移旧数据。
 重新导入原始资料需要显式新建库；新版库内部的历史来源、知识修订和产物引用继续保留。
 
-所有 UltraKB 文档客户端由 `ultrakb/index_client.py` 构造，同时注入任务模型和
-`ConDBPageIndexStorage`。`IndexLocation` 描述数据库、托管输入根、格式、只读性与
-所属修订。工作库使用 `context.sqlite`，`okb_` 表完整保存构建文档、原始 metadata、
-pages 和扩展字段；源文件摘要与处理策略去重键分开保存，树与业务映射在同一事务提交。
+UltraKB 运行时通过共享主库的存储适配器访问文档、会话和确定性知识导航树。
+三类树共用 ConDB 存储，保留独立身份和内容策略。ready 文档索引及完整构建结果
+独立提交，后续编译或知识发布失败不会撤销它们。输入通过托管清单物化，
+不存在运行时每来源独立的 `context.sqlite` 或整库发布副本。
 
-发布索引包前关闭连接、checkpoint 并核对 SQLite 完整性；复制主数据库与托管输入，
-通过既有文件系统 mutation 发布。包内 `index.json` 声明相对位置与修订归属，
+独立 SDK 仍可使用 `IndexLocation` / `ConDBPageIndexStorage` 创建显式索引包。
+导出时关闭连接、checkpoint 并核对 SQLite 完整性；包内 `index.json` 声明相对位置与修订归属，
 封存后客户端和 SQLite 都拒绝修改，读取不会重新调用模型或重建丢失缓存。
 搬移后按包的新位置解析输入；重编译沿用已保留的处理结果，重新处理才采用新策略。
-SQLite 提交和文件系统发布由各自事务保护，不把二者描述为一个跨系统原子事务。
+显式包不是 UltraKB 运行时第二主库。完整知识库的移动或备份应使用
+`ultrakb storage backup` / `restore`，不可复制活跃主库单文件。
 
 
 2026-10-06 整批整合验证（实施票 108–115）：

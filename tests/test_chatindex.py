@@ -197,14 +197,13 @@ def test_restore_rejects_unverifiable_checkpoint(model_service, damage):
 def test_real_runtime_adapter_uses_shared_budget_and_never_serializes_secrets(
     model_service, kb_dir
 ):
+    from native_usage_fixtures import native_usage_execution, read_requests
     from test_llm_execution import executor_for
 
     from ultrakb.conversation_index import create_conversation_index
     from ultrakb.llm_execution import ModelBudgetExceeded
-    from ultrakb.llm_usage import read_requests
-    from ultrakb.llm_usage_execution import import_usage_execution
 
-    with import_usage_execution(kb_dir, "conversation_index"):
+    with native_usage_execution(kb_dir, "conversation_index"):
         runtime = executor_for(model_service, max_calls=1)
         tree = create_conversation_index("session-fixture", executor=runtime)
         tree.add_exchange("first", "a user fact", "SECRET")

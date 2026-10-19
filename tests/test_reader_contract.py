@@ -39,8 +39,10 @@ async def test_final_page_and_slide_schemas_have_no_nullable_part(kb_dir, slides
 @pytest.mark.asyncio
 async def test_wrong_reader_and_outside_range_offer_executable_actions(kb_dir):
     source(kb_dir)
-    (kb_dir / "wiki/sources/pages.json").write_bytes(
-        (kb_dir / "wiki/sources/manual.json").read_bytes()
+    from reading_fixtures import publish_original
+
+    publish_original(
+        kb_dir, json.loads((kb_dir / "wiki/sources/manual.json").read_bytes()), doc_name="pages"
     )
     source(kb_dir, slides=True)
     agent = agent_for(kb_dir)

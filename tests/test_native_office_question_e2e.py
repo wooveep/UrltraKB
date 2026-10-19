@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 
 import pytest
+from native_catalog_fixtures import original_bytes, retained_pdf_bytes
 from native_question_inputs import write_office_input
 from test_setup_question_capacity import wait_until
 
@@ -35,7 +36,7 @@ def test_fresh_office_import_delivers_native_originals_to_a_real_answer(
     from PySide6.QtWidgets import QApplication
 
     from ultrakb import config
-    from ultrakb.agent.chat_session import load_session
+    from ultrakb.application.conversations import read_conversation
     from ultrakb.application.knowledge_bases import get_kb_list, initialize_kb
     from ultrakb.application.query_views import read_selected_file, resolve_query_views
     from ultrakb.application.sources import source_inventory
@@ -145,7 +146,7 @@ def test_fresh_office_import_delivers_native_originals_to_a_real_answer(
             assert saved["unit_kind"] == "page" and saved["pages"] == 1
             assert saved["office"]["runtime_fingerprint"] == runtime[1].fingerprint
             assert saved["office"]["build_id"] == runtime[1].build_id
-            assert (kb / saved["internal_pdf_path"]).read_bytes().startswith(b"%PDF-")
+            assert retained_pdf_bytes(kb, saved).startswith(b"%PDF-")
             reader = readers[units[0].doc_name]
             if kind == "pptx":
                 body = read_document_source(kb, source_id, pages="1", part="body")
@@ -169,7 +170,7 @@ def test_fresh_office_import_delivers_native_originals_to_a_real_answer(
                 )
         assert reader["reading_action"]["tool"] == tool
         assert reader["source_revision_id"] == saved["source_revision_id"]
-        assert (kb / saved["original_path"]).read_bytes() == original
+        assert original_bytes(kb, saved["source_revision_id"]) == original
         answer_start = len(live_llm.requests)
         answer_id = manager.submit(
             kb, [ContinueConversation(question)], require_verified_connection=True
@@ -183,9 +184,9 @@ def test_fresh_office_import_delivers_native_originals_to_a_real_answer(
         task = manager.get(answer_id)
         assert task.state == "completed" and task.unfinished == 0, task.error
         result = task.results[0]
-        session = load_session(kb, result.session_id)
-        assert result.turn_count == session.turn_count == 1
-        answer = session.turns[0].assistant_text
+        session = read_conversation(kb, result.session_id)
+        assert result.turn_count == session.total_turns == 1
+        answer = session.turns[0][1]
         assert answer == result.output and answer_fact.lower() in answer.lower()
         if excluded_fact is not None:
             assert excluded_fact.lower() not in answer.lower()

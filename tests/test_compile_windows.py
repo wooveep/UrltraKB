@@ -35,71 +35,17 @@ def _plan(wiki, value):
 
 
 def _checkpoints(kb_dir):
-    import uuid
+    from compile_work_fixtures import new_compile_work
 
-    from ultrakb.compile_checkpoints import CompileCheckpoints
-    from ultrakb.lifecycle import current_generation
-    from ultrakb.model_task import ModelTask
-
-    task = ModelTask(
-        task_id=uuid.uuid4().hex,
-        kb_generation=current_generation(kb_dir),
-        fingerprint="f" * 64,
-        bindings={"models": {"compile": "deepseek/deepseek-flash"}},
-        policy={"max_calls": 2},
-    )
-    return CompileCheckpoints(kb_dir, task, {"document": "manual"}, {"protocol": "page-v1"})
+    return new_compile_work(kb_dir, {"document": "manual"}, {"protocol": "page-v1"})
 
 
 @contextmanager
 def _publication(kb_dir, retained, *, recompile=False):
-    """Publish genuine retained inputs, without a generator or model replacement."""
-    from ultrakb.ingest_records import UnitRevision
-    from ultrakb.normalization import normalization_id, read_normalization, restore_normalization
-    from ultrakb.source_catalog import read_admission, read_record, read_source
-    from ultrakb.source_map import freeze_text_map
-    from ultrakb.unit_publication import (
-        begin_unit_attempt,
-        list_source_units,
-        prepare_compile_view,
-        publish_unit_revision,
-    )
+    from native_publication_fixtures import publication_workspace
 
-    admission = read_admission(kb_dir, read_source(kb_dir, retained.source_id))
-    [unit] = list_source_units(kb_dir, retained.source_id)
-    revision = read_record(kb_dir, "unit-revisions", unit.target_revision_id, UnitRevision)
-    from ultrakb.locks import kb_ingest_lock
-
-    with kb_ingest_lock(kb_dir / ".ultrakb"):
-        state, admitted = begin_unit_attempt(
-            kb_dir,
-            unit,
-            revision,
-            retry_confirmed=True,
-            recompile=recompile,
-            discovery_intent=admission.discovery_intent,
-        )
-        assert admitted
-        directory, normalized = read_normalization(
-            kb_dir, normalization_id(revision.source_revision_id, revision.processing_fingerprint)
-        )
-        with prepare_compile_view(kb_dir) as view:
-            converted = restore_normalization(directory, normalized, view.scope.wiki_dir.parent)
-            yield view.scope.wiki_dir, unit.doc_name
-            state = publish_unit_revision(
-                kb_dir,
-                admission,
-                unit,
-                revision,
-                state,
-                view,
-                normalized_source=converted.source_path.relative_to(view.scope.wiki_dir).as_posix(),
-                source_map=freeze_text_map(view.scope.wiki_dir, unit.doc_name),
-                processing=converted.processing,
-                is_long=converted.is_long_doc,
-                normalized_format="markdown",
-            )
-            assert state.status == "completed"
+    with publication_workspace(kb_dir, retained.unit_revision_id) as (wiki, target):
+        yield wiki, target.doc_name
 
 
 def _page_request(reader, item, *, kind="concepts", action="create", long=False):
@@ -230,7 +176,7 @@ def test_unchanged_update_resolves_without_new_source_contribution(kb_dir, proce
     retained = page_evidence(live_scope(kb_dir), f"{kind}/river-equipment.md")
     assert retained["source_revision_ids"] == basis["source_revision_ids"]
     assert retained["refresh_reasons"] == basis["refresh_reasons"]
-    assert run_remove_for_api(kb_dir, "new")["status"] == "removed"
+    assert run_remove_for_api(kb_dir, duplicate.source_id)["status"] == "removed"
     assert page.read_bytes() == before
     assert page_evidence(live_scope(kb_dir), f"{kind}/river-equipment.md")[
         "source_revision_ids"
@@ -359,13 +305,13 @@ def test_navigation_only_import_keeps_fact_provenance_and_survives_removal(kb_di
             rewrite_summary=True,
         )
     assert page.read_bytes() == before
-    assert "[[concepts/orchard]]" in (kb_dir / "wiki/summaries/new.md").read_text()
-    assert frontmatter.parse(page.read_text())["sources"] == ["summaries/old.md"]
+    assert "[[concepts/orchard]]" in (kb_dir / f"wiki/summaries/{current.doc_name}.md").read_text()
+    assert frontmatter.parse(page.read_text())["sources"] == [f"summaries/{first.doc_name}.md"]
     assert (
         page_evidence(live_scope(kb_dir), "concepts/orchard.md")["source_revision_ids"]
         == basis["source_revision_ids"]
     )
-    assert run_remove_for_api(kb_dir, "new")["status"] == "removed"
+    assert run_remove_for_api(kb_dir, current.source_id)["status"] == "removed"
     assert page.read_bytes() == before
     assert (
         page_evidence(live_scope(kb_dir), "concepts/orchard.md")["source_revision_ids"]
@@ -404,9 +350,9 @@ def test_short_summary_format_repair_is_bounded_before_publication(kb_dir, repai
     assert "one JSON object" in repair["content"]
     assert "Do not append a second object" in repair["content"]
     checkpoints = _checkpoints(kb_dir)
-    checkpoints.claim_repair("summary", "request")
+    checkpoints.claim_repair("summary", "a" * 64)
     with pytest.raises(PageResponseError):
-        checkpoints.claim_repair("summary", "request")
+        checkpoints.claim_repair("summary", "a" * 64)
     summary = kb_dir / "wiki/summaries/capacity.md"
     if repaired:
         raw = validate_page_delivery(
@@ -637,11 +583,6 @@ def test_long_import_reads_native_windows_from_confirmed_locations(kb_dir, sugge
 def test_workbook_page_request_preserves_sparse_native_rows(kb_dir, processing_only):
     from openpyxl import Workbook
 
-    from ultrakb.ingest_records import UnitRevision
-    from ultrakb.normalization import normalization_id, read_normalization
-    from ultrakb.source_catalog import read_record
-    from ultrakb.unit_publication import list_source_units
-
     book = Workbook()
     sheet = book.active
     sheet.title = "设备清单"
@@ -654,13 +595,9 @@ def test_workbook_page_request_preserves_sparse_native_rows(kb_dir, processing_o
     source = kb_dir / "设备.xlsx"
     book.save(source)
     retained = processing_only(source)
-    [unit] = list_source_units(kb_dir, retained.source_id)
-    revision = read_record(kb_dir, "unit-revisions", unit.target_revision_id, UnitRevision)
-    directory, saved = read_normalization(
-        kb_dir, normalization_id(revision.source_revision_id, revision.processing_fingerprint)
-    )
-    reader = CompileSourceWindows(directory / "wiki", unit.doc_name)
-    payload = reader.current_original_evidence()
+    with _publication(kb_dir, retained) as (wiki, name):
+        reader = CompileSourceWindows(wiki, name)
+        payload = reader.current_original_evidence()
     rows = {r["row"]: r["cells"] for r in payload["worksheet_rows"]}
     assert [c["coordinate"] for c in rows[2]] == ["A2", "C2"]
     assert [c["coordinate"] for c in rows[9]] == ["A9", "C9", "F9"]

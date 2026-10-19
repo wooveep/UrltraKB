@@ -1,12 +1,18 @@
-"""Explicitly seal manually assembled storage inputs before HTTP reading tests."""
+"""Explicitly publish manually assembled fixture pages before HTTP reading tests."""
 
 
 def publish_fixture(kb_dir):
-    from ultrakb.locks import kb_ingest_lock
-    from ultrakb.published_knowledge import initialize_publication
+    from ultrakb.desktop.verification_data import publish_pages
 
-    with kb_ingest_lock(kb_dir / ".ultrakb"):
-        return initialize_publication(kb_dir)
+    wiki = kb_dir / "wiki"
+    return publish_pages(
+        kb_dir,
+        {
+            path.relative_to(wiki).as_posix(): path.read_bytes()
+            for path in wiki.rglob("*")
+            if path.is_file()
+        },
+    )
 
 
 def page_preconditions(kb_dir, path):

@@ -71,8 +71,10 @@ def test_public_task_pages_and_export_follow_actual_import_attempts_without_priv
     } <= codes
     assert all(stage.state != "started" for stage in complete.stages)
     [generation] = [s for s in complete.stages if s.stage_code == "compile.generate.v1"]
+    stages = {stage.stage_attempt_id: stage for stage in complete.stages}
     assert all(
-        stage.parent_stage_id == generation.stage_attempt_id
+        stages[stage.parent_stage_id].stage_code == "model.slot.v1"
+        and stages[stage.parent_stage_id].parent_stage_id == generation.stage_attempt_id
         for stage in complete.stages
         if stage.stage_code == "model_request"
     )

@@ -16,10 +16,23 @@ import click
     "--part", type=click.Choice(["body", "notes"]), help="Read only slide body or speaker notes."
 )
 @click.option("--source-revision", help="Read this frozen source revision.")
+@click.option(
+    "--unit-revision", help="Read this retained processing unit, including unpublished input."
+)
 @click.option("--knowledge-revision", help="Read an immutable knowledge snapshot.")
 @click.pass_context
 def source(
-    ctx, source_id, pages, chars, blocks, part, source_revision, knowledge_revision, unit_id, cells
+    ctx,
+    source_id,
+    pages,
+    chars,
+    blocks,
+    part,
+    source_revision,
+    knowledge_revision,
+    unit_id,
+    cells,
+    unit_revision,
 ):
     """Read SOURCE_ID (from list) with revision and coverage information."""
     from ultrakb.application.views import view_scope
@@ -29,6 +42,8 @@ def source(
 
     root = _root(ctx)
     try:
+        if unit_revision and knowledge_revision:
+            raise ValueError("Select a retained input separately from a knowledge publication")
         scope = _selected_scope(ctx, root)
         if knowledge_revision:
             scope = view_scope(root, "legacy", historical_revision=knowledge_revision)
@@ -41,6 +56,7 @@ def source(
             part=part,
             source_revision_id=source_revision,
             unit_id=unit_id,
+            unit_revision_id=unit_revision,
             cells=cells,
             scope=scope,
         )

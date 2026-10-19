@@ -5,24 +5,16 @@ from __future__ import annotations
 
 def verify_removal(window, kb, wait_until):
     from ultrakb.desktop.documents import DocumentsDialog
+    from ultrakb.desktop.verification_data import publish_pages, retain_document
     from ultrakb.desktop.verification_tasks import SubmittedTasks, finished_document
-    from ultrakb.locks import atomic_write_json, atomic_write_text, kb_ingest_lock
 
-    with kb_ingest_lock(kb / ".ultrakb"):
-        atomic_write_json(
-            kb / ".ultrakb/hashes.json",
-            {
-                "native-removal": {
-                    "name": "待删除资料.md",
-                    "doc_name": "native-removal",
-                    "type": "short",
-                    "raw_path": "raw/待删除资料.md",
-                }
-            },
-        )
-        atomic_write_text(kb / "raw/待删除资料.md", "保留原文。\n")
-        atomic_write_text(kb / "wiki/sources/native-removal.md", "资料正文。\n")
-        atomic_write_text(kb / "wiki/summaries/native-removal.md", "# 摘要\n")
+    retain_document(
+        kb,
+        "待删除资料.md",
+        "native-removal",
+        "保留原文。\n",
+        summary="# 摘要\n",
+    )
     from ultrakb.desktop.verification_workbench import management_page
 
     dialog = management_page(window, kb, "资料", DocumentsDialog, wait_until)
@@ -35,11 +27,14 @@ def verify_removal(window, kb, wait_until):
         dialog.preview_button.click()
         wait_until(lambda: dialog.confirm_button.isEnabled())
         assert "待删除资料.md" in dialog.details.toPlainText()
-        with kb_ingest_lock(kb / ".ultrakb"):
-            atomic_write_text(
-                kb / "wiki/concepts/native-removal.md",
-                "---\nsources: [summaries/native-removal.md]\n---\n保留页面。\n",
-            )
+        publish_pages(
+            kb,
+            {
+                "concepts/native-removal.md": (
+                    "---\nsources: [summaries/native-removal.md]\n---\n保留页面。\n"
+                ).encode(),
+            },
+        )
         dialog.confirm_button.click()
         assert finished_document(tasks, dialog).failed == 1
         assert (kb / "wiki/summaries/native-removal.md").exists()

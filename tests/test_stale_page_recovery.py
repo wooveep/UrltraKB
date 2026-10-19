@@ -4,19 +4,19 @@ import asyncio
 import json
 from dataclasses import replace
 from time import monotonic
-from types import SimpleNamespace
 
 import litellm
 import pytest
+from compile_work_fixtures import checkpoint_record, new_compile_work
 from error_transport import ErrorTransport
+from native_usage_fixtures import observe_executor, read_requests
 
 from ultrakb.agent.page_response import PageResponseError
 from ultrakb.agent.page_updates import PageUpdate
 from ultrakb.agent.source_excerpts import SourceExcerpts
-from ultrakb.compile_checkpoints import CompileCheckpoints, digest
+from ultrakb.compile_checkpoints import digest
 from ultrakb.config import LlmCredentialBundle
 from ultrakb.llm_execution import CompletionExecutor, ModelCallPolicy, RoleBindings
-from ultrakb.llm_usage import UsageScope, read_requests
 from ultrakb.locks import atomic_write_text
 
 
@@ -50,11 +50,8 @@ def page_inputs(kb_dir):
             ],
         }
     )
-    checkpoints = CompileCheckpoints(
-        kb_dir,
-        SimpleNamespace(task_id="b" * 32, parent_task_id=None, compiler_request_version=2),
-        {"document": "manual"},
-        {"protocol": "stale-page-originals"},
+    checkpoints = new_compile_work(
+        kb_dir, {"document": "manual"}, {"protocol": "stale-page-originals"}
     )
     return path, patch, excerpts, messages, raw, checkpoints
 
@@ -77,7 +74,7 @@ async def test_stale_delivery_never_sends_a_repair_or_changes_its_checkpoint(
     if retained:
         checkpoints.save(key, signature, raw)
         raw = checkpoints.load(key, signature)
-    before_checkpoint = checkpoints.path.read_bytes() if checkpoints.path.exists() else None
+    before_checkpoint = checkpoint_record(checkpoints, key)
     human = patch.original + "\nHuman addition made during generation.\r\n"
     atomic_write_text(path, human)
     before_page = path.read_bytes()
@@ -104,7 +101,7 @@ async def test_stale_delivery_never_sends_a_repair_or_changes_its_checkpoint(
         record_property("http_sends", len(service.requests))
     assert path.read_bytes() == before_page
     assert not read_requests(kb_dir)
-    after_checkpoint = checkpoints.path.read_bytes() if checkpoints.path.exists() else None
+    after_checkpoint = checkpoint_record(checkpoints, key)
     assert after_checkpoint == before_checkpoint
 
 
@@ -129,8 +126,8 @@ async def test_failed_repair_keeps_human_content_and_cannot_reopen_its_send_allo
         executor = CompletionExecutor(
             RoleBindings("deepseek/deepseek-flash", credentials),
             ModelCallPolicy(max_calls=1, retries=0, backoff=0, deadline=monotonic() + 5),
-            scope=UsageScope(kb_dir, "c" * 32),
         )
+        observe_executor(kb_dir, executor, work=checkpoints)
         options = {
             "bundle": credentials,
             "initial_response": raw,
@@ -153,7 +150,7 @@ async def test_failed_repair_keeps_human_content_and_cannot_reopen_its_send_allo
         assert len(service.requests) == executor.calls == 1
         request.node.user_properties.append(("http_sends", len(service.requests)))
     assert path.read_bytes() == before
-    entry = json.loads(checkpoints.path.read_text())["entries"][key]
+    entry = checkpoint_record(checkpoints, key)
     assert entry["repair_used"] and entry["failure_code"] == "page_excerpt_invalid"
     assert checkpoints.load(key, digest(excerpts.messages(messages))) is None
     [failed] = read_requests(kb_dir)
@@ -216,6 +213,7 @@ async def test_current_page_repairs_only_the_unknown_reference_with_real_flash(
     assert len(live_llm.calls) - before == 1
     assert executor.calls == 1
     assert path.read_bytes() == patch.original.encode()
-    entry = json.loads(checkpoints.path.read_text())["entries"][key]
-    assert entry["request_digest"] == signature and entry["repair_used"]
+    entry = checkpoint_record(checkpoints, key)
+    assert entry["repair_used"]
+    assert checkpoints.failure_code(key, signature) == "page_excerpt_invalid"
     assert entry["failure_code"] == "page_excerpt_invalid"

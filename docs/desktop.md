@@ -36,7 +36,8 @@ the active KB changes what you browse and where new work is submitted. It does
 not stop work already submitted for another KB.
 
 Knowledge-base configuration remains in `.ultrakb/config.yaml`, KB credentials in
-its `.env`, and completed conversations in `.ultrakb/chats`. Global configuration
+its `.env`. Conversations, tasks, source versions and publications share
+`.ultrakb/kb.sqlite`; immutable content is retained in `.ultrakb/blobs`. Global configuration
 uses `~/.config/ultrakb/`. Older data requires the
 [name-switch procedure](../README.md#名称切换与旧数据). Task summaries and
 directory lifecycle records also live outside the program directory. Replacing
@@ -162,12 +163,12 @@ source-copy receipt retained; existing repair flags and model-call usage remain.
 Truncated output is never recovered this way, and an invalid saved response does
 not grant another repair attempt. Only still-missing batches need model sends.
 
-Invalid compiler responses are saved verbatim as `.txt` files under
-`.ultrakb/compile-responses/<model-task>/<document-key>/`, with JSON sidecars
-containing the stage, protocol, expected section IDs, request digest and validation
-error. The terminal failure includes the response path, relative to the KB.
-These diagnostics survive successful publication and compile-checkpoint cleanup.
-Responses lost before this capture was introduced cannot be recovered retroactively.
+Invalid compiler responses are retained verbatim as immutable Blobs. Main-store
+records link their execution, stage, protocol, expected section IDs, request digest
+and validation error. Task diagnostics expose their retained references; a reference
+is not a path to edit. Accepted computations and paid responses survive publication
+or working-copy synchronization failures. Explicit diagnostic archival preserves
+responses still needed by recovery and accepted work.
 
 Summary prompt examples, local validation and response schemas share
 `ultrakb/agent/summary_protocol.py`. Known hosted models use strict JSON Schema when
@@ -179,9 +180,8 @@ DeepSeek Chat Completions only supports `json_object`; its model-table schema fl
 does not enable an unsupported Chat Completions wire format. Other compilation and
 indexing requests retain their existing transport. Capability selection makes no
 probe request and does not retry with another format after a provider rejection.
-Pre-contract checkpoints retain their JSON-mode layout admission and original
-prompt identity so accepted batches and consumed repair opportunities remain
-reusable. Remaining sends use the available strict schema after the normal final
+Native checkpoints retain their exact prompt identity and consumed repair opportunities.
+Accepted batches remain reusable. Remaining sends use the available strict schema after the normal final
 capacity check; an oversized upgraded request stops without discarding old results
 or spending a model send.
 Native Responses terminal status is retained at the HTTP boundary: incomplete
@@ -227,11 +227,11 @@ the same diagnostic directory. Approximate candidates are labelled as candidates
 an unrelated paragraph is not reported as the quotation's source. Structured
 summary requests without their original windows are rejected before any send.
 
-`scripts/verify_retained_summary.py` replays a selected saved response with the
-shared delivery validator, reuses accepted batches by their exact request digests
-and blocks network connections. Its candidate and verification report must be
-written outside every KB. Replay does not accept checkpoints, publish knowledge,
-start an import or spend the model-task allowance.
+Saved responses and accepted summary batches are retained in the native main store.
+`pytest tests/test_retained_summary_reuse.py tests/test_summary_budget_recovery.py
+ tests/test_storage_summary_retry.py` checks exact request binding, recovery without
+resending accepted work and explicit consent before one additional failed-summary
+repair. It uses real SDK requests against local HTTP fixtures.
 
 **移除所选资料** reviews the aggregate effect of withdrawing new Sources, including
 pages that will lose all effective sources. Originals, images and historical
@@ -500,10 +500,11 @@ output reserve. Legacy `utf8-bound` settings keep their saved values and process
 identities. New byte-only profiles use `max_input_bytes`. The full limit reference
 is [default-limits.md](default-limits.md).
 
-`scripts/verify_create_capacity.py` replays a retained document on scratch copies
-with network and real model calls denied. Synthetic protocol responses verify
-capacity, interruption and continuation; they do not certify knowledge quality or
-publish results to the original KB.
+`pytest tests/test_create_capacity.py tests/test_create_assembly.py
+ tests/test_import_capacity_recovery.py tests/test_index_capacity_recovery.py`
+checks capacity, interruption and continuation against native storage and actual SDK
+requests to local HTTP services. These checks retain originals and ready indexes
+without publishing test results to an existing knowledge base.
 
 The source acceptance matrix for this update is
 [A01–A24](validation/desktop-ux-A01-A24-2026-10-15.md). It distinguishes native

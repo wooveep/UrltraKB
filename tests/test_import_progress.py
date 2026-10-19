@@ -9,7 +9,6 @@ from publication_fixtures import publish_document
 @pytest.mark.native
 def test_import_progress_keeps_target_and_rechecks_a_delayed_next_step(tmp_path, monkeypatch):
     pytest.importorskip("PySide6")
-    from PySide6.QtWidgets import QApplication
 
     from ultrakb import config
     from ultrakb.application.knowledge_bases import initialize_kb
@@ -40,9 +39,10 @@ def test_import_progress_keeps_target_and_rechecks_a_delayed_next_step(tmp_path,
     )
     new_source = tmp_path / "unsent.md"
     new_source.write_text("# This model operation is deliberately not admitted.\n")
-    app = QApplication.instance() or create_application()
+    app = create_application(settings_dir=tmp_path / "qt-settings")
     app.setQuitOnLastWindowClosed(False)
     window = Workbench(history_dir=tmp_path / "tasks")
+    window.manager.require_verified_connection = False
     window.show()
 
     def wait(condition):
@@ -97,11 +97,16 @@ def test_import_progress_keeps_target_and_rechecks_a_delayed_next_step(tmp_path,
         removed = window.manager.submit(kb, [RemoveDocument(published.source_id, preview.version)])
         wait(lambda: window.manager.get(removed).state in TERMINAL)
         assert window.manager.get(removed).state == "completed"
-        wait(lambda: progress._available is False)
-        wait(lambda: "不可用" in window.focus_caption.text())
+        wait(lambda: progress._available is True)
+        assert "existing.md" in window.focus_caption.text()
         progress.poll()
-        assert not progress.ask.isEnabled() and "尚无可用于提问" in progress.status.text()
-        assert "更多" in progress.status.text()
+        wait(lambda: progress.ask.isEnabled())
+        assert (
+            "Original body."
+            in window.read_scope.knowledge.read(
+                f"summaries/{published.units[0].doc_name}.md"
+            ).decode()
+        )
     finally:
         wait(lambda: all(t.state in TERMINAL for t in window.manager.tasks()))
         window.request_quit()

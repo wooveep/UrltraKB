@@ -27,7 +27,7 @@ async def test_generation_disconnect_and_repeated_cancel_wait_for_the_actual_pro
 
     root, identity = deck_knowledge(tmp_path)
     scope = storage_scope(root, identity)
-    monkeypatch.setattr(views, "view_scope", lambda *args: scope)
+    monkeypatch.setattr(views, "view_scope", lambda *args, **kwargs: scope)
     entered, release, disconnected = Event(), Event(), Event()
 
     def respond(request, index):

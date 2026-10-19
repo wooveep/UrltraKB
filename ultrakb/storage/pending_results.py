@@ -37,10 +37,10 @@ class PendingResults:
         if len(encoded) > 4 * 1024 * 1024:
             raise ValueError("Pending import result exceeds the storage payload limit")
         status = (
-            "completed"
+            "not_imported"
+            if result.status in {"skipped", "rejected"} and result.source_id is None
+            else "completed"
             if result.status in {"added", "skipped"}
-            else "not_imported"
-            if result.status == "rejected" and result.source_id is None
             else result.status
             if result.status in {"partial", "failed", "stopped"}
             else "blocked"

@@ -128,17 +128,18 @@ def test_reader_reports_pending_evidence_and_historical_status(kb_dir, monkeypat
 def test_confirming_empty_contribution_requires_current_source(kb_dir, monkeypatch):
     import asyncio
 
+    from native_catalog_fixtures import read_source
+
     from ultrakb.application.refresh import (
         confirm_empty_source,
         refresh_knowledge_view,
         refresh_status,
     )
     from ultrakb.application.views import view_scope
-    from ultrakb.source_catalog import read_source
 
     first = _import_rule(kb_dir, monkeypatch, "install", "TLS is required.")
     scope = view_scope(kb_dir, first.units[0].view_id)
-    generation = read_source(kb_dir, first.source_id).target_generation
+    generation = read_source(kb_dir, first.source_id).generation
     result = confirm_empty_source(kb_dir, first.source_id, generation=generation)
     assert result.status == "completed"
     assert (
@@ -245,6 +246,8 @@ def test_failed_refresh_preserves_the_old_result_and_reasons(kb_dir, monkeypatch
 def test_late_refresh_acceptance_cannot_clear_new_reasons(kb_dir, monkeypatch):
     import asyncio
 
+    from native_catalog_fixtures import read_source
+
     from ultrakb.application.pages import read_page, save_page
     from ultrakb.application.refresh import (
         accept_refresh_proposal,
@@ -254,13 +257,12 @@ def test_late_refresh_acceptance_cannot_clear_new_reasons(kb_dir, monkeypatch):
         refresh_status,
     )
     from ultrakb.application.views import view_scope
-    from ultrakb.source_catalog import read_source
 
     first = _import_rule(kb_dir, monkeypatch, "install", "TLS is required.")
     scope = view_scope(kb_dir, first.units[0].view_id)
     page = read_page(kb_dir, "summaries/install", scope=scope)
     save_page(kb_dir, page.path, "Human policy", version=page.version, scope=scope)
-    generation = read_source(kb_dir, first.source_id).target_generation
+    generation = read_source(kb_dir, first.source_id).generation
     confirm_empty_source(kb_dir, first.source_id, generation=generation)
     result = asyncio.run(refresh_knowledge_view(kb_dir, scope=scope))
     proposal = read_refresh_proposal(kb_dir, result.proposal_id, scope=scope)
@@ -366,39 +368,3 @@ def test_unchanged_pending_page_keeps_its_old_input_revision(kb_dir, monkeypatch
     page = read_page(kb_dir, "summaries/operate", scope=view_scope(kb_dir, first.units[0].view_id))
     assert page.validity == "needs_refresh"
     assert set(page.source_revision_ids) == {first.source_revision_id, second.source_revision_id}
-
-
-def test_cleanup_retains_history_and_defers_when_ownership_is_unreadable(kb_dir, monkeypatch):
-    from ultrakb.application.refresh import cleanup_unreferenced_artifacts
-    from ultrakb.application.removal import remove_document
-    from ultrakb.documents import read_document_source
-
-    first = _import_rule(kb_dir, monkeypatch, "install", "TLS is required.")
-    original = read_document_source(kb_dir, first.source_id)["original_path"]
-    remove_document(kb_dir, first.source_id)
-    retained = cleanup_unreferenced_artifacts(kb_dir, [original])
-    assert retained["retained"] == [original]
-    assert (kb_dir / original).is_file()
-    orphan = ".ultrakb/artifacts/" + "d" * 64 + "/content.pdf"
-    (kb_dir / orphan).parent.mkdir(parents=True)
-    (kb_dir / orphan).write_bytes(b"orphan")
-    broken = kb_dir / ".ultrakb/catalog/discovery-intents" / ("e" * 32 + ".json")
-    broken.write_text("{broken")
-    deferred = cleanup_unreferenced_artifacts(kb_dir, [orphan])
-    assert deferred["retained"] == [orphan] and not deferred["complete"]
-    assert (kb_dir / orphan).is_file()
-
-
-def test_cleanup_does_not_guess_ownership_of_inline_managed_links(kb_dir):
-    from ultrakb.application.pages import save_page
-    from ultrakb.application.refresh import cleanup_unreferenced_artifacts
-
-    artifact = ".ultrakb/artifacts/" + "f" * 64 + "/content.pdf"
-    (kb_dir / artifact).parent.mkdir(parents=True)
-    (kb_dir / artifact).write_bytes(b"retained manually linked evidence")
-    page = kb_dir / "wiki/concepts/manual.md"
-    page.write_text("# Manual evidence")
-    save_page(kb_dir, "concepts/manual", f"[Original](../../{artifact})")
-    result = cleanup_unreferenced_artifacts(kb_dir, [artifact])
-    assert result["retained"] == [artifact]
-    assert (kb_dir / artifact).is_file()

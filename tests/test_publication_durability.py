@@ -1,130 +1,74 @@
-"""Page retirement reaches stable storage before its knowledge head commits."""
-
-import asyncio
-import uuid
-from pathlib import Path
+"""Publication precedes working-copy deletion; failed directory sync stays pending."""
 
 import pytest
 
-from ultrakb.ingest_records import KnowledgeHead, KnowledgeRevision
-from ultrakb.lifecycle import current_generation
-from ultrakb.locks import kb_ingest_lock
-from ultrakb.refresh_publication import RefreshProposal, commit_refresh
-from ultrakb.unit_publication import wiki_versions
-
-pytest_plugins = ("test_pdf_readback",)
+from ultrakb.application.views import published_scope
+from ultrakb.storage.coordination import storage_stage
+from ultrakb.storage.knowledge_store import KnowledgeStore
+from ultrakb.storage.wiki_projection import ProjectionStore
 
 
-def _trace_retirement(monkeypatch, old, publication):
-    from ultrakb import locks, mutation
-
-    events = []
-    sync, unlink, write = locks._fsync_directory, Path.unlink, publication.write_record
-
-    def track_sync(path):
-        events.append(("fsync", path))
-        return sync(path)
-
-    def track_unlink(path, *args, **kwargs):
-        if path == old:
-            events.append(("unlink", path))
-        return unlink(path, *args, **kwargs)
-
-    def track_write(path, record):
-        if path.name == "head.json":
-            events.append(("head", path))
-        return write(path, record)
-
-    monkeypatch.setattr(locks, "_fsync_directory", track_sync)
-    monkeypatch.setattr(mutation, "_fsync_directory", track_sync)
-    monkeypatch.setattr(Path, "unlink", track_unlink)
-    monkeypatch.setattr(publication, "write_record", track_write)
-    return events
-
-
-def _assert_flushed_before_head(events, old):
-    deletion = events.index(("unlink", old))
-    head = next(i for i, (kind, _) in enumerate(events) if kind == "head")
-    assert ("fsync", old.parent) in events[deletion + 1 : head]
-
-
-def test_refresh_flushes_retired_page_directory_before_head_commit(kb_dir, monkeypatch):
-    from ultrakb import refresh_publication
-
-    old = kb_dir / "wiki/summaries/retired.md"
-    old.write_text("# Old knowledge")
-    staging = kb_dir / ".ultrakb/staging/refresh"
-    (staging / "wiki").mkdir(parents=True)
-    proposal = RefreshProposal(
-        proposal_id=uuid.uuid4().hex,
-        view_id="legacy",
-        expected_head=KnowledgeHead(view_id="legacy"),
-        expected_kb_generation=current_generation(kb_dir),
-        source_generations={},
-        expected_pages=wiki_versions(kb_dir, kb_dir / "wiki"),
-        candidate_pages={},
-        candidate_manifest=KnowledgeRevision(
-            knowledge_revision_id=uuid.uuid4().hex,
-            view_id="legacy",
-            base_revision_id=None,
-            change_kind="refresh",
-            input_revisions=(),
-            page_dependencies={},
-            generated_baselines={},
-            original_references=(),
-        ),
-        inputs={},
-        conflicts=(),
-    )
-    events = _trace_retirement(monkeypatch, old, refresh_publication)
-    with kb_ingest_lock(kb_dir / ".ultrakb"):
-        result = commit_refresh(kb_dir, staging, proposal)
-    assert result.status == "completed" and not old.exists()
-    _assert_flushed_before_head(events, old)
-
-
-@pytest.mark.parametrize("fail_flush", [False, True])
-def test_unit_publication_flushes_deletions_or_rolls_back(
-    kb_dir, monkeypatch, pdf_model, fail_flush
+@pytest.mark.parametrize("interrupted", [False, True])
+def test_projection_flushes_retired_directory_before_acknowledging_deletion(
+    kb_dir, monkeypatch, interrupted
 ):
-    from ultrakb import locks, unit_publication
-    from ultrakb.agent import compiler
-    from ultrakb.application.documents import import_document
-    from ultrakb.application.recompilation import recompile_document
-    from ultrakb.application.views import view_scope
-    from ultrakb.unit_publication import read_head
+    import ultrakb.locks as locks
 
-    source = kb_dir / "manual.txt"
-    source.write_text("Fixture instructions.")
-    first = import_document(kb_dir, source)
-    assert first.status == "added", first.message
-    scope = view_scope(kb_dir, first.units[0].view_id)
-    old = scope.wiki_dir / "summaries/manual.md"
-    head, content = read_head(kb_dir, scope.view_id), old.read_bytes()
+    base = published_scope(kb_dir).knowledge
+    store = KnowledgeStore(kb_dir, base.identity)
+    store.publish(store.prepare_changes(base, {"concepts/retired.md": b"Previous committed rule"}))
+    projection = ProjectionStore(kb_dir, base.identity)
+    assert projection.sync().status == "synced"
+    current = store.bind()
+    deleted = kb_dir / "wiki/concepts/retired.md"
+    publication = store.publish(store.prepare_changes(current, {"concepts/retired.md": None}))
+    assert deleted.exists()
+    with pytest.raises(FileNotFoundError):
+        store.bind().read("concepts/retired.md")
+    assert store.receipt(publication.publication_id).revision_id == publication.revision_id
+    real_sync, real_confirm = locks._fsync_directory, ProjectionStore._confirm
+    synchronized = []
 
-    async def retire_summary(*args, scope, **kwargs):
-        (scope.wiki_dir / "summaries/manual.md").unlink()
+    def sync(directory):
+        if directory == deleted.parent and not deleted.exists():
+            if interrupted:
+                raise OSError("Injected directory synchronization failure")
+        result = real_sync(directory)
+        if not deleted.exists():
+            synchronized.append(directory)
+        return result
 
-    monkeypatch.setattr(compiler, "compile_short_doc", retire_summary)
-    events = _trace_retirement(monkeypatch, old, unit_publication)
-    sync = locks._fsync_directory
-    failed = False
+    def confirm(self, db, owner, slot, plan, generation, path, digest, size):
+        if path == "concepts/retired.md":
+            assert next(parent for parent in deleted.parents if parent.exists()) in synchronized
+            assert not db.connection.in_transaction
+        return real_confirm(self, db, owner, slot, plan, generation, path, digest, size)
 
-    def fail_after_delete(path):
-        nonlocal failed
-        if fail_flush and not failed and path == old.parent and ("unlink", old) in events:
-            failed = True
-            raise OSError("Directory flush failed after retirement")
-        return sync(path)
-
-    monkeypatch.setattr(locks, "_fsync_directory", fail_after_delete)
-    result = asyncio.run(recompile_document(kb_dir, first.source_id))
-    if fail_flush:
-        assert failed and result.status == "failed", result.message
-        assert old.read_bytes() == content
-        assert read_head(kb_dir, scope.view_id) == head
-        assert not any(kind == "head" for kind, _ in events)
-    else:
-        assert result.status == "compiled", result.message
-        assert not old.exists()
-        _assert_flushed_before_head(events, old)
+    with monkeypatch.context() as fault:
+        fault.setattr(locks, "_fsync_directory", sync)
+        fault.setattr(ProjectionStore, "_confirm", confirm)
+        result = projection.sync()
+    if interrupted:
+        assert result.status == "pending" and result.error_code == "OSError"
+        assert store.bind().publication_id == publication.publication_id
+        assert not deleted.exists()
+        with storage_stage(kb_dir, base.identity, read_only=True) as db:
+            assert (
+                db.connection.execute(
+                    "SELECT digest FROM ukb_projection_applied WHERE path = 'concepts/retired.md'"
+                ).fetchone()[0]
+                is not None
+            )
+        interrupted = False
+        with monkeypatch.context() as recovery:
+            recovery.setattr(locks, "_fsync_directory", sync)
+            recovery.setattr(ProjectionStore, "_confirm", confirm)
+            result = projection.sync()
+    assert result.status == "synced"
+    assert not deleted.exists()
+    assert next(parent for parent in deleted.parents if parent.exists()) in synchronized
+    assert store.bind().publication_id == publication.publication_id
+    with storage_stage(kb_dir, base.identity, read_only=True) as db:
+        assert db.connection.execute(
+            "SELECT digest FROM ukb_projection_applied WHERE path = 'concepts/retired.md'"
+        ).fetchone() == (None,)

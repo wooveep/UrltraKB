@@ -116,19 +116,6 @@ async def history_page(
     return asdict(page)
 
 
-@refresh_router.get("/api/v1/refresh/references")
-async def references(kb: str):
-    from ultrakb.artifact_references import list_artifact_references
-
-    root = await asyncio.to_thread(_resolve_kb, kb)
-    found = await asyncio.to_thread(list_artifact_references, root)
-    return {
-        "complete": found.complete,
-        "paths": [str(p) for p in sorted(found.paths)],
-        "index_documents": sorted(found.index_documents),
-    }
-
-
 @refresh_router.post("/api/v1/refresh")
 async def refresh(request: RefreshRequest):
     root, scope = await _selected(request.kb, request.view_id)

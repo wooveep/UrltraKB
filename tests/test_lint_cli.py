@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -25,7 +24,6 @@ def _setup_kb(tmp_path: Path) -> Path:
     from kb_fixtures import mark_current_kb
 
     mark_current_kb(ultrakb_dir.parent)
-    (ultrakb_dir / "hashes.json").write_text(json.dumps({}))
     (kb_dir / "wiki" / "index.md").write_text(
         "# Knowledge Base Index\n\n## Documents\n\n## Concepts\n"
     )
@@ -33,28 +31,28 @@ def _setup_kb(tmp_path: Path) -> Path:
 
 
 class TestLintCommand:
-    def test_lint_empty_kb_skips(self, tmp_path):
+    def test_lint_empty_kb_records_a_structural_report_without_model_sends(self, tmp_path):
         """Lint on an empty KB (no indexed docs) should exit early."""
         kb_dir = _setup_kb(tmp_path)
         runner = CliRunner()
         with patch("ultrakb.cli._find_kb_dir", return_value=kb_dir):
             result = runner.invoke(cli, ["lint"])
         assert result.exit_code == 0
-        assert "Nothing to lint" in result.output
-        assert "no documents indexed" in result.output
-        # No report should be written
-        reports = list((kb_dir / "wiki" / "reports").glob("*.md"))
-        assert reports == []
+        assert "Structural Lint Report" in result.output
+        from native_usage_fixtures import read_requests
 
-    def test_lint_no_hashes_file_skips(self, tmp_path):
+        assert read_requests(kb_dir) == []
+        assert len(list((kb_dir / "wiki/reports").glob("*.md"))) == 1
+
+    def test_lint_ignores_an_unrelated_legacy_registry(self, tmp_path):
         """Lint should also skip when hashes.json doesn't exist."""
         kb_dir = _setup_kb(tmp_path)
-        (kb_dir / ".ultrakb" / "hashes.json").unlink()
+        (kb_dir / ".ultrakb/hashes.json").write_text("not native business state")
         runner = CliRunner()
         with patch("ultrakb.cli._find_kb_dir", return_value=kb_dir):
             result = runner.invoke(cli, ["lint"])
         assert result.exit_code == 0
-        assert "Nothing to lint" in result.output
+        assert "Structural Lint Report" in result.output
 
     def test_lint_no_kb(self, tmp_path):
         runner = CliRunner()

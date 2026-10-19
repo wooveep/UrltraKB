@@ -7,39 +7,21 @@ from PySide6.QtWidgets import QLabel
 def verify_baseline(window, kb, root, wait):
     from ultrakb.desktop.conversation_activity import task_status
     from ultrakb.desktop.source_reader import SourceReader
-    from ultrakb.locks import atomic_write_json, atomic_write_text, kb_ingest_lock
-    from ultrakb.mutation import mutation_scope
-    from ultrakb.published_knowledge import read_publication
+    from ultrakb.desktop.verification_data import retain_document
     from ultrakb.runtime.records import TaskView
 
-    with (
-        kb_ingest_lock(kb / ".ultrakb"),
-        mutation_scope(
-            kb,
-            [
-                kb / "wiki/sources/短文.md",
-                kb / "wiki/sources/长文.json",
-                kb / ".ultrakb/hashes.json",
-            ],
-            operation="verify-baseline-documents",
-        ),
-    ):
-        atomic_write_text(kb / "wiki/sources/短文.md", "# 短文\n\n原始 Markdown 正文。")
-        atomic_write_json(
-            kb / "wiki/sources/长文.json",
-            [
-                {"page": 1, "content": "# 第一页\n\nPageIndex 保留的第一页。"},
-                {"page": 2, "content": "# 第二页\n\nPageIndex 保留的第二页。"},
-            ],
-        )
-        atomic_write_json(
-            kb / ".ultrakb/hashes.json",
-            {
-                "a" * 64: {"name": "短文.docx", "doc_name": "短文", "type": "docx"},
-                "b" * 64: {"name": "长文.pdf", "doc_name": "长文", "type": "long_pdf"},
-            },
-        )
-    publication_id = read_publication(kb).publication_id
+    retain_document(kb, "短文.md", "短文", "# 短文\n\n原始 Markdown 正文。")
+    publication = retain_document(
+        kb,
+        "长文.pdf",
+        "长文",
+        "第一页和第二页的保留正文。",
+        pages=[
+            {"page": 1, "content": "# 第一页\n\nPageIndex 保留的第一页。"},
+            {"page": 2, "content": "# 第二页\n\nPageIndex 保留的第二页。"},
+        ],
+    )
+    publication_id = publication.publication_id
     window.open_knowledge_base(kb)
     wait(
         lambda: window.kb == kb
@@ -54,12 +36,12 @@ def verify_baseline(window, kb, root, wait):
         and panel.read_scope.publication_id == publication_id
     )
     assert panel.table.columnCount() == 4
-    assert all(panel.table.item(row, 2).text() == "已导入（旧资料）" for row in range(2))
+    assert all("处理完成" in panel.table.item(row, 2).text() for row in range(2))
     assert not panel.details.isVisible()
     hint = window.findChild(QLabel, "documentWorkflow").text()
     assert "PDF" in hint and "Word" in hint
-    for name, expected in (("短文.docx", "原始 Markdown 正文"), ("长文.pdf", "保留的第二页")):
-        row = next(i for i in range(2) if panel.table.item(i, 0).text() == name)
+    for name, expected in (("短文.md", "原始 Markdown 正文"), ("长文.pdf", "保留的第二页")):
+        row = next(i for i in range(2) if panel.table.item(i, 0).text().endswith(name))
         panel.table.selectRow(row)
         panel.read_button.click()
         wait(lambda: any(d.isVisible() for d in window.findChildren(SourceReader)))

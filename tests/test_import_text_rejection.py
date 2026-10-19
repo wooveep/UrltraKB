@@ -3,7 +3,7 @@
 import pytest
 
 from ultrakb.application.documents import import_document
-from ultrakb.source_catalog import list_sources
+from ultrakb.application.sources import source_inventory as list_sources
 
 pytest_plugins = ("block_fixtures",)
 
@@ -84,9 +84,8 @@ def test_office_extraction_rejection_identifies_conversion_and_preserves_origina
 
 
 def test_catalog_boundary_checks_the_assessment_against_frozen_bytes(kb_dir, tmp_path):
-    from ultrakb.import_text import preflight_import_text
+    from ultrakb.import_text import preflight_import_text, validate_text_preflight
     from ultrakb.inputs import prepared_input
-    from ultrakb.source_catalog import admit_source_revision
 
     path = tmp_path / "changed.md"
     path.write_text("hello", encoding="utf-8")
@@ -94,7 +93,7 @@ def test_catalog_boundary_checks_the_assessment_against_frozen_bytes(kb_dir, tmp
         assessment = preflight_import_text(kb_dir, prepared)
         prepared.path.write_text(("参" * 30 + "损坏\n") * 4, encoding="utf-8")
         with pytest.raises(ValueError, match="changed after extraction"):
-            admit_source_revision(kb_dir, prepared, text_assessment=assessment)
+            validate_text_preflight(prepared, assessment)
     assert not list_sources(kb_dir)
 
 
@@ -102,68 +101,20 @@ def test_rejected_replacement_keeps_the_previous_source_target_and_knowledge(
     kb_dir, tmp_path, block_model
 ):
     from ultrakb.application.sources import source_inventory
-    from ultrakb.source_catalog import read_source
+    from ultrakb.application.views import published_scope
+    from ultrakb.storage.catalog_store import CatalogStore
 
     path = tmp_path / "replace.md"
     path.write_text("hello original", encoding="utf-8")
     initial = import_document(kb_dir, path)
     before = source_inventory(kb_dir)
-    target = read_source(kb_dir, initial.source_id)
+    catalog = CatalogStore(kb_dir, published_scope(kb_dir).knowledge.identity)
+    target = catalog.source(initial.source_id)
     called = len(block_model)
     path.write_text(("参" * 30 + "损坏\n") * 4, encoding="utf-8")
     rejected = import_document(kb_dir, path)
     assert rejected.status == "rejected"
     assert len(block_model) == called
     assert source_inventory(kb_dir) == before
-    assert read_source(kb_dir, initial.source_id) == target
+    assert catalog.source(initial.source_id) == target
     assert len(list_sources(kb_dir)) == 1
-
-
-def test_legacy_recompile_rejects_anomalous_retained_text_before_admission(kb_dir, block_model):
-    import asyncio
-    import json
-
-    from ultrakb.application.recompilation import recompile_document
-
-    original = ("参" * 30 + "损坏\n") * 4
-    (kb_dir / "wiki/sources/old.md").write_text(original, encoding="utf-8")
-    (kb_dir / ".ultrakb/hashes.json").write_text(
-        json.dumps({"old-hash": {"doc_name": "old", "name": "old.md", "type": "md"}})
-    )
-    result = asyncio.run(recompile_document(kb_dir, "old-hash"))
-    assert result.error_type == "ImportTextRejected"
-    assert not list_sources(kb_dir) and not block_model
-    assert result.model_usage["current"]["requests"] == 0
-    assert (kb_dir / "wiki/sources/old.md").read_text("utf-8") == original
-
-
-def test_runtime_recompile_preserves_the_text_rejection_result(kb_dir, block_model, monkeypatch):
-    from ultrakb.application.execution import ExecutionContext
-    from ultrakb.application.recompilation import RecompileResult
-    from ultrakb.llm_usage import usage_receipt
-    from ultrakb.runtime.records import UnitIdentity
-    from ultrakb.runtime.requests import RecompileDocument
-    from ultrakb.runtime.worker import _execute
-
-    async def rejected(*args, **kwargs):
-        return RecompileResult(
-            "rejected",
-            message="Repeated CJK text",
-            error_type="ImportTextRejected",
-            quality=("import_text_rejected",),
-            unfinished=("text_preflight",),
-            model_usage=usage_receipt(kb_dir),
-        )
-
-    monkeypatch.setattr("ultrakb.application.recompilation.recompile_document", rejected)
-    result = _execute(
-        RecompileDocument("old-hash", "confirmed-version"),
-        UnitIdentity("a" * 32, "1", str(kb_dir), "b" * 64),
-        ExecutionContext(),
-    )
-    assert result.status == "failed"
-    assert "ImportTextRejected" in result.error
-    assert result.quality == ("import_text_rejected",)
-    assert result.unfinished == ("text_preflight",)
-    assert result.model_usage["current"]["requests"] == 0
-    assert not list_sources(kb_dir) and not block_model

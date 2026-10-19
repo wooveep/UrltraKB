@@ -147,6 +147,11 @@ async def check_stored_knowledge(scope, options, context, *, bundle=None):
         context.credential_bundle = LlmCredentialBundle(**asdict(bundle))
     if options.version is not None and options.version != _version(scope):
         return LintResult("conflict")
+    semantic = options.semantic and any(
+        path.startswith(("sources/", "summaries/", "concepts/", "entities/", "explorations/"))
+        and path.endswith((".md", ".json"))
+        for path in scope.reading_view.files
+    )
     store = LintStore(base.root, base.identity)
     settings = {"fix": options.fix, "semantic": options.semantic, "unique": options.unique_report}
     execution = context.storage_execution
@@ -190,7 +195,7 @@ async def check_stored_knowledge(scope, options, context, *, bundle=None):
                     proposed, structural_report=run_structural_lint(base.root, scope=private)
                 )
             context.on_event({"stage": "structural_report", "report": proposed.structural_report})
-            if options.semantic:
+            if semantic:
                 from .storage_lint_semantic import semantic_report
 
                 report = await semantic_report(scope, private, options, context, active_bundle)
@@ -235,7 +240,7 @@ async def check_stored_knowledge(scope, options, context, *, bundle=None):
         asyncio.run(execute(active_bundle))
 
     try:
-        if options.semantic:
+        if semantic:
             with context.begin(base.root) as captured:
                 await run_blocking(lambda: worker(bundle if bundle is not None else captured))
         else:

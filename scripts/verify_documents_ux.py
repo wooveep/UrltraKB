@@ -15,11 +15,13 @@ def main():
     args = parser.parse_args()
     root = args.output.resolve()
     root.mkdir(parents=True, exist_ok=False)
+    os.environ["ULTRAKB_CONFIG_DIR"] = str(root / "settings")
     os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "true"
     os.environ["OPENAI_AGENTS_DISABLE_TRACING"] = "1"
     if args.headless:
         os.environ["QT_QPA_PLATFORM"] = "offscreen"
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tests"))
+    from focus_fixtures import unprocessed_source
     from publication_fixtures import fail_document
     from PySide6.QtCore import Qt
     from PySide6.QtTest import QTest
@@ -32,16 +34,16 @@ def main():
     from ultrakb.desktop.documents import DocumentsDialog
     from ultrakb.desktop.source_reader import SourceReader
     from ultrakb.desktop.verification import create_application
+    from ultrakb.desktop.verification_data import retain_document
     from ultrakb.desktop.verification_workbench import button
     from ultrakb.desktop.window import Workbench
     from ultrakb.locks import atomic_write_text, kb_ingest_lock
-    from ultrakb.state import HashRegistry
 
     config.GLOBAL_CONFIG_DIR = root / "settings"
     config.GLOBAL_CONFIG_PATH = config.GLOBAL_CONFIG_DIR / "global.yaml"
     kb = root / "资料体验库"
     initialize_kb(kb, seed_environment=False)
-    app = create_application()
+    app = create_application(settings_dir=root / "qt-settings")
     app.setQuitOnLastWindowClosed(False)
     assert args.headless or app.platformName() not in {"offscreen", "minimal"}
     window = Workbench(history_dir=root / "tasks")
@@ -76,15 +78,9 @@ def main():
         assert [a.text() for a in importer.menu().actions()] == ["导入文件", "导入目录", "导入网址"]
         panel.grab().save(str(root / "empty.png"))
         checks.append("A07/A17: single import menu, folded options, truthful first empty state")
+        retain_document(kb, "可读资料.md", "独立内部名称", "# 可读原文\n\n阅读不会发送模型请求。")
+        unprocessed_source(kb, kb / "raw/正文缺失.pdf")
         with kb_ingest_lock(kb / ".ultrakb"):
-            atomic_write_text(
-                kb / "wiki/sources/独立内部名称.md", "# 可读原文\n\n阅读不会发送模型请求。"
-            )
-            registry = HashRegistry(kb / ".ultrakb/hashes.json")
-            registry.add(
-                "a" * 64, {"name": "可读资料.md", "doc_name": "独立内部名称", "type": "md"}
-            )
-            registry.add("b" * 64, {"name": "正文缺失.pdf", "doc_name": "missing", "type": "pdf"})
             atomic_write_text(kb / "raw/未完成资料.md", "# 已保存正文\n\n本地中断，尚未形成知识。")
         fail_document(
             kb, kb / "raw/未完成资料.md", bundle=LlmCredentialBundle(api_key="unused-fixture")
@@ -97,7 +93,7 @@ def main():
         missing = next(row for row in panel.rows.values() if row.document["name"] == "正文缺失.pdf")
         assert not missing.actions["read"].allowed
         panel.table.selectRow(
-            next(i for i in range(3) if panel.table.item(i, 0).text() == "正文缺失.pdf")
+            next(i for i in range(3) if "正文缺失.pdf" in panel.table.item(i, 0).text())
         )
         assert "正文" in panel.status.text()
         panel.grab().save(str(root / "qualified-rows.png"))
@@ -124,7 +120,9 @@ def main():
         )
         panel._row_menu.close()
         panel.state_filter.setCurrentText("未完成")
-        assert panel.table.rowCount() == 1
+        visible_names = [panel.table.item(i, 0).text() for i in range(panel.table.rowCount())]
+        assert any("未完成资料.md" in name for name in visible_names), visible_names
+        assert not any("可读资料.md" in name for name in visible_names), visible_names
         panel.state_filter.setCurrentText("全部")
         assert all(panel.table.cellWidget(i, j) is None for i in range(3) for j in range(3))
         checks.append(

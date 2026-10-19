@@ -73,9 +73,13 @@ async def test_generator_run_delegates_to_skill_creator(tmp_path):
 @pytest.mark.parametrize("selected", [False, True])
 async def test_generator_deck_dispatches_to_deck_creator(tmp_path, selected):
     kb_dir = tmp_path
+    from kb_fixtures import mark_current_kb
+
+    mark_current_kb(kb_dir)
     (kb_dir / "wiki").mkdir()
     (kb_dir / "wiki" / "AGENTS.md").write_text("schema", encoding="utf-8")
 
+    scope = legacy_scope(kb_dir) if selected else None
     gen = Generator(
         target_type="deck",
         name="my-deck",
@@ -83,7 +87,7 @@ async def test_generator_deck_dispatches_to_deck_creator(tmp_path, selected):
         kb_dir=kb_dir,
         model="openai/gpt-4o",
         critique=False,
-        scope=legacy_scope(kb_dir) if selected else None,
+        scope=scope,
     )
 
     # Post-refactor: validate_deck moved into run_skill (called inside
@@ -113,7 +117,7 @@ async def test_generator_deck_dispatches_to_deck_creator(tmp_path, selected):
         critique=False,
         skill_name="ultrakb-deck-neon",
         bundle=None,
-        scope=legacy_scope(kb_dir) if selected else None,
+        scope=scope,
     )
     regen.assert_not_called()  # marketplace is skill-only
     assert result == gen.output_dir

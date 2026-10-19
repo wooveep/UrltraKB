@@ -231,8 +231,7 @@ def prepare_skill_run(
             path: File path relative to the KB root, e.g.
                 ``"output/decks/foo/index.html"``.
         """
-        target = (kb_dir / path).resolve()
-        if not any(target.is_relative_to(kb_dir.resolve() / area) for area in ("output", "skills")):
+        if not path.startswith(("output/", "skills/")):
             return "Use the permitted wiki readers for knowledge evidence."
         return read_kb_file(path, kb_root, scope=scope)
 

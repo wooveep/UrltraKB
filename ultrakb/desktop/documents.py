@@ -249,7 +249,7 @@ class DocumentsDialog(ManagementPanel):
 
     def read_source(self):
         """Render the original pipeline's retained Markdown or per-page JSON text."""
-        from ultrakb.documents import read_document_source
+        from ultrakb.documents import read_document_view
 
         selected = self.table.selectionModel().selectedRows()
         if len(selected) != 1:
@@ -260,6 +260,11 @@ class DocumentsDialog(ManagementPanel):
         from ultrakb.desktop.document_rows import focused
 
         identity = focused(self).identity
+        document = focused(self).document
+        targets = document.get("units", [])
+        retained = None
+        if targets and not any(unit.get("successful_revision_id") for unit in targets):
+            retained = targets[0]["target_revision_id"]
         read_scope = self.read_scope
 
         def loaded(value, error):
@@ -268,10 +273,10 @@ class DocumentsDialog(ManagementPanel):
                 return
             from ultrakb.desktop.source_reader import show_source
 
-            if any(unit.get("key") != "body" for unit in value.get("available_units", [])):
+            if value.source.get("sheet") is not None:
                 from ultrakb.desktop.worksheets import WorksheetsDialog
 
-                WorksheetsDialog(self.window, self.kb, value, read_scope=read_scope).show()
+                WorksheetsDialog(self.window, self.kb, value.source, read_scope=value.scope).show()
             else:
                 show_source(self.window, self.kb, value)
 
@@ -279,7 +284,9 @@ class DocumentsDialog(ManagementPanel):
             self,
             identity,
             "阅读原文",
-            lambda: read_document_source(self.kb, identifier, scope=read_scope or self.scope),
+            lambda: read_document_view(
+                self.kb, identifier, unit_revision_id=retained, scope=read_scope or self.scope
+            ),
             loaded,
             snapshot=read_scope is not None,
         )

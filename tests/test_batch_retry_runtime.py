@@ -55,6 +55,9 @@ def test_sdk_shared_failure_halts_only_this_batch(kb_dir, tmp_path, provider, mo
     initialize_kb(other, seed_environment=False)
     with kb_ingest_lock(other / ".ultrakb"):
         atomic_write_text(other / "wiki/concepts/note.md", "# Note\n\nBefore.")
+    from ultrakb.desktop.verification_data import publish_pages
+
+    publish_pages(other, {"concepts/note.md": b"# Note\n\nBefore."})
     note = read_page(other, "concepts/note")
     provider.select(mode)
     manager = TaskManager(history_dir=tmp_path / "tasks")
@@ -113,15 +116,17 @@ def test_explicit_stop_waits_for_inflight_sdk_cleanup_and_keeps_commit(kb_dir, t
     import time
 
     from ultrakb.application.pages import read_page
+    from ultrakb.application.sources import source_inventory
+    from ultrakb.desktop.verification_data import publish_pages
     from ultrakb.locks import atomic_write_text, kb_ingest_lock
     from ultrakb.runtime.requests import ImportFile, SavePage
     from ultrakb.runtime.tasks import TaskManager
-    from ultrakb.source_catalog import list_sources
 
     with kb_ingest_lock(kb_dir / ".ultrakb"):
         atomic_write_text(kb_dir / "wiki/concepts/note.md", "# Before\n\nOriginal body.")
         for name in ("first", "not-run"):
             atomic_write_text(kb_dir / f"raw/{name}.md", f"# {name}\n\nOperating policy.")
+    publish_pages(kb_dir, {"concepts/note.md": b"# Before\n\nOriginal body."})
     note = read_page(kb_dir, "concepts/note")
     provider.select("wait")
     manager = TaskManager(history_dir=tmp_path / "stop-tasks")
@@ -143,7 +148,9 @@ def test_explicit_stop_waits_for_inflight_sdk_cleanup_and_keeps_commit(kb_dir, t
         assert result.state == "stopped" and result.processes_reaped
         assert result.results[0].status == "completed" and len(result.results) == 2
         assert "Committed" in read_page(kb_dir, note.path).body
-        assert not any(source.identity.endswith("not-run.md") for source in list_sources(kb_dir))
+        assert not any(
+            source["location"].endswith("not-run.md") for source in source_inventory(kb_dir)
+        )
     finally:
         provider.release.set()
         manager.shutdown(stop=True)
@@ -184,17 +191,15 @@ def test_batch_reuses_initial_snapshot_after_global_settings_change(kb_dir, tmp_
         assert manager.join(45)
 
 
-def test_workbook_completed_sheet_survives_shared_failure_and_tail_stays_pending(
-    kb_dir, tmp_path, provider
-):
-    from office_publication_fixtures import publish_workbook
+def test_workbook_completed_sheet_survives_shared_failure_and_tail_stays_pending(kb_dir, tmp_path):
     from openpyxl import Workbook
+    from test_storage_conversation_writes import StreamTransport
 
     from ultrakb.application.document_actions import document_inventory
     from ultrakb.application.document_batches import preview_document_batch
+    from ultrakb.application.documents import import_document
     from ultrakb.application.source_retry import retry_source
-    from ultrakb.config import resolve_credential_bundle
-    from ultrakb.source_catalog import list_sources
+    from ultrakb.config import load_config, save_config
 
     book = Workbook()
     book.active.title = "Alpha"
@@ -203,27 +208,40 @@ def test_workbook_completed_sheet_survives_shared_failure_and_tail_stays_pending
         book.create_sheet(name)["A1"] = f"Unfinished {name} operating policy"
     path = tmp_path / "partial.xlsx"
     book.save(path)
-    publish_workbook(
-        kb_dir,
-        path,
-        bundle=resolve_credential_bundle(kb_dir),
-        sheet_names=["Alpha"],
-        record_model_task=False,
+    save_config(
+        kb_dir / ".ultrakb/config.yaml",
+        {
+            **load_config(kb_dir / ".ultrakb/config.yaml"),
+            "model": "openai/gpt-4o-mini",
+            "model_policy": {"max_calls": 8, "retries": 0},
+        },
     )
-    source = list_sources(kb_dir)[0]
-    provider.select("authentication")
-    result = retry_source(kb_dir, source.source_id)
-    assert len(result.units) == 2
-    assert result.units[0].status == "completed"
-    assert result.units[1].status == "failed"
-    assert any(stage.startswith("not_run:") for stage in result.unfinished)
+    error = {
+        "error": {"message": "Invalid key", "type": "invalid_api_key", "code": "invalid_api_key"}
+    }
+    with StreamTransport(
+        [
+            {"content": '{"description":"Alpha","content":"Previously completed alpha data"}'},
+            {"content": '{"concepts":[],"entities":[]}'},
+            error,
+            error,
+        ],
+        statuses=[200, 200, 401, 401],
+    ) as service:
+        (kb_dir / ".env").write_text(f"LLM_API_KEY=offline-key\nOPENAI_API_BASE={service.url}\n")
+        result = import_document(kb_dir, path)
+        assert result.status == "partial", result.message
+        assert len(service.requests) == 3
+        retried = retry_source(kb_dir, result.source_id)
+        assert retried.status == "partial", retried.message
+        assert len(service.requests) == 4
     [row] = document_inventory(kb_dir)
     assert len(row.document["units"]) == 3
-    assert sorted(unit["status"] for unit in row.document["units"]) == [
-        "completed",
-        "failed",
-        "pending",
-    ]
+    assert {unit["name"]: unit["status"] for unit in row.document["units"]} == {
+        "Alpha": "completed",
+        "Beta": "failed",
+        "Gamma": "pending",
+    }
     preview = preview_document_batch(kb_dir, (row.identity,), action="retry")
     assert len(preview.retry_targets) == 2
     assert all("Alpha" not in target.name for target in preview.retry_targets)

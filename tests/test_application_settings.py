@@ -7,13 +7,12 @@ def test_initialization_distinguishes_owned_creation_lock_from_existing_kb(tmp_p
     from ultrakb import config
     from ultrakb.application.knowledge_bases import initialize_kb
     from ultrakb.lifecycle import creation_lifecycle
-    from ultrakb.locks import kb_ingest_lock
 
     monkeypatch.setattr(config, "GLOBAL_CONFIG_DIR", tmp_path / "settings")
     monkeypatch.setattr(config, "GLOBAL_CONFIG_PATH", tmp_path / "settings/global.yaml")
     kb = tmp_path / "created"
     # An adapter's creation lease must precede the KB and global leases.
-    with creation_lifecycle(kb), kb_ingest_lock(kb / ".ultrakb"):
+    with creation_lifecycle(kb):
         with config._with_global_config_lock():
             assert initialize_kb(kb, seed_environment=False)["created"]
         with pytest.raises(FileExistsError):
@@ -22,7 +21,7 @@ def test_initialization_distinguishes_owned_creation_lock_from_existing_kb(tmp_p
     incomplete = tmp_path / "incomplete/.ultrakb"
     incomplete.mkdir(parents=True)
     (incomplete / "unexpected").write_text("keep")
-    with creation_lifecycle(incomplete.parent), kb_ingest_lock(incomplete):
+    with creation_lifecycle(incomplete.parent):
         with pytest.raises(FileExistsError):
             initialize_kb(incomplete.parent)
     assert (incomplete / "unexpected").read_text() == "keep"
@@ -53,12 +52,15 @@ def test_global_settings_restore_both_files_after_write_failure(tmp_path, monkey
     assert {path: path.read_bytes() for path in before} == before
 
 
-def test_global_settings_read_recovers_an_interrupted_pair(tmp_path, monkeypatch):
+def test_global_settings_read_requires_explicit_repair_of_an_interrupted_pair(
+    tmp_path, monkeypatch
+):
     from ultrakb import config
     from ultrakb.application import settings
+    from ultrakb.application.repair import repair_global_settings
     from ultrakb.application.settings_data import GlobalConfigPatchRequest
     from ultrakb.locks import atomic_write_text
-    from ultrakb.mutation import snapshot_paths
+    from ultrakb.mutation import RecoveryRequired, snapshot_paths
 
     monkeypatch.setattr(config, "GLOBAL_CONFIG_DIR", tmp_path)
     monkeypatch.setattr(config, "GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
@@ -72,6 +74,9 @@ def test_global_settings_read_recovers_an_interrupted_pair(tmp_path, monkeypatch
             operation="global-settings",
         )
         atomic_write_text(tmp_path / "global.yaml", "model: interrupted\n")
+    with pytest.raises(RecoveryRequired):
+        settings.read_global_config()
+    assert repair_global_settings().repaired
     result = settings.read_global_config()
     assert result.model == "before" and result.has_api_key
     assert not list((tmp_path / ".ultrakb/journal").glob("*.json"))

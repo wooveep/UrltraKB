@@ -60,13 +60,15 @@ class _RssSampler:
 
 
 def _phase_metrics(events, wall_seconds, concurrency):
-    waits = [(row.duration_ns or 0) / 1e9 for row in events if row.event == "slot_acquired"]
-    held = sum((row.duration_ns or 0) / 1e9 for row in events if row.event == "slot_released")
+    queue = [row for row in events if row.stage_code == "model.queue.v1"]
+    slots = [row for row in events if row.stage_code == "model.slot.v1"]
+    waits = [row.duration_seconds for row in queue if row.duration_seconds is not None]
+    held = sum(row.duration_seconds for row in slots if row.duration_seconds is not None)
     return {
         "events": len(events),
-        "queued": sum(row.event == "queued" for row in events),
-        "slots_acquired": len(waits),
-        "slots_released": sum(row.event == "slot_released" for row in events),
+        "queued": len(queue),
+        "slots_acquired": len(slots),
+        "slots_released": sum(row.state == "completed" for row in slots),
         "queue_wait_seconds_sum": sum(waits),
         "queue_wait_seconds_max": max(waits, default=None),
         "slot_held_seconds_sum": held,
@@ -79,16 +81,17 @@ def _phase_metrics(events, wall_seconds, concurrency):
 @pytest.mark.live
 @pytest.mark.asyncio
 async def test_real_summary_serial_and_parallel_comparison(kb_dir, tmp_path, live_llm, monkeypatch):
-    from ultrakb.execution_timing import read_phase_events, timing_report
+    from native_usage_fixtures import aggregate_usage, read_requests
+
+    from ultrakb.application.execution import ExecutionContext
+    from ultrakb.application.knowledge_tasks import read_knowledge_task
     from ultrakb.llm_execution import (
         CompletionExecutor,
         ModelCallPolicy,
         RoleBindings,
         active_executor,
     )
-    from ultrakb.llm_usage import active_scope, aggregate_usage, read_requests
-    from ultrakb.llm_usage_execution import bind_model_task, import_usage_execution
-    from ultrakb.model_task import TaskJournal
+    from ultrakb.llm_usage import active_scope
 
     original = (
         "Close the inlet before maintenance. Reopen it only after pressure reaches zero.\n\n"
@@ -108,20 +111,19 @@ async def test_real_summary_serial_and_parallel_comparison(kb_dir, tmp_path, liv
     signatures = []
     client = LiveLLM(live_llm.budget, response_cache=tmp_path / "arm-1.json")
     client.install(monkeypatch)
-    executor = journal = scope = None
+    executor = context = scope = None
     try:
-        with import_usage_execution(kb_dir, "summary_concurrency_comparison") as scope:
-            executor = CompletionExecutor(
-                RoleBindings(
-                    "deepseek/deepseek-flash",
-                    client.credentials,
-                    generation={"compile": {"max_tokens": 512, "temperature": 0}},
-                ),
-                ModelCallPolicy(max_calls=18, concurrency=3, retries=1, backoff=0.2),
-                scope=scope,
-            )
-            journal = TaskJournal(kb_dir, executor)
-            bind_model_task(journal.record.task_id)
+        executor = CompletionExecutor(
+            RoleBindings(
+                "deepseek/deepseek-flash",
+                client.credentials,
+                generation={"compile": {"max_tokens": 512, "temperature": 0}},
+            ),
+            ModelCallPolicy(max_calls=18, concurrency=3, retries=1, backoff=0.2),
+        )
+        context = ExecutionContext(executor=executor, credential_bundle=client.credentials)
+        with context.begin(kb_dir):
+            scope = active_scope()
             with executor.activate():
                 for concurrency in (1, 2, 3):
                     # The test gateway's response store is arm-specific. One frozen
@@ -132,7 +134,12 @@ async def test_real_summary_serial_and_parallel_comparison(kb_dir, tmp_path, liv
                     receipt_start, timing_start = len(client.receipts), len(client.timings)
                     errors_start, budget_start = len(executor.model_errors), executor.calls
                     provider_start = live_llm.budget.report()["provider_requests"]
-                    prior_events = {row.event_id for row in read_phase_events(kb_dir)}
+                    prior_events = {
+                        row.stage_attempt_id
+                        for row in read_knowledge_task(
+                            kb_dir, context.storage_execution.task_id, limit=128
+                        ).stages
+                    }
                     prior_requests = {row.request_attempt_id for row in read_requests(kb_dir)}
 
                     async def generate(messages, stage, originals, sections):
@@ -182,7 +189,11 @@ async def test_real_summary_serial_and_parallel_comparison(kb_dir, tmp_path, liv
                         active += delta
                         peak = max(peak, active)
                     events = [
-                        row for row in read_phase_events(kb_dir) if row.event_id not in prior_events
+                        row
+                        for row in read_knowledge_task(
+                            kb_dir, context.storage_execution.task_id, limit=128
+                        ).stages
+                        if row.stage_attempt_id not in prior_events
                     ]
                     records = [
                         row
@@ -243,11 +254,17 @@ async def test_real_summary_serial_and_parallel_comparison(kb_dir, tmp_path, liv
                 "original": original,
                 "request_digests_by_arm": signatures,
                 "shared_scope_execution_id": scope.execution_id if scope else None,
-                "shared_model_task_id": journal.record.task_id if journal else None,
+                "shared_model_budget_id": context.storage_execution.model_budget_id
+                if context
+                else None,
                 "shared_executor_fingerprint": executor.fingerprint if executor else None,
                 "shared_model_slots": 3,
                 "model_options": {"max_tokens": 512, "temperature": 0},
-                "cumulative_phase_report": timing_report(kb_dir),
+                "cumulative_phase_report": read_knowledge_task(
+                    kb_dir, context.storage_execution.task_id, limit=128
+                ).model_dump(mode="json")
+                if context
+                else None,
                 "interpretation": (
                     "One sequential 1/2/3-arm sample with identical request bytes and "
                     "separate real-response stores. Provider load, cache warmth and "

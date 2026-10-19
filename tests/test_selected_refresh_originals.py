@@ -10,15 +10,16 @@ from test_selected_refresh_sdk import _import, _prepared
 pytest_plugins = ("test_vendor_sdk",)
 
 
-def test_selected_refresh_rejects_an_unregistered_preferred_original(kb_dir, model_service):
+def test_selected_refresh_ignores_an_unregistered_working_copy_original(kb_dir, model_service):
     from publication_fixtures import publish_document
 
-    from ultrakb.agent.source_windows import CompileSourceWindows
     from ultrakb.application.refresh import refresh_selected_sources, refresh_status
-    from ultrakb.application.views import view_scope
+    from ultrakb.application.views import published_scope, view_scope
+    from ultrakb.locks import atomic_write_text
 
     (kb_dir / ".ultrakb/config.yaml").write_text(
         "model: deepseek/deepseek-flash\nlanguage: en\n"
+        "model_capacity:\n  max_input_tokens: 65536\n  tokenizer_model: gpt-4o-mini\n"
         "model_policy:\n  retries: 0\n  max_calls: 20\n"
     )
     path = kb_dir / "problem.pdf"
@@ -37,7 +38,7 @@ def test_selected_refresh_rejects_an_unregistered_preferred_original(kb_dir, mod
         shared_body="# Shared\n\nOriginal problem policy allows direct access.",
     )
     assert first.status == "added", first.message
-    _import(kb_dir, model_service, "normal", "UNRELATED NORMAL ORIGINAL SENTINEL.")
+    normal = _import(kb_dir, model_service, "normal", "UNRELATED NORMAL ORIGINAL SENTINEL.")
     write_pdf("Corrected problem policy requires approval.")
     updated = publish_document(
         kb_dir,
@@ -47,73 +48,60 @@ def test_selected_refresh_rejects_an_unregistered_preferred_original(kb_dir, mod
     )
     assert updated.status == "added", updated.message
     scope = view_scope(kb_dir, first.units[0].view_id)
-    assert (scope.wiki_dir / "sources/problem.json").is_file()
-    normal_summary = scope.wiki_dir / "summaries/normal.md"
-    normal_before = normal_summary.read_bytes()
-
-    # A stale auxiliary file is valid text but is not part of the PDF's normalization.
-    shadow = scope.wiki_dir / "sources/problem.content.json"
-    from ultrakb.locks import atomic_write_text
-
-    atomic_write_text(
-        shadow, (scope.wiki_dir / "sources/normal.content.json").read_bytes().decode("utf-8")
-    )
-    assert (
-        CompileSourceWindows(scope.wiki_dir, "problem").original_path
-        == "sources/problem.content.json"
-    )
-    before = refresh_status(kb_dir, scope=scope)["needs_refresh"]
+    normal_summary = f"summaries/{normal.units[0].doc_name}"
+    normal_before = published_scope(kb_dir).knowledge.read(normal_summary)
+    shadow = scope.wiki_dir / f"sources/{first.units[0].doc_name.removesuffix('.md')}.content.json"
+    atomic_write_text(shadow, "UNRELATED NORMAL ORIGINAL SENTINEL.")
     count = len(model_service.requests)
 
     result = asyncio.run(refresh_selected_sources(kb_dir, [first.source_id], scope=scope))
 
-    after = refresh_status(kb_dir, scope=scope)["needs_refresh"]
-    assert result.status in {"partial", "failed"}, result.message
-    assert after["concepts/shared.md"] == before["concepts/shared.md"]
-    assert len(model_service.requests) == count
-    assert normal_summary.read_bytes() == normal_before
+    assert result.status == "completed", result.message
+    assert not refresh_status(kb_dir, scope=scope)["needs_refresh"]
+    assert published_scope(kb_dir).knowledge.read(normal_summary) == normal_before
+    assert count < len(model_service.requests) <= count + 4
+    sent = json.dumps(model_service.requests[count:])
+    assert "Corrected problem policy requires approval." in sent
+    assert "UNRELATED NORMAL ORIGINAL SENTINEL" not in sent
 
 
-@pytest.mark.parametrize("all_sources", [False, True], ids=["partial", "complete"])
+@pytest.mark.parametrize("all_sources", [False, True])
 def test_selected_publication_retains_originals_of_old_page_dependencies(
     kb_dir, model_service, all_sources
 ):
+    from native_catalog_fixtures import catalog
+
     from ultrakb.application.refresh import refresh_selected_sources, refresh_status
-    from ultrakb.knowledge_evidence import validated_input
-    from ultrakb.unit_publication import read_head
+    from ultrakb.application.views import published_scope
+    from ultrakb.documents import read_document_source
 
     sources, scope = _prepared(kb_dir, model_service)
     count = len(model_service.requests)
-
     result = asyncio.run(
         refresh_selected_sources(kb_dir, sources if all_sources else sources[:1], scope=scope)
     )
-
     assert result.status == ("completed" if all_sources else "partial"), result.message
     assert (
         (count < len(model_service.requests) <= count + 4)
         if all_sources
         else len(model_service.requests) == count
     )
-    head = read_head(kb_dir, scope.view_id)
-    manifest_path = (
-        kb_dir
-        / ".ultrakb/knowledge"
-        / scope.view_id
-        / "revisions"
-        / head.knowledge_revision_id
-        / "manifest.json"
-    )
-    manifest = json.loads(manifest_path.read_text())
-    current = set(manifest["input_revisions"])
+    fixed = published_scope(kb_dir)
+    current = set(fixed.knowledge.unit_revisions())
     dependencies = {
-        identity for identities in manifest["page_dependencies"].values() for identity in identities
+        unit for units in fixed.knowledge.page_input_revisions().values() for unit in units
     }
     assert dependencies - current, "The fixture must retain older page evidence."
-    originals = set()
-    for identity in current | dependencies:
-        _, source = validated_input(kb_dir, identity, scope.view_id)
-        originals.add(source.original)
-        originals.update(asset.artifact for asset in source.assets if asset.artifact)
-    assert originals <= set(manifest["original_references"])
+    store = catalog(kb_dir)
+    for revision_id in current | dependencies:
+        target = store.unit_revision(revision_id)
+        assert store.read_original(target.source_revision_id)
+        original = read_document_source(
+            kb_dir,
+            target.source_id,
+            unit_id=target.unit_id,
+            unit_revision_id=target.unit_revision_id,
+            scope=fixed,
+        )
+        assert original["content"].strip()
     assert bool(refresh_status(kb_dir, scope=scope)["needs_refresh"]) is not all_sources

@@ -6,19 +6,17 @@ The real validators, source readers and persistent checkpoints remain in use.
 
 import json
 from dataclasses import replace
-from types import SimpleNamespace
 
 import pytest
+from compile_work_fixtures import new_compile_work
 
 from ultrakb.agent import compiler, update_generation
 from ultrakb.agent.planning_identity import _compare
-from ultrakb.compile_checkpoints import CompileCheckpoints
 
 
 def saved_work(kb_dir):
-    return CompileCheckpoints(
+    return new_compile_work(
         kb_dir,
-        SimpleNamespace(task_id="b" * 32, parent_task_id=None, compiler_request_version=3),
         {"document": "manual"},
         {"protocol": "coordination-regression"},
     )

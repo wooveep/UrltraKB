@@ -1,7 +1,7 @@
 """Interactive multi-turn chat REPL for the UltraKB knowledge base.
 
 Builds on the single-shot Q&A agent in ``ultrakb.agent.query`` and keeps
-conversation state in ``ChatSession``. Uses prompt_toolkit for the input
+conversation state in the shared main store. Uses prompt_toolkit for the input
 line (history, editing, bottom toolbar) and streams responses directly to
 stdout to preserve the existing ``query`` visual.
 """
@@ -12,29 +12,24 @@ import asyncio
 import os
 import sys
 import time
-from collections.abc import AsyncGenerator
-from contextlib import aclosing
 from pathlib import Path
 from threading import Event
 from typing import Any
 
-from prompt_toolkit import PromptSession
-from prompt_toolkit.completion import Completer, Completion, PathCompleter
-from prompt_toolkit.document import Document
 from prompt_toolkit.formatted_text import FormattedText
-from prompt_toolkit.shortcuts import CompleteStyle, print_formatted_text
+from prompt_toolkit.shortcuts import print_formatted_text
 from prompt_toolkit.styles import Style
 
-from ultrakb.agent.chat_session import ChatSession
-from ultrakb.agent.query import (
-    MAX_TURNS,
-    build_chat_agent,
-    iter_agent_response_events,
-)
-from ultrakb.config import LlmCredentialBundle
 from ultrakb.knowledge_scope import KnowledgeScope, resolve_scope
-from ultrakb.log import append_log
-from ultrakb.model_outputs import ModelOutputs, model_output_scope
+from ultrakb.terminal_chat_prompt import (
+    _bottom_toolbar as _bottom_toolbar,
+)
+from ultrakb.terminal_chat_prompt import (
+    _ChatCompleter as _ChatCompleter,
+)
+from ultrakb.terminal_chat_prompt import (
+    _make_prompt_session as _make_prompt_session,
+)
 from ultrakb.terminal_chat_state import TerminalConversation
 
 _STYLE_DICT: dict[str, str] = {
@@ -221,123 +216,6 @@ def _print_resume_view(session: TerminalConversation, style: Style) -> None:
                 ("class:resume.assistant", f"    {preview}{extra}\n"),
             )
     print()
-
-
-def _bottom_toolbar(session: TerminalConversation) -> FormattedText:
-    return FormattedText(
-        [
-            ("class:toolbar", " session "),
-            ("class:toolbar.session", session.id),
-            (
-                "class:toolbar",
-                f"  {session.turn_count} turn(s)  {session.model} ",
-            ),
-        ]
-    )
-
-
-_SLASH_COMMANDS: list[tuple[str, str]] = [
-    ("/exit", "Exit (Ctrl-D also works)"),
-    ("/quit", "Exit (alias)"),
-    ("/help", "Show available commands"),
-    ("/clear", "Start a fresh session"),
-    ("/save", "Export transcript to wiki/explorations/"),
-    ("/status", "Show knowledge base status"),
-    ("/list", "List all documents"),
-    ("/lint", "Lint the knowledge base"),
-    ("/add", "Add a document or directory"),
-    ("/skill", 'Compile a skill (try `/skill new <name> "intent"`)'),
-    ("/deck", 'Generate a deck (try `/deck new <name> "intent"`)'),
-    ("/critique", "Run html-critic skill on a file (e.g. `/critique output/decks/foo/index.html`)"),
-]
-
-
-class _ChatCompleter(Completer):
-    """Complete slash commands and file paths after /add."""
-
-    def __init__(self) -> None:
-        self._path_completer = PathCompleter(expanduser=True)
-
-    def get_completions(self, document: Document, complete_event: Any) -> Any:
-        text = document.text_before_cursor
-
-        # After "/add ", complete file paths (skip dotfiles)
-        if text.lstrip().lower().startswith("/add "):
-            path_text = text.lstrip()[5:]
-            # Strip leading quote so PathCompleter resolves the real path
-            quote_char = ""
-            if path_text and path_text[0] in ("'", '"'):
-                quote_char = path_text[0]
-                path_text = path_text[1:]
-            path_doc = Document(path_text, len(path_text))
-            for c in self._path_completer.get_completions(path_doc, complete_event):
-                # Hide dotfiles unless the user explicitly typed a dot
-                basename = c.text.lstrip("/")
-                if basename.startswith(".") and not path_text.rpartition("/")[2].startswith("."):
-                    continue
-                # Append closing quote for files; skip for directories so
-                # the user can keep navigating into subdirectories.
-                if quote_char and not c.text.endswith("/"):
-                    comp_text = c.text + quote_char
-                else:
-                    comp_text = c.text
-                yield Completion(
-                    comp_text,
-                    start_position=c.start_position,
-                    display=c.display,
-                    display_meta=c.display_meta,
-                )
-            return
-
-        # Complete slash commands with descriptions
-        if text.startswith("/"):
-            for cmd, desc in _SLASH_COMMANDS:
-                if cmd.startswith(text.lower()):
-                    yield Completion(cmd, start_position=-len(text), display_meta=desc)
-
-
-def _make_prompt_session(
-    session: TerminalConversation, style: Style, use_color: bool, kb_dir: Path
-) -> PromptSession:
-    from prompt_toolkit.filters import has_completions
-    from prompt_toolkit.history import FileHistory
-    from prompt_toolkit.key_binding import KeyBindings
-
-    kb = KeyBindings()
-
-    @kb.add("tab", filter=has_completions)
-    def _accept_completion(event: Any) -> None:
-        """Tab accepts the current completion (like zsh), not cycle."""
-        buf = event.current_buffer
-        state = buf.complete_state
-        if not state:
-            return
-        # Only one candidate or already selected — accept immediately
-        if state.current_completion:
-            buf.apply_completion(state.current_completion)
-        elif len(state.completions) == 1:
-            buf.apply_completion(state.completions[0])
-        else:
-            # Multiple candidates, nothing selected — highlight first
-            buf.go_to_completion(0)
-
-    @kb.add("tab", filter=~has_completions)
-    def _trigger_completion(event: Any) -> None:
-        """Tab triggers completion when menu is not open."""
-        buf = event.current_buffer
-        buf.start_completion()
-
-    history_path = kb_dir / ".ultrakb" / "chat_history"
-    return PromptSession(
-        message=FormattedText([("class:prompt", ">>> ")]),
-        style=style,
-        completer=_ChatCompleter(),
-        complete_style=CompleteStyle.MULTI_COLUMN,
-        complete_while_typing=False,
-        key_bindings=kb,
-        history=FileHistory(str(history_path)),
-        bottom_toolbar=(lambda: _bottom_toolbar(session)) if use_color else None,
-    )
 
 
 def _make_rich_console() -> Any:
@@ -807,159 +685,20 @@ async def _handle_slash_critique(
         )
         return
 
-    target = (kb_dir / path).resolve() if not Path(path).is_absolute() else Path(path)
-    if not target.is_file():
-        _fmt(style, ("class:error", f"[ERROR] File not found: {path}\n"))
-        return
-
     from ultrakb.application.skill_maintenance import critique_artifact
 
-    rel_str = str(target.relative_to(kb_dir)) if target.is_relative_to(kb_dir) else str(target)
-    _fmt(style, ("class:slash.ok", f"Critiquing {rel_str}...\n"))
     try:
-        await critique_artifact(kb_dir, path, scope=scope)
-    except (RuntimeError, ValueError, OSError) as exc:
-        _fmt(style, ("class:error", f"[ERROR] {exc}\n"))
+        target = Path(path)
+        rel_str = target.relative_to(kb_dir).as_posix() if target.is_absolute() else path
+        _fmt(style, ("class:slash.ok", f"Critiquing {rel_str}...\n"))
+        await critique_artifact(kb_dir, rel_str, scope=scope)
+    except Exception as exc:
+        from ultrakb.application.connection_failures import operation_error_message
+
+        _fmt(style, ("class:error", f"[ERROR] {operation_error_message(exc)}\n"))
         return
 
     _fmt(style, ("class:slash.ok", f"Critique pass complete: {rel_str}\n"))
-
-
-def build_chat_session_agent(
-    kb_dir: Path,
-    session: ChatSession,
-    bundle: "LlmCredentialBundle | None" = None,
-    *,
-    scope: KnowledgeScope | None = None,
-) -> Any:
-    """Build the write- and skill-capable agent for one chat session (REST ``/chat``).
-
-    Thin wrapper that resolves language from the session/config and delegates
-    to ``build_chat_agent`` with the session's model. Kept in chat.py (not
-    query.py) so the query module's ``build_chat_agent`` signature stays
-    unchanged for the CLI; the API uses this session-aware variant instead.
-    """
-    from ultrakb.config import resolve_effective_config
-
-    scope = resolve_scope(kb_dir, scope)
-    session.require_view(scope.view_id)
-    config = resolve_effective_config(kb_dir)[0]
-    language = session.language or config.get("language", "en")
-    return build_chat_agent(kb_dir, session.model, language=language, bundle=bundle, scope=scope)
-
-
-async def iter_chat_turn_events(
-    agent: Any,
-    session: ChatSession,
-    user_input: str,
-    *,
-    run_config: Any = None,
-    outputs: ModelOutputs | None = None,
-    attempt_id: str | None = None,
-    scope: KnowledgeScope | None = None,
-    prepared_input=None,
-    selection=None,
-) -> AsyncGenerator[dict[str, Any], None]:
-    """Yield non-TTY events for one chat turn and persist the final turn.
-
-    Used by the REST ``/chat`` SSE stream: forwards delta/tool_call events from
-    ``iter_agent_response_events`` unchanged, and on the final event records
-    the turn into the session (history + counts) before re-emitting it with
-    ``session_id``/``turn_count``.
-    """
-    from ultrakb.locks import async_kb_lock, async_session_lock
-
-    kb_dir = session.path.parent.parent.parent
-    query_scope = scope
-    scope = resolve_scope(kb_dir, scope)
-    async with async_session_lock(kb_dir, session.id):
-        async with async_kb_lock(kb_dir / ".ultrakb", exclusive=True):
-            session.reload()
-            session.require_view(scope.view_id)
-            append_log(scope.wiki_dir, "query", user_input, scope=scope)
-            from ultrakb.context.preparation import recent_input
-
-            new_input = (prepared_input or recent_input(session, user_input)).sdk_input
-            from ultrakb.application.query_views import resolve_query_views
-
-            selection = selection or resolve_query_views(kb_dir, user_input, scope=query_scope)
-
-            # Accumulate the ordered, interleaved trace (narration text + tool reads) in
-            # SSE arrival order, mirroring the frontend's live fold, so a RESTORED turn
-            # renders step-by-step identically instead of collapsing to one text block.
-            # Persisted per turn via record_turn(trace=...). Only READ tools go into the
-            # trace (see _TRACE_READ_TOOLS): they are all the frontend renders, and
-            # recording a non-read tool like write_file would persist its full `content`
-            # argument (the whole generated file) into the session JSON and ship it to
-            # the browser on restore only to be dropped — the same large-payload waste
-            # the `final` frame already avoids by stripping history.
-            trace: list[dict[str, Any]] = []
-
-            data = None
-            base_usage = session.token_usage
-            usage_recorded = False
-            with model_output_scope(kb_dir, outputs):
-                stream = iter_agent_response_events(
-                    agent,
-                    new_input,
-                    max_turns=MAX_TURNS,
-                    run_config=run_config,
-                    selection=selection,
-                    readers_bound=prepared_input is not None,
-                )
-                async with aclosing(stream):
-                    async for event in stream:
-                        kind = event["event"]
-                        if kind == "usage":
-                            session.record_usage(event["data"], baseline=base_usage)
-                            usage_recorded = True
-                            yield event
-                            continue
-                        if kind in {"delta", "tool_call"}:
-                            from ultrakb.agent.chat_trace import append_event
-
-                            append_event(trace, event, read_tools=_TRACE_READ_TOOLS)
-                            yield event
-                            continue
-                        if kind != "final":
-                            yield event
-                            continue
-
-                        data = event["data"]
-                        answer = data["answer"]
-                        from ultrakb.agent.chat_trace import complete_trace
-
-                        complete_trace(trace, answer)
-                        break
-            if data is not None and "answer" in data:
-                from ultrakb.llm_execution import check_model_stop
-
-                check_model_stop()
-                from ultrakb.application.execution import activity
-
-                with activity("saving"):
-                    session.record_turn(
-                        user_input,
-                        answer,
-                        data["history"],
-                        trace=trace,
-                        attempt_id=attempt_id,
-                        usage=None if usage_recorded else data.get("usage"),
-                        turn_usage=data.get("usage"),
-                        citations=data.get("citations"),
-                        answer_outcome=data.get("answer_outcome"),
-                    )
-                yield {
-                    "event": "final",
-                    "data": {
-                        "answer": answer,
-                        "session_id": session.id,
-                        "turn_count": session.turn_count,
-                        "usage": data.get("usage"),
-                        "answer_outcome": data.get("answer_outcome"),
-                        "unfinished": data.get("unfinished", ()),
-                    },
-                }
 
 
 async def run_chat(

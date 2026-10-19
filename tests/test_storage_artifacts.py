@@ -415,3 +415,71 @@ def test_never_activated_artifact_content_cannot_authorize_replacing_external_by
     third = store.save(path, b"Current target.", expected_epoch=2, **request)
     assert store.sync(path, revision_id=third.revision_id).status == "changed"
     assert (root / path).read_bytes() == b"Never activated."
+
+
+def test_http_output_reads_retained_bytes_and_never_serves_unaccepted_worktree(
+    tmp_path, monkeypatch
+):
+    from fastapi.testclient import TestClient
+    from test_storage_artifact_exports import artifact_writer
+
+    from ultrakb.api import create_app
+
+    root, _, _, save = artifact_writer(tmp_path)
+    first = save("output/report.html", b"<h1>First accepted</h1>")
+    second = save("output/report.html", b"<h1>Current accepted</h1>")
+    assert first.status == second.status == "saved"
+    copy = root / "output/report.html"
+    copy.parent.mkdir(exist_ok=True)
+    copy.write_text("<h1>Unaccepted external draft</h1>")
+    monkeypatch.setenv("ULTRAKB_API_TOKEN", "artifact-test-token")
+    monkeypatch.setattr("ultrakb.api_helpers.resolve_kb_alias", lambda value: root)
+    client = TestClient(create_app())
+    headers = {"Authorization": "Bearer artifact-test-token"}
+    params = {"kb": "fixture", "path": "output/report.html"}
+    current = client.get("/api/v1/output", params=params, headers=headers)
+    assert current.status_code == 200
+    assert current.text == "<h1>Current accepted</h1>"
+    historical = client.get(
+        "/api/v1/output", params={**params, "revision_id": first.revision_id}, headers=headers
+    )
+    assert historical.status_code == 200 and historical.text == "<h1>First accepted</h1>"
+    copy.unlink()
+    assert client.get("/api/v1/output", params=params, headers=headers).text == current.text
+    (root / "output/unaccepted.html").write_text("Do not serve this draft")
+    missing = client.get(
+        "/api/v1/output", params={**params, "path": "output/unaccepted.html"}, headers=headers
+    )
+    assert missing.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_backup_restore_rebuilds_an_applied_artifact_copy_without_a_model(tmp_path):
+    from ultrakb.application.storage_maintenance import backup_knowledge, restore_knowledge
+    from ultrakb.storage.artifact_store import ArtifactStore
+
+    root, identity, _ = question_knowledge(tmp_path)
+    path, content = "output/demo/index.html", "<!doctype html><h1>Restored artifact</h1>"
+    with StreamTransport(
+        [write_call("write-restored", path, content), {"content": "Saved the artifact."}]
+    ) as service:
+        (root / ".env").write_text(f"LLM_API_KEY=offline-test-key\nOPENAI_API_BASE={service.url}\n")
+        result = await continue_conversation(
+            root,
+            "Create an HTML artifact.",
+            new_session_id="restore-artifact",
+            scope=storage_scope(root, identity),
+        )
+        assert result.status == "completed", result.error
+        assert result.artifact_outputs[0]["projection"] == "applied"
+        backup = tmp_path / "artifact-backup"
+        backup_knowledge(root, backup)
+        destination = tmp_path / "artifact-restored"
+        restored = restore_knowledge(backup, destination)
+        assert restored.identity.generation != identity.generation
+        scope = storage_scope(destination, restored.identity)
+        assert read_artifact(destination, path, scope=scope) == content
+        synced = ArtifactStore(destination, restored.identity).sync(path)
+        assert synced.status == "applied", synced
+        assert (destination / path).read_text() == content
+        assert len(service.requests) == 2

@@ -2,8 +2,8 @@
 
 from ultrakb.application.pending import stop_pending_job
 from ultrakb.application.views import view_scope
-from ultrakb.catalog_schema import UnsupportedCatalogWriter
 from ultrakb.lifecycle import KnowledgeBaseRemoved, expected_generation
+from ultrakb.storage.database import StorageFormatError
 
 
 def confirm_stops(root, stops):
@@ -16,5 +16,5 @@ def confirm_stops(root, stops):
                 stop_pending_job(
                     root, request.job_id, request.dispatch_id, request.generation, scope=scope
                 )
-        except (KnowledgeBaseRemoved, UnsupportedCatalogWriter):
+        except (KnowledgeBaseRemoved, StorageFormatError):
             pass  # A replaced or unsupported KB cannot accept the old delivery.

@@ -26,7 +26,7 @@ def test_cnki_adapters_publish_a_single_source_with_an_internal_pdf(
     external.parent.mkdir()
     shutil.move(cnki_source, external)
     original = external.read_bytes()
-    resources = None
+    task_result = None
     if entry == "desktop":
         from ultrakb.runtime.requests import ImportFile
         from ultrakb.runtime.tasks import TaskManager
@@ -37,7 +37,7 @@ def test_cnki_adapters_publish_a_single_source_with_an_internal_pdf(
             result = manager.wait(identity, timeout=120)
             assert result.succeeded == 1, result
             assert result.processes_reaped
-            resources = result.results[0].resources
+            task_result = result.results[0]
         finally:
             manager.shutdown(stop=True)
             assert manager.join(10)
@@ -74,11 +74,16 @@ def test_cnki_adapters_publish_a_single_source_with_an_internal_pdf(
     assert source["name"] == external.name
     assert source["cnki"]["internal_format"] == "KDH"
     assert "Original CNKI content." in source["content"]
-    assert (kb_dir / source["original_path"]).read_bytes() == original
-    assert (kb_dir / source["internal_pdf_path"]).is_file()
+    from native_catalog_fixtures import original_bytes, retained_pdf_bytes
+
+    assert original_bytes(kb_dir, source["source_revision_id"]) == original
+    assert retained_pdf_bytes(kb_dir, source).startswith(b"%PDF-")
     assert "office" not in source
-    if resources is not None:
-        assert str(kb_dir / source["internal_pdf_path"]) in resources
+    if task_result is not None:
+        assert task_result.source_id == source["source_id"]
+        assert any(
+            unit.target_revision_id == source["unit_revision_id"] for unit in task_result.units
+        )
     assert not external.with_suffix(".pdf").exists()
 
 
@@ -118,27 +123,41 @@ def test_native_source_reader_opens_cnki_pdf_without_office_metadata(
     payload = tmp_path / "source.json"
     payload.write_text(json.dumps(source))
     code = """
-import json, sys
+import hashlib, json, sys, time
 from pathlib import Path
 from types import SimpleNamespace
 from PySide6.QtWidgets import QApplication, QWidget, QPushButton, QLabel
 from PySide6.QtGui import QDesktopServices
 from ultrakb.desktop.source_reader import SourceReader
+from ultrakb.desktop.io import LocalIO
+from ultrakb.application.views import published_scope
 app = QApplication([])
 opened = []
 QDesktopServices.openUrl = lambda url: opened.append(url.toLocalFile()) or True
 root = Path(sys.argv[1])
 source = json.loads(Path(sys.argv[2]).read_text())
 window = QWidget()
+window.io = LocalIO(window)
+window.read_scope = published_scope(root)
 window.appearance = SimpleNamespace(dark=False)
 window.zoom = SimpleNamespace(currentData=lambda: 1.0)
 reader = SourceReader(window, root, source)
 button = next(button for button in reader.findChildren(QPushButton)
               if '生成的 PDF' in button.text())
 button.click()
-assert opened == [str(root / source['internal_pdf_path'])]
+deadline = time.monotonic() + 5
+while not opened and time.monotonic() < deadline:
+    app.processEvents()
+    time.sleep(0.01)
+assert len(opened) == 1
+assert hashlib.sha256(Path(opened[0]).read_bytes()).hexdigest() == source['cnki']['pdf_digest']
 assert any('KDH' in label.text() for label in reader.findChildren(QLabel))
 reader.close()
+window.io.stop()
+while not window.io.stopped() and time.monotonic() < deadline:
+    app.processEvents()
+    time.sleep(0.01)
+assert window.io.stopped()
 """
     result = subprocess.run(
         [sys.executable, "-c", code, str(kb_dir), str(payload)],

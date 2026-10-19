@@ -60,6 +60,9 @@ EXECUTION_SCHEMA = (
     )""",
     "CREATE INDEX ukb_executions_task ON ukb_executions(task_id, sequence)",
     "CREATE INDEX ukb_executions_budget ON ukb_executions(model_budget_id, sequence)",
+    "CREATE INDEX ukb_executions_application ON ukb_executions(application_task_id, sequence)",
+    "CREATE INDEX ukb_executions_application_unit "
+    "ON ukb_executions(application_task_id, application_unit_id, sequence)",
     "CREATE UNIQUE INDEX ukb_one_active_execution_per_task ON ukb_executions(task_id) "
     "WHERE state IN ('started', 'stopping')",
     """CREATE TABLE ukb_stage_attempts (

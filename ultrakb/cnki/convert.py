@@ -11,8 +11,8 @@ from typing import Callable
 from ultrakb.cnki.engine import detect_format, inspect_pdf
 from ultrakb.cnki.records import CNKIConversion, CNKIWorkerResult
 from ultrakb.cnki.runtime import identity_key, processing_identity, require_runtime
+from ultrakb.file_digest import hash_file
 from ultrakb.locks import atomic_write_bytes, atomic_write_text
-from ultrakb.state import HashRegistry
 
 
 def convert_cnki(
@@ -34,7 +34,7 @@ def convert_cnki(
     require_runtime(identity)
     if expected_identity is not None and expected_identity != identity:
         raise ValueError("CNKI processing identity changed during preparation")
-    digest = HashRegistry.hash_file(source)
+    digest = hash_file(source)
     with tempfile.TemporaryDirectory(prefix="ultrakb-cnki-") as temporary:
         task = Path(temporary)
         pdf, response = task / "converted.pdf", task / "result.json"
@@ -78,12 +78,12 @@ def convert_cnki(
         if result.internal_format != kind:
             raise ValueError("CNKI conversion receipt does not match the original format")
         pages = inspect_pdf(pdf, declared_pages=result.declared_pages)
-        if HashRegistry.hash_file(source) != digest or pages != result.pages:
+        if hash_file(source) != digest or pages != result.pages:
             raise ValueError("CNKI original or conversion changed during the attempt")
         record = CNKIConversion(
             input_digest=digest,
             processing_identity=identity,
-            pdf_digest=HashRegistry.hash_file(pdf),
+            pdf_digest=hash_file(pdf),
             **result.model_dump(),
         )
         check_stop()
@@ -93,43 +93,24 @@ def convert_cnki(
         return record_path
 
 
-def _retained_cnki(kb_dir, prepared, expected_identity):
-    from ultrakb.normalization import NormalizedInput, read_normalization
-    from ultrakb.source_catalog import read_record
-
-    for path in sorted((kb_dir / ".ultrakb/catalog/normalizations").glob("*.json")):
-        saved = read_record(kb_dir, "normalizations", path.stem, NormalizedInput)
-        if saved.cnki_path and saved.files.get(saved.raw_path) == prepared.digest:
-            directory, saved = read_normalization(kb_dir, saved.normalization_id)
-            receipt = directory / saved.cnki_path
-            record = CNKIConversion.model_validate_json(receipt.read_text("utf-8"))
-            if expected_identity is None or record.processing_identity == expected_identity:
-                return directory / saved.pdf_path, receipt, record.processing_identity
-    return None
-
-
 def prepare_cnki(kb_dir: Path, prepared, *, check_stop=lambda: None, expected_identity=None):
     check_stop()
-    retained = _retained_cnki(kb_dir, prepared, expected_identity)
-    identity = retained[2] if retained else processing_identity()
+    identity = processing_identity()
     if expected_identity is not None and identity != expected_identity:
         raise ValueError("CNKI processing identity changed during preparation")
     key = identity_key(identity)
     if key not in prepared.conversions:
-        if retained:
-            prepared.conversions[key] = retained[:2]
-        else:
-            temporary = tempfile.TemporaryDirectory(prefix="ultrakb-cnki-prepared-")
-            pdf = Path(prepared.conversion_tasks.enter_context(temporary)) / "internal.pdf"
-            try:
-                receipt = convert_cnki(
-                    prepared.path, pdf, check_stop=check_stop, expected_identity=identity
-                )
-            except Exception as exc:
-                temporary.cleanup()
-                prepared.conversions[key] = exc
-                raise
-            prepared.conversions[key] = (pdf, receipt)
+        temporary = tempfile.TemporaryDirectory(prefix="ultrakb-cnki-prepared-")
+        pdf = Path(prepared.conversion_tasks.enter_context(temporary)) / "internal.pdf"
+        try:
+            receipt = convert_cnki(
+                prepared.path, pdf, check_stop=check_stop, expected_identity=identity
+            )
+        except Exception as exc:
+            temporary.cleanup()
+            prepared.conversions[key] = exc
+            raise
+        prepared.conversions[key] = (pdf, receipt)
     if isinstance(prepared.conversions[key], Exception):
         raise prepared.conversions[key]
     pdf, path = prepared.conversions[key]
@@ -137,8 +118,8 @@ def prepare_cnki(kb_dir: Path, prepared, *, check_stop=lambda: None, expected_id
     if (
         record.input_digest != prepared.digest
         or record.processing_identity != identity
-        or HashRegistry.hash_file(prepared.path) != prepared.digest
-        or HashRegistry.hash_file(pdf) != record.pdf_digest
+        or hash_file(prepared.path) != prepared.digest
+        or hash_file(pdf) != record.pdf_digest
     ):
         raise ValueError("Prepared CNKI artifacts changed or belong to another input")
     inspect_pdf(pdf, declared_pages=record.pages)

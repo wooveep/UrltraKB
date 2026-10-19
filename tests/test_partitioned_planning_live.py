@@ -7,21 +7,19 @@ The synthetic source and exact returned text are saved for human semantic review
 import json
 from dataclasses import asdict
 from pathlib import Path
-from uuid import uuid4
 
 import pytest
+from compile_work_fixtures import new_compile_work
+from native_usage_fixtures import observe_executor
 
 from ultrakb.agent.compile_capacity import CompileCapacity
 from ultrakb.agent.compiler import _sanitize_concept_name
 from ultrakb.agent.partition_planning import partitioned_plan
 from ultrakb.agent.source_windows import CompileSourceWindows
-from ultrakb.compile_checkpoints import CompileCheckpoints
 from ultrakb.config import resolve_credential_bundle
 from ultrakb.execution_capacity import capacity_policy
 from ultrakb.llm_execution import CompletionExecutor, ModelCallPolicy, ModelRequest, RoleBindings
-from ultrakb.llm_usage import UsageScope
 from ultrakb.locks import atomic_write_json, atomic_write_text
-from ultrakb.model_task import TaskJournal
 from ultrakb.model_tokenizer import TokenMeasure
 
 pytestmark = pytest.mark.live
@@ -79,7 +77,6 @@ def test_real_partitioned_synonyms_and_homonyms_keep_native_locations(
             },
         ),
         ModelCallPolicy(max_calls=12, retries=0, backoff=0, concurrency=1),
-        scope=UsageScope(kb_dir, uuid4().hex),
     )
     fits = CompileCapacity(
         executor,
@@ -93,10 +90,8 @@ def test_real_partitioned_synonyms_and_homonyms_keep_native_locations(
             )
         ),
     )
-    journal = TaskJournal(kb_dir, executor)
-    checkpoints = CompileCheckpoints(
-        kb_dir, journal.record, {"document": "sample"}, {"protocol": 1}
-    )
+    checkpoints = new_compile_work(kb_dir, {"document": "sample"}, {"protocol": 1})
+    observe_executor(kb_dir, executor, work=checkpoints)
     delivered = []
     before = len(live_llm.calls)
     budget_before = len(json.loads(Path(live_llm.budget.path).read_text())["entries"])

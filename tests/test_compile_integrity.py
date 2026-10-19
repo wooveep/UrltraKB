@@ -12,6 +12,7 @@ from ultrakb.agent.compile_plan import CompilePlanError, parse_compile_plan, pla
 from ultrakb.agent.compiler import _ENTITY_TYPE_LIST, _sanitize_concept_name
 from ultrakb.agent.page_response import PageResponseError
 from ultrakb.compilation_report import collect_compile_report
+from ultrakb.compile_checkpoints import digest
 from ultrakb.locks import atomic_write_text
 
 pytest_plugins = ("test_workbook_import",)
@@ -71,6 +72,8 @@ def test_group_arrays_preserve_all_concepts_and_entities(kb_dir):
 def test_failed_plan_is_persisted_and_public_retry_preserves_exhausted_repair(
     kb_dir, three_sheets, monkeypatch, live_llm, bad_plan
 ):
+    from native_catalog_fixtures import unit_inventory
+
     from ultrakb.agent import compiler
     from ultrakb.agent.page_response import parse_page
     from ultrakb.agent.source_excerpts import SourceExcerpts
@@ -79,7 +82,6 @@ def test_failed_plan_is_persisted_and_public_retry_preserves_exhausted_repair(
     from ultrakb.application.workbook_actions import retry_worksheet
     from ultrakb.compile_checkpoints import digest, document_checkpoints
     from ultrakb.knowledge_scope import resolve_scope
-    from ultrakb.unit_publication import read_unit_publication
 
     _live_profile(kb_dir, monkeypatch, live_llm)
     deliveries = Counter()
@@ -169,8 +171,8 @@ def test_failed_plan_is_persisted_and_public_retry_preserves_exhausted_repair(
         assert f"{name.upper()}_SHEET" in body
     failed = units["Beta"]
     assert failed.successful_revision_id is None and failed.knowledge_revision_id is None
-    stored = read_unit_publication(kb_dir, failed.unit_id, failed.view_id)
-    assert stored.quality and stored.unfinished == ("concepts", "entities")
+    stored = unit_inventory(kb_dir, failed.unit_id, failed.view_id)
+    assert stored["quality"] and tuple(stored["unfinished"]) == ("concepts", "entities")
     assert sum(deliveries.values()) == 2
     before = dict(deliveries)
     admitted = len(live_llm.calls)
@@ -183,8 +185,8 @@ def test_failed_plan_is_persisted_and_public_retry_preserves_exhausted_repair(
     for name in ("Alpha", "Gamma"):
         unit = units[name]
         assert (
-            read_unit_publication(kb_dir, unit.unit_id, unit.view_id).knowledge_revision_id
-            == unit.knowledge_revision_id
+            unit_inventory(kb_dir, unit.unit_id, unit.view_id)["successful_revision_id"]
+            == unit.successful_revision_id
         )
 
 
@@ -196,10 +198,10 @@ def test_plan_repair_is_bounded_and_does_not_leave_unfinished(kb_dir):
         with pytest.raises(CompilePlanError, match="concepts") as failure:
             parse_compile_plan(raw, json.loads, **options)
         assert "corrected JSON plan" in plan_repair_message(failure.value, raw)
-        checkpoints.claim_repair("plan", "same-request")
+        checkpoints.claim_repair("plan", digest("same-request"))
         parse_compile_plan('{"concepts":{},"entities":{}}', json.loads, repaired=True, **options)
         with pytest.raises(PageResponseError, match="compile_repair_exhausted"):
-            checkpoints.claim_repair("plan", "same-request")
+            checkpoints.claim_repair("plan", digest("same-request"))
     assert not report.unfinished
     assert "compile_plan_repaired" in report.quality
 
@@ -220,22 +222,22 @@ def test_conflicting_plans_exhaust_once_and_preserve_existing_pages(kb_dir, plan
     checkpoints = _checkpoints(kb_dir)
     for attempt in range(2):
         if attempt:
-            checkpoints.claim_repair("plan", "same-request")
+            checkpoints.claim_repair("plan", digest("same-request"))
         with pytest.raises(CompilePlanError):
             parse_compile_plan(json.dumps(plan), json.loads, **_options(kb_dir / "wiki"))
     with pytest.raises(PageResponseError, match="compile_repair_exhausted"):
-        checkpoints.claim_repair("plan", "same-request")
+        checkpoints.claim_repair("plan", digest("same-request"))
     assert original.read_text() == "Existing knowledge."
     assert list((kb_dir / "wiki/concepts").glob("*.md")) == [original]
     assert not list((kb_dir / "wiki/entities").glob("*.md"))
 
 
 def test_incomplete_recompile_preserves_last_success(kb_dir, three_sheets, monkeypatch, live_llm):
+    from native_catalog_fixtures import publication, unit_inventory
     from office_publication_fixtures import publish_workbook
 
     from ultrakb.application.recompilation import recompile_document, select_recompilation
     from ultrakb.compilation_report import report_compile_issue
-    from ultrakb.unit_publication import read_head, read_unit_publication
 
     _live_profile(kb_dir, monkeypatch, live_llm)
     admitted = len(live_llm.calls)
@@ -252,7 +254,7 @@ def test_incomplete_recompile_preserves_last_success(kb_dir, three_sheets, monke
     )
     assert len(live_llm.calls) == admitted
     unit = first.units[0]
-    head = read_head(kb_dir, unit.view_id)
+    head = publication(kb_dir, unit.view_id)
 
     async def incomplete(*args, **kwargs):
         report_compile_issue("concept_generation_incomplete", "concepts")
@@ -265,10 +267,10 @@ def test_incomplete_recompile_preserves_last_success(kb_dir, three_sheets, monke
         recompile_document(kb_dir, first.source_id, unit_id=unit.unit_id, version=selected.version)
     )
     assert result.status == "failed" and "concepts" in result.unfinished
-    assert read_head(kb_dir, unit.view_id) == head
-    failed = read_unit_publication(kb_dir, unit.unit_id, unit.view_id)
-    assert failed.knowledge_revision_id == unit.knowledge_revision_id
-    assert failed.successful_revision_id == unit.successful_revision_id
+    assert publication(kb_dir, unit.view_id) == head
+    failed = unit_inventory(kb_dir, unit.unit_id, unit.view_id)
+    assert failed.knowledge_revision_id == unit.successful_revision_id
+    assert failed["successful_revision_id"] == unit.successful_revision_id
     assert len(live_llm.calls) == admitted
 
 

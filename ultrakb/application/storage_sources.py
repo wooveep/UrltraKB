@@ -69,9 +69,42 @@ def read_retained_asset(kb_dir, source_id, unit_revision_id, path, *, identity):
     return catalog.read_processed(target.processing_id, path)
 
 
+def read_source_image(kb_dir, source_id, unit_revision_id, path, *, identity):
+    import mimetypes
+
+    catalog, target = _retained_target(kb_dir, identity, source_id, unit_revision_id)
+    processing = catalog.processing(target.processing_id)
+    aliases = dict(image_paths(target, processing))
+    aliases.update(image_paths(target, processing, retained=True))
+    aliases.update({original: original for original in aliases.values()})
+    if path not in aliases:
+        raise FileNotFoundError("The selected input does not contain this image")
+    return (
+        catalog.read_processed(target.processing_id, aliases[path]),
+        mimetypes.guess_type(path)[0] or "application/octet-stream",
+    )
+
+
 def read_retained_original(kb_dir, source_id, unit_revision_id, *, identity):
     catalog, target = _retained_target(kb_dir, identity, source_id, unit_revision_id)
     return catalog.read_original(target.source_revision_id)
+
+
+def source_reading_units(scope, source_id):
+    """List only the exact originals referenced by this fixed publication."""
+    from .storage_inventory import unit_inventory
+
+    bound = scope.knowledge
+    catalog = CatalogStore(scope.kb_dir, bound.identity)
+    active = set(bound.unit_revisions())
+    actual = {}
+    for unit in sorted(bound.input_units(), key=lambda item: item.unit_revision_id not in active):
+        actual.setdefault(unit.unit_id, unit)
+    return [
+        unit_inventory(catalog, unit, unit, scope)
+        for unit in actual.values()
+        if unit.source_id == source_id
+    ]
 
 
 def _payload(
@@ -87,6 +120,7 @@ def _payload(
     blocks=None,
 ):
     processing = catalog.processing(target.processing_id)
+    current_unit = catalog.unit(target.unit_id)
     native = catalog.read_processed(target.processing_id, processing.source_path)
     files = {file.path: file for file in processing.files}
     images = image_paths(target, processing, retained=retained)
@@ -130,7 +164,9 @@ def _payload(
         if any(value is not None for value in (pages, chars, blocks)):
             raise PageRangeError("This source has no retained native reading map")
         selection["content"] = native.decode("utf-8")
-    metadata = {}
+    from .storage_conversion_metadata import conversion_metadata
+
+    metadata = conversion_metadata(catalog, target, processing)
     if "retention.json" in files:
         from .storage_retained_inputs import RetainedContent
 
@@ -170,7 +206,7 @@ def _payload(
         if retained
         else "needs_refresh"
         if source.revision_id != target.source_revision_id
-        or catalog.unit(target.unit_id).unit_revision_id != target.unit_revision_id
+        or current_unit.unit_revision_id != target.unit_revision_id
         else "current",
         "unit_revision_id": target.unit_revision_id,
         "knowledge_revision_id": publication.revision_id if publication else None,
@@ -185,6 +221,10 @@ def _payload(
         else "pending",
         "content_state": processing.content_state,
         "processing": processing.decision.model_dump(mode="json"),
+        "target_processing": catalog.processing(current_unit.processing_id).decision.model_dump(
+            mode="json"
+        ),
+        "original_kind": "managed",
         "processing_fingerprint": processing.fingerprint,
         "length_class": processing.decision.length_class,
         "execution_mode": processing.decision.execution_mode,

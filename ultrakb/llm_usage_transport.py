@@ -14,7 +14,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping
 
-from ultrakb.execution_timing import ObservationStart, record_phase_event, start_observation
+from ultrakb.execution_timing import ObservationStart, start_observation
 from ultrakb.llm_usage import (
     _SCOPE,
     UsageScope,
@@ -92,15 +92,6 @@ class ModelCall:
             self.sent_ids.append(identity)
             finish_request(identity, scope=self.scope, terminal=False, send_status="sent")
         self.send_starts[identity] = start_observation()
-        record_phase_event(
-            "send",
-            stage=self.stage,
-            work_id=self.stage.split(".", 1)[-1],
-            scope=self.scope,
-            logical_call_id=self.metadata.get("logical_call_id"),
-            request_attempt_id=identity,
-            at=self.send_starts[identity],
-        )
         return identity
 
     def finish(self, response=None, *, state="completed"):
@@ -219,17 +210,6 @@ class ModelCall:
         if identity in self.response_ids or identity not in self.send_starts:
             return
         self.response_ids.add(identity)
-        record_phase_event(
-            "response" if response_observed else "request_settled",
-            stage=self.stage,
-            work_id=self.stage.split(".", 1)[-1],
-            scope=self.scope,
-            logical_call_id=self.metadata.get("logical_call_id"),
-            request_attempt_id=identity,
-            started=self.send_starts[identity],
-            outcome=state,
-            at=at,
-        )
 
 
 _CALL: ContextVar[ModelCall | None] = ContextVar("ultrakb_usage_model_call", default=None)

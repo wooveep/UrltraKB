@@ -3,9 +3,9 @@
 from pathlib import Path
 from urllib.parse import unquote
 
+from ultrakb.file_digest import hash_file
 from ultrakb.file_state import contained_paths
 from ultrakb.inputs import PreparedImage, PreparedInput
-from ultrakb.state import HashRegistry
 
 
 def artifact_availability(kb_dir, relative, digest):
@@ -19,7 +19,7 @@ def artifact_availability(kb_dir, relative, digest):
     path = kb_dir / relative
     contained_paths(kb_dir, [path])
     try:
-        available = path.is_file() and HashRegistry.hash_file(path) == digest
+        available = path.is_file() and hash_file(path) == digest
     except OSError:
         available = False
     return {

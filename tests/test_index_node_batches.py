@@ -268,14 +268,13 @@ async def test_scheduler_changes_reuse_receipts_but_source_or_contract_changes_d
 
 @pytest.mark.parametrize(("first_size", "resume_size"), [(8, 1), (1, 8)])
 def test_delivered_work_survives_cancel_before_validation_and_rescheduling(
-    tmp_path, monkeypatch, first_size, resume_size
+    tmp_path, monkeypatch, first_size, resume_size, index_stages
 ):
     import litellm
     from pageindex import IndexConfig, LocalClient
 
     from ultrakb.execution_capacity import capacity_policy
     from ultrakb.index_llm import PageIndexLLM
-    from ultrakb.index_stages import IndexStages
     from ultrakb.llm_execution import CompletionExecutor, LlmCredentialBundle, RoleBindings
     from ultrakb.locks import LockCancelled
 
@@ -319,7 +318,7 @@ def test_delivered_work_survives_cancel_before_validation_and_rescheduling(
             custom_endpoint=True,
         )
         adapter = PageIndexLLM(executor)
-        adapter.checkpoints = IndexStages(tmp_path, source, identity={"model": "fixture"})
+        adapter.checkpoints = index_stages(tmp_path, source, identity={"model": "fixture"})
         return adapter
 
     first = runtime()

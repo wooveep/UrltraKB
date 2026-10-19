@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pymupdf
 import pytest
+from native_catalog_fixtures import original_bytes, retained_pdf_bytes
 
 pytest_plugins = ("test_office_import",)
 
@@ -22,12 +23,12 @@ def test_binary_word_retains_final_body_blank_page_and_image(
     result = import_document(kb_dir, path)
     assert result.status == "added", result.message
     saved = read_document_source(kb_dir, result.source_id)
-    assert (kb_dir / saved["original_path"]).read_bytes() == path.read_bytes()
+    assert original_bytes(kb_dir, saved["source_revision_id"]) == path.read_bytes()
     assert saved["pages"] == 3
     assert "INSERTED_MARKER" in saved["content"] and "DELETED_MARKER" not in saved["content"]
     assert "HIDDEN_MARKER" not in saved["content"]
     assert saved["office"]["detected_filter"] == "MS Word 97"
-    with pymupdf.open(kb_dir / saved["internal_pdf_path"]) as pdf:
+    with pymupdf.open(stream=retained_pdf_bytes(kb_dir, saved), filetype="pdf") as pdf:
         assert pdf[1].get_text().strip() == ""
         image = pdf[2].get_image_info()[0]
         assert (image["width"], image["height"]) == (160, 80)
@@ -63,7 +64,7 @@ def test_binary_word_failure_keeps_original_and_explains_why(
         assert "damaged" in result.message.lower()
     saved = read_document_source(kb_dir, result.source_id)
     assert saved["knowledge_revision_id"] is None
-    assert (kb_dir / saved["original_path"]).read_bytes() == path.read_bytes()
+    assert original_bytes(kb_dir, saved["source_revision_id"]) == path.read_bytes()
 
 
 def test_binary_word_upload_and_cli_read_the_same_source(kb_dir, office_runtime, pdf_model):
@@ -91,4 +92,4 @@ def test_binary_word_upload_and_cli_read_the_same_source(kb_dir, office_runtime,
     assert read.exit_code == 0, read.output
     saved = json.loads(read.output)
     assert saved["office"]["detected_filter"] == "MS Word 97"
-    assert (kb_dir / saved["original_path"]).read_bytes() == original
+    assert original_bytes(kb_dir, saved["source_revision_id"]) == original

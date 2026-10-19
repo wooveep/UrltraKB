@@ -27,6 +27,9 @@ def test_api_ignores_stale_browser_bundle_and_still_delivers_html(kb_dir, tmp_pa
     deck = kb_dir / "output/decks/example/index.html"
     deck.parent.mkdir(parents=True)
     deck.write_text("<html>Generated deck</html>", encoding="utf-8")
+    from test_api import _publish_artifact_fixture
+
+    _publish_artifact_fixture(kb_dir, deck.parent)
 
     with TestClient(create_app()) as client:
         assert client.get("/").status_code == 404

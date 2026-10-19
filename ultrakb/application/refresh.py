@@ -4,9 +4,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ultrakb.knowledge_scope import KnowledgeScope, reading_scope, resolve_scope
-from ultrakb.locks import kb_read_lock
-from ultrakb.source_changes import effective_input
-from ultrakb.unit_publication import read_head
 
 
 @dataclass(frozen=True)
@@ -24,28 +21,17 @@ def read_source_contribution_target(kb_dir, source_id, *, scope=None):
     if selected.historical:
         raise ValueError("Select the current view before confirming source contribution")
     with reading_scope(selected):
-        if selected.knowledge is not None:
-            from ultrakb.storage.catalog_store import CatalogStore
+        assert selected.knowledge is not None
+        from ultrakb.storage.catalog_store import CatalogStore
 
-            source = CatalogStore(selected.kb_dir, selected.knowledge.identity).source(source_id)
-            return SourceContributionTarget(
-                source.source_id,
-                source.label,
-                source.revision_id,
-                source.generation,
-                source.removed,
-                source.contribution_empty,
-            )
-        from ultrakb.source_catalog import read_source
-
-        legacy = read_source(selected.kb_dir, source_id)
+        source = CatalogStore(selected.kb_dir, selected.knowledge.identity).source(source_id)
         return SourceContributionTarget(
-            legacy.source_id,
-            legacy.name,
-            legacy.target_revision_id,
-            legacy.target_generation,
-            legacy.removed,
-            legacy.contribution_empty,
+            source.source_id,
+            source.label,
+            source.revision_id,
+            source.generation,
+            source.removed,
+            source.contribution_empty,
         )
 
 
@@ -58,140 +44,41 @@ def list_knowledge_history(
     publication_id=None,
     cancelled=None,
 ) -> tuple[dict, ...]:
-    from ultrakb.application.views import view_scope
-    from ultrakb.ingest_records import KnowledgeRevision
-    from ultrakb.unit_publication import wiki_versions
-
     scope = resolve_scope(kb_dir, scope)
+    if scope.knowledge is None:
+        raise ValueError("This operation requires a main-store knowledge base")
+
     from ultrakb.storage.knowledge_history import require_limit
 
     require_limit(limit)
     if publication_id is not None and publication_id != scope.publication_id:
-        if scope.knowledge is not None:
-            from .views import storage_scope
+        from .views import storage_scope
 
-            scope = storage_scope(
-                scope.kb_dir,
-                scope.knowledge.identity,
-                publication_id=publication_id,
-                view_id=scope.view_id,
-            )
-        else:
-            from .views import published_scope
-
-            scope = published_scope(scope.kb_dir, scope.view_id, publication_id=publication_id)
-    if scope.knowledge is not None:
-        from ultrakb.storage.knowledge_history import KnowledgeHistory
-
-        from .knowledge_history import history_reading
-
-        with history_reading(scope, cancelled):
-            return KnowledgeHistory(scope.knowledge).list(after=after, limit=limit)
-    with kb_read_lock(scope.kb_dir / ".ultrakb"):
-        identity = (
-            scope.publication.knowledge_revision_id
-            if scope.publication is not None
-            else KnowledgeRevision.model_validate_json(
-                (scope.wiki_dir.parent / "manifest.json").read_text()
-            ).knowledge_revision_id
-            if scope.historical
-            else read_head(scope.kb_dir, scope.view_id).knowledge_revision_id
+        scope = storage_scope(
+            scope.kb_dir,
+            scope.knowledge.identity,
+            publication_id=publication_id,
+            view_id=scope.view_id,
         )
-        seen: set[str] = set()
-        history = []
-        while identity:
-            if identity in seen:
-                raise ValueError("Knowledge history contains a cycle")
-            seen.add(identity)
-            selected = view_scope(scope.kb_dir, scope.view_id, historical_revision=identity)
-            manifest = KnowledgeRevision.model_validate_json(
-                (selected.wiki_dir.parent / "manifest.json").read_text()
-            )
-            if manifest.knowledge_revision_id != identity or manifest.view_id != scope.view_id:
-                raise ValueError("Knowledge history belongs to another view")
-            history.append(
-                {
-                    "knowledge_revision_id": identity,
-                    "change_kind": manifest.change_kind,
-                    "input_revisions": manifest.input_revisions,
-                    "pages": tuple(
-                        p
-                        for p in wiki_versions(scope.kb_dir, selected.wiki_dir)
-                        if p.endswith(".md") and "/" in p
-                    ),
-                }
-            )
-            identity = manifest.base_revision_id
-        if after is not None:
-            positions = [
-                i for i, value in enumerate(history) if value["knowledge_revision_id"] == after
-            ]
-            if not positions:
-                raise ValueError("History cursor is unavailable")
-            history = history[positions[0] + 1 :]
-        return tuple(history[:limit])
+    from ultrakb.storage.knowledge_history import KnowledgeHistory
 
+    from .knowledge_history import history_reading
 
-def cleanup_unreferenced_artifacts(kb_dir: Path, candidates: list[str]) -> dict:
-    """Clean only explicitly selected managed artifacts, with a complete ownership proof."""
-    import shutil
-
-    from pydantic import TypeAdapter
-
-    from ultrakb.artifact_references import list_artifact_references
-    from ultrakb.file_state import contained_paths
-    from ultrakb.locks import kb_ingest_lock
-    from ultrakb.mutation import mutation_scope
-    from ultrakb.source_records import RelativePath
-
-    kb_dir = kb_dir.resolve()
-    with kb_ingest_lock(kb_dir / ".ultrakb"):
-        paths = []
-        for candidate in candidates:
-            TypeAdapter(RelativePath).validate_python(candidate)
-            path = kb_dir / candidate
-            if not candidate.startswith((".ultrakb/artifacts/", ".ultrakb/normalized/")):
-                raise ValueError("Only managed artifacts can be physically cleaned")
-            contained_paths(kb_dir, [path])
-            if any(p.is_symlink() for p in (path, *path.parents) if p.is_relative_to(kb_dir)):
-                raise ValueError("Artifact cleanup cannot follow a symbolic link")
-            paths.append(path)
-        references = list_artifact_references(kb_dir)
-        retained: list[Path] = []
-        removed: list[Path] = []
-        for path in paths:
-            owned = any(p == path or p.is_relative_to(path) for p in references.paths)
-            (retained if owned or not references.complete else removed).append(path)
-        with mutation_scope(kb_dir, removed, operation="clean-unreferenced-artifacts"):
-            for path in removed:
-                if path.is_dir():
-                    shutil.rmtree(path)
-                else:
-                    path.unlink(missing_ok=True)
-        return {
-            "deleted": [p.relative_to(kb_dir).as_posix() for p in removed],
-            "retained": [p.relative_to(kb_dir).as_posix() for p in retained],
-            "complete": references.complete,
-        }
+    with history_reading(scope, cancelled):
+        return KnowledgeHistory(scope.knowledge).list(after=after, limit=limit)
 
 
 def read_refresh_proposal(
     kb_dir: Path, identity: str, *, scope: KnowledgeScope | None = None
 ) -> dict:
-    from ultrakb.refresh_publication import refresh_candidate_view
+    scope = resolve_scope(kb_dir, scope)
+    if scope.knowledge is None:
+        raise ValueError("This operation requires a main-store knowledge base")
 
     kb_dir = kb_dir.resolve()
-    if scope is not None:
-        scope = resolve_scope(kb_dir, scope)
-        if scope.knowledge is not None:
-            from .storage_refresh import read_stored_refresh
+    from .storage_refresh import read_stored_refresh
 
-            return read_stored_refresh(scope, identity)
-    with kb_read_lock(kb_dir / ".ultrakb"):
-        proposal = refresh_candidate_view(kb_dir, identity)
-        if scope and (scope.read_only or scope.view_id != proposal["view_id"]):
-            raise ValueError("Refresh proposal belongs to another live view")
-        return proposal
+    return read_stored_refresh(scope, identity)
 
 
 @dataclass(frozen=True)
@@ -201,70 +88,45 @@ class RefreshProposalPage:
 
 
 def list_refresh_proposal_page(kb_dir: Path, *, scope=None, after=None, limit=63):
+    scope = resolve_scope(kb_dir, scope)
+    if scope.knowledge is None:
+        raise ValueError("This operation requires a main-store knowledge base")
     kb_dir = kb_dir.resolve()
-    if scope is not None:
-        scope = resolve_scope(kb_dir, scope)
-        if scope.knowledge is not None:
-            from ultrakb.storage.refresh_store import RefreshStore
+    from ultrakb.storage.refresh_store import RefreshStore
 
-            proposals, cursor = RefreshStore(kb_dir, scope.knowledge.identity).summary_page(
-                scope.view_id, after=after, limit=limit
-            )
-            return RefreshProposalPage(proposals, cursor)
-    if after is not None:
-        raise ValueError("Refresh review cursors require a main-store scope")
-    return RefreshProposalPage(list_refresh_proposals(kb_dir, scope=scope), None)
+    proposals, cursor = RefreshStore(kb_dir, scope.knowledge.identity).summary_page(
+        scope.view_id, after=after, limit=limit
+    )
+    return RefreshProposalPage(proposals, cursor)
 
 
 def list_refresh_proposals(
     kb_dir: Path, *, scope: KnowledgeScope | None = None
 ) -> tuple[dict, ...]:
+    scope = resolve_scope(kb_dir, scope)
+    if scope.knowledge is None:
+        raise ValueError("This operation requires a main-store knowledge base")
     kb_dir = kb_dir.resolve()
-    if scope is not None:
-        scope = resolve_scope(kb_dir, scope)
-        if scope.knowledge is not None:
-            items, after = [], None
-            while True:
-                page = list_refresh_proposal_page(kb_dir, scope=scope, after=after)
-                items.extend(page.proposals)
-                if page.next_after is None:
-                    return tuple(items)
-                after = page.next_after
-    with kb_read_lock(kb_dir / ".ultrakb"):
-        proposals = (
-            read_refresh_proposal(kb_dir, p.parent.name)
-            for p in sorted((kb_dir / ".ultrakb/refresh-proposals").glob("*/proposal.json"))
-        )
-        return tuple(p for p in proposals if not scope or p["view_id"] == scope.view_id)
+    items, after = [], None
+    while True:
+        page = list_refresh_proposal_page(kb_dir, scope=scope, after=after)
+        items.extend(page.proposals)
+        if page.next_after is None:
+            return tuple(items)
+        after = page.next_after
 
 
 def accept_refresh_proposal(
     kb_dir: Path, identity: str, *, version: str, scope: KnowledgeScope | None = None, context=None
 ):
-    from ultrakb.application.execution import ExecutionContext
-    from ultrakb.locks import kb_ingest_lock
-    from ultrakb.refresh_publication import RefreshResult, commit_refresh, read_refresh_candidate
-    from ultrakb.state import HashRegistry
+    scope = resolve_scope(kb_dir, scope)
+    if scope.knowledge is None:
+        raise ValueError("This operation requires a main-store knowledge base")
 
     kb_dir = kb_dir.resolve()
-    if scope is not None:
-        scope = resolve_scope(kb_dir, scope)
-        if scope.knowledge is not None:
-            from .storage_refresh import accept_stored_refresh
+    from .storage_refresh import accept_stored_refresh
 
-            return accept_stored_refresh(scope, identity, version=version, context=context)
-        scope = resolve_scope(kb_dir, scope, writable=True)
-    context = context or ExecutionContext()
-    with kb_ingest_lock(kb_dir / ".ultrakb", cancelled=context.cancelled, on_wait=context.waiting):
-        directory, proposal = read_refresh_candidate(kb_dir, identity)
-        if scope and (scope.read_only or scope.view_id != proposal.view_id):
-            raise ValueError("Refresh proposal belongs to another live view")
-        if HashRegistry.hash_file(directory / "proposal.json") != version:
-            return RefreshResult(
-                "conflict", proposal.view_id, proposal_id=identity, message="Saved diff changed"
-            )
-        with context.begin(kb_dir):
-            return commit_refresh(kb_dir, directory, proposal, context.check_stop)
+    return accept_stored_refresh(scope, identity, version=version, context=context)
 
 
 def confirm_empty_source(
@@ -276,177 +138,33 @@ def confirm_empty_source(
     context=None,
 ):
     """An explicit, generation-bound confirmation excludes this revision's contribution."""
-    from ultrakb.application.execution import ExecutionContext
-    from ultrakb.catalog_schema import CatalogSchema, catalog_schema_path
-    from ultrakb.locks import kb_ingest_lock
-    from ultrakb.mutation import mutation_scope
-    from ultrakb.refresh_publication import RefreshResult
-    from ultrakb.source_catalog import read_source, record_path, write_record
-    from ultrakb.source_changes import source_change_heads
+    scope = resolve_scope(kb_dir, scope)
+    if scope.knowledge is None:
+        raise ValueError("This operation requires a main-store knowledge base")
 
     kb_dir = kb_dir.resolve()
-    if scope is not None:
-        scope = resolve_scope(kb_dir, scope)
-        if scope.knowledge is not None:
-            from .storage_empty_source import confirm_stored_empty
+    from .storage_empty_source import confirm_stored_empty
 
-            return confirm_stored_empty(scope, source_id, generation=generation, context=context)
-        scope = resolve_scope(kb_dir, scope, writable=True)
-    context = context or ExecutionContext()
-    with kb_ingest_lock(kb_dir / ".ultrakb", cancelled=context.cancelled, on_wait=context.waiting):
-        source = read_source(kb_dir, source_id)
-        view_id = "legacy"
-        if source.removed or source.target_generation != generation:
-            return RefreshResult(
-                "conflict", view_id, message="Source changed; review the current source first"
-            )
-        from ultrakb.source_changes import exclude_source_inputs
-
-        changed = exclude_source_inputs(kb_dir, source, "empty").model_copy(
-            update={"contribution_empty": True, "target_generation": generation + 1}
-        )
-        records = {
-            catalog_schema_path(kb_dir): CatalogSchema(),
-            record_path(kb_dir, "sources", source_id): changed,
-            **source_change_heads(kb_dir, changed, "empty"),
-        }
-        with (
-            context.begin(kb_dir),
-            mutation_scope(kb_dir, list(records), operation="confirm-empty-source"),
-        ):
-            for path, record in records.items():
-                write_record(path, record)
-            context.check_stop()
-        return RefreshResult(
-            "completed",
-            view_id,
-            message="Empty contribution confirmed; dependent knowledge needs refresh",
-        )
+    return confirm_stored_empty(scope, source_id, generation=generation, context=context)
 
 
 async def refresh_knowledge_view(kb_dir: Path, *, scope: KnowledgeScope, context=None):
-    import shutil
-
-    from ultrakb.application.execution import ExecutionContext
-    from ultrakb.locks import LockCancelled, async_kb_lock, atomic_write_text
-    from ultrakb.mutation import RecoveryRequired, mutation_scope
-    from ultrakb.refresh_publication import RefreshResult, publish_refresh
-    from ultrakb.schema import AGENTS_MD, INDEX_SEED
-    from ultrakb.source_catalog import list_sources
-    from ultrakb.unit_publication import prepare_compile_view
-
     scope = resolve_scope(kb_dir, scope)
-    if scope.knowledge is not None:
-        from .storage_refresh import refresh_stored_view
+    if scope.knowledge is None:
+        raise ValueError("This operation requires a main-store knowledge base")
 
-        return await refresh_stored_view(scope, context)
-    scope = resolve_scope(kb_dir, scope, writable=True)
-    kb_dir = scope.kb_dir
-    context = context or ExecutionContext()
-    async with async_kb_lock(
-        kb_dir / ".ultrakb", exclusive=True, cancelled=context.cancelled, on_wait=context.waiting
-    ):
-        try:
-            from ultrakb.source_changes import unpublished_legacy_inputs
+    from .storage_refresh import refresh_stored_view
 
-            if missing := unpublished_legacy_inputs(kb_dir):
-                return RefreshResult(
-                    "blocked",
-                    scope.view_id,
-                    message="Legacy evidence has no published normalization. Complete source "
-                    "mapping and recompilation before refreshing: " + ", ".join(missing.values()),
-                    unfinished=("legacy_source_migration",),
-                )
-            with (
-                context.begin(kb_dir) as bundle,
-                prepare_compile_view(kb_dir, scope.view_id) as view,
-            ):
-                inputs = {
-                    unit: identity
-                    for unit, identity in view.head.inputs.items()
-                    if effective_input(kb_dir, scope.view_id, identity)
-                }
-                from ultrakb.ingest_records import UnitRevision
-                from ultrakb.source_catalog import read_record
-                from ultrakb.workbooks.progress import workbook_progress
-
-                actual = {
-                    read_record(kb_dir, "unit-revisions", identity, UnitRevision).source_revision_id
-                    for identity in inputs.values()
-                }
-                sources = list_sources(kb_dir)
-                pending_sources = []
-                for source in sources:
-                    if source.removed or source.contribution_empty:
-                        continue
-                    progress = workbook_progress(kb_dir, source, scope.view_id)
-                    if progress is not None and not progress.finished:
-                        pending_sources.append(source.name)
-                    elif source.target_revision_id not in actual and not (
-                        progress is not None and progress.empty
-                    ):
-                        pending_sources.append(source.name)
-                if pending_sources:
-                    return RefreshResult(
-                        "blocked",
-                        scope.view_id,
-                        message="Finish importing the current sources before refreshing: "
-                        + ", ".join(pending_sources),
-                        unfinished=("current_source_import",),
-                    )
-                generations = {s.source_id: s.target_generation for s in sources}
-                with mutation_scope(
-                    kb_dir, [view.scope.wiki_dir.parent], operation="build-refreshed-view"
-                ):
-                    from ultrakb.unit_publication import copy_tree
-
-                    copy_tree(scope.wiki_dir, view.scope.wiki_dir.parent / "base")
-                    for section in ("sources", "summaries", "concepts", "entities"):
-                        shutil.rmtree(view.scope.wiki_dir / section, ignore_errors=True)
-                        (view.scope.wiki_dir / section).mkdir(parents=True)
-                    atomic_write_text(view.scope.wiki_dir / "AGENTS.md", AGENTS_MD)
-                    atomic_write_text(view.scope.wiki_dir / "index.md", INDEX_SEED)
-                    for page in view.head.needs_refresh:
-                        if page.startswith(("reports/", "explorations/")):
-                            (view.scope.wiki_dir / page).unlink(missing_ok=True)
-                    from ultrakb.refresh_inputs import compile_refresh_inputs
-
-                    originals = await compile_refresh_inputs(
-                        kb_dir, view.scope, inputs, bundle, context.check_stop
-                    )
-                return publish_refresh(
-                    kb_dir, view, inputs, originals, generations, context.check_stop
-                )
-        except (RecoveryRequired, LockCancelled):
-            raise
-        except Exception as exc:
-            from ultrakb.ingest_diagnostics import failure_reason
-
-            context.check_stop()
-            return RefreshResult(
-                "failed", scope.view_id, message=failure_reason(exc), unfinished=("refresh",)
-            )
+    return await refresh_stored_view(scope, context)
 
 
 def refresh_status(kb_dir: Path, *, scope: KnowledgeScope) -> dict:
     scope = resolve_scope(kb_dir, scope)
-    if scope.knowledge is not None:
-        from ultrakb.storage.knowledge_validity import publication_validity
+    if scope.knowledge is None:
+        raise ValueError("This operation requires a main-store knowledge base")
+    from ultrakb.storage.knowledge_validity import publication_validity
 
-        return publication_validity(scope.knowledge)
-    with kb_read_lock(scope.kb_dir / ".ultrakb"):
-        head = read_head(scope.kb_dir, scope.view_id)
-        return {
-            "view_id": scope.view_id,
-            "knowledge_revision_id": head.knowledge_revision_id,
-            "generation": head.generation,
-            "needs_refresh": head.model_dump(mode="json")["needs_refresh"],
-            "effective_inputs": tuple(
-                identity
-                for identity in head.inputs.values()
-                if effective_input(scope.kb_dir, scope.view_id, identity)
-            ),
-        }
+    return publication_validity(scope.knowledge)
 
 
 async def refresh_selected_sources(
@@ -458,135 +176,14 @@ async def refresh_selected_sources(
     page_paths: list[str] | None = None,
 ):
     """Never invoke document conversion, indexing, summary generation or planning."""
-    from ultrakb.application.execution import ExecutionContext
-    from ultrakb.compilation_report import collect_compile_report
-    from ultrakb.config import resolve_effective_config
-    from ultrakb.ingest_records import KnowledgeRevision
-    from ultrakb.locks import LockCancelled, async_kb_lock
-    from ultrakb.mutation import RecoveryRequired, mutation_scope
-    from ultrakb.refresh_publication import RefreshResult, RefreshSelection, publish_refresh
-    from ultrakb.selected_refresh import _reconcile_page, _refresh_index
-    from ultrakb.selected_refresh_evidence import (
-        current_page_inputs,
-        require_selected_inputs,
-        retained_inputs,
-        selected_pages,
-        selected_reasons,
-        summary_owner,
-    )
-    from ultrakb.source_catalog import list_sources
-    from ultrakb.unit_publication import copy_tree, prepare_compile_view
-
     scope = resolve_scope(kb_dir, scope)
-    if scope.knowledge is not None:
-        from .storage_refresh import refresh_stored_view
+    if scope.knowledge is None:
+        raise ValueError("This operation requires a main-store knowledge base")
 
-        return await refresh_stored_view(
-            scope,
-            context,
-            selection=(tuple(source_ids), tuple(page_paths) if page_paths is not None else None),
-        )
-    scope = resolve_scope(kb_dir, scope, writable=True)
-    kb_dir = scope.kb_dir
-    context = context or ExecutionContext()
-    async with async_kb_lock(
-        kb_dir / ".ultrakb", exclusive=True, cancelled=context.cancelled, on_wait=context.waiting
-    ):
-        try:
-            with (
-                context.begin(kb_dir) as bundle,
-                prepare_compile_view(kb_dir, scope.view_id, retain_pending_context=True) as view,
-            ):
-                reasons = selected_reasons(kb_dir, view.head, source_ids)
-                pages = selected_pages(reasons, page_paths)
-                retained = retained_inputs(kb_dir, view.head, view.scope.wiki_dir)
-                require_selected_inputs(
-                    source_ids,
-                    retained,
-                    pages,
-                    view.scope.wiki_dir,
-                    page_limited=page_paths is not None,
-                )
-                root = kb_dir / ".ultrakb/knowledge" / scope.view_id / "revisions"
-                previous = KnowledgeRevision.model_validate_json(
-                    (root / str(view.head.knowledge_revision_id) / "manifest.json").read_text()
-                )
-                config = resolve_effective_config(kb_dir)[0]
-                resolved, owners, reconciled = {}, {}, {}
-                readers: dict = {}
-                from ultrakb.agent.link_registry import FrozenLinkRegistry
-                from ultrakb.lint import list_existing_wiki_targets
+    from .storage_refresh import refresh_stored_view
 
-                link_registry = FrozenLinkRegistry.capture(
-                    view.scope.wiki_dir, list_existing_wiki_targets(view.scope.wiki_dir)
-                )
-                with (
-                    mutation_scope(
-                        kb_dir, [view.scope.wiki_dir.parent], operation="refresh-selected-sources"
-                    ),
-                    collect_compile_report() as report,
-                ):
-                    copy_tree(scope.wiki_dir, view.scope.wiki_dir.parent / "base")
-                    for page, pending in sorted(reasons.items()):
-                        context.check_stop()
-                        if page not in pages:
-                            continue
-                        if page.startswith("summaries/"):
-                            owner = summary_owner(page, view.scope.wiki_dir, retained)
-                            if owner:
-                                owners[page], resolved[page] = owner, pending
-                        elif page.startswith(("concepts/", "entities/")):
-                            identities = current_page_inputs(
-                                kb_dir,
-                                view.head,
-                                previous,
-                                page,
-                                pending,
-                                retained,
-                                view.scope.wiki_dir,
-                            )
-                            if identities and (view.scope.wiki_dir / page).is_file():
-                                reconciled[page] = await _reconcile_page(
-                                    kb_dir,
-                                    view,
-                                    page,
-                                    identities,
-                                    retained,
-                                    config,
-                                    bundle,
-                                    readers,
-                                    link_registry=link_registry,
-                                )
-                                resolved[page] = pending
-                    if (
-                        "index.md" in reasons
-                        and set(source_ids) <= {item.unit.source_id for item in retained.values()}
-                        and all(page in resolved for page in reasons if page != "index.md")
-                    ):
-                        _refresh_index(view.scope.wiki_dir)
-                        resolved["index.md"] = reasons["index.md"]
-                    report.require_complete()
-                return publish_refresh(
-                    kb_dir,
-                    view,
-                    dict(view.head.inputs),
-                    tuple(sorted({p for item in retained.values() for p in item.originals})),
-                    {s.source_id: s.target_generation for s in list_sources(kb_dir)},
-                    context.check_stop,
-                    selection=RefreshSelection(
-                        source_ids=tuple(source_ids),
-                        page_paths=tuple(page_paths) if page_paths is not None else None,
-                        resolved=resolved,
-                        summary_owners=owners,
-                        reconciled_pages=reconciled,
-                    ),
-                )
-        except (RecoveryRequired, LockCancelled):
-            raise
-        except Exception as error:
-            from ultrakb.ingest_diagnostics import failure_reason
-
-            context.check_stop()
-            return RefreshResult(
-                "failed", scope.view_id, message=failure_reason(error), unfinished=("refresh",)
-            )
+    return await refresh_stored_view(
+        scope,
+        context,
+        selection=(tuple(source_ids), tuple(page_paths) if page_paths is not None else None),
+    )

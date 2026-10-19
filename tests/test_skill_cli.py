@@ -27,6 +27,9 @@ def _make_kb(tmp_path):
     # Populate the wiki with compiled content so the wiki-content gate accepts it.
     (tmp_path / "wiki" / "concepts" / "demo.md").write_text("# demo\n")
     (tmp_path / "wiki" / "summaries" / "demo.md").write_text("# demo\n")
+    from publication_read_inputs import publish_fixture
+
+    publish_fixture(tmp_path)
     return tmp_path
 
 
@@ -101,7 +104,12 @@ def test_skill_new_errors_with_freshly_init_wiki(tmp_path):
 
 def test_skill_new_aborts_when_target_exists_without_yes(tmp_path):
     kb = _make_kb(tmp_path)
-    (kb / "output" / "skills" / "demo").mkdir(parents=True)
+    target = kb / "output" / "skills" / "demo"
+    target.mkdir(parents=True)
+    (target / "SKILL.md").write_text("---\nname: demo\ndescription: saved\n---\n")
+    from artifact_fixtures import publish_artifacts
+
+    publish_artifacts(kb, target)
     runner = CliRunner()
     with patch("ultrakb.cli._find_kb_dir", return_value=kb):
         # Simulate non-interactive abort (CliRunner doesn't supply a TTY,
@@ -196,6 +204,9 @@ def test_skill_rollback_restores_from_workspace(tmp_path):
     current = kb / "output" / "skills" / "demo"
     current.mkdir(parents=True)
     (current / "SKILL.md").write_text("---\nname: demo\ndescription: broken\n---\n")
+    from artifact_fixtures import publish_artifacts
+
+    publish_artifacts(kb, kb / "output", sync=True)
 
     runner = CliRunner()
     with patch("ultrakb.cli._find_kb_dir", return_value=kb):
@@ -219,6 +230,9 @@ def test_skill_rollback_to_specific_iteration(tmp_path):
     current = kb / "output" / "skills" / "demo"
     current.mkdir(parents=True)
     (current / "SKILL.md").write_text("placeholder")
+    from artifact_fixtures import publish_artifacts
+
+    publish_artifacts(kb, kb / "output", sync=True)
 
     runner = CliRunner()
     with patch("ultrakb.cli._find_kb_dir", return_value=kb):
@@ -286,7 +300,7 @@ def test_skill_new_keeps_existing_skill_when_configuration_capture_fails(tmp_pat
     with (
         patch("ultrakb.cli._find_kb_dir", return_value=kb),
         patch(
-            "ultrakb.application.execution.capture_config",
+            "ultrakb.application.storage_execution.capture_storage_config",
             side_effect=RuntimeError("invalid config"),
         ),
     ):

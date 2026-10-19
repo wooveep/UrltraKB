@@ -12,6 +12,9 @@ def test_page_context_includes_sources_outlinks_and_backlinks(kb_dir):
     )
     (kb_dir / "wiki/index.md").write_text("[[concepts/note]]")
     (kb_dir / "wiki/concepts/inbound.md").write_text("[[concepts/note|Note]]")
+    from publication_read_inputs import publish_fixture
+
+    publish_fixture(kb_dir)
     detail = read_page_context(kb_dir, "concepts/note")
     assert [ref.path for ref in detail.sources] == ["sources/paper", None]
     assert detail.sources[1].label == "missing"
@@ -28,7 +31,9 @@ def test_reader_refuses_an_external_wiki_directory(kb_dir):
     import pytest
 
     from ultrakb.application.pages import read_page
+    from ultrakb.desktop.verification_data import publish_pages
 
+    publish_pages(kb_dir, {"index.md": b"Committed index"})
     outside = kb_dir.with_name(kb_dir.name + "-outside")
     (kb_dir / "wiki").rename(outside)
     (outside / "index.md").write_text("External data")
@@ -36,8 +41,7 @@ def test_reader_refuses_an_external_wiki_directory(kb_dir):
         (kb_dir / "wiki").symlink_to(outside, target_is_directory=True)
     except OSError:
         pytest.skip("Directory symlinks unavailable")
-    with pytest.raises(ValueError, match="Invalid page path"):
-        read_page(kb_dir, "index")
+    assert read_page(kb_dir, "index").content == "Committed index"
 
 
 def test_unreadable_neighbor_keeps_current_page_and_marks_incomplete_links(kb_dir):
@@ -45,6 +49,9 @@ def test_unreadable_neighbor_keeps_current_page_and_marks_incomplete_links(kb_di
 
     (kb_dir / "wiki/concepts/good.md").write_text("Readable content")
     (kb_dir / "wiki/concepts/bad.md").write_bytes(b"\xff")
+    from publication_read_inputs import publish_fixture
+
+    publish_fixture(kb_dir)
     context = read_page_context(kb_dir, "concepts/good")
     assert context.page.body == "Readable content"
     assert len(context.problems) == 1

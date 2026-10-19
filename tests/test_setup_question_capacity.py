@@ -5,6 +5,7 @@ from time import monotonic
 
 import pytest
 from error_transport import ErrorTransport
+from native_catalog_fixtures import original_bytes
 
 
 @pytest.fixture
@@ -78,7 +79,10 @@ def test_fresh_kb_blocks_model_work_without_capacity(
             assert task.state == "blocked" and task.processes_reaped
             assert task.succeeded == 0 and task.results[0].turn_count == 0
             assert task.results[0].unfinished == ("connection_setup",)
-            assert task.model_usage["current"]["actual_sends"] == 0
+            assert task.model_usage is None
+            from native_usage_fixtures import read_requests
+
+            assert read_requests(kb) == []
             assert service.requests == []
             assert get_kb_list(kb)["documents"] == []
             assert list((kb / ".ultrakb/chats").glob("*.json")) == []
@@ -147,6 +151,9 @@ def test_retesting_unchanged_deepseek_prepares_capacity_for_the_actual_question(
             mutation_scope(kb, [source_path], operation="verify-question-original"),
         ):
             atomic_write_text(source_path, "The retained original states 42.")
+        from ultrakb.desktop.verification_data import retain_document
+
+        retain_document(kb, "original.md", "original", "The retained original states 42.")
         assert resolve_query_views(kb).has_evidence
         io = LocalIO()
         panel = ConnectionSetup(io, kb)
@@ -194,7 +201,7 @@ def test_fresh_kb_imports_native_pages_and_answers_in_spawn_workers(
     from PySide6.QtWidgets import QApplication
 
     from ultrakb import config
-    from ultrakb.agent.chat_session import load_session
+    from ultrakb.application.conversations import read_conversation
     from ultrakb.application.knowledge_bases import get_kb_list, initialize_kb
     from ultrakb.application.query_views import read_selected_file, resolve_query_views
     from ultrakb.config_state import capture_config
@@ -270,7 +277,7 @@ def test_fresh_kb_imports_native_pages_and_answers_in_spawn_workers(
         saved = read_document_source(kb, document["source_id"], pages="1")
         assert saved["unit_kind"] == "page" and saved["pages"] == 1
         assert "indoor room permits quiet reading" in saved["content"]
-        assert (kb / saved["original_path"]).read_bytes() == original
+        assert original_bytes(kb, saved["source_revision_id"]) == original
         selected = resolve_query_views(kb)
         assert selected.has_evidence and len(selected.views) == 1
         view = selected.views[0]
@@ -302,9 +309,9 @@ def test_fresh_kb_imports_native_pages_and_answers_in_spawn_workers(
         assert task.succeeded == 1 and task.unfinished == 0
         result = task.results[0]
         assert result.session_id and result.turn_count == 1
-        session = load_session(kb, result.session_id)
-        assert session.turn_count == 1
-        answer = session.turns[0].assistant_text
+        session = read_conversation(kb, result.session_id)
+        assert session.total_turns == 1
+        answer = session.turns[0][1]
         assert answer == result.output and "indoor" in answer.lower()
         assert read_selected_file(view, reader["path"]) == source_bytes
         assert room_document.read_bytes() == original

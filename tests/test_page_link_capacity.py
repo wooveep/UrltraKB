@@ -3,11 +3,12 @@
 import json
 
 import pytest
+from compile_work_fixtures import invalid_responses
 from litellm import ServiceUnavailableError
 
 
 @pytest.fixture(autouse=True)
-def model_send():
+def model_send(kb_dir, request):
     """Run the real SDK, request capacity and task budget against a local protocol server."""
     import threading
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -70,15 +71,31 @@ def model_send():
                 base_url=f"http://127.0.0.1:{server.server_port}/v1",
             ),
         ),
-        ModelCallPolicy(max_calls=256, retries=0),
+        ModelCallPolicy(max_calls=getattr(request, "param", 256), retries=0),
     )
     executor.compile_capacity = TokenMeasure(
         {"input_limit": 1000000, "unknown_reason": None, "measurement_unit": "utf8_byte"}
     )
     service.executor = executor
+    from ultrakb.application.execution import ExecutionContext
+    from ultrakb.application.views import published_scope
+
+    context = ExecutionContext(
+        executor=executor,
+        credential_bundle=executor.bindings.credentials(),
+        storage_identity=published_scope(kb_dir).knowledge.identity,
+    )
     try:
-        with executor.activate():
-            yield service
+        with context.begin(kb_dir):
+            from compile_work_fixtures import new_compile_work
+
+            from ultrakb.storage.compile_binding import compile_binding
+
+            work = new_compile_work(
+                kb_dir, {"document": "manual"}, {"protocol": "retained-create-test"}
+            )
+            with compile_binding(work, view_id="legacy", document="manual"):
+                yield service
         assert not errors, errors
         assert executor.calls == len(requests)
     finally:
@@ -162,12 +179,7 @@ async def test_page_repair_gets_bounded_link_ambiguity_and_preserves_the_complet
     model_send.respond = deliver
     result = await prepare_page_creation(**options).generate()
     assert result["content"] == "Use [[concepts/cache]]."
-    saved = json.loads(checkpoints.path.read_text())
-    failures = [
-        item for entry in saved["entries"].values() for item in entry.get("response_failures", [])
-    ]
-    assert len(failures) == 1
-    diagnostic = json.loads((kb_dir / failures[0]).read_text())
+    [diagnostic] = invalid_responses(checkpoints)
     assert len(diagnostic["field_errors"]) == 1
     [problem] = diagnostic["field_errors"]
     assert problem["name"] == "Cache"
@@ -346,11 +358,9 @@ async def test_long_protocol_diagnostic_is_retained_locally_and_repair_request_s
     )
     assert json.loads(result)["content"] == "Supported."
     assert len(requests) == 1
-    saved = json.loads(checkpoints.path.read_text())["entries"]["protocol-repair"]
-    [failure] = saved["response_failures"]
-    diagnostic = json.loads((kb_dir / failure).read_text())
-    assert bad_field in diagnostic["error_detail"]
-    assert (kb_dir / diagnostic["response_file"]).read_text() == raw
+    [diagnostic] = invalid_responses(checkpoints, "protocol-repair")
+    assert bad_field in diagnostic["detail"]
+    assert diagnostic["raw"].decode() == raw
 
 
 @pytest.mark.asyncio
@@ -403,17 +413,11 @@ async def test_truncated_creation_splits_only_failed_contribution_and_restores_a
     )
     assert "Retained contribution 1." in result["content"]
     assert "Retained contribution 2." in result["content"]
-    saved = json.loads(checkpoints.path.read_text())
-    assert any(key.startswith("create-split:") for key in saved["entries"])
-    failures = [
-        item for entry in saved["entries"].values() for item in entry.get("response_failures", [])
-    ]
-    assert failures
-    assert any(
-        (kb_dir / json.loads((kb_dir / path).read_text())["response_file"]).read_text()
-        == '{"content":"cut'
-        for path in failures
-    )
+    from compile_work_fixtures import accepted_step_keys
+
+    assert any(key.startswith("create-split:") for key in accepted_step_keys(checkpoints))
+    failures = invalid_responses(checkpoints)
+    assert any(record["raw"] == b'{"content":"cut' for record in failures)
 
 
 def test_short_page_capacity_fallback_covers_full_current_original_without_repeating_it(kb_dir):
@@ -582,6 +586,7 @@ async def test_unknown_link_name_scans_every_frozen_catalogue_partition_before_r
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("interrupt_after_correction", [False, True])
+@pytest.mark.parametrize("model_send", [3], indirect=True)
 async def test_invalid_link_decision_gets_one_bounded_repair_and_retains_raw_response(
     kb_dir, monkeypatch, model_send, interrupt_after_correction
 ):
@@ -614,26 +619,18 @@ async def test_invalid_link_decision_gets_one_bounded_repair_and_retains_raw_res
 
     model_send.respond = deliver
     if interrupt_after_correction:
-        from ultrakb import locks
-
-        write = locks.atomic_write_text
+        record = checkpoints.record_received_response
         interrupted = False
 
-        def interrupt_after_receipt(path, content, **kwargs):
+        def interrupt_after_receipt(key, signature, body, **metadata):
             nonlocal interrupted
-            write(path, content, **kwargs)
-            if path != checkpoints.path or interrupted:
-                return
-            entries = json.loads(content)["entries"]
-            for key, entry in entries.items():
-                if ":links:" not in key or not entry.get("latest_response"):
-                    continue
-                receipt = json.loads((kb_dir / entry["latest_response"]).read_text())
-                if receipt["error_code"] == "response_received" and receipt["attempt"] == 2:
-                    interrupted = True
-                    raise RuntimeError("Interrupted after receiving the corrected group")
+            receipt = record(key, signature, body, **metadata)
+            if ":links:" in key and metadata.get("attempt") == 2 and not interrupted:
+                interrupted = True
+                raise RuntimeError("Interrupted after receiving the corrected group")
+            return receipt
 
-        monkeypatch.setattr(locks, "atomic_write_text", interrupt_after_receipt)
+        monkeypatch.setattr(checkpoints, "record_received_response", interrupt_after_receipt)
         with pytest.raises(RuntimeError, match="Interrupted after receiving"):
             await prepare_page_creation(**options).generate()
     result = await prepare_page_creation(**options).generate()
@@ -641,16 +638,9 @@ async def test_invalid_link_decision_gets_one_bounded_repair_and_retains_raw_res
     assert len(requests) == 3
     await prepare_page_creation(**options).generate()
     assert len(requests) == 3
-    entries = json.loads(checkpoints.path.read_text())["entries"]
-    failures = [
-        item
-        for key, entry in entries.items()
-        if ":links:" in key
-        for item in entry.get("response_failures", [])
-    ]
+    failures = [r for r in invalid_responses(checkpoints) if ":links:" in r["step_key"]]
     assert len(failures) == 1
-    record = json.loads((kb_dir / failures[0]).read_text())
-    assert (kb_dir / record["response_file"]).read_text() == '{"resolutions":[]}'
+    assert failures[0]["raw"] == b'{"resolutions":[]}'
 
 
 @pytest.mark.parametrize(

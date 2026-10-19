@@ -141,28 +141,27 @@ def test_new_active_input_does_not_relabel_an_unchanged_shared_page(tmp_path):
     assert refresh_status(root, scope=current)["effective_inputs"] == (newer.unit_revision_id,)
 
 
-def test_legacy_current_question_keeps_its_selection_validity_when_reading_a_fixed_page(kb_dir):
-    from publication_fixtures import publish_document
-
+def test_current_question_keeps_its_selection_validity_when_reading_a_fixed_page(tmp_path):
     from ultrakb.application.query_views import resolve_query_views
     from ultrakb.application.views import view_scope
-    from ultrakb.config import LlmCredentialBundle
 
-    original = kb_dir / "raw/manual.md"
-    original.write_text("TLS is required.")
-    published = publish_document(
-        kb_dir, original, "TLS is required.", bundle=LlmCredentialBundle(api_key="offline-unused")
+    root, identity, unit = compile_input(tmp_path, body_text="TLS is required.")
+    store = KnowledgeStore(root, identity)
+    published = store.publish(
+        store.prepare_revision(
+            {"index.md": b"[[summaries/manual]]", "summaries/manual.md": b"TLS is required."},
+            expected=store.bind().publication_id,
+            unit_revisions=(unit.unit_revision_id,),
+        )
     )
-    selection = resolve_query_views(kb_dir, scope=view_scope(kb_dir, "legacy"))
+    selection = resolve_query_views(root, scope=view_scope(root, "legacy"))
     [view] = selection.views
     assert view.validity == "current"
     body = read_query_page(selection, "summaries/manual.md", view_id=view.view_id)
     assert "status=current" in body and "TLS is required." in body
     historical = resolve_query_views(
-        kb_dir,
-        scope=view_scope(
-            kb_dir, "legacy", historical_revision=published.units[0].knowledge_revision_id
-        ),
+        root,
+        scope=view_scope(root, "legacy", historical_revision=published.revision_id),
     )
     body = read_query_page(historical, "summaries/manual.md", view_id=view.view_id)
     assert "status=historical" in body and "TLS is required." in body

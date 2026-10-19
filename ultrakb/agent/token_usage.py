@@ -65,16 +65,12 @@ def add_usage(previous: dict | None, current: dict | None) -> dict | None:
 
 def execution_usage(fallback: dict | None = None) -> dict | None:
     """Project the shared transport ledger; SDK-only callers keep their reported usage."""
-    from ultrakb.llm_usage import active_scope, aggregate_usage
+    from ultrakb.llm_usage import active_scope
 
     scope = active_scope()
-    if scope is None:
+    if scope is None or scope.storage is None:
         return fallback
-    total = (
-        scope.storage.usage.summary(execution_id=scope.execution_id)
-        if scope.storage is not None
-        else aggregate_usage(scope.kb_dir, execution_ids=[scope.execution_id])
-    )
+    total = scope.storage.usage.summary(execution_id=scope.execution_id)
     if not total["requests"]:
         return fallback
     return aggregate_token_usage(total)

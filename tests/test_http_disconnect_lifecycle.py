@@ -21,9 +21,11 @@ import pytest
 import uvicorn
 from error_transport import ErrorTransport
 from fastapi import UploadFile
+from native_usage_fixtures import read_requests
 
 from ultrakb.config import load_config, save_config
-from ultrakb.llm_usage import read_requests
+from ultrakb.desktop.verification_data import publish_pages
+from ultrakb.lifecycle import exclusive_lifecycle
 from ultrakb.locks import atomic_write_text, kb_ingest_lock
 
 
@@ -123,8 +125,8 @@ def _start(response):
 def test_tcp_disconnect_holds_lease_until_real_sdk_cleanup_and_preserves_no_half_turn(
     kb_dir, socket_api, monkeypatch, endpoint
 ):
-    from ultrakb.agent.chat_session import list_sessions, load_session
     from ultrakb.application.conversations import read_conversation
+    from ultrakb.application.sessions import list_conversations
 
     cleanup_started, cleanup_release, cleanup_finished = (threading.Event() for _ in range(3))
     waiting, acquired = threading.Event(), threading.Event()
@@ -149,7 +151,7 @@ def test_tcp_disconnect_holds_lease_until_real_sdk_cleanup_and_preserves_no_half
     monkeypatch.setattr(litellm, "acompletion", observe_completion)
 
     def other_writer():
-        with kb_ingest_lock(kb_dir / ".ultrakb", on_wait=waiting.set):
+        with exclusive_lifecycle(kb_dir, on_wait=waiting.set):
             acquired.set()
 
     with ErrorTransport(status=503, gate=threading.Event()) as model:
@@ -162,7 +164,7 @@ def test_tcp_disconnect_holds_lease_until_real_sdk_cleanup_and_preserves_no_half
         atomic_write_text(
             kb_dir / ".env", f"LLM_API_KEY=offline-test-key\nOPENAI_API_BASE={model.url}\n"
         )
-        atomic_write_text(kb_dir / "wiki/sources/original.md", "The answer in this original is 42.")
+        publish_pages(kb_dir, {"sources/original.md": b"The answer in this original is 42."})
         question = "Read sources/original.md and answer the question."
         payload = {"kb": "local", "stream": True}
         payload.update(question=question, save=True) if endpoint == "query" else payload.update(
@@ -184,7 +186,8 @@ def test_tcp_disconnect_holds_lease_until_real_sdk_cleanup_and_preserves_no_half
                     assert model.requests[0]["json"]["model"] == "deepseek-flash"
                 # Closing httpx's streaming response closes an actual TCP socket.
                 assert socket_api.disconnected.wait(3), "uvicorn did not observe socket disconnect"
-                assert cleanup_started.wait(3), "Disconnect never reached the SDK cleanup exit"
+                model.gate.set()
+                assert cleanup_started.wait(3), "Disconnect never reached SDK cleanup"
                 writer = workers.submit(other_writer)
                 assert waiting.wait(3), "The other writer did not encounter the operation lease"
                 assert not acquired.is_set() and not socket_api.finished.is_set()
@@ -198,18 +201,18 @@ def test_tcp_disconnect_holds_lease_until_real_sdk_cleanup_and_preserves_no_half
                     writer.result(timeout=5)
         assert len(model.requests) == 1, "A disconnected application must not retry the model"
     assert not list((kb_dir / "wiki/explorations").glob("*.md"))
-    sessions = list_sessions(kb_dir)
+    sessions = list_conversations(kb_dir)
     if endpoint == "chat":
         assert len(sessions) == 1
-        session = load_session(kb_dir, sessions[0]["id"])
-        assert session.turn_count == 0 and session.history == []
-        restored = read_conversation(kb_dir, session.id)
+        restored = read_conversation(kb_dir, sessions[0]["id"])
+        assert restored.total_turns == 0
         assert restored.turns == ()
-        assert restored.timeline == ((question, "这次回答未完成，可以继续提问。"),)
+        assert restored.incomplete == ((0, question),)
     else:
         assert sessions == []
     [receipt] = read_requests(kb_dir)
-    assert receipt.send_status == "sent" and receipt.state == "cancelled"
+    assert receipt.send_status == "sent" and receipt.state in {"failed", "cancelled"}
+    assert receipt.business_state == "cancelled"
     assert receipt.usage_status == "unknown"
 
 
@@ -262,7 +265,7 @@ def test_tcp_upload_disconnect_retracts_only_owned_staging_before_kb_admission(
             assert other_owner[0].read_text() == "Other request's private input"
             assert existing.read_text() == "Previously retained raw input"
             assert not (kb_dir / "raw/paper.md").exists()
-        assert read_requests(kb_dir) == ()
+        assert read_requests(kb_dir) == []
     finally:
         cleanup_uploads([other_owner])
 
@@ -273,8 +276,8 @@ def test_tcp_disconnect_after_real_flash_delta_drains_sdk_without_committing_hal
 ):
     from litellm import CustomStreamWrapper
 
-    from ultrakb.agent.chat_session import list_sessions, load_session
     from ultrakb.application.conversations import read_conversation
+    from ultrakb.application.sessions import list_conversations
 
     live_llm.install(monkeypatch)
     config_path = kb_dir / ".ultrakb/config.yaml"
@@ -283,8 +286,8 @@ def test_tcp_disconnect_after_real_flash_delta_drains_sdk_without_committing_hal
     config["model_policy"] = {"max_calls": 2, "retries": 0}
     config["role_generation"] = {"answer": {"max_tokens": 96, "reasoning_effort": "none"}}
     save_config(config_path, config)
-    atomic_write_text(
-        kb_dir / "wiki/sources/original.md", "The twelve months run January–December."
+    publish_pages(
+        kb_dir, {"sources/original.md": "The twelve months run January–December.".encode()}
     )
     sdk_waiting, release_sdk, sdk_closed = (threading.Event() for _ in range(3))
     writer_waiting, writer_acquired = threading.Event(), threading.Event()
@@ -326,7 +329,7 @@ def test_tcp_disconnect_after_real_flash_delta_drains_sdk_without_committing_hal
     monkeypatch.setattr(CustomStreamWrapper, "aclose", observe_close)
 
     def other_writer():
-        with kb_ingest_lock(kb_dir / ".ultrakb", on_wait=writer_waiting.set):
+        with exclusive_lifecycle(kb_dir, on_wait=writer_waiting.set):
             assert sdk_closed.is_set(), "The write lease escaped before the actual SDK closed"
             writer_acquired.set()
 
@@ -372,12 +375,11 @@ def test_tcp_disconnect_after_real_flash_delta_drains_sdk_without_committing_hal
     assert 1 <= len(calls) == len(requests) <= 2
     assert all(item["model"] == "deepseek/deepseek-flash" and item["stream"] for item in calls)
     assert not any("event: final\n" in frame for frame in socket_api.frames)
-    [saved] = list_sessions(kb_dir)
-    session = load_session(kb_dir, saved["id"])
-    assert session.turn_count == 0 and session.history == []
-    restored = read_conversation(kb_dir, session.id)
+    [saved] = list_conversations(kb_dir)
+    restored = read_conversation(kb_dir, saved["id"])
+    assert restored.total_turns == 0
     assert restored.turns == ()
-    assert restored.timeline == ((question, "这次回答未完成，可以继续提问。"),)
+    assert restored.incomplete == ((0, question),)
     assert not list((kb_dir / "wiki/explorations").glob("*.md"))
     [receipt] = [item for item in read_requests(kb_dir) if item.business_state == "cancelled"]
     assert receipt.state == "cancelled" and receipt.send_status == "sent"

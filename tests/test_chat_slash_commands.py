@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -10,30 +9,31 @@ import pytest
 from prompt_toolkit.styles import Style
 
 from ultrakb.agent.chat import _handle_slash, _run_add, run_chat
-from ultrakb.agent.chat_session import ChatSession
 from ultrakb.knowledge_scope import legacy_scope
+from ultrakb.terminal_chat_state import TerminalConversation
 
 
 def _setup_kb(tmp_path: Path) -> Path:
-    """Create a minimal KB structure and return kb_dir."""
-    kb_dir = tmp_path
-    (kb_dir / "raw").mkdir()
-    (kb_dir / "wiki" / "sources" / "images").mkdir(parents=True)
-    (kb_dir / "wiki" / "summaries").mkdir(parents=True)
-    (kb_dir / "wiki" / "concepts").mkdir(parents=True)
-    (kb_dir / "wiki" / "reports").mkdir(parents=True)
-    ultrakb_dir = kb_dir / ".ultrakb"
-    ultrakb_dir.mkdir()
-    (ultrakb_dir / "config.yaml").write_text("model: gpt-4o-mini\n")
-    from kb_fixtures import mark_current_kb
+    from ultrakb.application.knowledge_bases import initialize_kb
 
-    mark_current_kb(ultrakb_dir.parent)
-    (ultrakb_dir / "hashes.json").write_text(json.dumps({}))
-    return kb_dir
+    initialize_kb(tmp_path, seed_environment=False)
+    return tmp_path
 
 
-def _make_session(kb_dir: Path) -> ChatSession:
-    return ChatSession.new(kb_dir, "gpt-4o-mini", "en")
+def _make_session(kb_dir: Path) -> TerminalConversation:
+    return TerminalConversation.new(kb_dir, "gpt-4o-mini", "en")
+
+
+def _record_turn(session, user, answer, *, attempt_id=None):
+    from uuid import uuid4
+
+    from ultrakb.storage.session_store import SessionStore
+
+    store = SessionStore(session.kb_dir, session.scope.knowledge.identity)
+    if not session.persisted:
+        store.create(session.id, model=session.model, language=session.language)
+    store.append_exchange(session.id, uuid4().hex, user, answer, attempt_id=attempt_id)
+    session.reload()
 
 
 _STYLE = Style.from_dict({})
@@ -76,8 +76,13 @@ async def test_slash_list_empty(tmp_path, capsys):
 @pytest.mark.asyncio
 async def test_slash_list_with_docs(tmp_path, capsys):
     kb_dir = _setup_kb(tmp_path)
-    hashes = {"abc": {"name": "paper.pdf", "type": "pdf"}}
-    (kb_dir / ".ultrakb" / "hashes.json").write_text(json.dumps(hashes))
+    from ultrakb.knowledge_scope import resolve_scope
+    from ultrakb.storage.catalog_store import CatalogStore
+
+    original = tmp_path / "paper.pdf"
+    original.write_bytes(b"Retained fixture bytes")
+    scope = resolve_scope(kb_dir)
+    CatalogStore(kb_dir, scope.knowledge.identity).admit(original, source_key="paper-fixture")
     session = _make_session(kb_dir)
     result = await _handle_slash("/list", kb_dir, session, _STYLE)
     assert result is None
@@ -132,7 +137,10 @@ async def test_slash_add_single_file(tmp_path):
     with p, patch("ultrakb.application.documents.add_single_file") as mock_add:
         await _run_add(str(doc), kb_dir, _STYLE)
         assert mock_add.call_args.args == (doc, kb_dir)
-        assert mock_add.call_args.kwargs["scope"] == legacy_scope(kb_dir)
+        selected = mock_add.call_args.kwargs["scope"]
+        expected = legacy_scope(kb_dir)
+        assert selected.publication_id == expected.publication_id
+        assert selected.knowledge.identity == expected.knowledge.identity
 
 
 @pytest.mark.asyncio
@@ -189,7 +197,6 @@ async def test_run_chat_handles_ctrl_c_during_slash_command(tmp_path):
     p, collected = _collect_fmt()
     with (
         p,
-        patch("ultrakb.agent.chat.build_chat_agent", return_value=object()),
         patch("ultrakb.agent.chat._print_header"),
         patch("ultrakb.agent.chat._make_prompt_session", return_value=prompt),
         patch(
@@ -239,11 +246,11 @@ async def test_slash_clear(tmp_path):
 async def test_slash_save_preserves_previous_completed_history(tmp_path):
     kb_dir = _setup_kb(tmp_path)
     session = _make_session(kb_dir)
-    session.record_turn("Question", "Completed answer", [])
+    _record_turn(session, "Question", "Completed answer")
     p, _collected = _collect_fmt()
     with p:
         await _handle_slash("/save named-copy", kb_dir, session, _STYLE)
-        session.record_turn("Next question", "Next completed answer", [])
+        _record_turn(session, "Next question", "Next completed answer")
         await _handle_slash("/save named-copy", kb_dir, session, _STYLE)
     paths = list((kb_dir / "wiki/explorations").glob("named-copy-*.md"))
     assert len(paths) == 2
@@ -260,7 +267,7 @@ async def test_cancelled_slash_save_never_starts_after_its_lock_is_released(tmp_
 
     kb_dir = _setup_kb(tmp_path)
     session = _make_session(kb_dir)
-    session.record_turn("Question", "Completed answer", [])
+    _record_turn(session, "Question", "Completed answer")
     ready, release = threading.Event(), threading.Event()
 
     def hold():
@@ -296,21 +303,18 @@ def test_save_transcript_strips_ghost_wikilinks(tmp_path):
     from ultrakb.agent.chat import _save_transcript
 
     kb_dir = _setup_kb(tmp_path)
-    # A real concept page on disk → valid wikilink target.
-    (kb_dir / "wiki" / "concepts" / "attention.md").write_text(
-        "# Attention\n",
-        encoding="utf-8",
-    )
+    from ultrakb.desktop.verification_data import publish_pages
+
+    publish_pages(kb_dir, {"concepts/attention.md": b"# Attention\n"})
 
     session = _make_session(kb_dir)
-    session.record_turn(
+    _record_turn(
+        session,
         "What is a transformer?",
         "A transformer uses [[concepts/attention]] to model relationships. "
         "Unlike [[concepts/rnn]], it processes tokens in parallel and relies "
         "on [[concepts/positional-encoding]] for order.",
-        [],
     )
-    session.title = "transformer-q"
 
     result = _save_transcript(kb_dir, session, name=None)
     path = Path(result.resources[0])

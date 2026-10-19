@@ -1,7 +1,5 @@
 """Shared-wiki import and immutable source snapshot boundaries."""
 
-import json
-
 import pytest
 from application_llm_fixtures import real_application_model  # noqa: F401
 
@@ -61,34 +59,13 @@ def test_api_upload_uses_the_shared_readable_wiki(kb_dir, monkeypatch):
         assert old.status_code == 200 and old.json()["content"] == read.json()["content"]
 
 
-def test_legacy_mapping_preserves_readable_evidence_without_a_model(kb_dir):
-    from ultrakb.application.views import map_legacy_sources, view_scope
-    from ultrakb.documents import read_document_source
-
-    (kb_dir / ".ultrakb/hashes.json").write_text(
-        json.dumps({"old-hash": {"name": "manual.md", "doc_name": "manual", "type": "md"}})
-    )
-    page = kb_dir / "wiki/sources/manual.md"
-    page.write_text("A mixed legacy source; its product was never recorded.")
-
-    mapped = map_legacy_sources(kb_dir)
-
-    assert len(mapped["source_ids"]) == 1 and not mapped["unavailable"]
-    source = read_document_source(
-        kb_dir, mapped["source_ids"][0], scope=view_scope(kb_dir, "legacy")
-    )
-    assert source["original_kind"] == "legacy_snapshot"
-    assert source["content"] == page.read_text()
-
-
 def test_snapshot_excludes_later_sources_and_foreign_scopes(kb_dir, import_pdf, tmp_path, live_llm):
+    from native_catalog_fixtures import publication
     from publication_fixtures import publish_document
 
     from ultrakb.application.sources import source_inventory
     from ultrakb.application.views import view_scope
     from ultrakb.documents import read_document_source
-    from ultrakb.source_catalog import read_source_revision
-    from ultrakb.unit_publication import read_head
 
     first = import_pdf()
     original = (kb_dir / "original.pdf").read_bytes()
@@ -96,7 +73,7 @@ def test_snapshot_excludes_later_sources_and_foreign_scopes(kb_dir, import_pdf, 
     snapshot = view_scope(
         kb_dir,
         live.view_id,
-        historical_revision=read_head(kb_dir, live.view_id).knowledge_revision_id,
+        historical_revision=publication(kb_dir, live.view_id).revision_id,
     )
     second_path = kb_dir / "later.pdf"
     second_path.write_bytes((kb_dir / "original.pdf").read_bytes())
@@ -115,8 +92,9 @@ def test_snapshot_excludes_later_sources_and_foreign_scopes(kb_dir, import_pdf, 
         read_document_source(kb_dir, first.source_id, scope=snapshot)["source_revision_id"]
         == first.source_revision_id
     )
-    revision = read_source_revision(kb_dir, first.source_revision_id)
-    assert (kb_dir / revision.original).read_bytes() == original
+    from native_catalog_fixtures import original_bytes
+
+    assert original_bytes(kb_dir, first.source_revision_id) == original
     assert (
         "Original instruction."
         in read_document_source(kb_dir, first.source_id, scope=snapshot)["content"]

@@ -222,20 +222,22 @@ def test_invalid_embedded_image_keeps_original_and_text_without_sending_payload(
 
     from ultrakb.agent.compiler import short_document_messages
     from ultrakb.agent.source_windows import CompileSourceWindows
+    from ultrakb.application.views import published_scope
     from ultrakb.config import LlmCredentialBundle
     from ultrakb.locks import atomic_write_text
-    from ultrakb.source_catalog import read_source_revision
+    from ultrakb.storage.catalog_store import CatalogStore
 
     source = kb_dir / "broken-image.md"
     original = "# Procedure\nDisconnect the load.\n![Figure](data:image/png;base64,NOT_VALID!!!)\n"
     atomic_write_text(source, original)
     result = publish_document(kb_dir, source, "Disconnect the load.", bundle=LlmCredentialBundle())
     assert result.status == "added"
-    saved = read_source_revision(kb_dir, result.source_revision_id)
-    assert (kb_dir / saved.original).read_text() == original
-    frozen = json.loads((kb_dir / "wiki/sources/broken-image.content.json").read_text())
+    catalog = CatalogStore(kb_dir, published_scope(kb_dir).knowledge.identity)
+    assert catalog.read_original(result.source_revision_id).decode() == original
+    doc_name = result.units[0].doc_name
+    frozen = json.loads((kb_dir / f"wiki/sources/{doc_name}.content.json").read_text())
     assert frozen["diagnostics"]
-    reader = CompileSourceWindows(kb_dir / "wiki", "broken-image")
+    reader = CompileSourceWindows(kb_dir / "wiki", doc_name)
     evidence = reader.current_original_evidence(frozen["text"])
     messages = short_document_messages(
         "broken-image", frozen["text"], "", "en", original_evidence=evidence

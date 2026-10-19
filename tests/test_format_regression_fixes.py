@@ -107,7 +107,7 @@ def test_unreadable_pdf_distinguishes_corruption_from_retained_no_text(
     import pymupdf
 
     from ultrakb.application.documents import import_document
-    from ultrakb.source_catalog import list_sources
+    from ultrakb.application.sources import source_inventory as list_sources
 
     path = tmp_path / "problem.pdf"
     if kind == "corrupt":

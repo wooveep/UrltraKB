@@ -16,7 +16,7 @@ def pdf_bytes():
 def test_kdh_conversion_keeps_original_and_validates_final_pdf(tmp_path, pdf_bytes):
     from ultrakb.cnki.convert import convert_cnki
     from ultrakb.cnki.records import CNKIConversion
-    from ultrakb.state import HashRegistry
+    from ultrakb.file_digest import hash_file
 
     key = b"FZHMEI"
     data = b"KDH 2.00".ljust(254, b"\0") + bytes(
@@ -29,8 +29,8 @@ def test_kdh_conversion_keeps_original_and_validates_final_pdf(tmp_path, pdf_byt
     record = CNKIConversion.model_validate_json(record_path.read_text())
     assert source.read_bytes() == data
     assert record.internal_format == "KDH"
-    assert record.input_digest == HashRegistry.hash_file(source)
-    assert record.pdf_digest == HashRegistry.hash_file(output)
+    assert record.input_digest == hash_file(source)
+    assert record.pdf_digest == hash_file(output)
     assert record.pages == 1
     with pymupdf.open(output) as pdf:
         assert not pdf.needs_pass and not pdf.is_repaired

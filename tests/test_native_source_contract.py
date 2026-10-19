@@ -106,6 +106,9 @@ async def test_bounded_pdf_read_and_gallery_use_native_image_occurrence(kb_dir, 
     pages = convert_pdf_to_pages(pdf, "manual", kb_dir / "wiki/sources/images/manual")
     source_path = kb_dir / "wiki/sources/manual.json"
     atomic_write_json(source_path, pages)
+    from reading_fixtures import publish_original
+
+    publish_original(kb_dir, pages)
     original = source_path.read_bytes()
     selected = read_page_selection(pages)
     left = selected["_page_segments"][0][0]

@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from error_transport import ErrorTransport
+from native_usage_fixtures import aggregate_usage, read_requests
 from test_llm_error_transports import executor_for, request
 
 from ultrakb.llm_execution import (
@@ -15,7 +16,6 @@ from ultrakb.llm_execution import (
     ModelDeadlineExceeded,
     StageBudgetExceeded,
 )
-from ultrakb.llm_usage import aggregate_usage, read_requests
 from ultrakb.locks import LockCancelled
 
 pytestmark = pytest.mark.integration

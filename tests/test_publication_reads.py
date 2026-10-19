@@ -3,22 +3,21 @@
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
-import pytest
-
 from ultrakb.application.knowledge import list_knowledge
 from ultrakb.application.reading import read_page_context
 
 
 def test_public_context_keeps_catalog_body_and_links_while_writer_holds_lease(kb_dir):
+    from publication_read_inputs import publish_fixture
+
     from ultrakb.application.pages import delete_page
     from ultrakb.application.views import published_scope
     from ultrakb.locks import atomic_write_text, kb_ingest_lock
-    from ultrakb.published_knowledge import initialize_publication
 
     atomic_write_text(kb_dir / "wiki/concepts/first.md", "# First\nOld [[concepts/second]].")
     atomic_write_text(kb_dir / "wiki/concepts/second.md", "# Second\n[[concepts/first]]")
     with kb_ingest_lock(kb_dir / ".ultrakb"):
-        initialize_publication(kb_dir)
+        publish_fixture(kb_dir)
     selected = published_scope(kb_dir)
     entered, release = threading.Event(), threading.Event()
 
@@ -53,18 +52,14 @@ def test_public_context_keeps_catalog_body_and_links_while_writer_holds_lease(kb
         writer.result(5)
 
 
-def test_public_read_requires_explicit_writer_initialization(kb_dir):
+def test_native_creation_has_an_immediately_readable_empty_publication(kb_dir):
     from ultrakb.application.views import published_scope
-    from ultrakb.published_knowledge import PublicationUnavailable
 
-    with pytest.raises(PublicationUnavailable):
-        published_scope(kb_dir)
+    assert published_scope(kb_dir).publication_id
     assert not (kb_dir / ".ultrakb/published").exists()
 
 
 def test_public_source_preview_and_query_use_frozen_catalog(kb_dir):
-    import shutil
-
     from publication_fixtures import publish_document
 
     from ultrakb.application.document_actions import document_inventory
@@ -87,7 +82,6 @@ def test_public_source_preview_and_query_use_frozen_catalog(kb_dir):
     assert not active_database.exists()
     catalog = get_kb_list(kb_dir, scope=selected)
     [source] = catalog["documents"]
-    shutil.rmtree(kb_dir / ".ultrakb/catalog")
     original.unlink()
     (kb_dir / "wiki/sources/manual.md").write_text("Unpublished source replacement")
 
@@ -96,7 +90,7 @@ def test_public_source_preview_and_query_use_frozen_catalog(kb_dir):
     assert preview["validity"] == "current"
     assert preview["publication_id"] == selected.publication_id
     query = resolve_query_views(kb_dir, scope=selected)
-    text = read_query_page(query, "sources/manual.md", view_id="legacy", strict=True)
+    text = read_query_page(query, preview["source_path"], view_id="legacy", strict=True)
     assert "Original requirement: retain every receipt." in text
     assert "status=current" in text
     [row] = document_inventory(kb_dir, scope=selected)
@@ -106,15 +100,15 @@ def test_public_source_preview_and_query_use_frozen_catalog(kb_dir):
 
 
 def test_http_reads_pin_one_publication_and_report_a_bad_pin(kb_dir, monkeypatch):
+    from publication_read_inputs import publish_fixture
     from test_api import _auth, _client, _use_named_kb
 
     from ultrakb.application.pages import save_page
     from ultrakb.locks import atomic_write_text, kb_ingest_lock
-    from ultrakb.published_knowledge import initialize_publication
 
     atomic_write_text(kb_dir / "wiki/concepts/first.md", "Old body.\n")
     with kb_ingest_lock(kb_dir / ".ultrakb"):
-        initialize_publication(kb_dir)
+        publish_fixture(kb_dir)
     client = _client(monkeypatch)
     name = _use_named_kb(monkeypatch, kb_dir)
     listing = client.post("/api/v1/list", headers=_auth(), json={"kb": name})
@@ -151,7 +145,7 @@ def test_http_reads_pin_one_publication_and_report_a_bad_pin(kb_dir, monkeypatch
             "publication_id": "a" * 32,
         },
     )
-    assert bad.status_code == 409
+    assert bad.status_code == 404
     mismatch = client.post(
         "/api/v1/page",
         headers=_auth(),
@@ -199,15 +193,16 @@ def test_http_reads_pin_one_publication_and_report_a_bad_pin(kb_dir, monkeypatch
 
 
 def test_edit_checks_public_identity_even_when_the_opened_page_has_not_changed(kb_dir):
+    from publication_read_inputs import publish_fixture
+
     from ultrakb.application.pages import read_page, save_page
     from ultrakb.application.views import published_scope
     from ultrakb.locks import atomic_write_text, kb_ingest_lock
-    from ultrakb.published_knowledge import initialize_publication
 
     atomic_write_text(kb_dir / "wiki/concepts/first.md", "First body.\n")
     atomic_write_text(kb_dir / "wiki/concepts/second.md", "Second body.\n")
     with kb_ingest_lock(kb_dir / ".ultrakb"):
-        initialize_publication(kb_dir)
+        publish_fixture(kb_dir)
     selected = published_scope(kb_dir)
     opened = read_page(kb_dir, "concepts/first", scope=selected)
     assert save_page(kb_dir, "concepts/second", "Other edit.\n").status == "saved"
@@ -290,18 +285,18 @@ def test_http_delete_uses_pinned_confirmation_and_rejects_stale_preconditions(kb
 
 
 def test_http_image_uses_the_pinned_publication(kb_dir, monkeypatch):
+    from publication_read_inputs import publish_fixture
     from test_api import _auth, _client, _use_named_kb
 
     from ultrakb.application.pages import save_page
     from ultrakb.application.views import published_scope
     from ultrakb.locks import atomic_write_text, kb_ingest_lock
-    from ultrakb.published_knowledge import initialize_publication
 
     image = kb_dir / "wiki/sources/images/figure.png"
     image.write_bytes(b"old-image")
     atomic_write_text(kb_dir / "wiki/concepts/first.md", "Old figure.\n")
     with kb_ingest_lock(kb_dir / ".ultrakb"):
-        initialize_publication(kb_dir)
+        publish_fixture(kb_dir)
     identity = published_scope(kb_dir).publication_id
     image.write_bytes(b"new-image")
     save_page(kb_dir, "concepts/first", "New figure.\n")
@@ -332,13 +327,16 @@ def test_public_source_preview_retains_a_failed_new_documents_normalized_body(kb
     original = kb_dir / "manual.md"
     original.write_text("A retained original while knowledge generation is unfinished.\n")
     failed = fail_document(kb_dir, original, bundle=LlmCredentialBundle(api_key="offline-unused"))
-    assert failed.status == "failed"
+    assert failed.status == "blocked"
     selected = published_scope(kb_dir)
-    preview = read_document_source(kb_dir, failed.source_id, scope=selected)
+    assert read_document_source(kb_dir, failed.source_id, scope=selected) is None
+    preview = read_document_source(
+        kb_dir, failed.source_id, unit_revision_id=failed.units[0].target_revision_id
+    )
     assert preview is not None
     assert preview["content"] == "A retained original while knowledge generation is unfinished.\n"
-    assert preview["publication_id"] == selected.publication_id
-    assert preview["status"] == "failed"
+    assert preview["publication_id"] is None
+    assert preview["status"] == "pending"
 
 
 def test_public_source_preview_can_read_an_older_dependency_of_a_pending_page(kb_dir):

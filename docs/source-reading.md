@@ -21,18 +21,19 @@ CLI 返回包含正文、修订和覆盖信息的 JSON：
 ultrakb --kb-dir /path/to/kb source SOURCE_ID --pages 2-3
 ultrakb --kb-dir /path/to/kb source SOURCE_ID \
   --knowledge-revision KNOWLEDGE_REVISION_ID --pages 3
+ultrakb --kb-dir /path/to/kb source SOURCE_ID --unit-revision UNIT_REVISION_ID
 ```
 
 API `POST /api/v1/document/source` 接受 `kb`、`hash`（来源 ID）、`view_id`、
-`source_revision_id`、`knowledge_revision_id` 和可选 `pages`。`view_id` 可省略，
+`source_revision_id`、`knowledge_revision_id`、`unit_revision_id` 和可选 `pages`。`view_id` 可省略，
 仅接受共享知识库的内部标识 `legacy`。无 `pages` 读取全文。
 响应的 `page_range` 是实际返回的页号，`pages` 是已验证的物理总页数；请求范围内
-没有记录的页在 `diagnostics` 中列出，不会凭空补正文。旧库缺少页序或处理依据时
+没有记录的页在 `diagnostics` 中列出，不会凭空补正文。来源缺少页序或处理依据时
 `coverage` 为 `unknown`、物理总页数为空，保留已有页号而不猜测缺失页。
 
-本地 PageIndex 将索引输入和图片保存在受管目录，缓存键包含原件摘要与处理策略。
-全文读取和范围读取共用缓存校验与恢复。缺少页缓存时，按记录的解析器及策略从同一受管输入恢复；
-图片摘要不符、原件损坏或处理策略不再可重建时会明确报错。
+托管原件、处理正文和图片来自主库关联的不可变内容清单，索引修订检查完整输入及策略。
+全文和范围读取使用相同的固定处理版本，不读取当前外部原件或 Wiki 工作副本。
+图片摘要不符或托管原件损坏时会明确报错；普通阅读不重建索引或暗中修复导航。
 
 Markdown 原文固定为 UTF-8 Unicode 码点序列，保留换行（包括 CRLF）、空白、前言、
 代码和表格。去除开头 BOM 及搬移图片引用的位置由 `origin_locators` 单独映射回原文件；
@@ -68,8 +69,12 @@ PDF 原生表格必须有提取阶段记录的几何区域；打印出的 HTML �
 
 文本度量固定使用离线 tiktoken 0.13.0 / cl100k_base：5,000 tokens 及以下为短文，
 与执行模型无关。`tokens` 和 `characters` 显示完整冻结文本的大小，`pages` 为空。
-首次编译失败时仍可阅读已保留的规范化正文，`knowledge_revision_id` 为空且状态保留失败原因。
+首次编译失败时，可通过明确的 `--unit-revision` / `unit_revision_id` 阅读已保留的规范化正文，
+`knowledge_revision_id` 为空且状态保留失败原因；普通来源读取只选择已发布的知识依据。
+处理单元修订可从资料清单的 `reading_units` 取得，不能同时指定知识修订与保留单元修订。
 已有成功正文时继续显示该正文及其度量，失败的新目标另列 `target_processing`。
+图片位于同一处理清单；HTTP 使用认证的 `GET /api/v1/document/source-image`，
+同时提供 `kb`、`source_id`、`unit_revision_id` 和清单中的 `path`，返回固定单元修订身份。
 
 ```sh
 ultrakb --kb-dir /path/to/kb source SOURCE_ID --chars 0:120
@@ -78,3 +83,11 @@ ultrakb --kb-dir /path/to/kb source SOURCE_ID --chars 0:120
 API 对应可选字段为 `chars: "0:120"`；桌面原文窗口提供相同范围输入。
 问答来源工具 `get_text_content` 返回相同字符范围和原文件映射，且受所选知识快照的证据范围限制。
 重编译复用冻结输入和分类；watch 对本地图片的更改和缺失状态也生成新的内容修订。
+
+Office 和 CNKI 来源的转换记录从所选不可变处理版本读取，包含原件、运行环境与
+转换 PDF 的内容指纹。历史阅读和显式保留输入使用各自的转换记录；记录与原件或
+同版本 PDF 不匹配时拒绝读取，不会把原件误当作转换 PDF。
+
+桌面“打开导入原件”和“打开导入时生成的 PDF”按阅读窗口已选定的来源与处理修订，
+在后台从 CAS 准备临时副本，再交给系统阅读器。副本不依赖外部原件或 Wiki 工作副本；
+窗口关闭会取消尚在等待的读取，并清理该窗口创建的临时副本。

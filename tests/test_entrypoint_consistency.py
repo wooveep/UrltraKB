@@ -130,6 +130,9 @@ def narrated_model(kb_dir, monkeypatch, live_llm):
         kb_dir / "wiki/index.md", "# Atlas V99\nRead sources/fixture.md for the recorded answer."
     )
     atomic_write_text(kb_dir / "wiki/sources/fixture.md", "# Atlas V99\nThe answer is 42.")
+    from publication_read_inputs import publish_fixture
+
+    publish_fixture(kb_dir)
     actual = []
     run_streamed, run = Runner.run_streamed, Runner.run
 
@@ -188,23 +191,23 @@ def test_query_saves_only_final_answer_and_keeps_previous_copy(
 
 
 def test_cli_resume_selects_latest_shared_session(kb_dir, monkeypatch):
-    from ultrakb.agent.chat_session import ChatSession
+    from ultrakb.application.views import published_scope
+    from ultrakb.storage.session_store import SessionStore
 
-    cli = importlib.import_module("ultrakb.cli")
-    previous = ChatSession.new(kb_dir, "model", "en", identity="a-previous")
-    current = ChatSession.new(kb_dir, "model", "en", identity="z-current")
-    previous.save()
-    current.save()
+    store = SessionStore(kb_dir, published_scope(kb_dir).knowledge.identity)
+    store.create("a-previous", model="model", language="en")
+    store.create("z-current", model="model", language="en")
     selected = []
 
     async def run_chat(root, session, **kwargs):
         selected.append(session.id)
 
+    cli = importlib.import_module("ultrakb.cli")
     monkeypatch.setattr("ultrakb.agent.chat.run_chat", run_chat)
     monkeypatch.setattr(cli, "_setup_llm_key", lambda _: None)
     result = CliRunner().invoke(cli.cli, ["--kb-dir", str(kb_dir), "chat", "--resume"])
     assert result.exit_code == 0, result.output
-    assert selected == [current.id]
+    assert selected == ["z-current"]
 
 
 @pytest.mark.parametrize("entry", ["api", "desktop"])
@@ -222,11 +225,11 @@ def test_artifact_export_rejects_external_symlink(kb_dir, tmp_path, monkeypatch,
     if entry == "api":
         with api_client(kb_dir, monkeypatch) as client:
             result = client.get("/api/v1/skill/example/archive", params={"kb": "audit"})
-        assert result.status_code == 400
+        assert result.status_code == 404
     else:
         destination = tmp_path.parent / f"{tmp_path.name}-export"
         destination.mkdir()
-        with pytest.raises(ValueError):
+        with pytest.raises(FileNotFoundError):
             export_artifact(kb_dir, "output/skills/example", destination)
 
 
@@ -235,7 +238,10 @@ def test_api_archive_has_same_layout_as_desktop(kb_dir, tmp_path, monkeypatch):
 
     target = kb_dir / "output/skills/example"
     target.mkdir(parents=True)
+    from test_api import _publish_artifact_fixture
+
     (target / "SKILL.md").write_text("# Example")
+    _publish_artifact_fixture(kb_dir, target)
     destination = tmp_path.parent / f"{tmp_path.name}-export"
     destination.mkdir()
     exported = export_artifact(kb_dir, "output/skills/example", destination)
@@ -252,12 +258,13 @@ def test_api_archive_has_same_layout_as_desktop(kb_dir, tmp_path, monkeypatch):
 @pytest.mark.parametrize("entry", ["cli", "api", "api_stream", "desktop"])
 def test_chat_persists_the_same_final_answer(kb_dir, monkeypatch, narrated_model, entry):
     from ultrakb.agent.chat import _build_style, _run_turn
-    from ultrakb.agent.chat_session import ChatSession, list_sessions, load_session
-    from ultrakb.application.conversations import continue_conversation
+    from ultrakb.application.conversations import continue_conversation, read_conversation
+    from ultrakb.application.sessions import list_conversations
+    from ultrakb.terminal_chat_state import TerminalConversation
 
     prompt = "Read sources/fixture.md and state the recorded answer."
     if entry == "cli":
-        session = ChatSession.new(kb_dir, "", "")
+        session = TerminalConversation.new(kb_dir, "", "")
         asyncio.run(_run_turn(session, prompt, _build_style(False), use_color=False))
     elif entry.startswith("api"):
         with api_client(kb_dir, monkeypatch) as client:
@@ -268,39 +275,46 @@ def test_chat_persists_the_same_final_answer(kb_dir, monkeypatch, narrated_model
         assert result.status_code == 200, result.text
     else:
         assert asyncio.run(continue_conversation(kb_dir, prompt)).status == "completed"
-    saved = load_session(kb_dir, list_sessions(kb_dir)[0]["id"])
-    assert saved.user_turns == [prompt]
-    assert "42" in saved.assistant_texts[0]
-    assert "Let me search." not in saved.assistant_texts[0]
-    assert saved.assistant_texts[0] == str(narrated_model[-1].final_output)
-    assert saved.turn_count == 1
-    assert saved.answer_outcomes == ["answered"]
+    saved = read_conversation(kb_dir, list_conversations(kb_dir)[0]["id"])
+    assert [user for user, answer in saved.turns] == [prompt]
+    assert "42" in saved.turns[0][1]
+    assert "Let me search." not in saved.turns[0][1]
+    assert saved.turns[0][1] == str(narrated_model[-1].final_output)
+    assert saved.total_turns == 1
+    assert saved.outcomes == ("answered",)
 
 
 def test_api_session_operations_use_shared_sessions(kb_dir, monkeypatch):
-    from ultrakb.agent.chat_session import ChatSession
+    from ultrakb.application.views import published_scope
+    from ultrakb.storage.session_store import SessionStore
 
-    own = ChatSession.new(kb_dir, "model", "en")
-    own.save()
+    store = SessionStore(kb_dir, published_scope(kb_dir).knowledge.identity)
+    store.create("shared-session", model="model", language="en")
     with api_client(kb_dir, monkeypatch) as client:
         listed = client.post("/api/v1/chat/sessions", json={"kb": "audit"})
-        assert [item["id"] for item in listed.json()["sessions"]] == [own.id]
+        assert [item["id"] for item in listed.json()["sessions"]] == ["shared-session"]
         loaded = client.post(
-            "/api/v1/chat/sessions/load", json={"kb": "audit", "session_id": own.id}
+            "/api/v1/chat/sessions/load", json={"kb": "audit", "session_id": "shared-session"}
         )
         assert loaded.status_code == 200, loaded.text
         invalid = client.post(
             "/api/v1/chat/sessions/load",
-            json={"kb": "audit", "session_id": own.id, "view_id": "a" * 32},
+            json={"kb": "audit", "session_id": "shared-session", "view_id": "a" * 32},
         )
         assert invalid.status_code == 422
-        assert own.path.exists()
+        assert store.load("shared-session")
         result = client.post(
-            "/api/v1/chat/sessions/delete", json={"kb": "audit", "session_id": own.id}
+            "/api/v1/chat/sessions/delete",
+            json={
+                "kb": "audit",
+                "session_id": "shared-session",
+                "version": loaded.json()["version"],
+            },
         )
         assert result.status_code == 200, result.text
         assert result.json()["deleted"] is True
-        assert not own.path.exists()
+        with pytest.raises(FileNotFoundError):
+            store.load("shared-session")
 
 
 @pytest.mark.parametrize("entry", ["cli", "api", "api_stream", "desktop"])
@@ -394,10 +408,15 @@ def test_terminal_shows_final_result_and_filters_reasoning(
         output = result.output
     elif entry == "chat":
         from ultrakb.agent.chat import _build_style, _run_turn
-        from ultrakb.agent.chat_session import ChatSession
+        from ultrakb.terminal_chat_state import TerminalConversation
 
         asyncio.run(
-            _run_turn(ChatSession.new(kb_dir, "", ""), prompt, _build_style(False), use_color=False)
+            _run_turn(
+                TerminalConversation.new(kb_dir, "", ""),
+                prompt,
+                _build_style(False),
+                use_color=False,
+            )
         )
         output = capsys.readouterr().out
     else:

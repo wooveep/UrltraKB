@@ -9,8 +9,6 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
-from ultrakb.locks import kb_lock, kb_repair_lock
-
 
 class _WaitingForKB(Exception):
     """No operation began; release the thread while another process owns the KB."""
@@ -63,13 +61,18 @@ class LocalIO(QObject):
         self._callbacks[sequence] = callback
         if on_wait is not None:
             self._waiters[sequence] = on_wait
-        generation, binding_error = None, None
+        generation, database_identity, binding_error = None, None, None
         if kb is not None and not creating:
             from ultrakb.lifecycle import current_generation, deletion_binding
 
             try:
                 generation = deletion_binding(kb) if deleting else current_generation(kb)
                 kb = kb.expanduser().resolve()
+                if not deleting:
+                    from ultrakb.storage.database import open_database
+
+                    with open_database(kb, read_only=True) as db:
+                        database_identity = db.identity
             except Exception as exc:
                 binding_error = exc
 
@@ -110,17 +113,12 @@ class LocalIO(QObject):
                         )
                     ):
                         raise ValueError("请选择已有的知识库目录")
-                    if snapshot:
+                    if not creating and not deleting:
                         from ultrakb.lifecycle import read_lifecycle
 
-                        scope.enter_context(read_lifecycle(kb, **wait_options))
-                    elif not deleting:
-                        lease = (
-                            kb_repair_lock(kb / ".ultrakb", **wait_options)
-                            if repair
-                            else kb_lock(kb / ".ultrakb", exclusive=exclusive, **wait_options)
+                        scope.enter_context(
+                            read_lifecycle(kb, database_identity=database_identity, **wait_options)
                         )
-                        scope.enter_context(lease)
                 if global_settings:
                     from ultrakb.config import _with_global_config_lock
 
@@ -139,7 +137,14 @@ class LocalIO(QObject):
                 from ultrakb.mutation import RecoveryRequired
 
                 try:
-                    return current_generation(kb) != generation
+                    if current_generation(kb) != generation:
+                        return True
+                    if database_identity is not None:
+                        from ultrakb.storage.database import open_database
+
+                        with open_database(kb, expected=database_identity, read_only=True):
+                            pass
+                    return False
                 except (OSError, ValueError, RecoveryRequired):
                     return True
             return False

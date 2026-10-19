@@ -3,14 +3,12 @@
 import json
 import shutil
 
-import pytest
 from figure_fixtures import record_markdown
 from PIL import Image
 
 from ultrakb.agent.page_figures import PageFigures, split_gallery
 from ultrakb.agent.page_updates import PageUpdate
 from ultrakb.figure_assets import freeze_figures, relative_figure
-from ultrakb.figure_publication import preserve_page_figures
 from ultrakb.markdown_images import image_references
 
 
@@ -80,27 +78,6 @@ def test_body_updates_keep_unedited_bindings_and_demote_ambiguous_old_figures(tm
     assert len({e["figure"]["asset_path"] for e in entries}) == 1
 
 
-def test_bare_figure_reference_is_repaired_in_candidate_only(tmp_path):
-    wiki = tmp_path / "wiki"
-    original_figures(wiki)
-    (wiki / "concepts/deep").mkdir(parents=True)
-    page = wiki / "concepts/deep/guide.md"
-    text = "---\nsources: [sources/manual.md]\n---\n原图：`图 片.png`\n"
-    page.write_text(text)
-    # Two appearances of that filename are ambiguous, even with shared bytes.
-    from ultrakb.agent.page_response import PageResponseError
-
-    with pytest.raises(PageResponseError, match="Ambiguous"):
-        preserve_page_figures(tmp_path, wiki, {})
-    assert page.read_text() == text
-    record_markdown(wiki, "sources/manual.md", "# Install\n![安装](<images/图 片.png>)\n")
-    preserve_page_figures(tmp_path, wiki, {})
-    assert text.strip() in page.read_text()
-    refs = image_references(page.read_text())
-    assert len(refs) == 1 and refs[0].local_path.startswith("../../sources/figure-assets/")
-    assert (page.parent / refs[0].local_path).is_file()
-
-
 def test_moved_wiki_figures_render_in_the_real_reader(tmp_path, monkeypatch):
     from time import monotonic
 
@@ -153,41 +130,3 @@ def test_moved_wiki_figures_render_in_the_real_reader(tmp_path, monkeypatch):
     finally:
         reader.stop_rendering()
         reader.close()
-
-
-def test_display_only_repair_does_not_claim_current_factual_inputs(tmp_path):
-    from ultrakb.ingest_records import KnowledgeHead, KnowledgeRevision
-    from ultrakb.knowledge_evidence import publication_dependencies
-
-    wiki = tmp_path / "wiki"
-    figures = original_figures(wiki)
-    context = PageFigures(
-        wiki, ({"id": "all", "figures": [f.occurrence_id for f in figures]},), tuple(figures)
-    )
-    page = "concepts/guide.md"
-    old_input, new_input, revision = "a" * 32, "b" * 32, "c" * 32
-    old = tmp_path / ".ultrakb/knowledge/legacy/revisions" / revision
-    (old / "wiki/concepts").mkdir(parents=True)
-    body = "---\nsources: [sources/manual.md]\n---\nA recorded procedure."
-    (old / "wiki" / page).write_text(body)
-    (old / "manifest.json").write_text(
-        KnowledgeRevision(
-            knowledge_revision_id=revision,
-            view_id="legacy",
-            change_kind="manual",
-            base_revision_id=None,
-            generated_baselines={},
-            original_references=(),
-            input_revisions=(old_input,),
-            page_dependencies={page: (old_input,)},
-        ).model_dump_json()
-    )
-    (wiki / "concepts").mkdir()
-    (wiki / page).write_text(
-        context.decorate(page, {"content": body, "source_ranges": ["all"]})["content"]
-    )
-    head = KnowledgeHead(view_id="legacy", knowledge_revision_id=revision)
-    dependencies = publication_dependencies(
-        tmp_path, head, {page: "changed"}, {page: "old"}, [new_input], wiki=wiki
-    )
-    assert dependencies[page] == (old_input,)

@@ -4,18 +4,19 @@ from pathlib import Path
 
 
 def verify_sessions(window, kb, wait_until):
+    from uuid import uuid4
+
     from PySide6.QtCore import QTimer
     from PySide6.QtWidgets import QMessageBox
 
-    from ultrakb.agent.chat_session import ChatSession
     from ultrakb.desktop.sessions import SessionsDialog
+    from ultrakb.desktop.verification_data import retain_conversation
     from ultrakb.desktop.verification_dialogs import message_box
     from ultrakb.desktop.verification_tasks import SubmittedTasks, assert_result_text
     from ultrakb.locks import session_lock
     from ultrakb.runtime.requests import ExportConversation
 
-    session = ChatSession.new(kb, "openai/verification", "zh")
-    session.record_turn("原生会话", "第一个完整回答。", [])
+    session_id, store = retain_conversation(kb, [("原生会话", "第一个完整回答。")])
     from ultrakb.desktop.verification_workbench import management_page
 
     dialog = management_page(window, kb, "对话", SessionsDialog, wait_until)
@@ -27,7 +28,9 @@ def verify_sessions(window, kb, wait_until):
         modal = message_box("已导出的副本会保留。")
         if modal is not None:
             if stale:
-                session.record_turn("确认之后的新问题", "必须保留的新回答。", [])
+                store.append_exchange(
+                    session_id, uuid4().hex, "确认之后的新问题", "必须保留的新回答。"
+                )
             modal.done(QMessageBox.StandardButton.Yes)
 
     def finish():
@@ -49,7 +52,7 @@ def verify_sessions(window, kb, wait_until):
         wait_until(lambda: dialog.table.rowCount() == 1)
         dialog.table.selectRow(0)
         # A held conversation yields the child slot and can stop before capture.
-        with session_lock(kb, session.id):
+        with session_lock(kb, session_id):
             dialog.export()
             task_id = dialog._task
             wait_until(lambda: window.manager.get(task_id).state == "waiting")
@@ -70,18 +73,20 @@ def verify_sessions(window, kb, wait_until):
         dialog.delete()
         conflict = finish()
         assert conflict.failed == 1 and conflict.started_at is None, conflict
-        assert session.path.exists()
+        assert store.conversation(session_id).session_id == session_id
         stale = False
         dialog.table.selectRow(0)
         dialog.delete()
         deleted = finish()
         assert deleted.state == "completed" and deleted.processes_reaped, deleted
-        assert not session.path.exists()
+        from ultrakb.storage.session_catalog import SessionCatalog
+
+        assert SessionCatalog(kb, store.identity).resolve(session_id, view_id="legacy") is None
         assert all(Path(path).exists() for path in copies)
-        dialog._task = window.manager.submit(kb, [ExportConversation(session.id)])
+        dialog._task = window.manager.submit(kb, [ExportConversation(session_id)])
         missing = finish()
         assert missing.skipped == 1 and missing.started_at is None, missing
-        assert missing.results[0].session_id == session.id
+        assert missing.results[0].session_id == session_id
         assert "no longer exists" in missing.results[0].error
         assert "跳过" in dialog.status.text()
     finally:

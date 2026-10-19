@@ -197,6 +197,7 @@ class GenerateArtifact(ViewSelection):
     intent: str = field(repr=False)
     version: str
     replace: bool = False
+    resume_execution_id: str | None = None
 
     def __post_init__(self) -> None:
         super().__post_init__()
@@ -205,6 +206,12 @@ class GenerateArtifact(ViewSelection):
         GenerationOptions(self.target_type, self.name, self.intent)
         if not isinstance(self.version, str) or not self.version:
             raise ValueError("Artifact generation requires the latest target version")
+        if self.resume_execution_id is not None:
+            from pydantic import TypeAdapter
+
+            from ultrakb.source_records import RecordId
+
+            TypeAdapter(RecordId).validate_python(self.resume_execution_id)
 
 
 @dataclass(frozen=True)

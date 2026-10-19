@@ -6,15 +6,14 @@ Stable attempt IDs make recovery idempotent across the two atomic file writes.
 """
 
 import json
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from hashlib import sha256
 from pathlib import Path
 from time import time_ns
 from uuid import uuid4
 
-from ultrakb.agent.chat_session import ChatSession, deletion_marker, load_session
 from ultrakb.lifecycle import KnowledgeBaseRemoved, current_generation, expected_generation
-from ultrakb.locks import atomic_write_json, file_write_lock, kb_ingest_lock, session_lock
+from ultrakb.locks import atomic_write_json, file_write_lock
 
 
 @dataclass(frozen=True)
@@ -30,9 +29,24 @@ class ChatOutbox:
     def _directory(self, root):
         return self.directory / sha256(str(root).encode()).hexdigest()
 
-    def accept(self, root, identity, message, *, new, after_turn=0, view_id="legacy"):
+    def accept(
+        self,
+        root,
+        identity,
+        message,
+        *,
+        new,
+        after_turn=0,
+        view_id="legacy",
+        database_identity=None,
+    ):
+        from ultrakb.storage.database import open_database
+
+        with open_database(root, expected=database_identity, read_only=True) as db:
+            database_identity = db.identity
         record = {
             "id": uuid4().hex,
+            "database_identity": asdict(database_identity),
             "session_id": identity,
             "message": message,
             "new": new,
@@ -57,6 +71,9 @@ class ChatOutbox:
             (directory / (identity + ".json")).unlink(missing_ok=True)
 
     def recover(self, root, *, exclude=(), on_wait=None):
+        from ultrakb.application.sessions import retain_pending_conversation
+        from ultrakb.storage.database import DatabaseIdentity, open_database
+
         directory = self._directory(root)
         if not directory.exists():
             return
@@ -77,45 +94,34 @@ class ChatOutbox:
                     or type(record.get("sequence")) is not int
                     or type(record.get("after_turn")) is not int
                     or record["after_turn"] < 0
+                    or not isinstance(record.get("database_identity"), dict)
                 ):
                     raise ValueError("Invalid saved chat submission")
-                records.append((record, path))
-            for record, path in sorted(records, key=lambda entry: entry[0]["sequence"]):
-                identity = record["session_id"]
-                try:
-                    with expected_generation(root, record["generation"]):
-                        pass
-                except KnowledgeBaseRemoved:
-                    # A deleted/recreated KB owns a different history. Stale
-                    # submissions must neither repopulate it nor block newer ones.
-                    path.unlink()
-                    continue
-                with session_lock(root, identity, on_wait=on_wait):
-                    with expected_generation(root, record["generation"]):
-                        with kb_ingest_lock(root / ".ultrakb", on_wait=on_wait):
-                            if deletion_marker(root, identity).exists():
-                                path.unlink()
-                                continue
-                            try:
-                                session = load_session(root, identity)
-                            except FileNotFoundError:
-                                if not record["new"]:
-                                    # An explicitly deleted existing conversation must stay deleted.
-                                    path.unlink()
-                                    continue
-                                session = ChatSession.new(
-                                    root,
-                                    "",
-                                    "",
-                                    identity=identity,
-                                    view_id=record.get("view_id", "legacy"),
-                                )
-                            session.require_view(record.get("view_id", "legacy"))
-                            if record["id"] not in session.completed_attempts:
-                                session.begin_attempt(
-                                    record["message"],
-                                    identity=record["id"],
-                                    after_turn=min(record["after_turn"], session.turn_count),
-                                    submission_order=record["sequence"],
-                                )
-                            path.unlink()
+                records.append(record)
+        # Waiting for a conversation never holds the desktop's admission lock.
+        for record in sorted(records, key=lambda entry: entry["sequence"]):
+            try:
+                with expected_generation(root, record["generation"]):
+                    pass
+            except KnowledgeBaseRemoved:
+                self.discard(root, record["id"])
+                continue
+            expected = DatabaseIdentity(**record["database_identity"])
+            with open_database(root, read_only=True) as db:
+                current = db.identity
+            if current != expected:
+                self.discard(root, record["id"])
+                continue
+            retain_pending_conversation(
+                root,
+                record["session_id"],
+                record["id"],
+                record["message"],
+                identity=expected,
+                new=record["new"],
+                after_turn=record["after_turn"],
+                order=record["sequence"],
+                view_id=record.get("view_id", "legacy"),
+                on_wait=on_wait,
+            )
+            self.discard(root, record["id"])

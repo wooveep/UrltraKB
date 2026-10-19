@@ -8,7 +8,6 @@ from pathlib import Path
 
 from ctree.state import prefix_digest, validate_turns
 
-from ultrakb.mutation import RecoveryRequired
 from ultrakb.storage.blobs import put_blob, read_bytes, retain_blob
 from ultrakb.storage.coordination import storage_stage
 from ultrakb.storage.database import DatabaseIdentity
@@ -98,10 +97,13 @@ class SessionStore:
         language: str,
         title: str = "",
         view_id: str = "legacy",
+        draft: bool = False,
     ) -> None:
-        if any(
-            not isinstance(value, str) or not value
-            for value in (session_id, model, language, view_id)
+        if (
+            any(not isinstance(value, str) for value in (session_id, model, language, view_id))
+            or not session_id
+            or not view_id
+            or (not draft and (not model or not language))
         ):
             raise ValueError("Conversation identity and execution settings must be explicit")
         if not isinstance(title, str):
@@ -138,8 +140,124 @@ class SessionStore:
         except ValueError as error:
             raise SessionConflict(str(error)) from error
 
+    def queue_submission(
+        self,
+        session_id,
+        submission_id,
+        message,
+        *,
+        view_id,
+        model="",
+        language="",
+        new=False,
+        order=None,
+        after_turn=0,
+        cancelled=None,
+        on_wait=None,
+    ):
+        """Retain stopped desktop intent without creating an execution or replaying work."""
+        if (
+            not isinstance(message, str)
+            or not message.strip()
+            or not isinstance(submission_id, str)
+            or not submission_id
+            or type(after_turn) is not int
+            or after_turn < 0
+            or order is not None
+            and (type(order) is not int or order < 0)
+        ):
+            raise ValueError("Invalid queued conversation submission")
+        _bounded_metadata(session_id, submission_id, view_id, model, language, order)
+        from ultrakb.locks import session_lock
+
+        with (
+            session_lock(
+                self.root,
+                session_id,
+                database_identity=self.identity,
+                cancelled=cancelled,
+                on_wait=on_wait,
+            ),
+            storage_stage(self.root, self.identity, cancelled=cancelled) as db,
+        ):
+            row = db.connection.execute(
+                "SELECT deleted, view_id FROM ukb_conversations WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            if row is None:
+                if not new:
+                    return "missing"
+                self.create(
+                    session_id,
+                    view_id=view_id,
+                    model=model,
+                    language=language,
+                    title=" ".join(message.split())[:60],
+                    draft=True,
+                )
+            elif row[0]:
+                return "deleted"
+            elif row[1] != view_id:
+                raise ValueError("Conversation belongs to another knowledge view")
+            content = put_blob(db, message.encode("utf-8"))
+            owner = hashlib.sha256(json.dumps((session_id, submission_id)).encode()).hexdigest()
+            with db.transaction() as connection:
+                self._retain_submission(
+                    connection,
+                    session_id,
+                    submission_id,
+                    content,
+                    order,
+                    owner=owner,
+                    after_turn=after_turn,
+                )
+            return "retained"
+
+    def _retain_submission(
+        self, connection, session_id, submission_id, content, order, *, owner, after_turn=None
+    ):
+        existing = connection.execute(
+            "SELECT message_digest, submission_order FROM ukb_conversation_submissions "
+            "WHERE session_id = ? AND submission_id = ?",
+            (session_id, submission_id),
+        ).fetchone()
+        if existing:
+            if existing != (content.digest, order):
+                raise ValueError("Conversation submission identity mismatch")
+            return
+        count = connection.execute(
+            "SELECT turn_count FROM ukb_conversations WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()[0]
+        connection.execute(
+            "INSERT INTO ukb_conversation_submissions(session_id, submission_id, "
+            "message_digest, after_turn, submission_order) VALUES (?, ?, ?, ?, ?)",
+            (
+                session_id,
+                submission_id,
+                content.digest,
+                count if after_turn is None else min(after_turn, count),
+                order,
+            ),
+        )
+        retain_blob(connection, "conversation-submission", owner, "user", content)
+        connection.execute(
+            "UPDATE ukb_conversations SET updated_at = ?, activity_version = activity_version + 1 "
+            "WHERE session_id = ?",
+            (now(), session_id),
+        )
+
     def start_submission(
-        self, session_id, submission_id, message, *, execution_id, publication_id, order=None
+        self,
+        session_id,
+        submission_id,
+        message,
+        *,
+        execution_id,
+        publication_id,
+        order=None,
+        model=None,
+        language=None,
     ):
         if (
             not isinstance(submission_id, str)
@@ -151,31 +269,29 @@ class SessionStore:
         ):
             raise ValueError("Conversation submissions require original text and a stable identity")
         _bounded_metadata(session_id, submission_id, execution_id, publication_id, order)
-        owner = hashlib.sha256(json.dumps((session_id, submission_id)).encode()).hexdigest()
         timestamp = now()
         with storage_stage(self.root, self.identity) as db:
             content = put_blob(db, message.encode("utf-8"))
+            owner = hashlib.sha256(json.dumps((session_id, submission_id)).encode()).hexdigest()
             with db.transaction() as connection:
                 self._current(db, session_id)
                 self._require_active_execution(connection, execution_id)
-                existing = connection.execute(
-                    "SELECT message_digest, submission_order FROM ukb_conversation_submissions "
-                    "WHERE session_id = ? AND submission_id = ?",
-                    (session_id, submission_id),
-                ).fetchone()
-                if existing and existing != (content.digest, order):
-                    raise ValueError("Conversation submission identity mismatch")
-                if not existing:
-                    count = connection.execute(
-                        "SELECT turn_count FROM ukb_conversations WHERE session_id = ?",
-                        (session_id,),
-                    ).fetchone()[0]
+                if model is not None or language is not None:
+                    if (
+                        not isinstance(model, str)
+                        or not model
+                        or not isinstance(language, str)
+                        or not language
+                    ):
+                        raise ValueError("Executed conversations require explicit model settings")
                     connection.execute(
-                        "INSERT INTO ukb_conversation_submissions(session_id, submission_id, "
-                        "message_digest, after_turn, submission_order) VALUES (?, ?, ?, ?, ?)",
-                        (session_id, submission_id, content.digest, count, order),
+                        "UPDATE ukb_conversations SET model = ?, language = ? "
+                        "WHERE session_id = ? AND turn_count = 0 AND model = '' AND language = ''",
+                        (model, language, session_id),
                     )
-                    retain_blob(connection, "conversation-submission", owner, "user", content)
+                self._retain_submission(
+                    connection, session_id, submission_id, content, order, owner=owner
+                )
                 completed = connection.execute(
                     "SELECT ordinal FROM ukb_turns WHERE session_id = ? AND attempt_id = ?",
                     (session_id, submission_id),
@@ -231,53 +347,6 @@ class SessionStore:
                 (state, error_code, execution_id),
             )
 
-    def recover_submission(
-        self, session_id, submission_id, message, *, execution_id, check_cancelled
-    ):
-        """Accept a retained complete answer; never resend an unconfirmed paid attempt."""
-        with storage_stage(self.root, self.identity, read_only=True) as db:
-            self._require_active_execution(db.connection, execution_id)
-            candidate = db.connection.execute(
-                "SELECT a.execution_id, a.turn_id, a.input_revision, a.payload_digest, "
-                "a.result_digest FROM ukb_conversation_answers a JOIN ukb_conversation_runs r "
-                "ON r.execution_id = a.execution_id JOIN ukb_executions e "
-                "ON e.execution_id = r.execution_id WHERE r.session_id = ? AND r.submission_id = ? "
-                "AND r.execution_id != ? ORDER BY e.sequence DESC LIMIT 1",
-                (session_id, submission_id, execution_id),
-            ).fetchone()
-            if candidate is None:
-                pending = db.connection.execute(
-                    "SELECT 1 FROM ukb_conversation_runs r JOIN ukb_usage_counters c "
-                    "ON c.bucket = 'execution' AND c.identity = r.execution_id "
-                    "AND c.stage_code = '' "
-                    "WHERE r.session_id = ? AND r.submission_id = ? AND r.execution_id != ? "
-                    "AND (c.actual_sends > 0 OR c.send_unknown > 0 OR c.in_flight_requests > 0) "
-                    "LIMIT 1",
-                    (session_id, submission_id, execution_id),
-                ).fetchone()
-                if pending:
-                    raise RecoveryRequired("The earlier paid conversation attempt needs recovery")
-                return False
-            turn = json.loads(read_bytes(db, candidate[3]))
-            metadata = json.loads(read_bytes(db, candidate[4]))
-            messages = {m["role"]: m["content"] for m in turn["messages"]}
-            if messages["user"] != message:
-                raise ValueError("Conversation submission identity mismatch")
-        self.append_exchange(
-            session_id,
-            candidate[1],
-            message,
-            messages["assistant"],
-            system=messages.get("system"),
-            attempt_id=submission_id,
-            expected_revision=candidate[2],
-            check_cancelled=check_cancelled,
-            metadata=metadata,
-            execution_id=execution_id,
-            reused_from=candidate[0],
-        )
-        return True
-
     def append_exchange(
         self,
         session_id: str,
@@ -298,6 +367,8 @@ class SessionStore:
             or not turn_id
             or not isinstance(user, str)
             or not isinstance(assistant, str)
+            or not user.strip()
+            or not assistant.strip()
             or system is not None
             and not isinstance(system, str)
             or attempt_id is not None

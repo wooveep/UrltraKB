@@ -99,8 +99,8 @@ def test_real_client_is_portable_sealed_and_never_mutates_on_reads(tmp_path, mon
     from test_index_llm import RecordingIndexLLM
 
     from ultrakb.index_client import create_index_client
-    from ultrakb.index_location import IndexLocation
-    from ultrakb.index_packages import seal_index_package
+    from ultrakb.index_location import INDEX_FORMAT, IndexLocation
+    from ultrakb.locks import atomic_write_json
 
     source = tmp_path / "source.md"
     source.write_text("# 原标题\n完整原文🙂\n## 第二节\n更多正文")
@@ -116,7 +116,19 @@ def test_real_client_is_portable_sealed_and_never_mutates_on_reads(tmp_path, mon
         original = collection.get_document(identity, include_text=True)
     assert (package / "context.sqlite").is_file()
     assert not (package / "pageindex.db").exists()
-    seal_index_package(package, "revision-1")
+    with sqlite3.connect(package / "context.sqlite") as checkpoint:
+        checkpoint.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        assert checkpoint.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+    atomic_write_json(
+        package / "index.json",
+        {
+            "format": INDEX_FORMAT,
+            "database": "context.sqlite",
+            "inputs_root": "files",
+            "read_only": True,
+            "owner_revision": "revision-1",
+        },
+    )
     published = tmp_path / "revision/index"
     shutil.copytree(package, published)
     shutil.rmtree(package)
@@ -197,37 +209,6 @@ def test_document_input_or_locator_corruption_is_rejected_before_commit(tmp_path
         with pytest.raises(ValueError):
             storage.save_document("default", "document", doc)
         assert storage.list_documents("default") == []
-
-
-def test_dedup_failure_keeps_the_existing_document_and_managed_input(kb_dir, monkeypatch, live_llm):
-    from pathlib import Path
-
-    from pageindex import IndexConfig
-    from test_index_llm import RecordingIndexLLM
-
-    from ultrakb import indexer
-    from ultrakb.index_client import create_index_client
-    from ultrakb.knowledge_scope import legacy_scope
-
-    source = kb_dir / "input.md"
-    source.write_text("# Title\nRetained original.")
-    options = IndexConfig(llm_client=RecordingIndexLLM(live_llm=live_llm), require_llm_client=True)
-    monkeypatch.setattr(indexer, "_build_index_config", lambda *a, **kw: options)
-    monkeypatch.setattr(
-        indexer, "_convert_pdf_to_pages", lambda *a: [{"page": 1, "content": "Retained original."}]
-    )
-    result = indexer.index_long_document(source, kb_dir, scope=legacy_scope(kb_dir))
-
-    def fail(*a, **kw):
-        raise OSError("injected output failure")
-
-    monkeypatch.setattr(indexer, "_write_long_doc_artifacts", fail)
-    with pytest.raises(OSError, match="injected output failure"):
-        indexer.index_long_document(source, kb_dir, scope=legacy_scope(kb_dir))
-    with create_index_client(storage_path=kb_dir / ".ultrakb", index_config=options) as reader:
-        document = reader.collection().get_document(result.doc_id, include_text=True)
-        assert Path(document["file_path"]).is_file()
-        assert "Retained original." in document["structure"][0]["text"]
 
 
 @pytest.mark.parametrize("entry", ["context.sqlite", "files"])

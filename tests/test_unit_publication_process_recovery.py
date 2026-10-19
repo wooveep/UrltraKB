@@ -1,443 +1,271 @@
-"""Publication survives process death; candidate content is explicit domain input.
-
-No model, compiler result or network response is substituted. The child performs
-the actual publication and exits without running Python exception/finally cleanup.
-"""
+"""Real process exits at native CAS, publication and working-copy boundaries."""
 
 import json
 import os
 import subprocess
 import sys
+from contextlib import contextmanager
+from dataclasses import asdict
 from pathlib import Path
 
 import pytest
+from figure_fixtures import png_bytes
 
-from ultrakb.application.ingestion import result_from_publication
-from ultrakb.application.refresh import list_knowledge_history
-from ultrakb.application.views import view_scope
-from ultrakb.ingest_records import ImportUnit, KnowledgeRevision, UnitPublication, UnitRevision
-from ultrakb.inputs import prepared_input
-from ultrakb.locks import (
-    atomic_write_json,
-    atomic_write_text,
-    durable_unlink,
-    kb_ingest_lock,
-    kb_read_lock,
-)
-from ultrakb.source_catalog import (
-    admit_source_revision,
-    read_admission,
-    read_record,
-    read_source,
-    read_source_revision,
-)
-from ultrakb.unit_publication import (
-    begin_unit_attempt,
-    plan_import_units,
-    prepare_compile_view,
-    publish_unit_revision,
-    read_head,
-    read_unit_publication,
-)
+from ultrakb.application.knowledge_bases import initialize_kb
+from ultrakb.application.views import published_scope
+from ultrakb.compile_checkpoints import digest
+from ultrakb.processing_policy import classify_markdown_tokens
+from ultrakb.storage.catalog_store import CatalogStore
+from ultrakb.storage.checkpoint_store import CompileCheckpointStore, CompileWork
+from ultrakb.storage.database import Database, DatabaseIdentity
+from ultrakb.storage.execution_store import ExecutionStore
+from ultrakb.storage.index_store import IndexStore
+from ultrakb.storage.knowledge_store import KnowledgeStore
+from ultrakb.storage.pending_store import PendingStore
+from ultrakb.storage.wiki_projection import ProjectionStore
 
-OLD_SOURCE = "The inlet remains closed until inspection.\n"
-NEW_SOURCE = "The inlet remains closed until the winter inspection.\n"
-EXIT_CODE = 73
+EXIT_CODE = 42
 
 
-def _forbid_network(event, args):
-    if event in {"socket.connect", "socket.getaddrinfo", "socket.gethostbyname"}:
-        raise AssertionError("Publication recovery uses only local domain inputs")
-
-
-def _retain_target(kb, body):
-    path = kb / "manual.txt"
-    atomic_write_text(path, body)
-    with prepared_input(path) as prepared:
-        admission = admit_source_revision(kb, prepared)
-    unit, revision = plan_import_units(kb, admission, "publication-process-recovery-v1")
-    state, runnable = begin_unit_attempt(kb, unit, revision)
-    assert runnable
-    return admission, unit, revision, state
-
-
-def _candidate_pages(wiki, doc_name, body, *, replacement):
-    atomic_write_text(wiki / f"sources/{doc_name}.md", body)
-    atomic_write_text(
-        wiki / f"summaries/{doc_name}.md",
-        f"---\ntype: Summary\ndescription: Retained inlet instructions\n"
-        f"full_text: sources/{doc_name}.md\n---\n\n{body}",
+def _retain(root, label):
+    identity = published_scope(root).knowledge.identity
+    source = root.parent / "manual.md"
+    image = root.parent / "figure.png"
+    source.write_text(f"{label} original\n![figure](images/figure.png)")
+    image.write_bytes(png_bytes("red" if label == "OLD" else "blue"))
+    catalog = CatalogStore(root, identity)
+    admitted = catalog.admit(source, source_key="one-source", sidecars={"figure.png": image})
+    processing = catalog.retain_processing(
+        admitted.revision_id,
+        {"body.md": source, "images/figure.png": image},
+        body_path="body.md",
+        fingerprint="native-crash-fixture",
+        operation_id=label,
+        decision=classify_markdown_tokens(10),
     )
-    if replacement:
-        durable_unlink(wiki / "sources/retired-excerpt.md", missing_ok=True)
-        atomic_write_text(wiki / "concepts/winter.md", "# Winter inspection\n\nNew inlet rule.\n")
-    else:
-        atomic_write_text(wiki / "sources/retired-excerpt.md", body)
-        atomic_write_text(wiki / "concepts/retired.md", "# Inspection\n\nPrevious inlet rule.\n")
+    return catalog.plan_unit(processing.processing_id, key="body", doc_name="manual")
 
 
-def _seed_and_prepare(kb):
-    with kb_ingest_lock(kb / ".ultrakb"):
-        admission, unit, revision, state = _retain_target(kb, OLD_SOURCE)
-        with prepare_compile_view(kb) as view:
-            _candidate_pages(view.scope.wiki_dir, unit.doc_name, OLD_SOURCE, replacement=False)
-            first = publish_unit_revision(
-                kb,
-                admission,
-                unit,
-                revision,
-                state,
-                view,
-                normalized_source=f"sources/{unit.doc_name}.md",
-                normalized_format="markdown",
-                is_long=False,
-            )
-        assert first.status == "completed"
-        target = _retain_target(kb, NEW_SOURCE)
-        before = read_head(kb)
-        old_pages = {
-            p.relative_to(kb / "wiki").as_posix(): p.read_bytes()
-            for p in (kb / "wiki").rglob("*")
-            if p.is_file()
-        }
-    return first, target, before, old_pages
-
-
-def _crash_publication(kb, source_id, point, timing, evidence):
-    """Only the child installs delegating storage observers used to terminate it."""
-    from ultrakb import unit_publication
-
-    sys.addaudithook(_forbid_network)
-    with kb_ingest_lock(kb / ".ultrakb"):
-        admission = read_admission(kb, read_source(kb, source_id))
-        unit, revision = plan_import_units(kb, admission, "publication-process-recovery-v1")
-        state = read_unit_publication(kb, unit.unit_id)
-        with prepare_compile_view(kb) as view:
-            _candidate_pages(view.scope.wiki_dir, unit.doc_name, NEW_SOURCE, replacement=True)
-            copy_tree = unit_publication.copy_tree
-            copy_file = unit_publication._copy_file_atomic
-            write_record = unit_publication.write_record
-            unlink = unit_publication.durable_unlink
-            from ultrakb.mutation import MutationSnapshot
-
-            mark_committed = MutationSnapshot.mark_committed
-            candidate_id = None
-
-            def stop_at(boundary, phase):
-                if (boundary, phase) == (point, timing):
-                    assert candidate_id is not None
-                    atomic_write_json(
-                        evidence,
-                        {
-                            "point": point,
-                            "timing": timing,
-                            "knowledge_revision_id": candidate_id,
-                            "attempt_id": state.attempt_id,
-                        },
-                    )
-                    os._exit(EXIT_CODE)
-
-            def observed_copy(source, destination):
-                nonlocal candidate_id
-                boundary = None
-                if destination.parent.parent.name == "revisions":
-                    candidate_id = destination.parent.name
-                    boundary = "immutable_copy"
-                elif destination == kb / "wiki":
-                    boundary = "live_copy"
-                stop_at(boundary, "before")
-                copy_tree(source, destination)
-                stop_at(boundary, "after")
-
-            def observed_record(path, record):
-                boundary = None
-                if path.parent.parent.name == "revisions":
-                    boundary = {"manifest.json": "manifest", "publication.json": "publication"}.get(
-                        path.name
-                    )
-                elif path.name == "head.json":
-                    boundary = "head"
-                elif path.parent.name == "publications":
-                    boundary = "state"
-                elif path.parent.name == "attempts":
-                    boundary = "attempt"
-                stop_at(boundary, "before")
-                write_record(path, record)
-                stop_at(boundary, "after")
-
-            def observed_file(source, destination):
-                copy_file(source, destination)
-                if candidate_id is not None:
-                    immutable = kb / ".ultrakb/knowledge/legacy/revisions" / candidate_id / "wiki"
-                    if destination.is_relative_to(immutable):
-                        stop_at("partial_immutable_copy", "after")
-                if destination == kb / "wiki/concepts/winter.md":
-                    stop_at("partial_live_copy", "after")
-
-            def observed_unlink(path, **kwargs):
-                boundary = "live_delete" if path == kb / "wiki/sources/retired-excerpt.md" else None
-                stop_at(boundary, "before")
-                unlink(path, **kwargs)
-                stop_at(boundary, "after")
-
-            def observed_commit(snapshot):
-                if snapshot.operation == "publish-unit-revision":
-                    stop_at("journal_commit", "before")
-                mark_committed(snapshot)
-                if snapshot.operation == "publish-unit-revision":
-                    stop_at("journal_commit", "after")
-
-            unit_publication.copy_tree = observed_copy
-            unit_publication._copy_file_atomic = observed_file
-            unit_publication.write_record = observed_record
-            unit_publication.durable_unlink = observed_unlink
-            MutationSnapshot.mark_committed = observed_commit
-            publish_unit_revision(
-                kb,
-                admission,
-                unit,
-                revision,
-                state,
-                view,
-                normalized_source=f"sources/{unit.doc_name}.md",
-                normalized_format="markdown",
-                is_long=False,
-            )
-    raise AssertionError("The requested storage boundary was not reached")
-
-
-def _child_environment(project):
-    env = {
-        key: value
-        for key, value in os.environ.items()
-        if not any(part in key.upper() for part in ("API_KEY", "TOKEN", "SECRET", "PASSWORD"))
+def _files(root, target, label):
+    identity = published_scope(root).knowledge.identity
+    catalog = CatalogStore(root, identity)
+    processing = catalog.processing(target.processing_id)
+    return {
+        "index.md": f"{label} index".encode(),
+        "concepts/topic.md": (
+            f"---\nsources: [sources/manual.md]\n---\n{label} committed claim"
+        ).encode(),
+        "sources/manual.md": catalog.read_processed(processing.processing_id, "body.md"),
+        "sources/images/figure.png": catalog.read_processed(
+            processing.processing_id, "images/figure.png"
+        ),
     }
-    env["PYTHONPATH"] = os.pathsep.join((str(project), str(project / "tests")))
-    return env
 
 
-def _read_after_restart(kb, unit_id, evidence):
-    """A fresh interpreter takes the first normal lease and observes restored state."""
-    sys.addaudithook(_forbid_network)
-    with kb_read_lock(kb / ".ultrakb"):
-        head = read_head(kb)
-        state = read_unit_publication(kb, unit_id)
-        atomic_write_json(
-            evidence,
+def _crash_publication(root, spec_path, evidence_path, point, timing):
+    def forbid_network(event, args):
+        if event in {"socket.connect", "socket.getaddrinfo"}:
+            raise AssertionError("The crash protocol uses no network or model service")
+
+    sys.addaudithook(forbid_network)
+    spec = json.loads(spec_path.read_text())
+    identity = DatabaseIdentity(**spec["identity"])
+    catalog = CatalogStore(root, identity)
+    target = catalog.unit_revision(spec["target"])
+    store, pending = KnowledgeStore(root, identity), PendingStore(root, identity)
+    index = IndexStore(root, identity).accept(
+        target.unit_revision_id,
+        {
+            "doc_name": "manual",
+            "pages": [{"page": 1, "content": "NEW index content"}],
+            "structure": [
+                {
+                    "node_id": "root",
+                    "title": "Manual",
+                    "text": "NEW index content",
+                    "start_index": 1,
+                    "end_index": 1,
+                }
+            ],
+        },
+        content_fingerprint=digest("new-index"),
+    )
+    execution = ExecutionStore(root, identity).begin(
+        "crash-fixture", fingerprint="f" * 64, max_calls=0
+    )
+    work = CompileCheckpointStore(root, identity).for_work(
+        execution.model_budget_id,
+        object_id={"unit_revision_id": target.unit_revision_id},
+        conditions={"compiler": 3},
+        execution_id=execution.execution_id,
+    )
+    work.save("summary:1", digest("accepted-input"), {"content": "Accepted before publication"})
+    job = pending.enqueue(target.source_revision_id, unit_revision_id=target.unit_revision_id)
+    job = pending.start(pending.claim(intent_id=job.intent_id))
+    pending.bind_execution(job, execution)
+    evidence_path.write_text(
+        json.dumps(
             {
-                "head_revision_id": head.knowledge_revision_id,
-                "generation": head.generation,
-                "unit_id": state.unit_id,
-                "target_revision_id": state.target_revision_id,
-                "successful_revision_id": state.successful_revision_id,
-                "publication_revision_id": state.knowledge_revision_id,
-                "attempt_id": state.attempt_id,
-                "status": state.status,
-            },
-        )
-
-
-def _run_restarted_reader(kb, unit_id, evidence):
-    project = Path(__file__).resolve().parents[1]
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            "from pathlib import Path; import sys; "
-            "from test_unit_publication_process_recovery import _read_after_restart; "
-            "_read_after_restart(Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3]))",
-            str(kb),
-            unit_id,
-            str(evidence),
-        ],
-        cwd=project,
-        env=_child_environment(project),
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
-    return json.loads(evidence.read_text())
-
-
-def _run_crashed_child(kb, source_id, point, timing, evidence):
-    project = Path(__file__).resolve().parents[1]
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            "from pathlib import Path; import sys; "
-            "from test_unit_publication_process_recovery import _crash_publication; "
-            "_crash_publication(Path(sys.argv[1]), sys.argv[2], sys.argv[3], "
-            "sys.argv[4], Path(sys.argv[5]))",
-            str(kb),
-            source_id,
-            point,
-            timing,
-            str(evidence),
-        ],
-        cwd=project,
-        env=_child_environment(project),
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    assert result.returncode == EXIT_CODE, result.stdout + result.stderr
-    return json.loads(evidence.read_text())
-
-
-@pytest.mark.parametrize(
-    ("point", "timing"),
-    [
-        (point, timing)
-        for point in (
-            "immutable_copy",
-            "manifest",
-            "publication",
-            "live_copy",
-            "live_delete",
-            "head",
-            "state",
-            "attempt",
-            "journal_commit",
-        )
-        for timing in ("before", "after")
-    ]
-    + [
-        ("partial_immutable_copy", "after"),
-        ("partial_live_copy", "after"),
-    ],
-)
-def test_process_death_exposes_one_complete_publication(kb_dir, tmp_path, point, timing):
-    first, target, before, old_pages = _seed_and_prepare(kb_dir)
-    prior_history = list_knowledge_history(kb_dir, scope=view_scope(kb_dir, "legacy"))
-    directory = kb_dir / ".ultrakb/knowledge/legacy/revisions"
-    prior_files = {
-        p.relative_to(directory).as_posix(): p.read_bytes()
-        for p in directory.rglob("*")
-        if p.is_file()
-    }
-    admission, unit, revision, started = target
-    observed = _run_crashed_child(
-        kb_dir, admission.source.source_id, point, timing, tmp_path / "child-exit.json"
-    )
-    assert observed["attempt_id"] == started.attempt_id
-    assert (observed["point"], observed["timing"]) == (point, timing)
-    committed = (point, timing) == ("journal_commit", "after")
-    journals = list((kb_dir / ".ultrakb/journal").glob("*.json"))
-    assert len(journals) == 1
-    assert json.loads(journals[0].read_text())["status"] == ("committed" if committed else "active")
-    if point == "partial_live_copy":
-        assert (kb_dir / "wiki/concepts/winter.md").exists()
-        assert (kb_dir / f"wiki/sources/{unit.doc_name}.md").read_text() == OLD_SOURCE
-
-    restarted = _run_restarted_reader(kb_dir, unit.unit_id, tmp_path / "restarted-read.json")
-    assert not list((kb_dir / ".ultrakb/journal").glob("*.json"))
-    with kb_read_lock(kb_dir / ".ultrakb"):
-        head = read_head(kb_dir)
-        pages = {
-            p.relative_to(kb_dir / "wiki").as_posix(): p.read_bytes()
-            for p in (kb_dir / "wiki").rglob("*")
-            if p.is_file()
-        }
-        current = read_unit_publication(kb_dir, unit.unit_id)
-        assert restarted == {
-            "head_revision_id": head.knowledge_revision_id,
-            "generation": head.generation,
-            "unit_id": current.unit_id,
-            "target_revision_id": current.target_revision_id,
-            "successful_revision_id": current.successful_revision_id,
-            "publication_revision_id": current.knowledge_revision_id,
-            "attempt_id": current.attempt_id,
-            "status": current.status,
-        }
-        if committed:
-            assert current.status == "completed" and current.stage == "published"
-            assert current.successful_revision_id == revision.unit_revision_id
-            assert current.knowledge_revision_id == observed["knowledge_revision_id"]
-            assert current.attempt_id == started.attempt_id and current.job_id == revision.job_id
-            assert current.proposal_id is None and current.error_type is None
-            assert head.generation == before.generation + 1
-            assert head.inputs == {**before.inputs, unit.unit_id: revision.unit_revision_id}
-            assert pages[f"sources/{unit.doc_name}.md"] == NEW_SOURCE.encode()
-            assert NEW_SOURCE.encode() in pages[f"summaries/{unit.doc_name}.md"]
-            assert "sources/retired-excerpt.md" not in pages
-            # Pending old knowledge is retained by the real publication policy.
-            assert pages["concepts/retired.md"] == old_pages["concepts/retired.md"]
-            assert pages["concepts/winter.md"] == b"# Winter inspection\n\nNew inlet rule.\n"
-        else:
-            assert head == before and pages == old_pages
-            assert current == started
-        assert head.knowledge_revision_id == current.knowledge_revision_id
-        assert head.inputs[unit.unit_id] == current.successful_revision_id
-        assert read_record(kb_dir, "attempts", started.attempt_id, UnitPublication) == current
-        assert read_record(kb_dir, "attempts", first.attempt_id, UnitPublication) == first
-        receipt = result_from_publication(
-            kb_dir, admission, current, status="added" if committed else "blocked"
-        )
-        assert receipt.units[0].target_revision_id == revision.unit_revision_id
-        assert receipt.units[0].successful_revision_id == current.successful_revision_id
-        assert receipt.units[0].knowledge_revision_id == current.knowledge_revision_id
-        old_input = read_record(
-            kb_dir, "unit-revisions", first.successful_revision_id, UnitRevision
-        )
-        old_original = read_source_revision(kb_dir, old_input.source_revision_id)
-        assert (kb_dir / old_original.original).read_text() == OLD_SOURCE
-        assert receipt.units[0].successful_source_revision_id == (
-            admission.revision.source_revision_id if committed else old_input.source_revision_id
-        )
-        assert all(Path(path).exists() for path in receipt.resources)
-        if committed:
-            published = directory / observed["knowledge_revision_id"]
-            assert (
-                UnitPublication.model_validate_json((published / "publication.json").read_bytes())
-                == current
-            )
-            manifest = KnowledgeRevision.model_validate_json(
-                (published / "manifest.json").read_bytes()
-            )
-            assert manifest.base_revision_id == first.knowledge_revision_id
-            assert manifest.unit_revision_id == current.successful_revision_id
-            assert manifest.generated_baselines == head.generated_baselines
-            retained = {
-                p.relative_to(published / "wiki").as_posix(): p.read_bytes()
-                for p in (published / "wiki").rglob("*")
-                if p.is_file()
+                "work_id": work.work_id,
+                "budget_id": work.model_budget_id,
+                "object_digest": work.object_digest,
+                "execution_id": work.execution_id,
+                "index_revision_id": index.index_revision_id,
             }
-            assert retained == pages
-        else:
-            assert not (directory / observed["knowledge_revision_id"]).exists()
-        manifest = KnowledgeRevision.model_validate_json(
-            (directory / first.knowledge_revision_id / "manifest.json").read_bytes()
         )
-        assert manifest.unit_revision_id == first.successful_revision_id
-        assert (
-            UnitPublication.model_validate_json(
-                (directory / first.knowledge_revision_id / "publication.json").read_bytes()
+    )
+    files = _files(root, target, "NEW")
+    import ultrakb.storage.wiki_projection as projection
+    from ultrakb.storage import blobs
+
+    write_blob, replace, unlink = blobs.atomic_write_bytes, os.replace, projection.durable_unlink
+    transaction = Database.transaction
+    prepared = None
+
+    def exit_now():
+        os._exit(EXIT_CODE)
+
+    def blob_write(path, payload):
+        selected = point == "blob" and payload == files["concepts/topic.md"]
+        if selected and timing == "before":
+            exit_now()
+        result = write_blob(path, payload)
+        if selected and timing == "after":
+            exit_now()
+        return result
+
+    @contextmanager
+    def commit(db):
+        with transaction(db) as sql:
+            yield sql
+            selected = (
+                prepared is not None
+                and point == "publication"
+                and sql.execute(
+                    "SELECT publication_id FROM ukb_heads WHERE view_id = 'legacy'"
+                ).fetchone()
+                == (prepared.publication_id,)
             )
-            == first
+            if selected and timing == "before":
+                exit_now()
+        if selected and timing == "after":
+            exit_now()
+
+    def replace_file(source, destination, *args, **options):
+        selected = (
+            point == "projection-replace" and Path(destination) == root / "wiki/concepts/topic.md"
         )
-        assert read_record(kb_dir, "units", unit.unit_id, ImportUnit) == unit
-        original = read_source_revision(kb_dir, admission.revision.source_revision_id)
-        assert (kb_dir / original.original).read_text() == NEW_SOURCE
-    history = list_knowledge_history(kb_dir, scope=view_scope(kb_dir, "legacy"))
-    if committed:
-        assert history[0]["knowledge_revision_id"] == current.knowledge_revision_id
-        assert history[1:] == prior_history
-    else:
-        assert history == prior_history
-    assert {rel: (directory / rel).read_bytes() for rel in prior_files} == prior_files
-    historical = view_scope(kb_dir, "legacy", historical_revision=first.knowledge_revision_id)
-    assert (historical.wiki_dir / f"sources/{unit.doc_name}.md").read_text() == OLD_SOURCE
-    assert not list((kb_dir / ".ultrakb/journal").glob("*.json"))
-    with kb_read_lock(kb_dir / ".ultrakb"):
-        assert read_head(kb_dir) == head  # Ordinary recovery is idempotent.
-        assert read_unit_publication(kb_dir, unit.unit_id) == current
-    with kb_ingest_lock(kb_dir / ".ultrakb"):
-        retry, runnable = begin_unit_attempt(kb_dir, unit, revision)
-        assert not runnable  # A completed or unconfirmed attempt is not silently replayed.
-        assert retry.attempt_id == started.attempt_id
-        assert retry.successful_revision_id == current.successful_revision_id
-        assert retry.knowledge_revision_id == current.knowledge_revision_id
-        assert retry.status == ("completed" if committed else "interrupted")
-        assert read_record(kb_dir, "attempts", retry.attempt_id, UnitPublication) == retry
+        if selected and timing == "before":
+            exit_now()
+        result = replace(source, destination, *args, **options)
+        if selected and timing == "after":
+            exit_now()
+        return result
+
+    def unlink_file(path, **options):
+        selected = point == "projection-delete" and path == root / "wiki/concepts/obsolete.md"
+        if selected and timing == "before":
+            exit_now()
+        result = unlink(path, **options)
+        if selected and timing == "after":
+            exit_now()
+        return result
+
+    blobs.atomic_write_bytes = blob_write
+    Database.transaction = commit
+    os.replace = replace_file
+    projection.durable_unlink = unlink_file
+    prepared = store.prepare_revision(
+        files,
+        expected=spec["old_publication"],
+        unit_revisions=(target.unit_revision_id,),
+        index_revisions=(index.index_revision_id,),
+        import_work=job,
+    )
+    store.publish(prepared, execution_id=execution.execution_id)
+    ProjectionStore(root, identity).sync()
+    raise AssertionError("The selected crash boundary was never reached")
+
+
+@pytest.mark.parametrize("timing", ["before", "after"])
+@pytest.mark.parametrize(
+    "point", ["blob", "publication", "projection-replace", "projection-delete"]
+)
+def test_process_death_exposes_one_complete_publication(tmp_path, point, timing):
+    root = tmp_path / "kb"
+    initialize_kb(root, seed_environment=False)
+    old_target = _retain(root, "OLD")
+    identity = published_scope(root).knowledge.identity
+    store = KnowledgeStore(root, identity)
+    old_files = {**_files(root, old_target, "OLD"), "concepts/obsolete.md": b"Retired page"}
+    first = store.publish(
+        store.prepare_revision(
+            old_files,
+            expected=store.bind().publication_id,
+            unit_revisions=(old_target.unit_revision_id,),
+        )
+    )
+    assert ProjectionStore(root, identity).sync().status == "synced"
+    target = _retain(root, "NEW")
+    spec, evidence = tmp_path / "spec.json", tmp_path / "evidence.json"
+    spec.write_text(
+        json.dumps(
+            {
+                "identity": asdict(identity),
+                "target": target.unit_revision_id,
+                "old_publication": first.publication_id,
+            }
+        )
+    )
+    env = {
+        **os.environ,
+        "PYTHONPATH": os.pathsep.join(
+            [str(Path(__file__).parent.resolve()), str(Path(__file__).parent.parent.resolve())]
+        ),
+    }
+    program = (
+        "from pathlib import Path; import sys; "
+        "from test_unit_publication_process_recovery import _crash_publication; "
+        "_crash_publication(Path(sys.argv[1]),Path(sys.argv[2]),Path(sys.argv[3]),"
+        "sys.argv[4],sys.argv[5])"
+    )
+    child = subprocess.run(
+        [sys.executable, "-c", program, str(root), str(spec), str(evidence), point, timing],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert child.returncode == EXIT_CODE, child.stderr
+    observed = store.bind()
+    expected = (
+        "OLD" if point == "blob" or (point == "publication" and timing == "before") else "NEW"
+    )
+    assert observed.read("index.md") == f"{expected} index".encode()
+    selected = old_target if expected == "OLD" else target
+    for path, payload in _files(root, selected, expected).items():
+        assert observed.read(path) == payload
+    assert observed.unit_revisions() == (selected.unit_revision_id,)
+    assert observed.read_original(selected.unit_revision_id).startswith(expected.encode())
+    assert store.receipt(observed.publication_id).revision_id == observed.publication.revision_id
+    retained = json.loads(evidence.read_text())
+    work = CompileWork(
+        root,
+        identity,
+        retained["work_id"],
+        retained["budget_id"],
+        retained["object_digest"],
+        retained["execution_id"],
+    )
+    assert (
+        work.load("summary:1", digest("accepted-input"))["content"] == "Accepted before publication"
+    )
+    assert (
+        IndexStore(root, identity).document(retained["index_revision_id"])["pages"][0]["content"]
+        == "NEW index content"
+    )
+    assert ProjectionStore(root, identity).sync().status == "synced"
+    for path, payload in _files(root, selected, expected).items():
+        assert (root / "wiki" / path).read_bytes() == payload
+    if expected == "NEW":
+        assert not (root / "wiki/concepts/obsolete.md").exists()

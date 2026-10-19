@@ -8,7 +8,8 @@ from starlette.datastructures import UploadFile
 
 from ultrakb.api_helpers import _add_saved_file, _reserve_add_uploads, _write_add_uploads
 from ultrakb.application.documents import AddFileResult
-from ultrakb.state import HashRegistry
+from ultrakb.application.views import published_scope
+from ultrakb.storage.catalog_store import CatalogStore
 
 
 def test_upload_body_is_invisible_to_raw_watch_until_complete(kb_dir, monkeypatch):
@@ -33,18 +34,16 @@ def test_upload_body_is_invisible_to_raw_watch_until_complete(kb_dir, monkeypatc
     asyncio.run(run())
 
 
-@pytest.mark.parametrize("path_key", ["raw_path", "path", "source_path"])
-def test_skipped_cleanup_keeps_a_raw_file_registered_during_the_operation(
-    kb_dir, monkeypatch, path_key
-):
+def test_skipped_cleanup_keeps_a_raw_file_registered_during_the_operation(kb_dir, monkeypatch):
     async def run():
         upload = UploadFile(filename="paper.md", file=io.BytesIO(b"# original"))
         ready = await _write_add_uploads(_reserve_add_uploads(kb_dir, [upload]), [upload])
         assert (await _add_saved_file(kb_dir, *ready[0])).status == "skipped"
 
     def consume(path, root, **kwargs):
-        registry = HashRegistry(root / ".ultrakb/hashes.json")
-        registry.add(registry.hash_file(path), {"name": path.name, path_key: f"raw/{path.name}"})
+        CatalogStore(root, published_scope(root).knowledge.identity).admit(
+            path, source_key=str(path.resolve())
+        )
         return AddFileResult(path.name, None, "skipped", "Already registered")
 
     monkeypatch.setattr("ultrakb.api_helpers._add_for_api", consume)

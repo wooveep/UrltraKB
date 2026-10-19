@@ -3,6 +3,7 @@
 import asyncio
 
 from application_llm_fixtures import real_application_model  # noqa: F401
+from native_catalog_fixtures import processing_snapshot
 from test_query_views import _import_rule
 
 
@@ -18,11 +19,7 @@ def test_selected_refresh_reuses_current_summaries_without_model_work(kb_dir, mo
     assert fixed.source_id == problem.source_id
     scope = view_scope(kb_dir, normal.units[0].view_id)
     assert "summaries/normal.md" in refresh_status(kb_dir, scope=scope)["needs_refresh"]
-    retained = {
-        str(p.relative_to(kb_dir)): p.read_bytes()
-        for p in (kb_dir / ".ultrakb/normalized").rglob("*")
-        if p.is_file()
-    }
+    retained = processing_snapshot(kb_dir)
 
     def forbidden(*args, **kwargs):
         raise AssertionError("Current summaries must not be recompiled or sent to a model")
@@ -37,7 +34,7 @@ def test_selected_refresh_reuses_current_summaries_without_model_work(kb_dir, mo
     assert result.status == "completed", result.message
     assert refresh_status(kb_dir, scope=scope)["needs_refresh"] == {}
     assert normal_summary.read_bytes() == before
-    assert all((kb_dir / name).read_bytes() == content for name, content in retained.items())
+    assert processing_snapshot(kb_dir, retained) == retained
 
 
 def test_selected_refresh_cannot_certify_a_manually_changed_normal_summary(kb_dir, monkeypatch):

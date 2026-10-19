@@ -5,11 +5,9 @@ from __future__ import annotations
 import json
 import threading
 
-from contextdb import ConDB
-
 from ultrakb.application.query_views import QuerySelection, read_selected_file
 from ultrakb.context.condb_llm import ConDBLLMAdapter, RetrievalFailure
-from ultrakb.context.projection import ensure_projection, fingerprint, open_runtime
+from ultrakb.context.projection import ensure_projection, fingerprint
 from ultrakb.llm_execution import CompletionExecutor, StageBudgetExceeded, raise_if_terminal
 
 
@@ -220,25 +218,18 @@ class KnowledgeRetrieval:
             "cache_enabled": False,  # Request results have their own cache.
         }
         bound = self.selection.views[0].scope.knowledge
-        if bound is not None:
-            with bound.navigation() as tree:
-                if tree.revision.tree_id != projection.tree_id:
-                    from ultrakb.storage.navigation_store import RecoveryRequired
+        if bound is None:
+            raise ValueError("Knowledge retrieval requires a main-store publication")
+        with bound.navigation() as tree:
+            if tree.revision.tree_id != projection.tree_id:
+                from ultrakb.storage.navigation_store import RecoveryRequired
 
-                    raise RecoveryRequired("Retrieval requires this publication's exact navigation")
-                result = tree.query(question, **options)
-                refs = []
-                for identity in result.node_ids:
-                    node = tree.node(identity)
-                    if node and (reference := (node.get("attrs") or {}).get("source_ref")):
-                        refs.append(reference)
-                return refs
-        with open_runtime(self.selection.views[0].scope.kb_dir) as db:
-            result = ConDB(storage=db).query(projection.tree_id, question, **options)
+                raise RecoveryRequired("Retrieval requires this publication's exact navigation")
+            result = tree.query(question, **options)
             refs = []
             for identity in result.node_ids:
-                node = db.get_node(projection.tree_id, identity)
-                if node and (reference := json.loads(node.attrs_json or "{}").get("source_ref")):
+                node = tree.node(identity)
+                if node and (reference := (node.get("attrs") or {}).get("source_ref")):
                     refs.append(reference)
             return refs
 

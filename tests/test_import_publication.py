@@ -120,7 +120,9 @@ def test_publication_rechecks_the_retained_claim_in_its_final_commit(imported, c
         imported.pending.retry(imported.job.intent_id)
         new_attempt = imported.pending.start(imported.pending.claim())
         assert new_attempt.attempt_id != imported.running.attempt_id
-    with pytest.raises(CatalogConflict):
+    from ultrakb.locks import LockCancelled
+
+    with pytest.raises(LockCancelled if change == "cancel" else CatalogConflict):
         imported.knowledge.publish(prepared)
     with pytest.raises(FileNotFoundError):
         imported.knowledge.bind()

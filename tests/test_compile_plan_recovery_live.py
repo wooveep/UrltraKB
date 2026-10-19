@@ -5,18 +5,17 @@ the accepted empty plan deliberately avoids page generation or wiki publication.
 """
 
 import json
-from uuid import uuid4
 
 import pytest
+from compile_work_fixtures import new_compile_work
+from native_usage_fixtures import observe_executor, read_requests
 
 from ultrakb.agent.compile_plan import CompilePlanError, request_compile_plan
 from ultrakb.agent.page_response import PageResponseError
 from ultrakb.compilation_report import collect_compile_report
-from ultrakb.compile_checkpoints import CompileCheckpoints, digest
+from ultrakb.compile_checkpoints import digest
 from ultrakb.config import resolve_credential_bundle
 from ultrakb.llm_execution import CompletionExecutor, ModelCallPolicy, ModelRequest, RoleBindings
-from ultrakb.llm_usage import UsageScope, read_requests
-from ultrakb.model_task import TaskJournal, read_task
 
 pytestmark = pytest.mark.live
 
@@ -26,12 +25,9 @@ def plan_runtime(kb_dir, live_llm, monkeypatch, *, reject_correction):
     executor = CompletionExecutor(
         RoleBindings("deepseek/deepseek-flash", resolve_credential_bundle(kb_dir)),
         ModelCallPolicy(max_calls=2, retries=0, backoff=0),
-        scope=UsageScope(kb_dir, uuid4().hex),
     )
-    journal = TaskJournal(kb_dir, executor)
-    checkpoints = CompileCheckpoints(
-        kb_dir, journal.record, {"document": "tiny-plan"}, {"protocol": "plan-v1"}
-    )
+    checkpoints = new_compile_work(kb_dir, {"document": "tiny-plan"}, {"protocol": "plan-v1"})
+    observe_executor(kb_dir, executor, work=checkpoints)
     mode = (
         'Always return exactly {"concepts":42}, including after correction requests. '
         "This is an intentionally invalid protocol delivery fixture."
@@ -86,14 +82,14 @@ def plan_runtime(kb_dir, live_llm, monkeypatch, *, reject_correction):
                 sanitize=str.lower,
             )
 
-    return executor, journal, checkpoints, signature, delivered, corrections, receive
+    return executor, checkpoints, signature, delivered, corrections, receive
 
 
 def test_real_plan_repairs_once_and_recovers_the_accepted_payload_without_a_send(
     kb_dir, live_llm, monkeypatch
 ):
     before = len(live_llm.calls)
-    executor, journal, checkpoints, signature, delivered, corrections, receive = plan_runtime(
+    executor, checkpoints, signature, delivered, corrections, receive = plan_runtime(
         kb_dir, live_llm, monkeypatch, reject_correction=False
     )
     with collect_compile_report() as report:
@@ -116,7 +112,7 @@ def test_real_plan_repairs_once_and_recovers_the_accepted_payload_without_a_send
     recovered = receive()
     assert recovered == plan
     assert len(delivered) == len(live_llm.calls) - before == 2
-    assert read_task(kb_dir, journal.record.task_id).used == 2
+    assert executor.scope.storage.executions.budget(checkpoints.model_budget_id).used == 2
     records = read_requests(kb_dir)
     assert len(records) == 2 and all(record.usage_status == "known" for record in records)
 
@@ -125,7 +121,7 @@ def test_two_real_invalid_plans_persist_failure_and_refuse_another_repair(
     kb_dir, live_llm, monkeypatch
 ):
     before = len(live_llm.calls)
-    executor, journal, checkpoints, signature, delivered, corrections, receive = plan_runtime(
+    executor, checkpoints, signature, delivered, corrections, receive = plan_runtime(
         kb_dir, live_llm, monkeypatch, reject_correction=True
     )
     with pytest.raises(CompilePlanError) as caught:
@@ -139,5 +135,5 @@ def test_two_real_invalid_plans_persist_failure_and_refuse_another_repair(
     with pytest.raises(PageResponseError, match="compile_repair_exhausted"):
         receive()
     assert len(delivered) == len(live_llm.calls) - before == 2
-    assert read_task(kb_dir, journal.record.task_id).used == 2
+    assert executor.scope.storage.executions.budget(checkpoints.model_budget_id).used == 2
     assert len(read_requests(kb_dir)) == 2

@@ -4,7 +4,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from ultrakb.application.document_actions import DocumentIdentity, document_inventory
-from ultrakb.application.recompilation import RecompileTarget, _version, select_recompilation
+from ultrakb.application.recompilation import RecompileTarget, select_recompilation
+from ultrakb.application.storage_recompilation import confirmation_version
 from ultrakb.knowledge_scope import KnowledgeScope
 
 
@@ -54,7 +55,8 @@ def preview_document_batch(
         raise ValueError("Unsupported document batch action")
     from ultrakb.knowledge_scope import reading_scope, resolve_scope
 
-    with reading_scope(resolve_scope(root, scope)):
+    scope = resolve_scope(root, scope)
+    with reading_scope(scope):
         rows = {row.identity: row for row in document_inventory(root, scope=scope)}
         if action == "retry":
             approved, skipped, retry_targets = [], [], []
@@ -100,7 +102,7 @@ def preview_document_batch(
                 selected,
                 tuple(approved),
                 tuple(skipped),
-                _version(root, scope=scope),
+                confirmation_version(scope),
                 (),
                 action,
                 tuple(retry_targets),

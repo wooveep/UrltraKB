@@ -75,18 +75,27 @@ def publish_knowledge_changes(
     changes: dict[str, bytes | None],
     *,
     page_inputs: dict[str, tuple[str, ...]] | None = None,
-    check_cancelled: Callable[[], None] = lambda: None,
+    check_cancelled: Callable[[], None] | None = None,
     execution_id: str | None = None,
     source_change=None,
 ) -> PublicationOutcome:
     """Commit an explicitly based manual edit before attempting worktree I/O."""
+    from .execution import current_execution
+
+    context = current_execution()
+    check_cancelled = check_cancelled or (context.check_stop if context else lambda: None)
+    if execution_id is None and context and context.storage_execution is not None:
+        execution_id = context.storage_execution.execution_id
     knowledge = KnowledgeStore(base.root, base.identity)
     prepared = knowledge.prepare_changes(
         base, changes, page_inputs=page_inputs, source_change=source_change
     )
     try:
         publication = knowledge.publish(
-            prepared, check_cancelled=check_cancelled, execution_id=execution_id
+            prepared,
+            check_cancelled=check_cancelled,
+            execution_id=execution_id,
+            on_wait=context.waiting if context else None,
         )
     except (PublicationConflict, ProjectionConflict, CatalogConflict) as error:
         return PublicationOutcome(

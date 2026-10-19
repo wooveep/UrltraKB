@@ -2,27 +2,6 @@
 
 import uuid
 
-from ultrakb.source_catalog import read_record
-from ultrakb.source_records import SourceRevision
-from ultrakb.workbooks.records import WorkbookSnapshot
-
-
-def previous_workbook(kb_dir, admission):
-    candidates = []
-    for path in (kb_dir / ".ultrakb/catalog/workbooks").glob("*.json"):
-        if path.stem == admission.revision.source_revision_id:
-            continue
-        revision = read_record(kb_dir, "source-revisions", path.stem, SourceRevision)
-        if (
-            revision.source_id != admission.source.source_id
-            or revision.created_at >= admission.revision.created_at
-        ):
-            continue
-        saved = read_record(kb_dir, "workbooks", path.stem, WorkbookSnapshot)
-        if not saved.error:
-            candidates.append((revision.created_at, saved))
-    return max(candidates, key=lambda value: value[0])[1] if candidates else None
-
 
 def reconcile_sheets(sheets, previous):
     """Names anchor reordering; native IDs are hints, never ordinal-only identity.

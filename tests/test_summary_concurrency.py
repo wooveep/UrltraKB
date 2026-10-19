@@ -9,6 +9,8 @@ from ultrakb.agent.document_summary import SYSTEM_TEMPLATE, build_document_summa
 from ultrakb.agent.source_windows import CompileSourceWindows
 from ultrakb.locks import atomic_write_text
 
+pytest_plugins = ("compile_work_fixtures",)
+
 
 def original_windows(kb):
     original = "\n\n".join(
@@ -65,14 +67,11 @@ async def test_summary_windows_overlap_but_assemble_in_original_order(kb_dir):
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_failed_window_settles_sibling_and_resume_only_sends_missing_work(kb_dir):
-    from types import SimpleNamespace
-
-    from ultrakb.compile_checkpoints import CompileCheckpoints
-
+async def test_failed_window_settles_sibling_and_resume_only_sends_missing_work(
+    kb_dir, compile_work
+):
     windows = original_windows(kb_dir)
-    task = SimpleNamespace(task_id="a" * 32, parent_task_id=None)
-    checkpoints = CompileCheckpoints(kb_dir, task, {"document": "manual"}, {})
+    checkpoints = compile_work({"document": "manual"}, {})
     entered = asyncio.Event()
     sent = []
 
@@ -123,15 +122,13 @@ async def test_failed_window_settles_sibling_and_resume_only_sends_missing_work(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_split_windows_share_the_queue_and_cached_results_survive_serial_fallback(kb_dir):
-    from types import SimpleNamespace
-
+async def test_split_windows_share_the_queue_and_cached_results_survive_serial_fallback(
+    kb_dir, compile_work
+):
     from ultrakb.agent.page_response import PageResponseError
-    from ultrakb.compile_checkpoints import CompileCheckpoints
 
     windows = original_windows(kb_dir)
-    task = SimpleNamespace(task_id="c" * 32, parent_task_id=None, compiler_request_version=3)
-    checkpoints = CompileCheckpoints(kb_dir, task, {"document": "manual"}, {})
+    checkpoints = compile_work({"document": "manual"}, {})
     sent = []
     active = peak = 0
 
@@ -176,7 +173,7 @@ async def test_split_windows_share_the_queue_and_cached_results_survive_serial_f
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_summary_progress_reports_real_completed_and_pending_windows(kb_dir):
-    from ultrakb.llm_usage_execution import import_usage_execution
+    from native_usage_fixtures import native_usage_execution
 
     windows = original_windows(kb_dir)
     events = []
@@ -189,7 +186,7 @@ async def test_summary_progress_reports_real_completed_and_pending_windows(kb_di
             ],
         }
 
-    with import_usage_execution(kb_dir, "summary", on_event=events.append):
+    with native_usage_execution(kb_dir, "summary", on_event=events.append):
         draft = await build_document_summary(
             windows,
             system_message={"role": "system", "content": SYSTEM_TEMPLATE.format(language="en")},

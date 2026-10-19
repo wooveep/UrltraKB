@@ -12,7 +12,6 @@ from ultrakb.source_records import ViewId
 
 if TYPE_CHECKING:
     from ultrakb.locks import PrivateMaterialization
-    from ultrakb.published_knowledge import PublishedKnowledge
     from ultrakb.storage.knowledge_store import BoundKnowledge
 
 
@@ -21,9 +20,9 @@ class KnowledgeScope:
     kb_dir: Path
     wiki_dir: Path
     view_id: str = "legacy"
-    publication: "PublishedKnowledge | None" = field(default=None, repr=False)
     knowledge: "BoundKnowledge | None" = field(default=None, repr=False)
     private_workspace: "PrivateMaterialization | None" = field(default=None, repr=False)
+    _historical: bool = field(default=False, repr=False, kw_only=True)
 
     def __post_init__(self) -> None:
         root = self.kb_dir.expanduser().resolve()
@@ -32,7 +31,6 @@ class KnowledgeScope:
 
             if (
                 type(self.private_workspace) is not PrivateMaterialization
-                or self.publication is not None
                 or self.knowledge is not None
                 or not self.private_workspace.permits_scope(self.wiki_dir)
             ):
@@ -43,45 +41,21 @@ class KnowledgeScope:
         if self.knowledge is not None:
             TypeAdapter(ViewId).validate_python(self.view_id)
             if (
-                self.publication is not None
-                or self.knowledge.root != root
+                self.knowledge.root != root
                 or self.knowledge.publication.view_id != self.view_id
                 or self.wiki_dir != root / "wiki"
             ):
                 raise ValueError("Public reading context belongs to another knowledge snapshot")
             object.__setattr__(self, "kb_dir", root)
             return  # The logical base must not follow a mutable worktree symlink.
-        wiki = self.wiki_dir.expanduser().resolve()
         TypeAdapter(ViewId).validate_python(self.view_id)
-        if not wiki.is_relative_to(root):
-            raise ValueError("Invalid page path: wiki escapes its knowledge base")
-        relative = wiki.relative_to(root).parts
-        managed = (
-            len(relative) == 4
-            and relative[:2] in {(".ultrakb", "staging"), (".ultrakb", "proposals")}
-            and relative[-1] == "wiki"
-        ) or (
-            len(relative) == 6
-            and relative[:3] == (".ultrakb", "knowledge", self.view_id)
-            and relative[3] == "revisions"
-            and relative[-1] == "wiki"
-        )
-        if not managed and not (self.view_id == "legacy" and wiki == root / "wiki"):
-            raise ValueError("Invalid knowledge view directory")
+        if self.wiki_dir.expanduser().absolute() != root / "wiki":
+            raise ValueError("Only a main-store snapshot or active compiler workspace is supported")
         object.__setattr__(self, "kb_dir", root)
-        object.__setattr__(self, "wiki_dir", wiki)
-        if self.publication is not None and (
-            self.publication.kb_dir != root
-            or self.publication.wiki_dir != wiki
-            or self.publication.view_id != self.view_id
-        ):
-            raise ValueError("Public reading context belongs to another knowledge snapshot")
 
     @property
     def publication_id(self) -> str | None:
-        if self.knowledge is not None:
-            return self.knowledge.publication_id
-        return self.publication.publication_id if self.publication is not None else None
+        return self.knowledge.publication_id if self.knowledge is not None else None
 
     @cached_property
     def reading_view(self):
@@ -93,49 +67,54 @@ class KnowledgeScope:
 
     @property
     def historical(self) -> bool:
-        return self.read_only and self.publication is None and self.knowledge is None
+        return self._historical
 
     @property
     def read_only(self) -> bool:
-        if self.private_workspace is not None:
-            return False
-        if self.knowledge is not None:
-            return True
-        relative = self.wiki_dir.relative_to(self.kb_dir).parts
-        return (len(relative) == 6 and relative[3] == "revisions") or (
-            len(relative) > 1 and relative[1] == "proposals"
-        )
+        return self.private_workspace is None
 
 
 def legacy_scope(kb_dir: Path) -> KnowledgeScope:
-    root = kb_dir.expanduser().resolve()
-    return KnowledgeScope(root, root / "wiki")
+    return live_scope(kb_dir)
 
 
 def live_scope(kb_dir: Path, view_id: str = "legacy") -> KnowledgeScope:
-    root = kb_dir.expanduser().resolve()
-    return KnowledgeScope(root, root / "wiki", view_id)
+    from ultrakb.application.views import view_scope
+
+    return view_scope(kb_dir, view_id)
 
 
 def resolve_scope(
     kb_dir: Path, scope: KnowledgeScope | None = None, *, writable: bool = False
 ) -> KnowledgeScope:
     """Bind live or historical knowledge to the same real KB."""
-    selected = scope if scope is not None else legacy_scope(kb_dir)
+    selected = scope if scope is not None else live_scope(kb_dir)
     if selected.kb_dir != kb_dir.expanduser().resolve():
         raise ValueError("Knowledge scope belongs to a different knowledge base")
+    if selected.knowledge is None and selected.private_workspace is None:
+        if selected.wiki_dir != selected.kb_dir / "wiki":
+            raise ValueError("Only a main-store snapshot or active compiler workspace is supported")
+        selected = live_scope(kb_dir, selected.view_id)
     if selected.private_workspace is not None and not selected.private_workspace.permits_scope(
         selected.wiki_dir
     ):
         raise ValueError("Compiler private materialization has finished")
-    if writable and selected.read_only:
+    if writable and (selected.historical or (selected.read_only and selected.knowledge is None)):
         raise ValueError("Knowledge revisions and proposals are read-only")
+    return selected
+
+
+def resolve_private_scope(kb_dir: Path, scope: KnowledgeScope | None) -> KnowledgeScope:
+    """File compilers may modify only their owned disposable materialization."""
+    selected = resolve_scope(kb_dir, scope, writable=True)
+    if selected.private_workspace is None:
+        raise ValueError("Compilation requires an active private materialization")
     return selected
 
 
 @contextmanager
 def reading_scope(scope: KnowledgeScope, *, cancelled=None):
-    """Only an explicitly fixed public snapshot can bypass the writer's lease."""
+    """Protect the fixed database generation; private materializations own their files."""
     if scope.knowledge is not None:
         from ultrakb.lifecycle import read_lifecycle
 
@@ -143,19 +122,12 @@ def reading_scope(scope: KnowledgeScope, *, cancelled=None):
             scope.kb_dir, database_identity=scope.knowledge.identity, cancelled=cancelled
         ):
             yield
-    elif scope.publication is None:
-        from ultrakb.locks import kb_read_lock
-
-        with kb_read_lock(scope.kb_dir / ".ultrakb", cancelled=cancelled):
-            yield
+    elif scope.private_workspace is not None and scope.private_workspace.permits_scope(
+        scope.wiki_dir
+    ):
+        yield
     else:
-        from ultrakb.lifecycle import expected_generation, read_lifecycle
-
-        with (
-            expected_generation(scope.kb_dir, scope.publication.generation),
-            read_lifecycle(scope.kb_dir, cancelled=cancelled),
-        ):
-            yield
+        raise ValueError("Reading requires a bound main-store snapshot")
 
 
 def read_wiki_bytes(scope: KnowledgeScope, path: str) -> bytes:
@@ -168,6 +140,8 @@ def read_wiki_bytes(scope: KnowledgeScope, path: str) -> bytes:
             unit, original = scope.reading_view.native_inputs[path]
             return scope.knowledge.read_source(unit, original)
         return scope.knowledge.read(path)
+    if scope.private_workspace is None:
+        raise ValueError("Reading requires a bound main-store snapshot")
     target = (scope.wiki_dir / path).resolve()
     if not target.is_relative_to(scope.wiki_dir):
         raise ValueError("Invalid page path")
@@ -178,6 +152,8 @@ def wiki_page_paths(scope: KnowledgeScope) -> tuple[str, ...]:
     """Enumerate safe Markdown names without hashing unrelated binary assets."""
     if scope.knowledge is not None:
         return tuple(sorted(path for path in scope.reading_view.files if path.endswith(".md")))
+    if scope.private_workspace is None or not scope.private_workspace.permits_scope(scope.wiki_dir):
+        raise ValueError("Knowledge enumeration requires a bound publication or private workspace")
     return tuple(
         sorted(
             path.relative_to(scope.wiki_dir).as_posix()

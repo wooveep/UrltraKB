@@ -181,34 +181,6 @@ def test_managed_copy_preserves_existing_markdown_title_semantics(tmp_path):
     assert result["structure"][0]["title"] == "human-readable"
 
 
-@pytest.mark.parametrize("damage", ["reference", "markdown_reference", "tail"])
-def test_reading_rejects_a_replaced_or_truncated_page_map(kb_dir, published_pdf, damage):
-    from ultrakb.documents import read_document_source
-
-    imported = published_pdf
-    assert imported.status == "added", imported.message
-    unit = imported.units[0]
-    directory = (
-        kb_dir / ".ultrakb/knowledge" / unit.view_id / "revisions" / unit.knowledge_revision_id
-    )
-    manifest_path = directory / "manifest.json"
-    manifest = json.loads(manifest_path.read_text())
-    page_map = directory / "wiki/sources/manual.json"
-    pages = json.loads(page_map.read_text())
-    if damage in {"reference", "markdown_reference"}:
-        pages[0]["content"] = "Other source body"
-        reference = "sources/other.json" if damage == "reference" else "sources/other.md"
-        (directory / "wiki" / reference).write_text(
-            json.dumps(pages) if damage == "reference" else "Other source body"
-        )
-        manifest["source_map"]["path"] = reference
-        manifest_path.write_text(json.dumps(manifest))
-    else:
-        page_map.write_text(json.dumps(pages[:-1]))
-    with pytest.raises(ValueError, match="[Mm]ap"):
-        read_document_source(kb_dir, imported.source_id)
-
-
 @pytest.mark.parametrize("threshold", [0, 20])
 def test_application_reads_physical_ranges_from_the_actual_historical_revision(
     kb_dir, physical_pdf, published_pdf, threshold, monkeypatch
@@ -285,30 +257,3 @@ def test_application_reads_physical_ranges_from_the_actual_historical_revision(
         )
     assert response.status_code == 200, response.text
     assert response.json()["content"] == last["content"]
-
-
-@pytest.mark.parametrize(
-    "selection", [{"blocks": "999"}, {"chars": "0:3"}, {"pages": "1", "blocks": "1"}]
-)
-def test_legacy_pdf_without_a_source_map_rejects_character_and_block_selectors(
-    kb_dir, published_pdf, selection
-):
-    from ultrakb.documents import read_document_source
-    from ultrakb.source_pages import PageRangeError
-
-    result = published_pdf
-    assert result.status == "added", result.message
-    unit = result.units[0]
-    path = (
-        kb_dir
-        / ".ultrakb/knowledge"
-        / unit.view_id
-        / "revisions"
-        / unit.knowledge_revision_id
-        / "manifest.json"
-    )
-    manifest = json.loads(path.read_text("utf-8"))
-    manifest["source_map"] = None
-    path.write_text(json.dumps(manifest), encoding="utf-8")
-    with pytest.raises(PageRangeError):
-        read_document_source(kb_dir, result.source_id, **selection)

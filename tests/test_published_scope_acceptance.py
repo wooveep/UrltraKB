@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from native_usage_fixtures import read_requests
 
 from ultrakb import frontmatter
 from ultrakb.agent.create_assembly import assemble_contributions
@@ -16,38 +17,29 @@ from ultrakb.application.page_scope_validation import (
     verify_published_scopes,
 )
 from ultrakb.application.pages import read_page, save_page
-from ultrakb.config import LlmCredentialBundle
 from ultrakb.content_blocks import markdown_layout
-from ultrakb.llm_execution import CompletionExecutor, ModelCallPolicy, RoleBindings
-from ultrakb.locks import atomic_write_json, atomic_write_text
-from ultrakb.model_task import TaskJournal, task_path
+from ultrakb.desktop.verification_data import publish_pages
+from ultrakb.locks import atomic_write_text
 
 FIXTURE = Path(__file__).parent / "fixtures" / "published-scope-pages.json"
 
 
-def test_published_legacy_pages_are_detected_and_offline_migration_keeps_evidence(kb_dir):
+def test_published_scopes_are_detected_and_manual_fix_keeps_evidence(kb_dir):
     cases = json.loads(FIXTURE.read_text("utf-8"))
     expectations = [PublishedScopeExpectation.model_validate(c["expected"]) for c in cases]
-    executor = CompletionExecutor(
-        RoleBindings("deepseek/deepseek-flash", LlmCredentialBundle(api_key="unused-offline")),
-        ModelCallPolicy(max_calls=1000),
-    )
-    executor.budget.restore(297, {"document_index": 270, "compile": 27})
-    journal = TaskJournal(kb_dir, executor)
-    budget = task_path(kb_dir, journal.record.task_id)
-    retained_budget = budget.read_bytes()
+    changes = {}
     for case in cases:
-        # Keep the frozen provenance bindings, including the gallery's processing revision.
-        for relative, record in case["catalog_records"].items():
-            atomic_write_json(kb_dir / relative, record)
-        atomic_write_text(kb_dir / "wiki" / case["expected"]["path"], case["published_before"])
+        changes[case["expected"]["path"]] = case["published_before"].encode()
     for expected in expectations:
         for link in expected.link_targets:
             if link.startswith("wiki:[["):
                 target = link.removeprefix("wiki:[[").removesuffix("]]").split("|", 1)[0]
                 page = kb_dir / "wiki" / (target.split("#", 1)[0] + ".md")
                 if not page.exists():
-                    atomic_write_text(page, "Existing linked knowledge.\n")
+                    changes[page.relative_to(kb_dir / "wiki").as_posix()] = (
+                        b"Existing linked knowledge.\n"
+                    )
+    publish_pages(kb_dir, changes)
     report = verify_published_scopes(kb_dir / "wiki", expectations)
     assert not report["ok"]
     assert len(report["pages"]) == 2
@@ -68,8 +60,7 @@ def test_published_legacy_pages_are_detected_and_offline_migration_keeps_evidenc
     migrated = verify_published_scopes(kb_dir / "wiki", expectations)
     assert migrated["ok"], migrated
     assert all(page["ok"] for page in migrated["pages"])
-    assert budget.read_bytes() == retained_budget
-    assert executor.calls == 297
+    assert read_requests(kb_dir) == []
 
 
 @pytest.mark.parametrize(

@@ -7,6 +7,33 @@ from .coordination import storage_stage
 from .database import database_path
 
 
+def application_usage(store, task_id, *, receipts=()):
+    with storage_stage(store.root, store.identity, read_only=True) as db:
+        executions = db.connection.execute(
+            "SELECT execution_id FROM ukb_executions WHERE model_budget_id IN "
+            "(SELECT model_budget_id FROM ukb_application_budget_bindings "
+            "WHERE application_task_id = ?) AND application_task_id = ?",
+            (task_id, task_id),
+        ).fetchall()
+        selections = {
+            (execution, source, unit)
+            for (execution,) in executions
+            for source, unit in db.connection.execute(
+                "SELECT DISTINCT source_id, unit_id FROM ukb_usage_requests "
+                "WHERE execution_id = ? AND (source_id IS NOT NULL OR unit_id IS NOT NULL)",
+                (execution,),
+            ).fetchall()
+        }
+    if not executions:
+        return store.combined_receipt(receipts) if any(receipts) else None
+    retained = [*receipts, *(store.receipt(execution_id=value[0]) for value in executions)]
+    retained.extend(
+        store.receipt(execution_id=execution, source_id=source, unit_id=unit)
+        for execution, source, unit in selections
+    )
+    return store.combined_receipt(receipt for receipt in retained if receipt)
+
+
 def combine_usage(store, receipts):
     receipts = [UsageReceipt.model_validate(receipt) for receipt in receipts]
     if any(

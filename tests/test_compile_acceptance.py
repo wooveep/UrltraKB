@@ -6,6 +6,7 @@ import pytest
 
 from ultrakb.agent.page_delivery import validate_page_delivery
 from ultrakb.agent.source_excerpts import SourceExcerpts
+from ultrakb.compile_checkpoints import digest
 
 
 @pytest.mark.parametrize("path", ["/root/data_restore/", "/var/log/pods/"])
@@ -72,10 +73,14 @@ async def test_saved_entity_is_revalidated_before_exhausted_repair_gate(kb_dir, 
     result = await prepare_page_creation(**options).generate()
     assert result["content"] == "使用 `/root/data_restore/`。"
     assert checkpoints.load(batch.key, batch.signature)["content"] == result["content"]
-    entry = json.loads(checkpoints.path.read_text())["entries"][batch.key]
+    from compile_work_fixtures import checkpoint_record
+
+    entry = checkpoint_record(checkpoints, batch.key)
     assert entry["repair_used"] is True
-    assert len(entry["response_failures"]) == 1
-    assert entry["reused_response"]["response_sha256"]
+    from compile_work_fixtures import response_record
+
+    assert response_record(checkpoints, batch.key)[0] == raw
+    assert response_record(checkpoints, batch.key)[1]
 
 
 @pytest.mark.asyncio
@@ -84,7 +89,7 @@ async def test_saved_update_recovers_with_spent_budget_and_preserves_page_base(k
 
     from ultrakb.agent.update_generation import generate_page_update
     from ultrakb.application.execution import ExecutionContext
-    from ultrakb.compile_checkpoints import digest, document_checkpoints
+    from ultrakb.compile_checkpoints import digest
     from ultrakb.locks import kb_ingest_lock
 
     old = "# Rules\n\nOld recovery rule.\n"
@@ -98,7 +103,9 @@ async def test_saved_update_recovers_with_spent_budget_and_preserves_page_base(k
     monkeypatch.setattr("ultrakb.agent.compiler._llm_call_async", no_model_send)
     context = ExecutionContext()
     with kb_ingest_lock(kb_dir / ".ultrakb"), context.begin(kb_dir):
-        cp = document_checkpoints(kb_dir, "legacy", "manual")
+        from compile_work_fixtures import new_compile_work
+
+        cp = new_compile_work(kb_dir, {"document": "manual"}, {})
         key = f"page:concepts/rules.md:{patch.digest}:batch:0"
         signature = digest(messages(list(originals.windows), patch))
         raw = json.dumps(
@@ -127,26 +134,29 @@ async def test_saved_update_recovers_with_spent_budget_and_preserves_page_base(k
             attempt=2,
         )
         context.executor.budget.restore(1000, {"compile": 1000})
-        before = context.model_task.record.model_dump()
-        result = await generate_page_update(
-            patch=patch,
-            originals=originals,
-            windows=reader,
-            page_path=page,
-            model="unused",
-            bundle=None,
-            system_message={
-                "role": "system",
-                "content": "Compile source facts into the wiki page.",
-            },
-            current_original=None,
-            known_targets_message={"role": "user", "content": "rules"},
-            task_message={"role": "user", "content": "Update all required conditions."},
-            fits=lambda _: True,
-        )
+        before = context.executor.calls
+        from ultrakb.storage.compile_binding import compile_binding
+
+        with compile_binding(cp, view_id=reader.view_id, document=reader.doc_name):
+            result = await generate_page_update(
+                patch=patch,
+                originals=originals,
+                windows=reader,
+                page_path=page,
+                model="unused",
+                bundle=None,
+                system_message={
+                    "role": "system",
+                    "content": "Compile source facts into the wiki page.",
+                },
+                current_original=None,
+                known_targets_message={"role": "user", "content": "rules"},
+                task_message={"role": "user", "content": "Update all required conditions."},
+                fits=lambda _: True,
+            )
         assert "检查 `/var/log/pods/`。" in result["content"]
         assert cp.load(key, signature)["edits"]
-        assert context.model_task.record.model_dump() == before
+        assert context.executor.calls == before
     assert page.read_text() == old
 
 
@@ -158,11 +168,13 @@ def test_unreconstructable_historical_request_keeps_its_response_and_fails(kb_di
 
     options, _, cp = creation_inputs(kb_dir, limit=1000000)
     [batch] = prepare_page_creation(**options).batches
-    cp.claim_repair(batch.key, "historical-request-cannot-be-reconstructed")
-    before = cp.path.read_bytes()
+    cp.claim_repair(batch.key, digest("historical-request-cannot-be-reconstructed"))
+    from compile_work_fixtures import checkpoint_record
+
+    before = checkpoint_record(cp, batch.key)
     with pytest.raises(PageResponseError, match="compile_request_changed"):
         prepare_page_creation(**options)
-    assert cp.path.read_bytes() == before
+    assert checkpoint_record(cp, batch.key) == before
 
 
 @pytest.mark.parametrize("template", ["/api/{role}/new", "arbitrary generated example"])
@@ -195,32 +207,6 @@ def test_structured_prose_and_compatible_templates_keep_only_explicit_reference_
     assert template in delivered["sections"][0]["content"]
     assert "Original source conditions." in delivered["sections"][0]["content"]
     assert excerpts.resolutions[0]["references"][0]["source_number"] == 1
-
-
-def test_legacy_task_children_inherit_request_bytes_and_paid_counts(kb_dir):
-    from ultrakb.config import LlmCredentialBundle
-    from ultrakb.llm_execution import CompletionExecutor, ModelCallPolicy, RoleBindings
-    from ultrakb.locks import atomic_write_json
-    from ultrakb.model_task import TaskJournal, read_task, task_path
-
-    bindings = RoleBindings("unused", LlmCredentialBundle())
-    first = CompletionExecutor(bindings, ModelCallPolicy(max_calls=5, retries=0))
-    first.budget.restore(2, {"compile": 2})
-    journal = TaskJournal(kb_dir, first)
-    assert journal.record.compiler_request_version == 3
-    path = task_path(kb_dir, journal.record.task_id)
-    legacy = json.loads(path.read_text())
-    legacy.pop("compiler_request_version")
-    atomic_write_json(path, legacy)
-    before = path.read_bytes()
-    assert read_task(kb_dir, journal.record.task_id).compiler_request_version == 1
-    extended = CompletionExecutor(bindings, ModelCallPolicy(max_calls=6, retries=0))
-    child = TaskJournal(kb_dir, extended, resume=journal.record.task_id)
-    assert child.record.parent_task_id == journal.record.task_id
-    assert child.record.compiler_request_version == 1
-    assert child.record.used == extended.calls == 2
-    assert child.record.stages == {"compile": 2}
-    assert path.read_bytes() == before
 
 
 @pytest.mark.asyncio

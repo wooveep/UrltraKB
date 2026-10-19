@@ -22,6 +22,7 @@ from ultrakb.application.storage_maintenance import (
     backup_knowledge,
     collect_garbage,
     preview_storage_maintenance,
+    repair_knowledge_navigation,
     repair_knowledge_receipts,
     repair_knowledge_usage,
     restore_knowledge,
@@ -58,6 +59,8 @@ def _result_text(result):
         "archived_count": "已归档阶段观测",
         "archived_bytes": "已归档观测载荷字节（不是磁盘回收量）",
         "path": "保存目录",
+        "publication_id": "公开版本",
+        "knowledge_revision_id": "知识修订",
     }
     if "repaired_counters" in values:
         labels["remaining"] = "剩余统计桶"
@@ -116,6 +119,7 @@ class StorageMaintenanceDialog(QDialog):
                 ("释放无引用恢复材料", self.retire_roots),
                 ("清理孤立内容", self.collect),
                 ("修复待确认回执", self.repair_receipts),
+                ("修复知识导航", self.repair_navigation),
                 ("核对用量统计", self.audit_usage),
                 ("重建用量统计", self.repair_usage),
                 ("归档过期观测", self.archive_observations),
@@ -251,6 +255,9 @@ class StorageMaintenanceDialog(QDialog):
 
     def repair_receipts(self):
         self._maintain(repair_knowledge_receipts)
+
+    def repair_navigation(self):
+        self._maintain(repair_knowledge_navigation)
 
     def audit_usage(self):
         if self.identity is None:

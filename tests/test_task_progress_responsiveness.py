@@ -2,7 +2,6 @@
 
 import threading
 import time
-from pathlib import Path
 
 import pytest
 from error_transport import ErrorTransport
@@ -29,18 +28,17 @@ def test_usage_backlog_keeps_task_reads_and_safe_stop_responsive(kb_dir, tmp_pat
     source = kb_dir.parent / f"{kb_dir.name}-source.md"
     atomic_write_text(source, "# Maintenance\n\nClose the inlet before maintenance.")
     entered, release, observed = threading.Event(), threading.Event(), threading.Event()
-    execution_records = kb_dir / ".ultrakb/usage/executions"
-    original_read = Path.read_text
+    import ultrakb.llm_usage as task_runtime
 
-    def read(path, *args, **kwargs):
-        # Only the parent's real progress merge is delayed. Spawned worker I/O
-        # and its control reader remain live, and this read holds no ledger lock.
-        if path.parent == execution_records and threading.current_thread().name == "ultrakb-tasks":
+    original_merge = task_runtime.merge_usage_receipts
+
+    def merge(*args, **kwargs):
+        if threading.current_thread().name == "ultrakb-tasks":
             entered.set()
-            assert release.wait(15), "Test did not release the parent usage projection"
-        return original_read(path, *args, **kwargs)
+            assert release.wait(15), "Test did not release the native progress query"
+        return original_merge(*args, **kwargs)
 
-    monkeypatch.setattr(Path, "read_text", read)
+    monkeypatch.setattr(task_runtime, "merge_usage_receipts", merge)
     gate = threading.Event()
     observer = manager = None
     failures = []

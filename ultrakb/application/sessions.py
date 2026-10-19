@@ -1,21 +1,13 @@
-"""Conversation deletion and transcript export under session → KB leases."""
+"""Bounded retained conversation history, versioned deletion and explicit export."""
 
 from __future__ import annotations
 
-import hashlib
-import json
-import re
-from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from ultrakb.agent.chat_session import ChatSession, _session_path, deletion_marker, load_session
 from ultrakb.application.execution import ExecutionContext
-from ultrakb.application.file_state import contained_paths
 from ultrakb.knowledge_scope import KnowledgeScope, resolve_scope
-from ultrakb.locks import atomic_write_text, kb_ingest_lock, kb_read_lock, session_lock
-from ultrakb.mutation import mutation_scope
 
 if TYPE_CHECKING:
     from ultrakb.storage.wiki_projection import ProjectionResult
@@ -42,61 +34,36 @@ def list_conversations(
     after: str | None = None,
     context: ExecutionContext | None = None,
 ) -> list[dict]:
-    """List the selected view's conversations, newest first; default to legacy."""
-    from ultrakb.agent.chat_session import list_sessions
+    """List a bounded page of the selected view's retained conversations."""
 
-    if scope is not None and scope.knowledge is not None:
-        from ultrakb.storage.session_catalog import SessionCatalog
+    scope = resolve_scope(kb_dir, scope)
+    from ultrakb.storage.session_catalog import SessionCatalog
 
-        scope = resolve_scope(kb_dir, scope)
-        assert scope.knowledge is not None
-        if view_id is not None and view_id != scope.view_id:
-            raise ValueError("Conversation scope and view do not match")
-        return SessionCatalog(scope.kb_dir, scope.knowledge.identity).list(
-            view_id=scope.view_id,
-            limit=limit,
-            after=after,
-            cancelled=context.cancelled if context else None,
-        )
-    with kb_read_lock(kb_dir / ".ultrakb", cancelled=context.cancelled if context else None):
-        return [item for item in list_sessions(kb_dir) if item["view_id"] == (view_id or "legacy")]
+    scope = resolve_scope(kb_dir, scope)
+    assert scope.knowledge is not None
+    if view_id is not None and view_id != scope.view_id:
+        raise ValueError("Conversation scope and view do not match")
+    return SessionCatalog(scope.kb_dir, scope.knowledge.identity).list(
+        view_id=scope.view_id,
+        limit=limit,
+        after=after,
+        cancelled=context.cancelled if context else None,
+    )
 
 
 def resolve_conversation(
     kb_dir: Path, query: str, *, view_id: str | None = None, scope: KnowledgeScope | None = None
 ) -> str | None:
-    if scope is not None and scope.knowledge is not None:
-        from ultrakb.storage.session_catalog import SessionCatalog
+    scope = resolve_scope(kb_dir, scope)
+    from ultrakb.storage.session_catalog import SessionCatalog
 
-        scope = resolve_scope(kb_dir, scope)
-        assert scope.knowledge is not None
-        if view_id is not None and view_id != scope.view_id:
-            raise ValueError("Conversation scope and view do not match")
-        return SessionCatalog(scope.kb_dir, scope.knowledge.identity).resolve(
-            query, view_id=scope.view_id
-        )
-    sessions = list_conversations(kb_dir, view_id=view_id)
-    if query == "__latest__":
-        return sessions[0]["id"] if sessions else None
-    if any(item["id"] == query for item in sessions):
-        return query
-    matches = [item["id"] for item in sessions if item["id"].startswith(query)]
-    if len(matches) > 1:
-        raise ValueError(f"Ambiguous session prefix '{query}' matches: {', '.join(matches)}")
-    return matches[0] if matches else None
-
-
-def load_conversation(
-    kb_dir: Path,
-    session_id: str,
-    *,
-    view_id: str | None = None,
-    context: ExecutionContext | None = None,
-) -> ChatSession:
-    with kb_read_lock(kb_dir / ".ultrakb", cancelled=context.cancelled if context else None):
-        session = load_session(kb_dir, session_id)
-        session.require_view(view_id or "legacy")
-        return session
+    scope = resolve_scope(kb_dir, scope)
+    assert scope.knowledge is not None
+    if view_id is not None and view_id != scope.view_id:
+        raise ValueError("Conversation scope and view do not match")
+    return SessionCatalog(scope.kb_dir, scope.knowledge.identity).resolve(
+        query, view_id=scope.view_id
+    )
 
 
 def delete_conversation(
@@ -109,63 +76,34 @@ def delete_conversation(
     scope: KnowledgeScope | None = None,
 ) -> SessionResult:
     root = kb_dir.resolve()
-    if scope is not None and scope.knowledge is not None:
-        from ultrakb.storage.session_catalog import SessionCatalog
+    scope = resolve_scope(root, scope)
+    from ultrakb.storage.session_catalog import SessionCatalog
 
-        scope = resolve_scope(root, scope)
-        assert scope.knowledge is not None
-        if view_id is not None and view_id != scope.view_id:
-            raise ValueError("Conversation scope and view do not match")
+    scope = resolve_scope(root, scope)
+    assert scope.knowledge is not None
+    if view_id is not None and view_id != scope.view_id:
+        raise ValueError("Conversation scope and view do not match")
 
-        def check_cancelled():
-            if context:
-                context.check_stop()
-            return False
+    def check_cancelled():
+        if context:
+            context.check_stop()
+        return False
 
-        status = SessionCatalog(root, scope.knowledge.identity).delete(
-            session_id,
-            view_id=scope.view_id,
-            expected=version,
-            cancelled=check_cancelled,
-            on_wait=context.waiting if context else None,
-        )
-        return SessionResult(
-            status, changes=(f"deleted conversation: {session_id}",) if status == "deleted" else ()
-        )
-    path = _session_path(root, session_id)
-    cancelled = context.cancelled if context else None
-    on_wait = context.waiting if context else None
-    with (
-        session_lock(root, session_id, cancelled=cancelled, on_wait=on_wait),
-        kb_ingest_lock(root / ".ultrakb", cancelled=cancelled, on_wait=on_wait),
-    ):
-        contained_paths(root, [path])
-        if not path.exists():
-            if deletion_marker(root, session_id).exists():
-                from ultrakb.context.conversation import delete_memory
-
-                delete_memory(root, session_id)
-            return SessionResult("missing")
-        load_session(root, session_id).require_view(view_id or "legacy")
-        if version is not None and hashlib.sha256(path.read_bytes()).hexdigest() != version:
-            return SessionResult("conflict")
-        with context.begin(root) if context else nullcontext():
-            marker = deletion_marker(root, session_id)
-            contained_paths(root, [marker])
-            with mutation_scope(root, [path, marker], operation="delete-conversation"):
-                atomic_write_text(marker, "deleted\n")
-                path.unlink()
-            from ultrakb.context.conversation import delete_memory
-
-            delete_memory(root, session_id)
-            return SessionResult(
-                "deleted", changes=(f"deleted: {path.relative_to(root).as_posix()}",)
-            )
+    status = SessionCatalog(root, scope.knowledge.identity).delete(
+        session_id,
+        view_id=scope.view_id,
+        expected=version,
+        cancelled=check_cancelled,
+        on_wait=context.waiting if context else None,
+    )
+    return SessionResult(
+        status, changes=(f"deleted conversation: {session_id}",) if status == "deleted" else ()
+    )
 
 
 def export_conversation(
     kb_dir: Path,
-    session: ChatSession | str,
+    session: str,
     name: str | None = None,
     *,
     unique: bool = True,
@@ -174,89 +112,42 @@ def export_conversation(
 ) -> SessionResult:
     """Export completed history without replacing previous exports.
 
-    A persisted conversation is reloaded under both leases. The CLI can also
-    export a newly created in-memory session which has never been persisted.
+    Originals are read from the main store under the owning session lock.
     """
     scope = resolve_scope(kb_dir, scope)
-    if scope.knowledge is not None:
-        from .storage_session_export import export_stored_conversation
+    from .storage_session_export import export_stored_conversation
 
-        return export_stored_conversation(scope, session, name, unique=unique, context=context)
-    scope = resolve_scope(kb_dir, scope, writable=True)
-    root = kb_dir.resolve()
-    identity = session if isinstance(session, str) else session.id
-    source = _session_path(root, identity)
-    if isinstance(session, ChatSession) and session.path.resolve() != source.resolve():
-        raise ValueError("Conversation belongs to another knowledge base")
-    cancelled = context.cancelled if context else None
-    on_wait = context.waiting if context else None
-    with (
-        session_lock(root, identity, cancelled=cancelled, on_wait=on_wait),
-        kb_ingest_lock(root / ".ultrakb", cancelled=cancelled, on_wait=on_wait),
-    ):
-        contained_paths(root, [source])
-        if isinstance(session, str) or session._version is not None or source.exists():
-            if not source.exists():
-                return SessionResult("missing")
-            session = load_session(root, identity)
-        session.require_view(scope.view_id)
-        base = name or session.title or (session.user_turns[0] if session.user_turns else identity)
-        slug = re.sub(r"[^a-z0-9]+", "-", base.lower()).strip("-")[:60] or identity
-        date = re.sub(r"[^0-9]", "", session.created_at[:10])
-        directory = scope.wiki_dir / "explorations"
-        path = directory / f"{slug}-{date}.md"
-        contained_paths(root, [path])
-        counter = 1
-        while unique and path.exists():
-            path = directory / f"{slug}-{date}-{counter}.md"
-            contained_paths(root, [path])
-            counter += 1
-        change = "updated" if path.exists() else "created"
-        with context.begin(root) if context else nullcontext():
-            content = _transcript(root, session, scope=scope)
-            with mutation_scope(root, [path], operation="export-conversation"):
-                atomic_write_text(path, content)
-            return SessionResult(
-                "exported",
-                resources=(str(path),),
-                changes=(f"{change}: {path.relative_to(root).as_posix()}",),
-            )
+    return export_stored_conversation(scope, session, name, unique=unique, context=context)
 
 
-def _transcript(kb_dir: Path, session: ChatSession, *, scope: KnowledgeScope | None = None) -> str:
-    scope = resolve_scope(kb_dir, scope)
-    from ultrakb.lint import build_norm_index, list_existing_wiki_targets, strip_ghost_wikilinks
+def retain_pending_conversation(
+    root,
+    session_id,
+    submission_id,
+    message,
+    *,
+    identity,
+    new=False,
+    after_turn=0,
+    order=None,
+    view_id="legacy",
+    cancelled=None,
+    on_wait=None,
+):
+    """Recover accepted desktop intent without executing a model or creating a run."""
+    from ultrakb.storage.database import open_database
+    from ultrakb.storage.session_store import SessionStore
 
-    known = list_existing_wiki_targets(scope.wiki_dir)
-    norm_index = build_norm_index(known)
-    lines = [
-        "---",
-        f"session: {json.dumps(session.id, ensure_ascii=False)}",
-        f"model: {json.dumps(session.model, ensure_ascii=False)}",
-        f"created: {json.dumps(session.created_at, ensure_ascii=False)}",
-        "---",
-        "",
-        f"# Chat transcript  {session.title or session.id}",
-        "",
-    ]
-    from ultrakb.agent.answer_text import visible_answer
-
-    for index in range(len(session.user_turns) + 1):
-        for entry in session.incomplete:
-            if entry["after_turn"] == index:
-                lines.extend(
-                    [f"## [unfinished] {entry['message']}", "", "_(answer unfinished)_", ""]
-                )
-        if index == len(session.user_turns):
-            break
-        user, answer = session.user_turns[index], session.assistant_texts[index]
-        answer = visible_answer(answer)
-        index += 1
-        lines.extend([f"## [{index}] {user}", ""])
-        if answer:
-            cleaned, _ = strip_ghost_wikilinks(answer, known, norm_index=norm_index)
-            lines.append(cleaned)
-        else:
-            lines.append("_(no response recorded)_")
-        lines.append("")
-    return "\n".join(lines)
+    with open_database(root, expected=identity, read_only=True):
+        pass
+    return SessionStore(root, identity).queue_submission(
+        session_id,
+        submission_id,
+        message,
+        view_id=view_id,
+        new=new,
+        after_turn=after_turn,
+        order=order,
+        cancelled=cancelled,
+        on_wait=on_wait,
+    )

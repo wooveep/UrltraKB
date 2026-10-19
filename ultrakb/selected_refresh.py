@@ -4,10 +4,6 @@ import json
 
 from ultrakb import frontmatter
 from ultrakb.locks import atomic_write_text
-from ultrakb.refresh_publication import (
-    RefreshedPage,
-)
-from ultrakb.state import HashRegistry
 
 
 def _full_windows(reader):
@@ -25,44 +21,6 @@ def _full_windows(reader):
     if text[cursor:].strip() or not result:
         raise ValueError("Selected source evidence is unread")
     return result
-
-
-async def _reconcile_page(
-    kb_dir, view, page, identities, retained, config, bundle, readers, *, link_registry=None
-):
-    from ultrakb.selected_refresh_evidence import retained_reader
-    from ultrakb.selected_refresh_manual import generated_refresh_baseline
-
-    wiki = view.scope.wiki_dir
-    evidence = []
-    for identity in identities:
-        if identity not in readers:
-            reader = retained_reader(
-                wiki, retained[identity], kb_dir=kb_dir, view_id=view.scope.view_id
-            )
-            readers[identity] = reader, _full_windows(reader)
-        evidence.extend(readers[identity][1])
-    reader = readers[identities[0]][0]
-    await reconcile_page(
-        wiki,
-        page,
-        reader,
-        evidence,
-        config,
-        bundle,
-        link_registry=link_registry,
-        generated_baseline=generated_refresh_baseline(kb_dir, view, page),
-    )
-    return RefreshedPage(
-        input_revisions=identities,
-        base_digest=view.base_pages[page],
-        candidate_digest=HashRegistry.hash_file(wiki / page),
-        original_files={
-            p: HashRegistry.hash_file(wiki / p)
-            for identity in identities
-            for p in retained[identity].paths
-        },
-    )
 
 
 async def reconcile_page(

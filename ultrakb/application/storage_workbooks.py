@@ -77,6 +77,8 @@ def _plan(
             frozen = freeze_sheet(ready, sheet) if content else None
             atomic_write_text(body, frozen.text if frozen else "")
             decision = classify_markdown_tokens(frozen.tokens if frozen and sheet.cells else 0)
+            if frozen is not None:
+                decision = decision.model_copy(update={"characters": len(frozen.text)})
             if sheet.content_state == "content":
                 private = KnowledgeScope(
                     scope.kb_dir,

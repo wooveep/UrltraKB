@@ -26,4 +26,4 @@ def test_failed_summary_retry_native_confirmation(tmp_path):
     )
     assert result.returncode == 0, result.stdout + result.stderr
     report = json.loads((output / "result.json").read_text())
-    assert len(report["checks"]) == 4 and report["model_sends"] == 0
+    assert len(report["checks"]) == 4 and report["model_sends"] == 2

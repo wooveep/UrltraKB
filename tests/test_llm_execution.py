@@ -94,9 +94,7 @@ def test_retry_attempts_share_logical_call_and_do_not_double_bill(
     model_service, kb_dir, monkeypatch
 ):
     import httpx
-
-    from ultrakb.llm_usage import aggregate_usage, read_requests
-    from ultrakb.llm_usage_execution import import_usage_execution
+    from native_usage_fixtures import aggregate_usage, native_usage_execution, read_requests
 
     send = httpx.Client._send_single_request
     failures = []
@@ -110,7 +108,7 @@ def test_retry_attempts_share_logical_call_and_do_not_double_bill(
         return send(client, outgoing)
 
     monkeypatch.setattr(httpx.Client, "_send_single_request", disconnect_once)
-    with import_usage_execution(kb_dir, "fixture"):
+    with native_usage_execution(kb_dir, "fixture"):
         executor = executor_for(model_service, max_calls=2, retries=1, backoff=0)
         result = executor.complete("compile", request(parent_call_id="a" * 32))
     records = read_requests(kb_dir)
@@ -186,8 +184,8 @@ def test_retry_policy_classifies_transient_transport_errors(status):
 
 
 def test_late_sync_result_is_recorded_but_never_published(model_service, kb_dir):
-    from ultrakb.llm_usage import aggregate_usage
-    from ultrakb.llm_usage_execution import import_usage_execution
+    from native_usage_fixtures import aggregate_usage, native_usage_execution
+
     from ultrakb.locks import LockCancelled
 
     # Warm this exact genuine request so the timed test controls only local delivery.
@@ -195,7 +193,7 @@ def test_late_sync_result_is_recorded_but_never_published(model_service, kb_dir)
     model_service.requests.clear()
     model_service.delay = 0.2
     cancelled = threading.Event()
-    with import_usage_execution(kb_dir, "fixture"):
+    with native_usage_execution(kb_dir, "fixture"):
         executor = executor_for(model_service, cancelled=cancelled.is_set)
         with ThreadPoolExecutor() as pool:
             future = pool.submit(executor.complete, "compile", request())
@@ -255,10 +253,11 @@ def test_task_freezes_role_binding_and_new_task_reads_new_settings(model_service
 
 
 def test_bound_requests_are_immutable_and_ledger_has_no_secrets(model_service, kb_dir):
-    from ultrakb.llm_usage import normalize_usage, read_requests
-    from ultrakb.llm_usage_execution import import_usage_execution
+    from native_usage_fixtures import native_usage_execution, read_requests
 
-    with import_usage_execution(kb_dir, "fixture"):
+    from ultrakb.llm_usage import normalize_usage
+
+    with native_usage_execution(kb_dir, "fixture"):
         executor = executor_for(model_service)
         executor.bindings.credentials().extra_headers["x-leak"] = "mutated"
         result = executor.complete("document_index", request())

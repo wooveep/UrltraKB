@@ -5,9 +5,11 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from reading_fixtures import publish_original, publish_text_original
 from test_answer_evidence_regression import agent_for, invoke
 
 from ultrakb.content_blocks import BLOCK_POLICY, split_blocks
+from ultrakb.desktop.verification_data import retain_document
 from ultrakb.text_formats import text_normalization_policy
 from ultrakb.text_source import NORMALIZATION_POLICY, FrozenText, TextOrigin
 
@@ -28,27 +30,31 @@ def frozen_text(kb_dir, text, *, policy=NORMALIZATION_POLICY, blocks=False):
     if policy is None:
         raw.pop("normalization_policy")
     (kb_dir / "wiki/sources/manual.content.json").write_text(json.dumps(raw))
+    body = kb_dir / "wiki/sources/manual.md"
+    body.write_text(text)
+    original = kb_dir / "raw/manual.txt"
+    original.write_text(text)
+    publish_text_original(kb_dir, original, body, body.with_suffix(".content.json"))
     return raw
 
 
 def native_text(kb_dir, text, kind):
     if kind in {"page", "slide"}:
         bodies = [text, "7.4 Later section\ncapacity after a physical boundary."]
-        (kb_dir / "wiki/sources/manual.json").write_text(
-            json.dumps(
-                [
-                    {
-                        "page": n,
-                        "unit_kind": "page",
-                        "content": body,
-                        **({"parts": {"body": body, "notes": ""}} if kind == "slide" else {}),
-                    }
-                    for n, body in enumerate(bodies, 1)
-                ]
-            )
+        publish_original(
+            kb_dir,
+            [
+                {
+                    "page": n,
+                    "unit_kind": "page",
+                    "content": body,
+                    **({"parts": {"body": body, "notes": ""}} if kind == "slide" else {}),
+                }
+                for n, body in enumerate(bodies, 1)
+            ],
         )
     elif kind == "legacy":
-        (kb_dir / "wiki/sources/manual.md").write_text(text)
+        retain_document(kb_dir, "manual.md", "manual", text)
     else:
         frozen_text(kb_dir, text, policy=text_normalization_policy("txt"), blocks=True)
 
@@ -156,6 +162,9 @@ async def test_html_heading_requires_its_saved_native_tag(kb_dir, tmp_path):
     )
     frozen = freeze_html(prepared, "manual", kb_dir / "wiki")
     (kb_dir / "wiki/sources/manual.content.json").write_text(frozen.model_dump_json())
+    body = kb_dir / "wiki/sources/manual.md"
+    body.write_text(frozen.text)
+    publish_text_original(kb_dir, path, body, body.with_suffix(".content.json"))
     result = json.loads(await invoke(agent_for(kb_dir), "search_originals", terms=["capacity"]))
     scope = result["hits"][0]["source_context"]["regions"][0]
     assert scope["status"] == "source_heading"

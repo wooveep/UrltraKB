@@ -1,4 +1,3 @@
-import json
 from unittest.mock import patch
 
 import pytest
@@ -9,11 +8,10 @@ from ultrakb.cli import cli
 from ultrakb.schema import AGENTS_MD
 
 
-def test_lint_fix_preserves_input_when_configuration_is_invalid(kb_dir):
-    (kb_dir / ".ultrakb/hashes.json").write_text('{"document": {}}')
+def test_lint_fix_preserves_input_when_storage_is_invalid(kb_dir):
     page = kb_dir / "wiki/concepts/topic.md"
     page.write_text("# Topic\n[[concepts/missing]]")
-    (kb_dir / ".env").write_bytes(b"\xff")
+    (kb_dir / ".ultrakb/kb.sqlite").write_bytes(b"invalid SQLite header")
     result = CliRunner().invoke(cli, ["--kb-dir", str(kb_dir), "lint", "--fix"])
     assert result.exit_code != 0
     assert "[[concepts/missing]]" in page.read_text()
@@ -44,10 +42,7 @@ def test_init_creates_structure(tmp_path):
 
         # Directories
         assert (cwd / "raw").is_dir()
-        assert (cwd / "wiki" / "sources" / "images").is_dir()
-        assert (cwd / "wiki" / "summaries").is_dir()
-        assert (cwd / "wiki" / "concepts").is_dir()
-        assert (cwd / "wiki" / "entities").is_dir()
+        assert (cwd / ".ultrakb" / "blobs").is_dir()
         assert (cwd / ".ultrakb").is_dir()
 
         # Files
@@ -55,11 +50,8 @@ def test_init_creates_structure(tmp_path):
         assert (cwd / "wiki" / "log.md").is_file()
         assert (cwd / "wiki" / "index.md").is_file()
         assert (cwd / ".ultrakb" / "config.yaml").is_file()
-        assert (cwd / ".ultrakb" / "hashes.json").is_file()
-
-        # hashes.json is empty object
-        hashes = json.loads((cwd / ".ultrakb" / "hashes.json").read_text())
-        assert hashes == {}
+        assert (cwd / ".ultrakb" / "kb.sqlite").is_file()
+        assert not (cwd / ".ultrakb" / "hashes.json").exists()
 
         # index.md header
         index_content = (cwd / "wiki" / "index.md").read_text()
@@ -395,6 +387,9 @@ class TestQueryUsesGlobalModel:
         gdir = tmp_path / "global-config"
         monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", gdir)
         monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", gdir / "global.yaml")
+        values = yaml.safe_load((kb_dir / ".ultrakb/config.yaml").read_text())
+        values.pop("model", None)
+        (kb_dir / ".ultrakb/config.yaml").write_text(yaml.safe_dump(values))
         save_global_config({"model": "global-only-model"})
         captured = {}
 

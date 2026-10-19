@@ -8,7 +8,6 @@ from pageindex import IndexConfig, LocalClient
 
 from ultrakb.execution_capacity import capacity_policy, request_input
 from ultrakb.index_llm import PageIndexLLM
-from ultrakb.index_stages import IndexStages
 from ultrakb.llm_execution import CompletionExecutor, LlmCredentialBundle, RoleBindings
 from ultrakb.locks import LockCancelled
 from ultrakb.model_tokenizer import ContextCapacityError
@@ -23,7 +22,7 @@ def response(text):
     )
 
 
-def runtime(root, source, limit=4096):
+def runtime(root, source, index_stages, limit=4096):
     executor = CompletionExecutor(
         RoleBindings("openai/fixture", LlmCredentialBundle(), model_table={})
     )
@@ -32,7 +31,7 @@ def runtime(root, source, limit=4096):
         custom_endpoint=True,
     )
     adapter = PageIndexLLM(executor)
-    adapter.checkpoints = IndexStages(root, source, identity={"model": "fixture"})
+    adapter.checkpoints = index_stages(root, source, identity={"model": "fixture"})
     return adapter
 
 
@@ -53,7 +52,7 @@ def collection(root, adapter):
 
 @pytest.mark.parametrize("limit", [2200, 4096, 9000])
 def test_many_small_nodes_use_bounded_description_and_resume_only_missing_work(
-    tmp_path, monkeypatch, limit
+    tmp_path, monkeypatch, limit, index_stages
 ):
     source = tmp_path / "source.md"
     source.write_text("".join(f"# Chapter {n}\nOriginal section {n}.\n\n" for n in range(158)))
@@ -69,7 +68,7 @@ def test_many_small_nodes_use_bounded_description_and_resume_only_missing_work(
 
     monkeypatch.setattr(litellm, "acompletion", summary)
     monkeypatch.setattr(litellm, "completion", description)
-    first = runtime(tmp_path, source, limit=limit)
+    first = runtime(tmp_path, source, index_stages, limit=limit)
     save = first.checkpoints.save
 
     def interrupt(key, result):
@@ -86,7 +85,7 @@ def test_many_small_nodes_use_bounded_description_and_resume_only_missing_work(
     client.close()
 
     # More capacity changes partition sizes, not accepted source/summary identity.
-    second = runtime(tmp_path, source, limit=limit * 2)
+    second = runtime(tmp_path, source, index_stages, limit=limit * 2)
     client, col = collection(tmp_path, second)
     identity = col.add(str(source))
     document = col.get_document(identity, include_text=True)
@@ -103,7 +102,9 @@ def test_many_small_nodes_use_bounded_description_and_resume_only_missing_work(
     client.close()
 
 
-def test_optional_description_failure_retains_a_complete_document(tmp_path, monkeypatch):
+def test_optional_description_failure_retains_a_complete_document(
+    tmp_path, monkeypatch, index_stages
+):
     source = tmp_path / "source.md"
     source.write_text("# Chapter\nThe retained original evidence.\n")
 
@@ -111,7 +112,7 @@ def test_optional_description_failure_retains_a_complete_document(tmp_path, monk
         return response("Navigation summary.")
 
     monkeypatch.setattr(litellm, "acompletion", summary)
-    adapter = runtime(tmp_path, source)
+    adapter = runtime(tmp_path, source, index_stages)
     original = adapter.complete
 
     def complete(messages, *, stage):
@@ -130,13 +131,15 @@ def test_optional_description_failure_retains_a_complete_document(tmp_path, monk
 
 
 @pytest.mark.asyncio
-async def test_large_correction_partitions_native_pages_before_sending(tmp_path, monkeypatch):
+async def test_large_correction_partitions_native_pages_before_sending(
+    tmp_path, monkeypatch, index_stages
+):
     from pageindex.index.page_index import single_toc_item_index_fixer
     from pageindex.llm import llm_client_scope
 
     source = tmp_path / "source.md"
     source.write_text("Original evidence")
-    adapter = runtime(tmp_path, source, limit=2200)
+    adapter = runtime(tmp_path, source, index_stages, limit=2200)
     sent = []
 
     async def locate(**kwargs):

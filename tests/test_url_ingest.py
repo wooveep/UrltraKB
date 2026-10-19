@@ -5,6 +5,8 @@ from __future__ import annotations
 import io
 from unittest.mock import MagicMock, patch
 
+from native_catalog_fixtures import original_bytes
+
 from ultrakb.url_ingest import (
     _parse_content_disposition_filename,
     _pdf_filename,
@@ -477,48 +479,22 @@ def test_fetch_pdf_uses_post_redirect_url_for_filename(tmp_path):
     assert result.name == "great-paper.pdf"
 
 
-def test_add_single_file_returns_added_on_success(tmp_path):
-    """Tri-state return contract: ``"added"`` when the file was newly
-    indexed. URL-ingest uses this to decide whether to keep / unlink
-    the just-downloaded file."""
+def test_add_single_file_returns_added_on_success(kb_dir):
+    from test_storage_conversation_writes import StreamTransport
+
     from ultrakb.cli import add_single_file
-    from ultrakb.converter import ConvertResult
 
-    # Build a minimal KB scaffold
-    (tmp_path / ".ultrakb").mkdir()
-    (tmp_path / ".ultrakb" / "config.yaml").write_text("model: gpt-4o-mini\n")
-    from kb_fixtures import mark_current_kb
-
-    mark_current_kb(tmp_path)
-    (tmp_path / ".ultrakb" / "hashes.json").write_text("{}")
-    (tmp_path / "raw").mkdir()
-    (tmp_path / "wiki" / "summaries").mkdir(parents=True)
-    (tmp_path / "wiki" / "sources").mkdir(parents=True)
-    (tmp_path / "wiki" / "concepts").mkdir(parents=True)
-    (tmp_path / "wiki" / "log.md").write_text("")
-
-    doc = tmp_path / "raw" / "x.md"
-    doc.write_text("# Hello")
-    source_path = tmp_path / "wiki" / "sources" / "x.md"
-    source_path.write_text("# Hello converted")
-
-    mock_result = ConvertResult(
-        raw_path=doc,
-        source_path=source_path,
-        is_long_doc=False,
-        file_hash="cafe" * 16,
-    )
-
-    async def compile_noop(*args, **kwargs):
-        return None
-
-    with (
-        patch("ultrakb.application.documents.convert_document", return_value=mock_result),
-        patch("ultrakb.agent.compiler.compile_short_doc", new=compile_noop),
-    ):
-        outcome = add_single_file(doc, tmp_path)
-
-    assert outcome == "added"
+    doc = kb_dir / "raw/x.md"
+    doc.write_text("# Hello\n\nA retained rule.")
+    with StreamTransport(
+        [
+            {"content": '{"description":"Rule","content":"A retained rule."}'},
+            {"content": '{"concepts":[],"entities":[]}'},
+        ]
+    ) as service:
+        (kb_dir / ".env").write_text(f"LLM_API_KEY=test-key\nOPENAI_API_BASE={service.url}\n")
+        assert add_single_file(doc, kb_dir) == "added"
+        assert len(service.requests) == 2
 
 
 def test_add_single_file_returns_skipped_on_dedup(kb_dir, pdf_model):
@@ -530,48 +506,27 @@ def test_add_single_file_returns_skipped_on_dedup(kb_dir, pdf_model):
     assert add_single_file(doc, kb_dir) == "skipped"
 
 
-def test_add_single_file_returns_failed_on_pipeline_error(tmp_path):
-    """A pipeline failure (e.g. transient LLM error during compilation)
-    must be distinguishable from dedup-skip, so URL-ingest can preserve
-    the raw file for retry instead of deleting it."""
+def test_add_single_file_returns_blocked_on_provider_error(kb_dir):
+    from error_transport import ErrorTransport
+
     from ultrakb.cli import add_single_file
-    from ultrakb.converter import ConvertResult
 
-    (tmp_path / ".ultrakb").mkdir()
-    (tmp_path / ".ultrakb" / "config.yaml").write_text("model: gpt-4o-mini\n")
-    from kb_fixtures import mark_current_kb
+    doc = kb_dir / "raw/x.md"
+    doc.write_text("# Hello\n\nA retained rule.")
+    from ultrakb.config import save_config
 
-    mark_current_kb(tmp_path)
-    (tmp_path / ".ultrakb" / "hashes.json").write_text("{}")
-    (tmp_path / "raw").mkdir()
-    (tmp_path / "wiki" / "summaries").mkdir(parents=True)
-    (tmp_path / "wiki" / "sources").mkdir(parents=True)
-    (tmp_path / "wiki" / "log.md").write_text("")
-
-    doc = tmp_path / "raw" / "x.md"
-    doc.write_text("# Hello")
-    source_path = tmp_path / "wiki" / "sources" / "x.md"
-    source_path.write_text("# Hello")
-
-    mock_result = ConvertResult(
-        raw_path=doc,
-        source_path=source_path,
-        is_long_doc=False,
-        file_hash="cafe" * 16,
+    save_config(
+        kb_dir / ".ultrakb/config.yaml",
+        {
+            "model": "openai/gpt-4o-mini",
+            "model_capacity": {"max_input_tokens": 65536, "tokenizer_model": "gpt-4o-mini"},
+            "model_policy": {"max_calls": 2, "retries": 0},
+        },
     )
-
-    async def fail_compile(*args, **kwargs):
-        raise RuntimeError("LLM 503")
-
-    # Make both compile attempts raise to drive the failure path.
-    with (
-        patch("ultrakb.application.documents.convert_document", return_value=mock_result),
-        patch("ultrakb.agent.compiler.compile_short_doc", new=fail_compile),
-        patch("ultrakb.application.documents.time.sleep"),
-    ):
-        outcome = add_single_file(doc, tmp_path)
-
-    assert outcome == "failed"
+    with ErrorTransport(status=503) as service:
+        (kb_dir / ".env").write_text(f"LLM_API_KEY=test-key\nOPENAI_API_BASE={service.url}\n")
+        assert add_single_file(doc, kb_dir) == "blocked"
+        assert len(service.requests) == 1 and doc.exists()
 
 
 def _prepared_fetch(filename, content):
@@ -599,13 +554,12 @@ def test_url_ingest_cleans_up_orphan_on_dedup_skip(kb_dir, pdf_model):
         assert first.exit_code == 0 and "; added" in first.output
         repeated = runner.invoke(cli, arguments)
     assert repeated.exit_code == 0 and "; skipped" in repeated.output
-    from ultrakb.source_catalog import list_sources, read_source_revision
+    from native_catalog_fixtures import list_sources
 
     sources = list_sources(kb_dir)
     assert len(sources) == 1
-    assert sources[0].identity == "https://example.com/paper"
-    original = read_source_revision(kb_dir, sources[0].target_revision_id).original
-    assert (kb_dir / original).read_bytes() == b"# Paper\n\nBody"
+    assert sources[0].source_key == "https://example.com/paper"
+    assert original_bytes(kb_dir, sources[0].revision_id) == b"# Paper\n\nBody"
     assert not list((kb_dir / "raw").iterdir())
 
 
@@ -662,59 +616,51 @@ def test_url_ingest_keeps_raw_file_on_pipeline_failure(kb_dir, monkeypatch, live
         )
     assert result.exit_code == 0 and "; failed" in result.output
     saved = read_document_source(kb_dir, get_kb_list(kb_dir)["documents"][0]["hash"])
-    assert (kb_dir / saved["original_path"]).read_bytes() == b"# Paper\n\nBody"
+    assert original_bytes(kb_dir, saved["source_revision_id"]) == b"# Paper\n\nBody"
     assert saved["knowledge_revision_id"] is None
 
 
-def test_url_ingest_pipeline_failure_rolls_back_converted_source_but_keeps_download(tmp_path):
-    """A URL add that fails after conversion should not leave source artifacts.
-
-    The downloaded raw file is intentionally kept for retry, but converted
-    artifacts must be published only under the mutation journal so rollback can
-    remove them.
-    """
+def test_url_ingest_pipeline_failure_retains_original_without_publishing(kb_dir):
     from click.testing import CliRunner
+    from error_transport import ErrorTransport
 
+    from ultrakb.application.sources import source_inventory
+    from ultrakb.application.views import published_scope
     from ultrakb.cli import cli
+    from ultrakb.storage.catalog_store import CatalogStore
 
-    (tmp_path / ".ultrakb").mkdir()
-    (tmp_path / ".ultrakb" / "config.yaml").write_text("model: gpt-4o-mini\n")
-    from kb_fixtures import mark_current_kb
+    original = b"# Paper\n\nBody"
+    before = published_scope(kb_dir)
+    from ultrakb.config import save_config
 
-    mark_current_kb(tmp_path)
-    (tmp_path / ".ultrakb" / "hashes.json").write_text("{}")
-    (tmp_path / "raw").mkdir()
-    (tmp_path / "wiki" / "summaries").mkdir(parents=True)
-    (tmp_path / "wiki" / "sources").mkdir(parents=True)
-    (tmp_path / "wiki" / "concepts").mkdir(parents=True)
-    (tmp_path / "wiki" / "log.md").write_text("", encoding="utf-8")
-
-    fetched_path = tmp_path / "raw" / "paper.md"
-
-    async def fail_compile(*args, **kwargs):
-        raise RuntimeError("LLM 503")
-
-    runner = CliRunner()
+    save_config(
+        kb_dir / ".ultrakb/config.yaml",
+        {
+            "model": "openai/gpt-4o-mini",
+            "model_capacity": {"max_input_tokens": 65536, "tokenizer_model": "gpt-4o-mini"},
+            "model_policy": {"max_calls": 2, "retries": 0},
+        },
+    )
     with (
-        patch("ultrakb.cli._find_kb_dir", return_value=tmp_path),
+        ErrorTransport(status=503) as service,
         patch(
             "ultrakb.url_ingest.fetch_url_to_raw",
-            side_effect=_prepared_fetch(fetched_path.name, b"# Paper\n\nBody"),
+            side_effect=_prepared_fetch("paper.md", original),
         ),
-        patch("ultrakb.agent.compiler.compile_short_doc", new=fail_compile),
-        patch("ultrakb.application.documents.time.sleep"),
-        patch("ultrakb.cli._setup_llm_key"),
     ):
-        result = runner.invoke(cli, ["add", "https://example.com/paper"])
-
-    assert result.exit_code == 0, result.output
-    assert "; failed" in result.output
-    from ultrakb.source_catalog import list_sources, read_source_revision
-
-    source = list_sources(tmp_path)[0]
-    original = read_source_revision(tmp_path, source.target_revision_id).original
-    assert (tmp_path / original).read_bytes() == b"# Paper\n\nBody"
-    assert not (tmp_path / "wiki" / "sources" / "paper.md").exists()
+        (kb_dir / ".env").write_text(f"LLM_API_KEY=test-key\nOPENAI_API_BASE={service.url}\n")
+        result = CliRunner().invoke(
+            cli, ["--kb-dir", str(kb_dir), "add", "https://example.invalid/paper"]
+        )
+        assert result.exit_code == 0 and "; blocked" in result.output, result.output
+        assert len(service.requests) == 1
+    [source] = source_inventory(kb_dir)
+    assert (
+        CatalogStore(kb_dir, before.knowledge.identity).read_original(source["source_revision_id"])
+        == original
+    )
+    assert published_scope(kb_dir).publication_id == before.publication_id
+    assert not (kb_dir / "wiki/sources/paper.md").exists()
 
 
 def test_cli_url_preparation_is_private_and_outside_kb_lease(tmp_path):
@@ -758,9 +704,9 @@ def test_cli_url_preparation_is_private_and_outside_kb_lease(tmp_path):
 
 def test_cli_url_retains_download_without_replacing_existing_raw_file(kb_dir, pdf_model):
     from click.testing import CliRunner
+    from native_catalog_fixtures import list_sources
 
     from ultrakb.cli import cli
-    from ultrakb.source_catalog import list_sources, read_source_revision
 
     existing = kb_dir / "raw/paper.md"
     existing.write_bytes(b"Existing local file")
@@ -773,7 +719,6 @@ def test_cli_url_retains_download_without_replacing_existing_raw_file(kb_dir, pd
         )
     assert result.exit_code == 0 and "; added" in result.output
     source = list_sources(kb_dir)[0]
-    original = read_source_revision(kb_dir, source.target_revision_id).original
-    assert (kb_dir / original).read_bytes() == body
+    assert original_bytes(kb_dir, source.revision_id) == body
     assert existing.read_bytes() == b"Existing local file"
     assert [path.name for path in (kb_dir / "raw").iterdir()] == ["paper.md"]

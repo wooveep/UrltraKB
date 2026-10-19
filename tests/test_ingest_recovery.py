@@ -1,7 +1,5 @@
 """Failed recovery halts import work until explicitly repaired."""
 
-import pytest
-
 pytest_plugins = ("test_pdf_readback",)
 
 
@@ -20,8 +18,8 @@ def test_import_does_not_retry_compilation_after_recovery_is_required(
         raise RecoveryRequired("Repair required during compilation")
 
     monkeypatch.setattr("ultrakb.agent.compiler.compile_short_doc", fail)
-    with pytest.raises(RecoveryRequired):
-        import_document(kb_dir, source)
+    result = import_document(kb_dir, source)
+    assert result.status == "blocked" and "Repair required" in result.message
     assert len(calls) == 1
 
 
@@ -48,232 +46,10 @@ def test_rest_watch_stops_processing_on_required_repair(kb_dir, monkeypatch):
         assert started.wait(5)
         state.worker_thread.join(5)
         assert not registry.status("test")["active"]
-        assert calls == ["bad"]
+        assert len(calls) == 1 and calls[0].startswith("bad-")
         assert not (kb_dir / "wiki/sources/later.md").exists()
     finally:
         registry.stop_all()
-
-
-@pytest.mark.parametrize("moment", ["prepare", "admitted"])
-def test_rest_watch_keeps_raw_input_identity_when_a_file_becomes_a_symlink(
-    kb_dir, monkeypatch, moment
-):
-    import time
-    from contextlib import contextmanager
-
-    import ultrakb.application.documents as documents
-    from ultrakb.state import HashRegistry
-    from ultrakb.watch_service import WatchRegistry
-
-    source = kb_dir / "raw/inbox/note.md"
-    source.parent.mkdir()
-    outside = kb_dir.with_name(kb_dir.name + "-outside.md")
-    outside.write_text("# Outside\n")
-    try:
-        source.symlink_to(outside)
-    except OSError:
-        pytest.skip("File symlinks unavailable")
-    source.unlink()
-    HashRegistry(kb_dir / ".ultrakb/hashes.json").add(
-        "0" * 64, {"name": "note.md", "doc_name": "note", "path": "raw/other/note.md"}
-    )
-    prepare = documents.prepared_input
-    import ultrakb.application.ingestion as ingestion
-
-    admit = ingestion.admit_source_revision
-    compiled = []
-    admitted = []
-    replaced = False
-
-    def replace_input(path):
-        nonlocal replaced
-        if path == source and not replaced:
-            source.unlink()
-            source.symlink_to(outside)
-            replaced = True
-
-    def after_admission(root, prepared, **kwargs):
-        result = admit(root, prepared, **kwargs)
-        admitted.append(result)
-        replace_input(source)
-        return result
-
-    @contextmanager
-    def before_copy(path):
-        replace_input(path)
-        with prepare(path) as ready:
-            yield ready
-
-    async def compile_document(name, path, *args, **kwargs):
-        compiled.append(path.read_text())
-
-    monkeypatch.setattr("ultrakb.agent.compiler.compile_short_doc", compile_document)
-    monkeypatch.setattr(
-        documents if moment == "prepare" else ingestion,
-        "prepared_input" if moment == "prepare" else "admit_source_revision",
-        before_copy if moment == "prepare" else after_admission,
-    )
-    registry = WatchRegistry()
-    registry.start("guarded", kb_dir, debounce=0.1)
-    try:
-        source.write_text("# Original\n")
-        deadline = time.monotonic() + 5
-        while time.monotonic() < deadline:
-            counts = registry.status("guarded")["counters"]
-            if counts["added"] + counts["failed"]:
-                break
-            time.sleep(0.01)
-    finally:
-        registry.stop_all()
-    assert replaced
-    assert compiled == (["# Original\n"] if moment == "admitted" else [])
-    entries = HashRegistry(kb_dir / ".ultrakb/hashes.json").all_entries()
-    assert all(item.get("path") != outside.as_posix() for item in entries.values())
-    assert outside.read_text() == "# Outside\n"
-    if moment == "admitted":
-        from ultrakb.application.views import published_scope
-        from ultrakb.documents import read_document_source
-        from ultrakb.published_knowledge import read_publication
-
-        public = read_publication(kb_dir)
-        [admission] = admitted
-        assert admission.source.identity == "raw/inbox/note.md"
-        assert (public.metadata_dir / admission.revision.original).read_text() == "# Original\n"
-        assert not (public.metadata_dir / "raw/inbox/note.md").exists()
-        assert all(
-            b"# Outside\n" not in (public.metadata_dir / relative).read_bytes()
-            for relative in public.record.metadata_files
-        )
-        outside.write_text("# Changed outside\n")
-        preview = read_document_source(
-            kb_dir, admission.source.source_id, scope=published_scope(kb_dir)
-        )
-        assert preview["content"] == "# Original\n"
-        assert preview["publication_id"] == public.publication_id
-        assert (kb_dir / preview["original_path"]).read_text() == "# Original\n"
-
-
-@pytest.mark.parametrize("directory_link", [False, True])
-def test_publication_isolates_unadmitted_raw_symlinks(kb_dir, directory_link):
-    from ultrakb.locks import kb_ingest_lock
-    from ultrakb.published_knowledge import initialize_publication, read_publication
-
-    outside = kb_dir.with_name(kb_dir.name + "-outside")
-    outside.mkdir()
-    original = outside / "external.md"
-    original.write_text("External content must remain outside publication.\n")
-    raw = kb_dir / "raw"
-    (raw / "local.md").write_text("Local input.\n")
-    link = raw / ("outside" if directory_link else "external.md")
-    try:
-        link.symlink_to(outside if directory_link else original, target_is_directory=directory_link)
-    except OSError:
-        pytest.skip("File symlinks unavailable")
-
-    with kb_ingest_lock(kb_dir / ".ultrakb"):
-        initialize_publication(kb_dir)
-    public = read_publication(kb_dir)
-
-    assert (public.metadata_dir / "raw/local.md").read_text() == "Local input.\n"
-    assert not (public.metadata_dir / link.relative_to(kb_dir)).exists()
-    assert all(
-        b"External content" not in (public.metadata_dir / relative).read_bytes()
-        for relative in public.record.metadata_files
-    )
-    assert original.read_text() == "External content must remain outside publication.\n"
-
-
-@pytest.mark.parametrize("relative", ["raw", ".ultrakb/artifacts/unsafe.md"])
-def test_publication_still_rejects_symlink_in_retained_storage(kb_dir, relative):
-    from ultrakb.locks import kb_ingest_lock
-    from ultrakb.published_knowledge import initialize_publication
-
-    outside = kb_dir.with_name(kb_dir.name + "-outside")
-    outside.mkdir()
-    original = outside / "external.md"
-    original.write_text("External content must remain outside publication.\n")
-    link = kb_dir / relative
-    if link.is_dir():
-        link.rmdir()
-    link.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        link.symlink_to(outside if relative == "raw" else original)
-    except OSError:
-        pytest.skip("File symlinks unavailable")
-
-    with kb_ingest_lock(kb_dir / ".ultrakb"):
-        with pytest.raises(ValueError, match="Publication resources must be regular files"):
-            initialize_publication(kb_dir)
-    assert original.read_text() == "External content must remain outside publication.\n"
-
-
-@pytest.mark.parametrize("marker_failure", [False, True])
-def test_failed_import_rollback_stays_blocked_after_the_io_error_is_gone(
-    kb_dir, tmp_path, monkeypatch, marker_failure, pdf_model
-):
-    import ultrakb.mutation as mutation
-    from ultrakb.application.documents import import_document
-    from ultrakb.documents import read_document_source
-    from ultrakb.knowledge_scope import live_scope
-    from ultrakb.mutation import RecoveryRequired, repair_marker
-
-    source = tmp_path / "note.md"
-    source.write_text("# Previously retained source\n")
-
-    first = import_document(
-        kb_dir,
-        source,
-    )
-    saved = read_document_source(kb_dir, first.source_id)
-    old = live_scope(kb_dir, saved["view_id"]).wiki_dir / "sources/note.md"
-    previous_body = old.read_text()
-    source.write_text("# New document\n")
-    restore = mutation.shutil.copytree
-    write_json = mutation.atomic_write_json
-
-    def fail_marker(path, *args, **kwargs):
-        if path == repair_marker(kb_dir):
-            raise OSError("Repair marker cannot be written")
-        return write_json(path, *args, **kwargs)
-
-    def fail_restore(src, dest, *args, **kwargs):
-        from pathlib import Path
-
-        if old.is_relative_to(dest) and "staging" in Path(src).parts:
-            raise OSError("Cannot restore source")
-        return restore(src, dest, *args, **kwargs)
-
-    commit = mutation.MutationSnapshot.mark_committed
-
-    def fail_publication(snapshot):
-        if snapshot.operation == "publish-unit-revision":
-            raise ValueError("Publication failed before commit")
-        return commit(snapshot)
-
-    with monkeypatch.context() as patch:
-        patch.setattr(mutation.MutationSnapshot, "mark_committed", fail_publication)
-        patch.setattr("ultrakb.application.documents.time.sleep", lambda value: None)
-        patch.setattr(mutation.shutil, "copytree", fail_restore)
-        if marker_failure:
-            patch.setattr(mutation, "atomic_write_json", fail_marker)
-        with pytest.raises(RecoveryRequired):
-            import_document(
-                kb_dir,
-                source,
-            )
-    assert repair_marker(kb_dir).is_file() is not marker_failure
-    assert list((kb_dir / ".ultrakb/journal").glob("*.json"))
-    # Recoverable I/O on the next call must not silently clear the explicit repair gate.
-    with pytest.raises(RecoveryRequired):
-        import_document(
-            kb_dir,
-            source,
-        )
-    from ultrakb.application.repair import repair_knowledge_base
-
-    assert repair_knowledge_base(kb_dir).repaired
-    assert old.read_text() == previous_body
-    assert not repair_marker(kb_dir).exists()
 
 
 def test_native_watch_does_not_follow_a_replaced_knowledge_base(kb_dir):

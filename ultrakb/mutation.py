@@ -528,54 +528,20 @@ def mutation_scope(
         delegated_lease is not None and delegated_lease.authorizes(required_lock)
     ):
         raise RuntimeError("Mutation requires the knowledge-base write lease")
-    from ultrakb.published_knowledge import (
-        prepare_publication,
-        publication_transaction,
-        publish_committed,
-        recover_before_mutation,
-        validate_checkpoint_paths,
-    )
-
-    if lock_path is None:
-        recover_before_mutation(kb_dir, delegated_lease=delegated_lease)
-    if checkpoint:
-        validate_checkpoint_paths(kb_dir, paths)
     snapshot = snapshot_paths(kb_dir, paths, operation=operation, hardlink_dirs=hardlink_dirs)
-    from contextlib import nullcontext
-
-    with nullcontext(False) if checkpoint else publication_transaction(snapshot) as outer:
-        try:
-            yield snapshot
-            if outer and lock_path is None:
-                prepare_publication(snapshot)
-            snapshot.mark_committed()
-        except BaseException as exc:
-            if checkpoint and snapshot.committed_on_disk():
-                snapshot.discard_best_effort()
-                raise
-            if snapshot.publication is not None and snapshot.committed_on_disk():
-                from ultrakb.published_knowledge import PublicationPending
-
-                raise PublicationPending(
-                    snapshot.publication["publication_id"], snapshot.journal_path
-                ) from exc
-            if snapshot.rollback_best_effort() is not None:
-                mark_needs_repair(kb_dir, snapshot.journal_path)
-                raise RecoveryRequired(f"Knowledge base needs repair: {kb_dir}")
+    try:
+        yield snapshot
+        snapshot.mark_committed()
+    except BaseException:
+        if snapshot.committed_on_disk():
             snapshot.discard_best_effort()
             raise
-        # Publication follows the durable internal commit and is deliberately
-        # outside rollback handling. A failed switch/receipt retains the journal.
-        if outer and snapshot.publication:
-            from ultrakb.execution_timing import record_phase_event
-
-            record_phase_event(
-                "internal_commit",
-                stage="publication",
-                work_id=snapshot.publication["publication_id"],
-            )
-        if not outer or publish_committed(snapshot, delegated_lease=delegated_lease):
-            snapshot.discard_best_effort()
+        if snapshot.rollback_best_effort() is not None:
+            mark_needs_repair(kb_dir, snapshot.journal_path)
+            raise RecoveryRequired(f"Knowledge base needs repair: {kb_dir}")
+        snapshot.discard_best_effort()
+        raise
+    snapshot.discard_best_effort()
 
 
 def _snapshot_from_journal(path: Path, data: dict) -> MutationSnapshot:
@@ -600,6 +566,8 @@ def _snapshot_from_journal(path: Path, data: dict) -> MutationSnapshot:
 def _validate_recovery_data(kb_dir: Path, data: dict) -> None:
     """Validate every path and backup before recovery changes any live content."""
     root = kb_dir.resolve()
+    if isinstance(data, dict) and data.get("publication") is not None:
+        raise ValueError("Filesystem publication journals are unsupported by the main store")
     if not isinstance(data, dict) or data.get("version") != 1:
         raise ValueError("Unknown mutation journal format")
     if Path(data["kb_dir"]).resolve() != root:
@@ -684,15 +652,6 @@ def recover_pending_journals(
             snapshot = _snapshot_from_journal(journal_path, data)
             status = data.get("status", "active")
             if status in {"committed", "rolled_back"}:
-                if status == "committed" and snapshot.publication is not None:
-                    from ultrakb.published_knowledge import publish_committed
-
-                    if not publish_committed(snapshot, delegated_lease=delegated_lease):
-                        from ultrakb.published_knowledge import PublicationPending
-
-                        raise PublicationPending(
-                            snapshot.publication["publication_id"], snapshot.journal_path
-                        )
                 snapshot.discard()
                 messages.append(f"Cleaned terminal mutation journal {journal_path.name}.")
                 continue
@@ -706,12 +665,6 @@ def recover_pending_journals(
                 f"Rolled back interrupted {snapshot.operation} journal {journal_path.name}."
             )
         except Exception as exc:
-            from ultrakb.published_knowledge import PublicationPending
-
-            if isinstance(exc, PublicationPending):
-                # This is committed work awaiting a switch/receipt, not dirty
-                # mutable state. The next writer retries it without model work.
-                raise
             # Never discard evidence or repeatedly retry partial recovery during
             # ordinary operations. All adapters see this durable repair barrier.
             mark_needs_repair(kb_dir, journal_path, exc)

@@ -13,9 +13,11 @@ def test_conversation_entrypoints_keep_users_and_all_stage_usage(
     kb_dir, model_service, monkeypatch, tmp_path, entry
 ):
     from agents import set_tracing_disabled
+    from conversation_fixtures import seed_conversation
+    from native_usage_fixtures import read_requests
 
-    from ultrakb.agent.chat_session import ChatSession, load_session
-    from ultrakb.llm_usage import read_requests
+    from ultrakb.application.conversations import read_conversation
+    from ultrakb.terminal_chat_state import TerminalConversation
 
     set_tracing_disabled(True)
     (kb_dir / ".ultrakb/config.yaml").write_text(
@@ -25,7 +27,7 @@ def test_conversation_entrypoints_keep_users_and_all_stage_usage(
     from ultrakb.locks import atomic_write_text
 
     atomic_write_text(kb_dir / "wiki/sources/manual.md", "A retained original source.")
-    session = ChatSession.new(kb_dir, "deepseek/deepseek-flash", "en")
+    turns = []
     for index in range(9):
         preference = (
             "My room is ARCHIVE_ROOM and my budget is 42 credits. "
@@ -34,7 +36,8 @@ def test_conversation_entrypoints_keep_users_and_all_stage_usage(
             if index == 8
             else f"My workspace note {index}. "
         )
-        session.record_turn(preference, "ASSISTANT_POISON: 999", [])
+        turns.append((preference, "ASSISTANT_POISON: 999"))
+    session = seed_conversation(kb_dir, turns)
 
     question = "Using my preferences only, confirm my current room and budget in one sentence."
     public = None
@@ -44,7 +47,7 @@ def test_conversation_entrypoints_keep_users_and_all_stage_usage(
         # The REPL delegates to the public application, including session reload.
         asyncio.run(
             _run_turn(
-                session,
+                TerminalConversation.resume(kb_dir, session.id),
                 question,
                 style=_build_style(False),
                 use_color=False,
@@ -97,12 +100,12 @@ def test_conversation_entrypoints_keep_users_and_all_stage_usage(
         finally:
             manager.shutdown(stop=True)
             assert manager.join(5)
-    restored = load_session(kb_dir, session.id)
+    restored = read_conversation(kb_dir, session.id)
     assert restored.turns[:-1] == session.turns[:9]
-    assert restored.turns[-1].user_text == question
-    assert "GARDEN_ROOM" in restored.turns[-1].assistant_text
-    assert "42" in restored.turns[-1].assistant_text
-    assert "999" not in restored.turns[-1].assistant_text
+    assert restored.turns[-1][0] == question
+    assert "GARDEN_ROOM" in restored.turns[-1][1]
+    assert "42" in restored.turns[-1][1]
+    assert "999" not in restored.turns[-1][1]
     requests = read_requests(kb_dir)
     assert len(requests) == len(model_service.requests)
     assert 1 <= len(requests) <= 8
@@ -113,4 +116,4 @@ def test_conversation_entrypoints_keep_users_and_all_stage_usage(
         assert public["model_usage"]["current"]["requests"] == len(requests)
         assert public["context"]["recent_turns"] == 6
         assert public["context"]["status"] == "recent_only"
-        assert public["usage"] == restored.token_usage
+        assert public["usage"] == restored.usage

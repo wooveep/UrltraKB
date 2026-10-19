@@ -34,7 +34,9 @@ def test_empty_refresh_adapters_publish_without_model_work(tmp_path, monkeypatch
             import ultrakb.cli as cli
 
             monkeypatch.setattr(cli, "_find_kb_dir", lambda *args: root)
-            monkeypatch.setattr(cli, "_selected_scope", lambda *args: storage_scope(root, identity))
+            monkeypatch.setattr(
+                cli, "_selected_scope", lambda *args, **kwargs: storage_scope(root, identity)
+            )
             result = CliRunner().invoke(cli.cli, ["refresh", "run"])
             assert result.exit_code == 0, result.output
             payload = json.loads(result.output)
@@ -64,7 +66,9 @@ def test_empty_refresh_adapters_publish_without_model_work(tmp_path, monkeypatch
             from ultrakb.runtime.requests import RefreshKnowledge
             from ultrakb.runtime.worker import _execute
 
-            monkeypatch.setattr(views, "view_scope", lambda *args: storage_scope(root, identity))
+            monkeypatch.setattr(
+                views, "view_scope", lambda *args, **kwargs: storage_scope(root, identity)
+            )
             request = RefreshKnowledge(view_id="legacy")
             worker = UnitIdentity.create(
                 uuid4().hex, 0, str(root), request, generation=identity.generation
@@ -94,7 +98,9 @@ def test_empty_confirmation_adapters_recover_the_same_committed_receipt(
         import ultrakb.cli as cli
 
         monkeypatch.setattr(cli, "_find_kb_dir", lambda *args: root)
-        monkeypatch.setattr(cli, "_selected_scope", lambda *args: storage_scope(root, identity))
+        monkeypatch.setattr(
+            cli, "_selected_scope", lambda *args, **kwargs: storage_scope(root, identity)
+        )
         for _ in range(2):
             result = CliRunner().invoke(
                 cli.cli, ["refresh", "empty", unit.source_id, "--generation", str(generation)]
@@ -131,7 +137,9 @@ def test_empty_confirmation_adapters_recover_the_same_committed_receipt(
         from ultrakb.runtime.requests import ConfirmEmptySource
         from ultrakb.runtime.worker import _execute
 
-        monkeypatch.setattr(views, "view_scope", lambda *args: storage_scope(root, identity))
+        monkeypatch.setattr(
+            views, "view_scope", lambda *args, **kwargs: storage_scope(root, identity)
+        )
         request = ConfirmEmptySource(unit.source_id, generation, view_id="legacy")
         for _ in range(2):
             worker = UnitIdentity.create(

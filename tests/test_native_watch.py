@@ -4,8 +4,8 @@ import threading
 import time
 from types import SimpleNamespace
 
+from ultrakb.file_digest import hash_file
 from ultrakb.runtime.watch import NativeWatch
-from ultrakb.state import HashRegistry
 
 pytest_plugins = ("test_pdf_readback",)
 
@@ -75,8 +75,12 @@ def test_startup_scan_admits_frozen_identities_and_observes_recursive_atomic_mov
     raw = kb_dir / "raw"
     known = raw / "known.txt"
     known.write_text("known")
-    registry = HashRegistry(kb_dir / ".ultrakb/hashes.json")
-    registry.add(registry.hash_file(known), {"name": known.name})
+    from ultrakb.application.views import published_scope
+    from ultrakb.storage.catalog_store import CatalogStore
+
+    CatalogStore(kb_dir, published_scope(kb_dir).knowledge.identity).admit(
+        known, source_key=str(known.resolve())
+    )
     folder = raw / "中文 目录"
     folder.mkdir()
     note = folder / "first.md"
@@ -133,7 +137,7 @@ def test_changes_coalesce_behind_active_task_and_failed_processed_version_is_not
         assert len(sink.items) == 1
         # The worker refreshed to this version before business. Its failure
         # does not authorize the scanner to replay that same full operation.
-        sink.finish("0", HashRegistry.hash_file(path), state="failed")
+        sink.finish("0", hash_file(path), state="failed")
         time.sleep(0.25)
         assert len(sink.items) == 1
         path.write_text("a later version")
@@ -232,14 +236,14 @@ def test_full_admission_window_does_not_reread_unchanged_waiting_bytes(kb_dir, m
     first = kb_dir / "raw/first.md"
     first.write_text("first")
     sink = TaskSink()
-    original = HashRegistry.hash_file
+    original = hash_file
     reads = []
 
     def observed(path):
         reads.append(path)
         return original(path)
 
-    monkeypatch.setattr(HashRegistry, "hash_file", observed)
+    monkeypatch.setattr("ultrakb.inputs.hash_file", observed)
     watch = NativeWatch(kb_dir, sink, debounce=0.05, scan_interval=0.02, max_submitted=1)
     try:
         eventually(lambda: len(sink.items) == 1)
@@ -259,7 +263,7 @@ def test_stop_during_candidate_hash_does_not_withdraw_already_submitted_work(kb_
     sink = TaskSink()
     watch = NativeWatch(kb_dir, sink, debounce=0.05, scan_interval=0.02, max_submitted=1)
     hashing, release = threading.Event(), threading.Event()
-    original = HashRegistry.hash_file
+    original = hash_file
     stable = kb_dir / "raw/stable.md"
 
     def paused(path):
@@ -272,7 +276,7 @@ def test_stop_during_candidate_hash_does_not_withdraw_already_submitted_work(kb_
         eventually(lambda: len(sink.items) == 1)
         waiting = sink.get("0")
         waiting.state, waiting.stage = "waiting", "waiting-input"
-        monkeypatch.setattr(HashRegistry, "hash_file", paused)
+        monkeypatch.setattr("ultrakb.inputs.hash_file", paused)
         stable.write_text("second")
         assert hashing.wait(5)
         watch.stop()

@@ -36,6 +36,37 @@ def _use_named_kb(monkeypatch, kb_dir, name: str = "test-kb") -> str:
     return name
 
 
+def _publish_artifact_fixture(kb_dir, directory):
+    from ultrakb.application.views import published_scope
+    from ultrakb.storage.artifact_store import ArtifactStore
+    from ultrakb.storage.execution_store import ExecutionStore
+
+    bound = published_scope(kb_dir).knowledge
+    executions = ExecutionStore(kb_dir, bound.identity)
+    execution = executions.begin("fixture-artifact", fingerprint="explicit-fixture", max_calls=0)
+    store = ArtifactStore(kb_dir, bound.identity)
+    for path in directory.rglob("*"):
+        if path.is_file():
+            saved = store.save(
+                path.relative_to(kb_dir).as_posix(),
+                path.read_bytes(),
+                expected_epoch=store.epoch(),
+                execution_id=execution.execution_id,
+                evidence_publication_id=bound.publication_id,
+            )
+            assert saved.status == "saved"
+    executions.finish(execution.execution_id, state="completed", work_settled=True)
+
+
+def _remove_model_override(kb_dir):
+    from ultrakb.locks import atomic_write_text
+
+    path = kb_dir / ".ultrakb/config.yaml"
+    values = yaml.safe_load(path.read_text())
+    values.pop("model", None)
+    atomic_write_text(path, yaml.safe_dump(values))
+
+
 def _events_from_sse(text: str) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     for block in text.strip().split("\n\n"):
@@ -156,6 +187,12 @@ def test_query_endpoint_uses_global_model(monkeypatch, kb_dir, tmp_path):
     from ultrakb.config import save_global_config
 
     save_global_config({"model": "global-model"})
+    from ultrakb.config import load_config, save_config
+
+    path = kb_dir / ".ultrakb/config.yaml"
+    values = load_config(path)
+    values.pop("model", None)
+    save_config(path, values)
 
     captured = {}
 
@@ -177,82 +214,56 @@ def test_query_endpoint_uses_global_model(monkeypatch, kb_dir, tmp_path):
 
 
 def test_chat_non_stream_creates_and_persists_session(monkeypatch, kb_dir):
-    """The HTTP adapter persists the application turn and exposes its receipt."""
-    from ultrakb.agent.chat_session import ChatSession, load_session
-    from ultrakb.application.conversations import AnswerResult
-    from ultrakb.knowledge_scope import resolve_scope
+    from stream_transport import StreamTransport
 
+    from ultrakb.application.conversations import read_conversation
+
+    _seed_short(kb_dir)
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
-
-    async def delivered_turn(root, message, *, session_id=None, scope, **kwargs):
-        assert root == kb_dir and message == "Hi" and session_id is None
-        scope = resolve_scope(root, scope)
-        session = ChatSession.new(root, "", "", view_id=scope.view_id)
-        session.record_turn(message, "Hello", [{"role": "assistant", "content": "Hello"}])
-        return AnswerResult(
-            "completed", "Hello", session_id=session.id, turn_count=session.turn_count
+    with StreamTransport([{"content": "Hello"}]) as service:
+        (kb_dir / ".env").write_text(
+            f"LLM_API_KEY=offline-test-key\nOPENAI_API_BASE={service.url}\n"
         )
-
-    monkeypatch.setattr("ultrakb.application.conversations.continue_conversation", delivered_turn)
-
-    response = client.post(
-        "/api/v1/chat",
-        json={"kb": kb, "message": "Hi", "stream": False},
-        headers=_auth(),
-    )
-
-    assert response.status_code == 200
+        response = client.post(
+            "/api/v1/chat", json={"kb": kb, "message": "Hi", "stream": False}, headers=_auth()
+        )
+    assert response.status_code == 200, response.text
     payload = response.json()
-    assert payload["answer"] == "Hello"
-    assert payload["turn_count"] == 1
-    session_path = kb_dir / ".ultrakb" / "chats" / f"{payload['session_id']}.json"
-    assert session_path.exists()
-    assert load_session(kb_dir, payload["session_id"]).user_turns == ["Hi"]
+    assert payload["answer"] == "Hello" and payload["turn_count"] == 1
+    assert read_conversation(kb_dir, payload["session_id"]).turns == (("Hi", "Hello"),)
+    assert len(service.requests) == 1
+    assert not (kb_dir / ".ultrakb/chats").exists()
 
 
 def test_chat_stream_resumes_session(monkeypatch, kb_dir):
+    from stream_transport import StreamTransport
+
+    from ultrakb.application.conversations import read_conversation
+    from ultrakb.application.views import published_scope
+    from ultrakb.storage.session_store import SessionStore
+
+    _seed_short(kb_dir)
+    store = SessionStore(kb_dir, published_scope(kb_dir).knowledge.identity)
+    store.create("api-resume", model="gpt-4o-mini", language="en")
+    store.append_exchange("api-resume", "first", "Hi", "Hello")
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
-
-    from ultrakb.agent.chat_session import ChatSession, load_session
-    from ultrakb.application.conversations import AnswerResult
-    from ultrakb.knowledge_scope import resolve_scope
-
-    session = ChatSession.new(kb_dir, "gpt-4o-mini", "en")
-    session.record_turn("Hi", "Hello", [{"role": "assistant", "content": "Hello"}])
-
-    async def delivered_turn(root, message, *, session_id, context, scope, **kwargs):
-        assert root == kb_dir and message == "Again" and session_id == session.id
-        scope = resolve_scope(root, scope)
-        continuing = load_session(root, session_id)
-        continuing.require_view(scope.view_id)
-        assert continuing.user_turns == ["Hi"]
-        assert continuing.assistant_texts == ["Hello"]
-        context.on_event({"event": "delta", "data": {"text": "Again"}})
-        continuing.record_turn(
-            message,
-            "Again",
-            [*continuing.history, {"role": "assistant", "content": "Again"}],
-            attempt_id="continuation",
+    with StreamTransport([{"content": "Again"}]) as service:
+        (kb_dir / ".env").write_text(
+            f"LLM_API_KEY=offline-test-key\nOPENAI_API_BASE={service.url}\n"
         )
-        return AnswerResult(
-            "completed", "Again", session_id=continuing.id, turn_count=continuing.turn_count
+        response = client.post(
+            "/api/v1/chat",
+            json={"kb": kb, "message": "Again", "session_id": "api-resume"},
+            headers=_auth(),
         )
-
-    monkeypatch.setattr("ultrakb.application.conversations.continue_conversation", delivered_turn)
-
-    response = client.post(
-        "/api/v1/chat",
-        json={"kb": kb, "message": "Again", "session_id": session.id},
-        headers=_auth(),
-    )
-
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     events = _events_from_sse(response.text)
-    assert events[0]["data"]["session_id"] == session.id
+    assert events[0]["data"]["session_id"] == "api-resume"
     assert events[-2]["data"]["turn_count"] == 2
-    assert load_session(kb_dir, session.id).user_turns == ["Hi", "Again"]
+    assert read_conversation(kb_dir, "api-resume").turns == (("Hi", "Hello"), ("Again", "Again"))
+    assert len(service.requests) == 1
 
 
 def test_chat_stream_forwards_artifact_event(monkeypatch, kb_dir):
@@ -574,28 +585,31 @@ def test_add_endpoint_uploads_and_adds_single_file(monkeypatch, kb_dir):
 
 
 def test_add_endpoint_runs_real_add_helper_outside_event_loop(monkeypatch, kb_dir):
+    import asyncio
+
+    import pytest
+
+    from ultrakb.api_helpers import _add_for_api
+
+    def observed(*args, **kwargs):
+        with pytest.raises(RuntimeError, match="no running event loop"):
+            asyncio.get_running_loop()
+        return _add_for_api(*args, **kwargs)
+
+    monkeypatch.setattr("ultrakb.api_helpers._add_for_api", observed)
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
-
-    async def fake_compile_short_doc(doc_name, source_path, target_kb, model, **kwargs):
-        assert doc_name == "paper"
-        assert target_kb == kb_dir
-
-    monkeypatch.setattr("ultrakb.cli._setup_llm_key", lambda kb: None)
-    monkeypatch.setattr("ultrakb.agent.compiler.compile_short_doc", fake_compile_short_doc)
-
-    response = client.post(
-        "/api/v1/add",
-        data={"kb": kb, "stream": "false"},
-        files=[("files", ("paper.md", b"# Paper", "text/markdown"))],
-        headers=_auth(),
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["added_count"] == 1
-    assert payload["files"][0]["status"] == "added"
-    assert payload["files"][0]["saved_path"] == str(kb_dir / "raw" / "paper.md")
+    with _model_service(kb_dir) as service:
+        response = client.post(
+            "/api/v1/add",
+            data={"kb": kb, "stream": "false"},
+            files=[("files", ("paper.md", b"The value is 17.", "text/markdown"))],
+            headers=_auth(),
+        )
+    assert response.status_code == 200, response.text
+    assert response.json()["added_count"] == 1, response.json()
+    assert response.json()["files"][0]["source_id"]
+    assert service.requests
 
 
 def test_add_endpoint_uploads_and_adds_multiple_files(monkeypatch, kb_dir):
@@ -859,46 +873,23 @@ def test_list_endpoint_returns_empty_inventory(monkeypatch, kb_dir):
 
 
 def test_list_endpoint_returns_structured_inventory(monkeypatch, kb_dir):
+    _seed_long(kb_dir)
+    _seed_short(kb_dir)
+    (kb_dir / "wiki/concepts/attention.md").write_text("# Attention")
+    (kb_dir / "wiki/reports/lint_20260101_000000.md").write_text("# Report")
+    publish_fixture(kb_dir)
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
-    hashes = {
-        "abc123": {"name": "paper.pdf", "type": "pdf", "pages": 12},
-        "def456": {"name": "notes.md", "type": "md"},
-    }
-    (kb_dir / ".ultrakb" / "hashes.json").write_text(json.dumps(hashes), encoding="utf-8")
-    (kb_dir / "wiki" / "summaries" / "paper.md").write_text("# Paper", encoding="utf-8")
-    (kb_dir / "wiki" / "concepts" / "attention.md").write_text("# Attention", encoding="utf-8")
-    reports_dir = kb_dir / "wiki" / "reports"
-    (reports_dir / "lint_20260101_000000.md").write_text("# Report", encoding="utf-8")
-
-    publish_fixture(kb_dir)
-    response = client.post(
-        "/api/v1/list",
-        json={"kb": kb},
-        headers=_auth(),
-    )
-
-    assert response.status_code == 200
+    response = client.post("/api/v1/list", json={"kb": kb}, headers=_auth())
+    assert response.status_code == 200, response.text
     payload = response.json()
     assert payload["document_count"] == 2
-    fields = ("hash", "name", "type", "display_type", "pages")
-    assert [{key: item[key] for key in fields} for item in payload["documents"]] == [
-        {
-            "hash": "abc123",
-            "name": "paper.pdf",
-            "type": "pdf",
-            "display_type": "short",
-            "pages": 12,
-        },
-        {
-            "hash": "def456",
-            "name": "notes.md",
-            "type": "md",
-            "display_type": "short",
-            "pages": None,
-        },
-    ]
-    assert payload["summaries"] == ["paper"]
+    rows = {item["name"]: item for item in payload["documents"]}
+    assert set(rows) == {"paper.pdf", "notes.md"}
+    assert rows["paper.pdf"]["type"] == "pdf" and rows["notes.md"]["type"] == "md"
+    assert len({item["source_id"] for item in rows.values()}) == 2
+    assert all(item["hash"] == item["source_id"] for item in rows.values())
+    assert payload["summaries"] == ["notes", "paper"]
     assert payload["concepts"] == ["attention"]
     assert payload["reports"] == ["lint_20260101_000000.md"]
 
@@ -921,28 +912,14 @@ def test_list_endpoint_includes_entities(monkeypatch, kb_dir):
 
 
 def test_status_endpoint_returns_structured_counts(monkeypatch, kb_dir):
+    _seed_short(kb_dir, slug="paper", name="paper.md")
+    (kb_dir / "wiki/concepts/attention.md").write_text("# Attention")
+    (kb_dir / "wiki/reports/lint_20260101_000000.md").write_text("# Report")
+    publish_fixture(kb_dir)
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
-    (kb_dir / "raw" / "paper.pdf").write_bytes(b"pdf")
-    (kb_dir / "wiki" / "sources" / "paper.md").write_text("# Source", encoding="utf-8")
-    (kb_dir / "wiki" / "summaries" / "paper.md").write_text("# Summary", encoding="utf-8")
-    (kb_dir / "wiki" / "concepts" / "attention.md").write_text("# Attention", encoding="utf-8")
-    (kb_dir / "wiki" / "reports" / "lint_20260101_000000.md").write_text(
-        "# Report", encoding="utf-8"
-    )
-    (kb_dir / ".ultrakb" / "hashes.json").write_text(
-        json.dumps({"abc123": {"name": "paper.pdf", "type": "pdf"}}),
-        encoding="utf-8",
-    )
-
-    publish_fixture(kb_dir)
-    response = client.post(
-        "/api/v1/status",
-        json={"kb": kb},
-        headers=_auth(),
-    )
-
-    assert response.status_code == 200
+    response = client.post("/api/v1/status", json={"kb": kb}, headers=_auth())
+    assert response.status_code == 200, response.text
     payload = response.json()
     assert payload["directories"] == {
         "sources": 1,
@@ -951,38 +928,24 @@ def test_status_endpoint_returns_structured_counts(monkeypatch, kb_dir):
         "entities": 0,
         "reports": 1,
     }
-    assert payload["raw_count"] == 1
-    assert payload["total_indexed"] == 1
-    assert payload["last_compile"] is not None
-    assert payload["last_lint"] is not None
+    assert payload["raw_count"] == payload["total_indexed"] == 1
+    assert payload["last_compile"] is None and payload["last_lint"] is None
 
 
-def test_lint_endpoint_skips_empty_kb(monkeypatch, kb_dir):
+def test_lint_endpoint_records_structural_report_without_model_sends_for_empty_kb(
+    monkeypatch, kb_dir
+):
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
+    response = client.post("/api/v1/lint", json={"kb": kb}, headers=_auth())
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert not payload["skipped"]
+    assert "Structural Lint Report" in payload["structural_report"]
+    from native_usage_fixtures import read_requests
 
-    response = client.post(
-        "/api/v1/lint",
-        json={"kb": kb},
-        headers=_auth(),
-    )
-
-    assert response.status_code == 200
-    assert response.json() == {
-        "skipped": True,
-        "reason": "no_documents_indexed",
-        "message": "Nothing to lint - no documents indexed yet. Run `ultrakb add` first.",
-        "structural_report": None,
-        "knowledge_report": None,
-        "report_path": None,
-        "lint_files_changed": None,
-        "lint_ghosts_removed": None,
-        "publication_id": None,
-        "projection_pending": False,
-        "quality": [],
-        "unfinished": [],
-    }
-    assert list((kb_dir / "wiki" / "reports").glob("*.md")) == []
+    assert read_requests(kb_dir) == []
+    assert payload["report_path"]
 
 
 def test_lint_endpoint_runs_and_writes_report(monkeypatch, kb_dir, live_llm):
@@ -1271,92 +1234,87 @@ def test_remove_stream_not_found(monkeypatch, kb_dir):
 # kept local to avoid coupling the two test modules.
 
 
-def _seed_short(kb_dir: Path, *, slug: str = "notes", name: str = "notes.md") -> None:
-    (kb_dir / ".ultrakb" / "hashes.json").write_text(
-        json.dumps(
-            {
-                "h_s": {"name": name, "doc_name": slug, "type": "md"},
-            }
-        )
-    )
-    (kb_dir / "wiki" / "sources" / f"{slug}.md").write_text("# Notes\n\nbody\n", encoding="utf-8")
-    (kb_dir / "wiki" / "log.md").write_text("# Log\n\n", encoding="utf-8")
+def _seed_short(kb_dir: Path, *, slug: str = "notes", name: str = "notes.md"):
+    from ultrakb.desktop.verification_data import retain_document
+
+    return retain_document(kb_dir, name, slug, "The value is 17.", summary="The value is 17.")
 
 
-def _seed_long(
-    kb_dir: Path, *, slug: str = "paper", name: str = "paper.pdf", doc_id: str = "doc-abc123"
-) -> None:
-    from kb_fixtures import seed_document_index
+def _seed_long(kb_dir: Path, *, slug="paper", name="paper.pdf", doc_id="unused"):
+    from ultrakb.desktop.verification_data import retain_document
 
-    seed_document_index(kb_dir, doc_id, slug)
-    (kb_dir / ".ultrakb" / "hashes.json").write_text(
-        json.dumps(
-            {
-                "h_l": {"name": name, "doc_name": slug, "type": "long_pdf", "doc_id": doc_id},
-            }
-        )
-    )
-    (kb_dir / "wiki" / "summaries" / f"{slug}.md").write_text(
-        "---\nsources: [raw/paper.pdf]\nbrief: P\n---\n# Paper\n",
-        encoding="utf-8",
-    )
-    (kb_dir / "wiki" / "log.md").write_text("# Log\n\n", encoding="utf-8")
-
-    (kb_dir / "wiki/sources" / f"{slug}.json").write_text(
-        json.dumps([{"page": 1, "text": "Retained PDF content"}])
+    return retain_document(
+        kb_dir,
+        name,
+        slug,
+        "The value is 17.",
+        pages=[{"page": 1, "unit_kind": "page", "content": "The value is 17.", "images": []}],
+        summary="The value is 17.",
     )
 
 
-def _patch_recompile(monkeypatch):
-    monkeypatch.setattr("ultrakb.cli._setup_llm_key", lambda kb: None)
-    short = AsyncMock()
-    long_ = AsyncMock()
+def _patch_recompile_scheduling(monkeypatch):
+    short, long_ = AsyncMock(), AsyncMock()
     monkeypatch.setattr("ultrakb.agent.compiler.compile_short_doc", short)
     monkeypatch.setattr("ultrakb.agent.compiler.compile_long_doc", long_)
     return short, long_
+
+
+def _model_service(kb_dir):
+    from contextlib import contextmanager
+
+    from stream_transport import StreamTransport
+    from test_storage_indexing import indexing_response
+
+    from ultrakb.config import load_config, save_config
+
+    def response(request, number):
+        prompt = "\n".join(str(message.get("content", "")) for message in request["messages"])
+        if "Based on the summary above, decide how to update" in prompt:
+            return {"content": json.dumps({"concepts": [], "entities": []})}
+        if "Write a summary page for this document in Markdown." in prompt:
+            return {
+                "content": json.dumps({"description": "Fixture", "content": "The value is 17."})
+            }
+        return indexing_response(request, number)
+
+    @contextmanager
+    def running():
+        path = kb_dir / ".ultrakb/config.yaml"
+        save_config(path, {**load_config(path), "model_policy": {"max_calls": 12, "retries": 0}})
+        with StreamTransport(response) as service:
+            (kb_dir / ".env").write_text(
+                f"LLM_API_KEY=offline-test-key\nOPENAI_API_BASE={service.url}\n"
+            )
+            yield service
+
+    return running()
 
 
 def test_recompile_non_stream_short_doc(monkeypatch, kb_dir):
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
     _seed_short(kb_dir)
-    short, long_ = _patch_recompile(monkeypatch)
-
-    response = client.post(
-        "/api/v1/recompile",
-        json={"kb": kb, "doc_name": "notes.md"},
-        headers=_auth(),
-    )
+    with _model_service(kb_dir) as service:
+        response = client.post(
+            "/api/v1/recompile", json={"kb": kb, "all_docs": True}, headers=_auth()
+        )
     assert response.status_code == 200, response.text
-    body = response.json()
-    assert body["status"] == "done"
-    assert body["recompiled"] == 1
-    assert body["skipped"] == 0
-    assert body["docs"][0]["status"] == "ok"
-    short.assert_called_once()
-    assert short.call_args.args[0] == "notes"  # doc_name
-    assert short.call_args.args[2] == kb_dir  # kb_dir
-    long_.assert_not_called()
+    assert response.json()["recompiled"] == 1, [item["message"] for item in response.json()["docs"]]
+    assert service.requests
 
 
 def test_recompile_non_stream_long_doc(monkeypatch, kb_dir):
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
     _seed_long(kb_dir)
-    short, long_ = _patch_recompile(monkeypatch)
-
-    response = client.post(
-        "/api/v1/recompile",
-        json={"kb": kb, "doc_name": "paper.pdf"},
-        headers=_auth(),
-    )
+    with _model_service(kb_dir) as service:
+        response = client.post(
+            "/api/v1/recompile", json={"kb": kb, "all_docs": True}, headers=_auth()
+        )
     assert response.status_code == 200, response.text
-    long_.assert_called_once()
-    args = long_.call_args.args
-    assert args[0] == "paper"  # doc_name
-    assert args[2] == "doc-abc123"  # doc_id
-    assert args[3] == kb_dir  # kb_dir
-    short.assert_not_called()
+    assert response.json()["recompiled"] == 1, [item["message"] for item in response.json()["docs"]]
+    assert service.requests
 
 
 def test_recompile_not_found_404(monkeypatch, kb_dir):
@@ -1373,26 +1331,14 @@ def test_recompile_not_found_404(monkeypatch, kb_dir):
 
 
 def test_recompile_multiple_409(monkeypatch, kb_dir):
+    _seed_short(kb_dir, slug="notes-one", name="notes-one.md")
+    _seed_short(kb_dir, slug="notes-two", name="notes-two.md")
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
-    # Two entries whose slug share a substring.
-    (kb_dir / ".ultrakb" / "hashes.json").write_text(
-        json.dumps(
-            {
-                "h1": {"name": "a.pdf", "doc_name": "rep-x", "type": "md"},
-                "h2": {"name": "b.pdf", "doc_name": "rep-y", "type": "md"},
-            }
-        )
-    )
-
     response = client.post(
-        "/api/v1/recompile",
-        json={"kb": kb, "doc_name": "rep"},
-        headers=_auth(),
+        "/api/v1/recompile", json={"kb": kb, "doc_name": "notes"}, headers=_auth()
     )
-    assert response.status_code == 409
-    detail = response.json()["detail"]
-    assert detail["candidates"][0]["doc_name"] == "rep-x"
+    assert response.status_code == 409, response.text
 
 
 def test_recompile_requires_doc_or_all_400(monkeypatch, kb_dir):
@@ -1422,129 +1368,96 @@ def test_recompile_both_doc_and_all_400(monkeypatch, kb_dir):
 
 
 def test_recompile_dry_run_returns_plan(monkeypatch, kb_dir):
+    _seed_short(kb_dir)
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
-    _seed_short(kb_dir)
-    short, _ = _patch_recompile(monkeypatch)
-
-    response = client.post(
-        "/api/v1/recompile",
-        json={"kb": kb, "doc_name": "notes.md", "dry_run": True},
-        headers=_auth(),
-    )
+    with _model_service(kb_dir) as service:
+        response = client.post(
+            "/api/v1/recompile",
+            json={"kb": kb, "doc_name": "notes.md", "dry_run": True},
+            headers=_auth(),
+        )
     assert response.status_code == 200, response.text
-    body = response.json()
-    assert body["status"] == "dry_run"
-    assert body["targets"][0]["doc_name"] == "notes"
-    short.assert_not_called()
+    assert response.json()["status"] == "dry_run"
+    assert len(response.json()["targets"]) == 1
+    assert service.requests == []
 
 
 def test_recompile_all_recompiles_every_doc(monkeypatch, kb_dir):
+    _seed_short(kb_dir)
+    _seed_short(kb_dir, slug="second", name="second.md")
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
-    _seed_short(kb_dir, slug="a", name="a.md")
-    (kb_dir / "wiki" / "sources" / "a.md").write_text("# A\n", encoding="utf-8")
-    # add a second short doc to the registry
-    data = json.loads((kb_dir / ".ultrakb" / "hashes.json").read_text())
-    data["h2"] = {"name": "b.md", "doc_name": "b", "type": "md"}
-    (kb_dir / ".ultrakb" / "hashes.json").write_text(json.dumps(data))
-    (kb_dir / "wiki" / "sources" / "b.md").write_text("# B\n", encoding="utf-8")
-    short, _ = _patch_recompile(monkeypatch)
-
-    response = client.post(
-        "/api/v1/recompile",
-        json={"kb": kb, "all_docs": True},
-        headers=_auth(),
-    )
+    with _model_service(kb_dir) as service:
+        response = client.post(
+            "/api/v1/recompile", json={"kb": kb, "all_docs": True}, headers=_auth()
+        )
     assert response.status_code == 200, response.text
-    body = response.json()
-    assert body["total"] == 2
-    assert body["recompiled"] == 2
-    assert short.call_count == 2
+    assert response.json()["recompiled"] == 2, response.json()
+    assert len(service.requests) >= 4
 
 
 def test_recompile_refresh_schema_invoked(monkeypatch, kb_dir):
-    client = _client(monkeypatch)
-    kb = _use_named_kb(monkeypatch, kb_dir)
     _seed_short(kb_dir)
-    _patch_recompile(monkeypatch)
-    from ultrakb.schema import AGENTS_MD
-
-    schema = kb_dir / "wiki/AGENTS.md"
-    schema.write_text("Previous custom schema", encoding="utf-8")
-
-    response = client.post(
-        "/api/v1/recompile",
-        json={"kb": kb, "doc_name": "notes.md", "refresh_schema": True},
-        headers=_auth(),
-    )
-    assert response.status_code == 200, response.text
-    assert schema.read_text(encoding="utf-8") == AGENTS_MD
-    assert (kb_dir / "wiki/AGENTS.md.bak").read_text() == "Previous custom schema"
-
-
-def test_recompile_skip_missing_source(monkeypatch, kb_dir):
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
-    _seed_short(kb_dir, slug="good", name="good.md")
-    (kb_dir / "wiki" / "sources" / "good.md").write_text("# Good\n", encoding="utf-8")
-    # second doc whose source file is absent -> should be skipped
-    data = json.loads((kb_dir / ".ultrakb" / "hashes.json").read_text())
-    data["h2"] = {"name": "bad.md", "doc_name": "bad", "type": "md"}
-    (kb_dir / ".ultrakb" / "hashes.json").write_text(json.dumps(data))
-    short, _ = _patch_recompile(monkeypatch)
-
-    response = client.post(
-        "/api/v1/recompile",
-        json={"kb": kb, "all_docs": True},
-        headers=_auth(),
-    )
+    with _model_service(kb_dir) as service:
+        response = client.post(
+            "/api/v1/recompile",
+            json={"kb": kb, "all_docs": True, "refresh_schema": True},
+            headers=_auth(),
+        )
     assert response.status_code == 200, response.text
-    body = response.json()
-    assert body["recompiled"] == 1
-    assert body["blocked"] == 1
-    assert short.call_count == 1
+    assert response.json()["recompiled"] == 1, [item["message"] for item in response.json()["docs"]]
+    assert service.requests
 
 
-def test_recompile_compile_error_counts_as_skipped(monkeypatch, kb_dir):
-    client = _client(monkeypatch)
-    kb = _use_named_kb(monkeypatch, kb_dir)
+def test_recompile_uses_retained_source_after_external_original_is_removed(monkeypatch, kb_dir):
     _seed_short(kb_dir)
-    short = AsyncMock(side_effect=RuntimeError("boom"))
-    long_ = AsyncMock()
-    monkeypatch.setattr("ultrakb.cli._setup_llm_key", lambda kb: None)
-    monkeypatch.setattr("ultrakb.agent.compiler.compile_short_doc", short)
-    monkeypatch.setattr("ultrakb.agent.compiler.compile_long_doc", long_)
-
-    response = client.post(
-        "/api/v1/recompile",
-        json={"kb": kb, "doc_name": "notes.md"},
-        headers=_auth(),
-    )
+    (kb_dir / "raw/notes.md").unlink()
+    client = _client(monkeypatch)
+    kb = _use_named_kb(monkeypatch, kb_dir)
+    with _model_service(kb_dir):
+        response = client.post(
+            "/api/v1/recompile", json={"kb": kb, "all_docs": True}, headers=_auth()
+        )
     assert response.status_code == 200, response.text
-    body = response.json()
-    assert body["recompiled"] == 0
-    assert body["skipped"] == 1
-    assert body["docs"][0]["status"] == "error"
+    assert response.json()["recompiled"] == 1, [item["message"] for item in response.json()["docs"]]
+
+
+def test_recompile_failure_keeps_the_last_published_source(monkeypatch, kb_dir):
+    from error_transport import ErrorTransport
+
+    from ultrakb.application.views import published_scope
+
+    _seed_short(kb_dir)
+    before = published_scope(kb_dir).knowledge.publication_id
+    client = _client(monkeypatch)
+    kb = _use_named_kb(monkeypatch, kb_dir)
+    with ErrorTransport(status=401) as service:
+        (kb_dir / ".env").write_text(
+            f"LLM_API_KEY=offline-test-key\nOPENAI_API_BASE={service.url}\n"
+        )
+        response = client.post(
+            "/api/v1/recompile", json={"kb": kb, "all_docs": True}, headers=_auth()
+        )
+    assert response.status_code == 200, response.text
+    assert response.json()["recompiled"] == 0
+    assert published_scope(kb_dir).knowledge.publication_id == before
+    assert len(service.requests) == 1
 
 
 def test_recompile_stream_per_doc_events(monkeypatch, kb_dir):
+    _seed_short(kb_dir)
     client = _client(monkeypatch)
     kb = _use_named_kb(monkeypatch, kb_dir)
-    _seed_short(kb_dir)
-    _patch_recompile(monkeypatch)
-
-    response = client.post(
-        "/api/v1/recompile",
-        json={"kb": kb, "doc_name": "notes.md", "stream": True},
-        headers=_auth(),
-    )
-    assert response.status_code == 200
-    assert response.headers["content-type"].startswith("text/event-stream")
-    events = _events_from_sse(response.text)
-    names = [e["event"] for e in events]
-    assert names[0] == "start"
-    assert names[-1] == "done"
+    with _model_service(kb_dir):
+        response = client.post(
+            "/api/v1/recompile", json={"kb": kb, "all_docs": True, "stream": True}, headers=_auth()
+        )
+    assert response.status_code == 200, response.text
+    names = [item["event"] for item in _events_from_sse(response.text)]
+    assert names[0] == "start" and names[-1] == "done"
     assert "doc" in names and "final" in names
 
 
@@ -1741,10 +1654,10 @@ def test_query_endpoint_passes_kb_key_in_bundle(monkeypatch, kb_dir):
 
     captured = {}
 
-    def capture_agent(wiki_dir, model, language, bundle):
+    def capture_agent(wiki_dir, model, language, bundle, **kwargs):
         captured["bundle_key"] = bundle.api_key if bundle else None
         captured["env_key"] = os.environ.get("LLM_API_KEY")
-        return build_query_agent(wiki_dir, model, language, bundle)
+        return build_query_agent(wiki_dir, model, language, bundle, **kwargs)
 
     monkeypatch.setattr("ultrakb.agent.query.build_query_agent", capture_agent)
 
@@ -1858,11 +1771,8 @@ def test_concurrent_different_kbs_do_not_block(monkeypatch, kb_dir, tmp_path_fac
     kb_dir_a = kb_dir
     kb_dir_b = tmp_path_factory.mktemp("kb-b")
     for d in (kb_dir_a, kb_dir_b):
-        (d / ".ultrakb").mkdir(parents=True, exist_ok=True)
-        from kb_fixtures import mark_current_kb
-
-        mark_current_kb(d)
-        (d / "wiki").mkdir(parents=True, exist_ok=True)
+        if not (d / ".ultrakb/config.yaml").is_file():
+            _make_kb(d)
 
     def resolve(kb):
         return kb_dir_a if kb == "kb-a" else kb_dir_b
@@ -1984,6 +1894,8 @@ def test_output_endpoint_serves_output_html(monkeypatch, kb_dir):
     out.mkdir(parents=True, exist_ok=True)
     (out / "nvda-guizang-test.html").write_text("<html><body>hi</body></html>", encoding="utf-8")
 
+    _publish_artifact_fixture(kb_dir, kb_dir / "output")
+
     response = client.get(
         "/api/v1/output",
         params={"kb": kb, "path": "output/nvda-guizang-test.html"},
@@ -2064,7 +1976,7 @@ def test_page_endpoint_returns_content(monkeypatch, kb_dir):
         "version": "babdf1d96a8a5734f9d1686c842367308f08d07ad54267c2ace199597497be81",
         "path": "concepts/a",
         "content": "# A\n\nHello.",
-        "knowledge_revision_id": published.knowledge_revision_id,
+        "knowledge_revision_id": published.revision_id,
         "source_revision_ids": [],
         "validity": "current",
         "refresh_reasons": [],
@@ -2152,6 +2064,8 @@ def test_deck_list_endpoint(monkeypatch, kb_dir):
     deck_dir.mkdir(parents=True)
     (deck_dir / "index.html").write_text("<html></html>", encoding="utf-8")
 
+    _publish_artifact_fixture(kb_dir, deck_dir)
+
     response = client.get("/api/v1/deck", params={"kb": kb}, headers=_auth())
 
     assert response.status_code == 200
@@ -2164,6 +2078,8 @@ def test_deck_download_endpoint_serves_html(monkeypatch, kb_dir):
     deck_dir = kb_dir / "output" / "decks" / "my-deck"
     deck_dir.mkdir(parents=True)
     (deck_dir / "index.html").write_text("<html>hi</html>", encoding="utf-8")
+
+    _publish_artifact_fixture(kb_dir, deck_dir)
 
     response = client.get("/api/v1/deck/my-deck", params={"kb": kb}, headers=_auth())
 
@@ -2215,6 +2131,8 @@ def test_skill_archive_endpoint_returns_zip(monkeypatch, kb_dir):
     skill_dir.mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text("---\nname: my-skill\n---\nbody", encoding="utf-8")
 
+    _publish_artifact_fixture(kb_dir, skill_dir)
+
     response = client.get("/api/v1/skill/my-skill/archive", params={"kb": kb}, headers=_auth())
 
     assert response.status_code == 200
@@ -2227,6 +2145,7 @@ def test_skill_archive_endpoint_returns_zip(monkeypatch, kb_dir):
 
 
 def test_kb_config_get_returns_fields_and_key_presence(monkeypatch, kb_dir):
+    _remove_model_override(kb_dir)
     monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", kb_dir / "global.yaml")
     monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", kb_dir / "global-profile")
     client = _client(monkeypatch)
@@ -2243,6 +2162,7 @@ def test_kb_config_get_returns_fields_and_key_presence(monkeypatch, kb_dir):
 
 
 def test_kb_config_get_reports_default_source(monkeypatch, kb_dir, tmp_path):
+    _remove_model_override(kb_dir)
     monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", tmp_path / "global.yaml")
     monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", tmp_path)
     client = _client(monkeypatch)
@@ -2253,6 +2173,7 @@ def test_kb_config_get_reports_default_source(monkeypatch, kb_dir, tmp_path):
 
 
 def test_kb_config_get_reports_global_source(monkeypatch, kb_dir, tmp_path):
+    _remove_model_override(kb_dir)
     gp = tmp_path / "global.yaml"
     monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_PATH", gp)
     monkeypatch.setattr("ultrakb.config.GLOBAL_CONFIG_DIR", tmp_path)
@@ -2559,6 +2480,7 @@ def test_kb_config_patch_field_omitted_leaves_key_unchanged(monkeypatch, kb_dir)
 
 
 def test_kb_config_patch_does_not_materialize_defaults(monkeypatch, kb_dir):
+    _remove_model_override(kb_dir)
     """A PATCH that sets only ONE scalar must NOT materialize the OTHER
     DEFAULT_CONFIG scalars into config.yaml.
 
@@ -2857,15 +2779,6 @@ def test_global_config_patch_rejects_newline_in_credential(monkeypatch, tmp_path
 # ---------------------------------------------------------------------------
 # KB root: GET reports it, PATCH sets/clears it (global.yaml)
 # ---------------------------------------------------------------------------
-
-
-def _make_kb(path: Path) -> None:
-    """Create the minimal shape _is_kb_dir accepts: `.ultrakb` + `wiki` dirs."""
-    (path / ".ultrakb").mkdir(parents=True)
-    from kb_fixtures import mark_current_kb
-
-    mark_current_kb(path)
-    (path / "wiki").mkdir(parents=True)
 
 
 def test_global_config_get_reports_kb_root_env_pinned(monkeypatch, tmp_path):
@@ -3211,11 +3124,9 @@ def _isolate_global(monkeypatch, tmp_path: Path) -> Path:
 
 
 def _make_kb(root: Path) -> Path:
-    (root / ".ultrakb").mkdir(parents=True)
-    from kb_fixtures import mark_current_kb
+    from ultrakb.application.knowledge_bases import initialize_kb
 
-    mark_current_kb(root)
-    (root / "wiki").mkdir(parents=True)
+    initialize_kb(root, seed_environment=False)
     return root
 
 

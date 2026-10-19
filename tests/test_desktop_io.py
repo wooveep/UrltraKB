@@ -55,13 +55,12 @@ def test_snapshot_io_reads_published_knowledge_while_writer_holds_lease(kb_dir):
     from ultrakb.application.pages import read_page
     from ultrakb.application.views import published_scope
     from ultrakb.desktop.io import LocalIO
+    from ultrakb.desktop.verification_data import publish_pages
     from ultrakb.locks import atomic_write_text, kb_ingest_lock
-    from ultrakb.published_knowledge import initialize_publication
 
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     atomic_write_text(kb_dir / "wiki/concepts/first.md", "Published body")
-    with kb_ingest_lock(kb_dir / ".ultrakb"):
-        initialize_publication(kb_dir)
+    publish_pages(kb_dir, {"concepts/first.md": b"Published body"})
     io = LocalIO()
     entered, release = threading.Event(), threading.Event()
     result = []
@@ -99,17 +98,10 @@ def test_workbench_opens_public_wiki_before_writer_dependent_loads(kb_dir):
     import sys
     from pathlib import Path
 
-    from ultrakb.locks import atomic_write_text, kb_ingest_lock
-    from ultrakb.published_knowledge import initialize_publication
-    from ultrakb.state import HashRegistry
+    from ultrakb.desktop.verification_data import publish_pages, retain_document
 
-    atomic_write_text(kb_dir / "wiki/concepts/first.md", "Published body")
-    atomic_write_text(kb_dir / "wiki/sources/original.md", "Frozen original source")
-    HashRegistry(kb_dir / ".ultrakb/hashes.json").add(
-        "reader-source", {"name": "original.md", "doc_name": "original", "type": "md"}
-    )
-    with kb_ingest_lock(kb_dir / ".ultrakb"):
-        initialize_publication(kb_dir)
+    retain_document(kb_dir, "original.md", "original", "Frozen original source")
+    publish_pages(kb_dir, {"concepts/first.md": b"Published body"})
     result = subprocess.run(
         [
             sys.executable,

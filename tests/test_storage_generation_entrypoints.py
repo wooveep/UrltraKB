@@ -43,7 +43,7 @@ def test_generator_returns_accepted_facts_through_projection_and_publication_fai
                 "BEGIN SELECT RAISE(ABORT, 'publication interrupted'); END"
             )
     monkeypatch.setattr(api, "_resolve_kb", lambda *args: root)
-    monkeypatch.setattr(views, "view_scope", lambda *args: scope)
+    monkeypatch.setattr(views, "view_scope", lambda *args, **kwargs: scope)
     monkeypatch.delenv("ULTRAKB_API_TOKEN", raising=False)
     responses = [
         tool_response("write_file", {"path": target, "content": GOOD_DECK}, "deck"),
@@ -58,7 +58,7 @@ def test_generator_returns_accepted_facts_through_projection_and_publication_fai
             import ultrakb.cli as cli
 
             monkeypatch.setattr(cli, "_find_kb_dir", lambda *args: root)
-            monkeypatch.setattr(cli, "_selected_scope", lambda *args: scope)
+            monkeypatch.setattr(cli, "_selected_scope", lambda *args, **kwargs: scope)
             result = CliRunner().invoke(
                 cli.cli, ["deck", "new", "value", "Present value.", "--json"]
             )
@@ -147,7 +147,7 @@ def test_cli_keeps_deck_validation_exit_status_with_json_and_pending_projection(
     root, identity = deck_knowledge(tmp_path)
     scope = storage_scope(root, identity)
     monkeypatch.setattr(cli, "_find_kb_dir", lambda *args: root)
-    monkeypatch.setattr(cli, "_selected_scope", lambda *args: scope)
+    monkeypatch.setattr(cli, "_selected_scope", lambda *args, **kwargs: scope)
 
     def unavailable(*args, **kwargs):
         raise OSError("Projection unavailable")
@@ -190,7 +190,11 @@ def test_unavailable_main_scope_is_a_streamed_error_before_any_model_work(tmp_pa
     stale = replace(identity, generation="0" * 32)
     monkeypatch.setattr(api, "_resolve_kb", lambda *args: root)
     monkeypatch.setattr(
-        views, "view_scope", lambda root, view_id: storage_scope(root, stale, view_id=view_id)
+        views,
+        "view_scope",
+        lambda root, view_id, **kwargs: storage_scope(
+            root, stale, view_id=view_id, cancelled=kwargs.get("cancelled")
+        ),
     )
     monkeypatch.delenv("ULTRAKB_API_TOKEN", raising=False)
     with TestClient(api.create_app()) as client:
@@ -227,7 +231,7 @@ def _execute_native(root, scenario):
         raise OSError("Projection unavailable")
 
     with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(views, "view_scope", lambda *args: scope)
+        patch.setattr(views, "view_scope", lambda *args, **kwargs: scope)
         if scenario == "pending":
             patch.setattr(ArtifactStore, "sync", unavailable)
             patch.setattr(ProjectionStore, "sync", unavailable)

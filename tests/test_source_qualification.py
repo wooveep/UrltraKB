@@ -27,6 +27,9 @@ def freeze_source(kb_dir, tmp_path, extension, text):
     source = kb_dir / "wiki/sources/manual.md"
     atomic_write_text(source, frozen.text)
     atomic_write_text(source.with_suffix(".content.json"), frozen.model_dump_json())
+    from reading_fixtures import publish_text_original
+
+    publish_text_original(kb_dir, path, source, source.with_suffix(".content.json"))
     return source, frozen
 
 
@@ -61,6 +64,11 @@ async def test_heading_roles_agree_in_new_index_and_public_continuation(
 ):
     source, frozen = freeze_source(kb_dir, tmp_path, extension, text)
     package = freeze_block_package(source, "manual")
+    from reading_fixtures import publish_text_original
+
+    publish_text_original(
+        kb_dir, tmp_path / f"input.{extension}", source, source.with_suffix(".content.json")
+    )
     parsed = FrozenBlockParser().parse(str(package), images_dir=str(tmp_path / "index/images"))
     assert [h["title"] for node in parsed.nodes for h in node.metadata["headings"]] == titles
     policy = BlockPolicy(parsed.metadata)
@@ -467,6 +475,11 @@ async def test_sparse_blocks_cannot_extend_table_header_scope(kb_dir, tmp_path):
     text = table + "\n\nOUTSIDE is ordinary prose.\n" + "z" * 2400 + "\n"
     source, _ = freeze_source(kb_dir, tmp_path, "md", text)
     freeze_block_package(source, "manual")
+    from reading_fixtures import publish_text_original
+
+    publish_text_original(
+        kb_dir, tmp_path / "input.md", source, source.with_suffix(".content.json")
+    )
     raw = json.loads(source.with_suffix(".content.json").read_text())
     outside = text.index("OUTSIDE")
     ordinal = next(
@@ -507,6 +520,11 @@ def test_omitted_heading_resets_the_selected_ancestor_path(kb_dir, tmp_path):
     text = "# First\n\n" + "a" * 4500 + "\n\n# Second\n\n" + "b" * 2500 + "\n\nOUTSIDE.\n"
     source, _ = freeze_source(kb_dir, tmp_path, "md", text)
     freeze_block_package(source, "manual")
+    from reading_fixtures import publish_text_original
+
+    publish_text_original(
+        kb_dir, tmp_path / "input.md", source, source.with_suffix(".content.json")
+    )
     raw = json.loads(source.with_suffix(".content.json").read_text())
     last = raw["blocks"][-1]["ordinal"]
     selected = read_block_selection(raw, f"1,{last}")
@@ -557,13 +575,13 @@ def test_generated_csv_header_requires_its_native_mapping(kb_dir, tmp_path):
 
 
 def test_legacy_string_source_keeps_literal_tables_unqualified(kb_dir, model_service):
+    from native_catalog_fixtures import knowledge_forest
     from test_answer_evidence_regression import selection
     from test_llm_execution import executor_for
 
     from ultrakb.agent.compiler import short_document_messages
     from ultrakb.agent.source_windows import CompileSourceWindows
     from ultrakb.context.knowledge import KnowledgeRetrieval
-    from ultrakb.context.projection import knowledge_forest
 
     text = "# shell comment\n\n<table><tr><td>literal example</td></tr></table>\n"
     path = kb_dir / "wiki/sources/legacy.md"
@@ -605,6 +623,11 @@ async def test_escaped_pipe_cell_html_preserves_native_roles(kb_dir, tmp_path, t
     )
     source, frozen = freeze_source(kb_dir, tmp_path, "md", text)
     package = freeze_block_package(source, "manual")
+    from reading_fixtures import publish_text_original
+
+    publish_text_original(
+        kb_dir, tmp_path / "input.md", source, source.with_suffix(".content.json")
+    )
     parsed = FrozenBlockParser().parse(str(package), images_dir=str(tmp_path / "index/images"))
     assert [h["title"] for node in parsed.nodes for h in node.metadata["headings"]] == [
         "Native heading"

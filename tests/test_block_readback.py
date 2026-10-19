@@ -27,7 +27,12 @@ def test_short_text_can_use_blocks_and_recompile_its_retained_original(
     source.write_bytes(b"hello world\r\n")
     result = import_document(kb_dir, source)
     assert result.status == "added", result.message
-    saved = read_document_source(kb_dir, result.source_id, blocks="1")
+    saved = read_document_source(
+        kb_dir,
+        result.source_id,
+        blocks="1",
+        unit_revision_id=getattr(result, "unit_revision_id", None),
+    )
     assert saved["content"] == "hello world\r\n" and saved["pages"] is None
     assert saved["block_count"] == 1 and saved["length_class"] == "short"
     assert saved["execution_mode"] == "segmented"
@@ -52,7 +57,12 @@ def test_short_text_can_use_blocks_and_recompile_its_retained_original(
         recompile_document(kb_dir, selection.targets[0].file_hash, version=selection.version)
     )
     assert recompiled.status == "compiled", recompiled.message
-    again = read_document_source(kb_dir, result.source_id, blocks="1")
+    again = read_document_source(
+        kb_dir,
+        result.source_id,
+        blocks="1",
+        unit_revision_id=getattr(result, "unit_revision_id", None),
+    )
     assert again["content"] == saved["content"]
     assert again["processing"] == saved["processing"]
 
@@ -89,7 +99,9 @@ def test_block_package_recovers_full_tree_ranges_and_assets_without_external_inp
     (tmp_path / "kept.png").write_bytes(picture)
     result = import_document(kb_dir, source)
     assert result.status == "added", result.message
-    saved = read_document_source(kb_dir, result.source_id)
+    saved = read_document_source(
+        kb_dir, result.source_id, unit_revision_id=getattr(result, "unit_revision_id", None)
+    )
     package = kb_dir / saved["base_path"] / "portable.okbi"
     store = tmp_path / "index"
     with ConDBPageIndexStorage(IndexLocation.package(store)) as database:
@@ -158,8 +170,16 @@ def test_structural_blocks_cover_code_tables_and_unicode_without_adding_display_
     source = Path(__file__).parent / "fixtures/content-blocks.md"
     original = source.read_bytes().decode("utf-8")
     result = processing_only(source)
-    saved = read_document_source(kb_dir, result.source_id)
+    saved = read_document_source(
+        kb_dir, result.source_id, unit_revision_id=getattr(result, "unit_revision_id", None)
+    )
     assert saved["content"] == original and saved["block_count"] > 2
+    saved = read_document_source(
+        kb_dir,
+        result.source_id,
+        blocks=f"1-{saved['block_count']}",
+        unit_revision_id=result.unit_revision_id,
+    )
     cursor = 0
     supplements = set()
     for unit in saved["units"]:
@@ -171,7 +191,12 @@ def test_structural_blocks_cover_code_tables_and_unicode_without_adding_display_
         cursor = end
     assert cursor == len(original)
     assert supplements == {"heading_path", "fence_open", "fence_close", "table_header"}
-    last = read_document_source(kb_dir, result.source_id, blocks=str(saved["block_count"]))
+    last = read_document_source(
+        kb_dir,
+        result.source_id,
+        blocks=str(saved["block_count"]),
+        unit_revision_id=getattr(result, "unit_revision_id", None),
+    )
     assert last["content"] == saved["units"][-1]["content"]
 
 
@@ -279,7 +304,12 @@ def test_unicode_line_separator_does_not_move_markdown_heading_coordinates(
     path = tmp_path / "unicode.md"
     path.write_text("hello\u2028world\n# 正文\n内容\n", encoding="utf-8")
     result = processing_only(path)
-    saved = read_document_source(kb_dir, result.source_id, blocks="1")
+    saved = read_document_source(
+        kb_dir,
+        result.source_id,
+        blocks="1",
+        unit_revision_id=getattr(result, "unit_revision_id", None),
+    )
     heading = saved["units"][0]["headings"][0]
     assert heading["title"] == "正文" and heading["source_span"] == [12, 17]
 
@@ -308,8 +338,16 @@ def test_nested_structures_keep_display_context_when_their_original_spans_split(
     path = tmp_path / "nested.md"
     path.write_text(original, encoding="utf-8")
     result = processing_only(path)
-    saved = read_document_source(kb_dir, result.source_id)
+    saved = read_document_source(
+        kb_dir, result.source_id, unit_revision_id=getattr(result, "unit_revision_id", None)
+    )
     assert saved["content"] == original
+    saved = read_document_source(
+        kb_dir,
+        result.source_id,
+        blocks=f"1-{saved['block_count']}",
+        unit_revision_id=result.unit_revision_id,
+    )
     assert any(
         item["kind"] == context for unit in saved["units"] for item in unit["display_context"]
     )

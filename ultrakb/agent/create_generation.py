@@ -80,9 +80,21 @@ class PageCreation:
         from ultrakb.llm_execution import active_executor
 
         check_model_stop()
+        retained = {
+            batch.key: retained_link_response(
+                self.checkpoints,
+                batch.key,
+                batch.signature,
+                stage=self.stage(number),
+                registry=batch.links,
+            )
+            for number, batch in enumerate(self.batches, 1)
+            if batch.accepted is None
+        }
+        missing = sum(value is None for value in retained.values())
         if executor := active_executor():
             executor.budget.require(
-                "compile", self.missing + min(self.missing, executor.policy.compile_repair_calls)
+                "compile", missing + min(missing, executor.policy.compile_repair_calls)
             )
         values = []
         index = 0
@@ -96,10 +108,11 @@ class PageCreation:
             check_model_stop()
             value = batch.accepted
             if value is None:
-                if self.checkpoints:
+                initial_response = retained.get(batch.key)
+                if self.checkpoints and initial_response is None:
                     self.checkpoints.require_generation(batch.key, batch.signature)
                 stage = self.stage(i)
-                if self.checkpoints:
+                if self.checkpoints and initial_response is None:
                     self.checkpoints.claim_generation(
                         batch.key, batch.signature, stage=f"compile.{stage}"
                     )
@@ -120,13 +133,7 @@ class PageCreation:
                         request_fits=lambda messages, options: request_admitted(
                             self.fits, messages, options
                         ),
-                        initial_response=retained_link_response(
-                            self.checkpoints,
-                            batch.key,
-                            batch.signature,
-                            stage=stage,
-                            registry=batch.links,
-                        ),
+                        initial_response=initial_response,
                     )
                 except PageResponseError as error:
                     if error.code not in _SPLITTABLE_ERRORS or self.splitter is None:

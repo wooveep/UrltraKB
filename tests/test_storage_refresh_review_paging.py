@@ -72,7 +72,7 @@ def test_refresh_review_tail_is_accessible_through_shared_cli_http_and_qt_io(tmp
     import ultrakb.cli as cli
 
     monkeypatch.setattr(cli, "_find_kb_dir", lambda *args: root)
-    monkeypatch.setattr(cli, "_selected_scope", lambda *args: scope)
+    monkeypatch.setattr(cli, "_selected_scope", lambda *args, **kwargs: scope)
     shown = CliRunner().invoke(cli.cli, ["refresh", "proposals"])
     assert shown.exit_code == 0, shown.output
     assert json.loads(shown.output)["next_after"] == first.next_after
@@ -87,7 +87,7 @@ def test_refresh_review_tail_is_accessible_through_shared_cli_http_and_qt_io(tmp
 
     monkeypatch.delenv("ULTRAKB_API_TOKEN", raising=False)
     monkeypatch.setattr(refresh, "_resolve_kb", lambda *args: root)
-    monkeypatch.setattr(views, "view_scope", lambda *args: scope)
+    monkeypatch.setattr(views, "view_scope", lambda *args, **kwargs: scope)
     with TestClient(create_app()) as client:
         response = client.get("/api/v1/refresh/proposals", params={"kb": str(root)})
         assert response.status_code == 200 and len(response.json()) == 63, response.text
@@ -222,7 +222,7 @@ async def test_http_review_cancellation_joins_the_storage_reader_waiting_on_recl
 
     monkeypatch.delenv("ULTRAKB_API_TOKEN", raising=False)
     monkeypatch.setattr(refresh, "_resolve_kb", lambda *args: root)
-    monkeypatch.setattr(views, "view_scope", lambda *args: scope)
+    monkeypatch.setattr(views, "view_scope", lambda *args, **kwargs: scope)
     monkeypatch.setattr(coordination, "storage_stage", observed)
     monkeypatch.setattr("ultrakb.storage.refresh_store.storage_stage", observed)
     with coordination.try_reclamation(root, identity) as db:

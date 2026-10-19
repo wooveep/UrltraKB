@@ -26,6 +26,24 @@ def _json(value, *, bounded=False):
     return encoded
 
 
+def _work_identity(object_id, conditions):
+    if not isinstance(object_id, dict) or not isinstance(conditions, dict):
+        raise ValueError("Compile work requires explicit object and policy records")
+    object_json, conditions_json = (
+        _json(object_id, bounded=True),
+        _json(conditions, bounded=True),
+    )
+    # Their combined metadata is one write unit, so bound it together as well.
+    if len(object_json.encode()) + len(conditions_json.encode()) > 64 * 1024:
+        raise ValueError("Compile work metadata exceeds the storage item limit")
+    return (
+        object_json,
+        conditions_json,
+        hashlib.sha256(object_json.encode()).hexdigest(),
+        hashlib.sha256(conditions_json.encode()).hexdigest(),
+    )
+
+
 class CompileCheckpointStore:
     def __init__(self, root: Path, identity: DatabaseIdentity):
         self.root, self.identity = root.resolve(), identity
@@ -34,17 +52,9 @@ class CompileCheckpointStore:
         self, model_budget_id: str, *, object_id: dict, conditions: dict, execution_id: str
     ):
         TypeAdapter(RecordId).validate_python(model_budget_id)
-        if not isinstance(object_id, dict) or not isinstance(conditions, dict):
-            raise ValueError("Compile work requires explicit object and policy records")
-        object_json, conditions_json = (
-            _json(object_id, bounded=True),
-            _json(conditions, bounded=True),
+        object_json, conditions_json, object_digest, conditions_digest = _work_identity(
+            object_id, conditions
         )
-        # Their combined metadata is one write unit, so bound it together as well.
-        if len(object_json.encode()) + len(conditions_json.encode()) > 64 * 1024:
-            raise ValueError("Compile work metadata exceeds the storage item limit")
-        object_digest = hashlib.sha256(object_json.encode()).hexdigest()
-        conditions_digest = hashlib.sha256(conditions_json.encode()).hexdigest()
         with storage_stage(self.root, self.identity) as db, db.transaction() as connection:
             require_active_execution(connection, self.identity, execution_id)
             if connection.execute(
@@ -74,6 +84,34 @@ class CompileCheckpointStore:
         return CompileWork(
             self.root, self.identity, row[0], model_budget_id, object_digest, execution_id
         )
+
+    def find_work(self, model_budget_id, *, object_id, conditions, execution_id):
+        """Read an exact work identity without opening a new execution or creating work."""
+        TypeAdapter(RecordId).validate_python(model_budget_id)
+        TypeAdapter(RecordId).validate_python(execution_id)
+        object_json, conditions_json, object_digest, conditions_digest = _work_identity(
+            object_id, conditions
+        )
+        with storage_stage(self.root, self.identity, read_only=True) as db:
+            row = db.connection.execute(
+                "SELECT work_id, object_json, conditions_json FROM ukb_compile_work "
+                "WHERE model_budget_id = ? AND object_digest = ? AND conditions_digest = ?",
+                (model_budget_id, object_digest, conditions_digest),
+            ).fetchone()
+            if row is None:
+                return None
+            if row[1:] != (object_json, conditions_json):
+                raise ValueError("Compile work metadata failed its content identity")
+            if db.connection.execute(
+                "SELECT model_budget_id FROM ukb_executions WHERE execution_id = ?",
+                (execution_id,),
+            ).fetchone() != (model_budget_id,):
+                raise ValueError("Compile work belongs to another model budget")
+            # A restored generation may read accepted historical inputs. Mutations
+            # still require a new current-generation execution through _active.
+            return CompileWork(
+                self.root, self.identity, row[0], model_budget_id, object_digest, execution_id
+            )
 
 
 class CompileWork:
@@ -295,7 +333,8 @@ class CompileWork:
     def require_generation(self, key, request_digest):
         with storage_stage(self.root, self.identity, read_only=True) as db:
             self._require_current_target(db.connection)
-            if self._record(db, key, request_digest).get("repair_used"):
+            record = self._record(db, key, request_digest)
+            if record.get("repair_used") and not record.get("summary_recovery_authorized"):
                 raise PageResponseError(
                     "compile_repair_exhausted", "The retained response repair was already consumed"
                 )
@@ -322,11 +361,17 @@ class CompileWork:
 
         with storage_stage(self.root, self.identity) as db:
             previous, record = self._record_snapshot(db, key, request_digest)
-            if record.get("repair_used"):
+            if record.get("repair_used") and not record.get("summary_recovery_authorized"):
                 raise PageResponseError(
                     "compile_repair_exhausted", "The retained response repair was already consumed"
                 )
             invocation = uuid4().hex
+            if record.get("summary_recovery_authorized"):
+                record = {
+                    **record,
+                    "summary_recovery_authorized": False,
+                    "summary_recovery_used": True,
+                }
             encoded = _json({**record, "latest_invocation": invocation}, bounded=True)
             with db.transaction() as connection:
                 self._active(connection)

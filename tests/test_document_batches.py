@@ -38,9 +38,10 @@ def test_native_checkbox_identity_and_shortcut_boundaries(tmp_path):
 def test_review_rejects_changed_knowledge_and_removed_target(kb_dir):
     from publication_fixtures import publish_document
 
+    from ultrakb.application.removal import remove_document
     from ultrakb.config import LlmCredentialBundle
+    from ultrakb.desktop.verification_data import publish_pages
     from ultrakb.locks import atomic_write_text, kb_ingest_lock
-    from ultrakb.state import HashRegistry
 
     path = kb_dir / "raw/manual.md"
     with kb_ingest_lock(kb_dir / ".ultrakb"):
@@ -49,23 +50,19 @@ def test_review_rejects_changed_knowledge_and_removed_target(kb_dir):
         kb_dir, path, "Saved summary", bundle=LlmCredentialBundle(api_key="unused-fixture")
     )
     [row] = document_inventory(kb_dir)
-    missing = DocumentIdentity("legacy", "f" * 64)
+    missing = DocumentIdentity("source", "f" * 32)
     preview = preview_document_batch(kb_dir, (row.identity, row.identity, missing))
     assert preview.selected == tuple(sorted({row.identity, missing}))
     assert preview.approved == (row.identity,) and len(preview.skipped) == 1
     assert validate_document_batch(preview) == preview
-    with kb_ingest_lock(kb_dir / ".ultrakb"):
-        atomic_write_text(kb_dir / "wiki/concepts/new.md", "Changed while confirming")
+    publish_pages(kb_dir, {"concepts/new.md": b"Changed while confirming"})
     with pytest.raises(DocumentBatchChanged):
         validate_document_batch(preview)
     with pytest.raises(ValueError, match="typed"):
         preview_document_batch(kb_dir, (row.identity.value,))
-    # Even an unusual legacy key cannot be mistaken for the new Source ID.
-    with kb_ingest_lock(kb_dir / ".ultrakb"):
-        HashRegistry(kb_dir / ".ultrakb/hashes.json").add(
-            row.identity.value, {"name": "collision.md", "type": "md"}
-        )
-    collision = preview_document_batch(
-        kb_dir, (row.identity, DocumentIdentity("legacy", row.identity.value))
-    )
-    assert not collision.approved and len(collision.skipped) == 2
+    refreshed = preview_document_batch(kb_dir, (row.identity,))
+    assert remove_document(kb_dir, row.identity.value).status == "removed"
+    with pytest.raises(DocumentBatchChanged):
+        validate_document_batch(refreshed)
+    removed = preview_document_batch(kb_dir, (row.identity,))
+    assert not removed.approved and len(removed.skipped) == 1

@@ -23,6 +23,7 @@ from ultrakb.application.knowledge_tasks import (
     export_knowledge_stage,
     export_knowledge_task,
     list_knowledge_tasks,
+    read_application_task,
     read_knowledge_execution,
     read_knowledge_stage,
     read_knowledge_task,
@@ -273,11 +274,20 @@ def fill_stage_tree(tree, stages):
 
 class KnowledgeTasksDialog(QDialog):
     def __init__(
-        self, kb_dir, parent=None, *, task_id=None, execution_id=None, limit=63, select_first=True
+        self,
+        kb_dir,
+        parent=None,
+        *,
+        task_id=None,
+        execution_id=None,
+        application_task_id=None,
+        limit=63,
+        select_first=True,
     ):
         super().__init__(parent)
         self.root, self.limit = Path(kb_dir), limit
         self.task_id, self.execution_id = task_id, execution_id
+        self.application_task_id = application_task_id
         self.select_first = select_first
         self.identity, self.detail, self.list_cursor = None, None, None
         self.stage_id, self.stage_detail, self.stage_cursor = None, None, 0
@@ -308,7 +318,9 @@ class KnowledgeTasksDialog(QDialog):
         layout.addWidget(self.work)
         self.body = QPlainTextEdit()
         self.body.setReadOnly(True)
-        if not select_first:
+        if application_task_id is not None:
+            self.body.setPlainText(f"应用任务：{application_task_id}\n尚未记录执行。")
+        elif not select_first:
             self.body.setPlainText("尚未关联到此任务的执行。可从知识库任务列表显式选择记录。")
         layout.addWidget(self.body, 1)
         navigation = QHBoxLayout()
@@ -395,7 +407,7 @@ class KnowledgeTasksDialog(QDialog):
             return
         options = self.options()
         task_id, execution_id = self.task_id, self.execution_id
-        if task_id is None and execution_id is None:
+        if task_id is None and execution_id is None and self.application_task_id is None:
             self.load_list()
             return
 
@@ -404,7 +416,11 @@ class KnowledgeTasksDialog(QDialog):
             options["identity"] = identity
             if task_id is None:
                 options.pop("execution_id")
-                detail = read_knowledge_execution(self.root, execution_id, **options)
+                detail = (
+                    read_knowledge_execution(self.root, execution_id, **options)
+                    if execution_id is not None
+                    else read_application_task(self.root, self.application_task_id, **options)
+                )
             else:
                 detail = read_knowledge_task(self.root, task_id, **options)
             return identity, detail

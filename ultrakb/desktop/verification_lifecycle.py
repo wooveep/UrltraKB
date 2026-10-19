@@ -30,7 +30,7 @@ def _hashes(root):
     return {
         path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
         for path in sorted(root.rglob("*"))
-        if path.is_file() and path.suffix != ".lock"
+        if path.is_file() and path.suffix != ".lock" and not path.name.endswith(".sqlite-shm")
     }
 
 
@@ -53,8 +53,11 @@ def verify_lifecycle(app, root: Path, mode: str, previous: Path | None) -> int:
     else:
         assert previous is None, "Only restart accepts --lifecycle-state"
         initialize_kb(state / "kb", seed_environment=False, model="openai/lifecycle-verification")
-        for number in range(3):
-            atomic_write_text(state / f"kb/wiki/concepts/page-{number}.md", "Original\n")
+        from .verification_data import publish_pages
+
+        publish_pages(
+            state / "kb", {f"concepts/page-{number}.md": b"Original\n" for number in range(3)}
+        )
         if mode == "delete":
             initialize_kb(state / "delete-kb", seed_environment=False)
     window = Workbench(history_dir=state / "history")
@@ -148,7 +151,7 @@ def verify_lifecycle(app, root: Path, mode: str, previous: Path | None) -> int:
                 def inspect_details():
                     dialog = QApplication.activeModalWidget()
                     text = dialog.findChild(QPlainTextEdit).toPlainText()
-                    observed.append(task_id in text and "阶段：" in text)
+                    observed.append(task_id in text and "尚未记录执行" in text)
                     dialog.accept()
 
                 QTimer.singleShot(10, inspect_details)

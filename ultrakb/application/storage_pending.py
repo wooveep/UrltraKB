@@ -36,8 +36,6 @@ def _context(scope, work, context):
         context,
         storage_identity=scope.knowledge.identity,
         executor=None,
-        resume_model_task_id=None,
-        model_task=None,
         resume_storage_execution_id=resume,
         storage_pending_attempt_id=work.attempt_id,
     )

@@ -4,11 +4,13 @@ import asyncio
 import json
 
 import pytest
+from native_catalog_fixtures import document_name, published_files, unit_inventory
 
 pytest_plugins = ("test_vendor_sdk",)
 
 
 def _import(kb, service, name, text, *, shared=False):
+    from native_catalog_fixtures import list_sources
     from publication_fixtures import publish_document
 
     path = kb / f"{name}.md"
@@ -21,7 +23,9 @@ def _import(kb, service, name, text, *, shared=False):
         shared_body="# Shared\n\nThe first policy permits direct use.\n\n" + text
         if shared
         else None,
-        shared_sources=["summaries/first.md", "summaries/second.md"],
+        shared_sources=[f"summaries/{document_name(kb, 'first')}.md"]
+        if shared and any(source.label == "first.md" for source in list_sources(kb))
+        else None,
     )
 
 
@@ -57,7 +61,7 @@ def test_selected_multi_source_page_reads_all_originals_and_preserves_normal_doc
     from ultrakb.application.refresh import refresh_selected_sources, refresh_status
 
     sources, scope = _prepared(kb_dir, model_service)
-    normal = scope.wiki_dir / "summaries/normal.md"
+    normal = scope.wiki_dir / f"summaries/{document_name(kb_dir, 'normal')}.md"
     before = normal.read_bytes()
     count = len(model_service.requests)
 
@@ -83,11 +87,10 @@ def test_selected_refresh_failure_retains_live_pages_and_pending_reasons(
     kb_dir, model_service, monkeypatch
 ):
     from ultrakb.application.refresh import refresh_selected_sources, refresh_status
-    from ultrakb.unit_publication import wiki_versions
 
     sources, scope = _prepared(kb_dir, model_service)
     before = refresh_status(kb_dir, scope=scope)
-    pages = wiki_versions(kb_dir, scope.wiki_dir)
+    pages = published_files(kb_dir)
     import httpx
 
     def disconnected(client, request):
@@ -100,7 +103,7 @@ def test_selected_refresh_failure_retains_live_pages_and_pending_reasons(
 
     assert result.status == "failed"
     assert refresh_status(kb_dir, scope=scope) == before
-    assert wiki_versions(kb_dir, scope.wiki_dir) == pages
+    assert published_files(kb_dir) == pages
 
 
 def test_selected_refresh_never_clears_an_unselected_source_reason(kb_dir, model_service):
@@ -145,7 +148,9 @@ def test_selected_refresh_can_finish_pages_while_an_unrelated_source_is_incomple
     from ultrakb.application.refresh import refresh_selected_sources, refresh_status
 
     sources, scope = _prepared(kb_dir, model_service)
-    normal_summary = (scope.wiki_dir / "summaries/normal.md").read_bytes()
+    normal_summary = (
+        scope.wiki_dir / f"summaries/{document_name(kb_dir, 'normal')}.md"
+    ).read_bytes()
     (kb_dir / "normal.md").write_text("An unrelated new policy requires review.")
     failed = fail_document(kb_dir, kb_dir / "normal.md", bundle=model_service.credentials)
     assert failed.status == "failed"
@@ -157,15 +162,20 @@ def test_selected_refresh_can_finish_pages_while_an_unrelated_source_is_incomple
     assert result.status == "partial", result.message
     assert count < len(model_service.requests) <= count + 4
     assert "An unrelated new policy" not in json.dumps(model_service.requests[-1])
-    assert (scope.wiki_dir / "summaries/normal.md").read_bytes() == normal_summary
+    assert (
+        scope.wiki_dir / f"summaries/{document_name(kb_dir, 'normal')}.md"
+    ).read_bytes() == normal_summary
     after = refresh_status(kb_dir, scope=scope)["needs_refresh"]
     assert "concepts/shared.md" not in after
-    assert after["summaries/normal.md"] == pending["summaries/normal.md"]
+    assert (
+        after[f"summaries/{document_name(kb_dir, 'normal')}.md"]
+        == pending[f"summaries/{document_name(kb_dir, 'normal')}.md"]
+    )
     selected = resolve_query_views(kb_dir)
     answer = read_query_page(selected, "concepts/shared.md", view_id=scope.view_id, strict=True)
     assert "The first policy requires review." in answer
     assert "The second policy permits approved use." in answer
-    assert "summaries/normal.md" not in selected.views[0].files
+    assert f"summaries/{document_name(kb_dir, 'normal')}.md" not in selected.views[0].files
 
 
 def test_independent_summary_can_clear_a_failed_other_source_reason(kb_dir, model_service):
@@ -173,18 +183,19 @@ def test_independent_summary_can_clear_a_failed_other_source_reason(kb_dir, mode
 
     from ultrakb.application.query_views import resolve_query_views
     from ultrakb.application.refresh import refresh_selected_sources, refresh_status
-    from ultrakb.unit_publication import read_head, read_unit_publication
+    from ultrakb.application.views import published_scope
 
     sources, scope = _prepared(kb_dir, model_service)
     (kb_dir / "second.md").write_text("The second policy has an unfinished replacement.")
     failed = fail_document(kb_dir, kb_dir / "second.md", bundle=model_service.credentials)
     assert failed.status == "failed"
     unit = failed.units[0].unit_id
-    publication = read_unit_publication(kb_dir, unit, scope.view_id)
-    before = read_head(kb_dir, scope.view_id)
-    page = "summaries/normal.md"
+    publication = unit_inventory(kb_dir, unit, scope.view_id)
+    before = published_scope(kb_dir, scope.view_id).knowledge
+    before_pending = refresh_status(kb_dir, scope=scope)["needs_refresh"]
+    page = f"summaries/{document_name(kb_dir, 'normal')}.md"
     body = (scope.wiki_dir / page).read_bytes()
-    assert any(r.source_id == sources[1] for r in before.needs_refresh[page])
+    assert any(r["source_id"] == sources[1] for r in before_pending[page])
     count = len(model_service.requests)
 
     result = asyncio.run(refresh_selected_sources(kb_dir, sources, scope=scope, page_paths=[page]))
@@ -192,12 +203,17 @@ def test_independent_summary_can_clear_a_failed_other_source_reason(kb_dir, mode
     assert result.status == "partial", result.message
     assert len(model_service.requests) == count
     assert (scope.wiki_dir / page).read_bytes() == body
-    assert read_unit_publication(kb_dir, unit, scope.view_id) == publication
-    after = read_head(kb_dir, scope.view_id)
-    assert after.inputs == before.inputs
-    assert after.needs_refresh == {p: r for p, r in before.needs_refresh.items() if p != page}
+    assert unit_inventory(kb_dir, unit, scope.view_id) == publication
+    after = published_scope(kb_dir, scope.view_id).knowledge
+    assert after.unit_revisions() == before.unit_revisions()
+    assert refresh_status(kb_dir, scope=scope)["needs_refresh"] == {
+        p: r for p, r in before_pending.items() if p != page
+    }
     assert page in resolve_query_views(kb_dir).views[0].files
-    assert "summaries/second.md" in refresh_status(kb_dir, scope=scope)["needs_refresh"]
+    assert (
+        f"summaries/{document_name(kb_dir, 'second')}.md"
+        in refresh_status(kb_dir, scope=scope)["needs_refresh"]
+    )
 
 
 @pytest.mark.parametrize("page", ["summaries/second.md", "concepts/shared.md"])
@@ -209,6 +225,8 @@ def test_failed_source_cannot_use_summary_independence_for_its_own_output(
     from ultrakb.application.refresh import refresh_selected_sources, refresh_status
 
     sources, scope = _prepared(kb_dir, model_service)
+    if page == "summaries/second.md":
+        page = f"summaries/{document_name(kb_dir, 'second')}.md"
     (kb_dir / "second.md").write_text("The second policy has an unfinished replacement.")
     assert (
         fail_document(kb_dir, kb_dir / "second.md", bundle=model_service.credentials).status
@@ -247,7 +265,10 @@ def test_failed_new_source_without_pending_reasons_cannot_refresh_other_summarie
 
     result = asyncio.run(
         refresh_selected_sources(
-            kb_dir, [failed.source_id], scope=scope, page_paths=["summaries/normal.md"]
+            kb_dir,
+            [failed.source_id],
+            scope=scope,
+            page_paths=[f"summaries/{document_name(kb_dir, 'normal')}.md"],
         )
     )
 
@@ -266,16 +287,23 @@ def test_selected_refresh_limits_work_to_requested_pages(kb_dir, model_service):
     count = len(model_service.requests)
 
     result = asyncio.run(
-        refresh_selected_sources(kb_dir, sources, scope=scope, page_paths=["summaries/first.md"])
+        refresh_selected_sources(
+            kb_dir,
+            sources,
+            scope=scope,
+            page_paths=[f"summaries/{document_name(kb_dir, 'first')}.md"],
+        )
     )
 
     assert result.status == "partial", result.message
     assert len(model_service.requests) == count
     assert (scope.wiki_dir / "concepts/shared.md").read_bytes() == shared
     after = refresh_status(kb_dir, scope=scope)["needs_refresh"]
-    assert "summaries/first.md" not in after
+    assert f"summaries/{document_name(kb_dir, 'first')}.md" not in after
     assert after == {
-        page: reasons for page, reasons in before.items() if page != "summaries/first.md"
+        page: reasons
+        for page, reasons in before.items()
+        if page != f"summaries/{document_name(kb_dir, 'first')}.md"
     }
 
 
@@ -287,6 +315,10 @@ def test_selected_refresh_rejects_invalid_page_scope_before_sending(kb_dir, mode
     from ultrakb.application.refresh import refresh_selected_sources, refresh_status
 
     sources, scope = _prepared(kb_dir, model_service)
+    pages = [
+        f"summaries/{document_name(kb_dir, 'first')}.md" if path == "summaries/first.md" else path
+        for path in pages
+    ]
     before = refresh_status(kb_dir, scope=scope)
     count = len(model_service.requests)
 
@@ -396,7 +428,7 @@ def test_selected_refresh_keeps_a_page_with_an_unavailable_source_association(
     from ultrakb.application.refresh import refresh_selected_sources, refresh_status
 
     sources, scope = _prepared(kb_dir, model_service)
-    (scope.wiki_dir / "summaries/second.md").unlink()
+    (scope.wiki_dir / f"summaries/{document_name(kb_dir, 'second')}.md").unlink()
     before = refresh_status(kb_dir, scope=scope)["needs_refresh"]["concepts/shared.md"]
     count = len(model_service.requests)
 
@@ -416,9 +448,17 @@ def test_selected_refresh_reads_the_tail_of_a_source_spanning_reader_windows(kb_
     original += "Configuration records must be retained.\n\n" * 8
     original += "The final prerequisite is recorded at the end.\n"
     _import(kb_dir, model_service, "first", original)
-    reader = CompileSourceWindows(scope.wiki_dir, "first")
-    complete = _full_windows(reader)
-    bounded = list(reader.iter_document_windows(fits=lambda window: len(window["content"]) <= 180))
+    from ultrakb.application.views import published_scope
+    from ultrakb.storage.compile_inputs import materialize_inputs
+
+    base = published_scope(kb_dir).knowledge
+    with base.compile_workspace() as baseline:
+        materialize_inputs(base, baseline, None)
+        reader = CompileSourceWindows(baseline.directory, document_name(kb_dir, "first"))
+        complete = _full_windows(reader)
+        bounded = list(
+            reader.iter_document_windows(fits=lambda window: len(window["content"]) <= 180)
+        )
     assert 2 <= len(bounded) <= 16
     assert "".join(window["content"] for window in bounded) == original
     assert "The final prerequisite is recorded at the end." in bounded[-1]["content"]

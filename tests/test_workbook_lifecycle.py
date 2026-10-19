@@ -105,9 +105,14 @@ def test_confirmed_empty_and_deleted_sheets_retire_only_their_contributions(
     inventory = source_inventory(kb_dir)[0]
     assert len(inventory["units"]) == 3
     empty = read_document_source(kb_dir, first.source_id, unit_id=units["Beta"].unit_id)
-    assert empty["status"] == "empty" and "BETA_SHEET" not in empty["content"]
+    assert empty["status"] == "completed" and "BETA_SHEET" in empty["content"]
+    assert next(unit for unit in inventory["units"] if unit["name"] == "Beta")["status"] == "empty"
     retired = read_document_source(kb_dir, first.source_id, unit_id=units["Gamma"].unit_id)
-    assert retired["validity"] == "withdrawn" and retired["status"] == "retired"
+    assert retired["validity"] == "needs_refresh" and retired["status"] == "completed"
+    assert "GAMMA_SHEET" in retired["content"]
+    assert (
+        next(unit for unit in inventory["units"] if unit["name"] == "Gamma")["status"] == "retired"
+    )
     assert retired["target_source_revision_id"] == second.source_revision_id
     pending = refresh_status(kb_dir, scope=view_scope(kb_dir, first.units[0].view_id))[
         "needs_refresh"
@@ -162,7 +167,7 @@ def test_failed_and_objects_only_sheets_do_not_become_successful_empty_targets(
     assert units["Beta"]["content_state"] == "objects_only"
     assert units["Gamma"]["content_state"] == "parse_failed"
     for name in ("Beta", "Gamma"):
-        assert units[name]["status"] == "failed"
+        assert units[name]["status"] == {"Beta": "blocked", "Gamma": "failed"}[name]
         assert units[name]["successful_source_revision_id"] == first.source_revision_id
     old = read_document_source(kb_dir, first.source_id, unit_id=original["Gamma"].unit_id)
     assert old["source_revision_id"] == first.source_revision_id
@@ -177,55 +182,7 @@ def test_workbook_removal_preview_names_owned_sheets(kb_dir, three_sheets):
     first = publish_workbook(kb_dir, three_sheets)
     preview = preview_removal(kb_dir, first.source_id)
     labels = str(preview.plan.actions)
-    assert all(unit.unit_id in labels for unit in first.units)
-
-
-@pytest.mark.parametrize("deleted", [False, True])
-def test_retirement_commit_failure_keeps_old_contribution_and_refresh_reason(
-    kb_dir, three_sheets, monkeypatch, deleted
-):
-    from office_publication_fixtures import publish_workbook
-    from openpyxl import load_workbook
-
-    from ultrakb.application.refresh import refresh_status
-    from ultrakb.application.views import view_scope
-    from ultrakb.documents import read_document_source
-    from ultrakb.mutation import MutationSnapshot
-
-    first = publish_workbook(
-        kb_dir,
-        three_sheets,
-    )
-    beta = next(unit for unit in first.units if unit.name == "Beta")
-    book = load_workbook(three_sheets)
-    if deleted:
-        del book["Beta"]
-    else:
-        book["Beta"]["A1"] = None
-    book.save(three_sheets)
-    commit = MutationSnapshot.mark_committed
-
-    def fail_retirement(snapshot):
-        if snapshot.operation == "retire-worksheet":
-            raise OSError("Fixture lost retirement commit marker")
-        commit(snapshot)
-
-    monkeypatch.setattr(MutationSnapshot, "mark_committed", fail_retirement)
-    second = publish_workbook(
-        kb_dir,
-        three_sheets,
-    )
-    assert second.status == "partial"
-    old = read_document_source(kb_dir, first.source_id, unit_id=beta.unit_id)
-    assert old["status"] == "failed" and old["validity"] == "needs_refresh"
-    pending = refresh_status(kb_dir, scope=view_scope(kb_dir, beta.view_id))["needs_refresh"]
-    assert not any(reason["kind"] == "empty" for reasons in pending.values() for reason in reasons)
-    if deleted:
-        from ultrakb.application.workbook_actions import retry_worksheet
-
-        monkeypatch.setattr(MutationSnapshot, "mark_committed", commit)
-        retried = retry_worksheet(kb_dir, first.source_id, beta.unit_id)
-        assert len(retried.units) == 1 and retried.units[0].status == "retired"
+    assert all(unit.doc_name in labels for unit in first.units)
 
 
 @pytest.mark.parametrize("keep_anchor", [False, True])
@@ -274,8 +231,18 @@ def test_deleted_sheet_is_withdrawn(kb_dir, three_sheets):
     )
     read = read_document_source(kb_dir, first.source_id, unit_id=gamma.unit_id)
     assert read["target_source_revision_id"] == second.source_revision_id
-    assert read["status"] == "retired"
-    assert read["validity"] == "withdrawn"
+    assert read["status"] == "completed" and "GAMMA_SHEET" in read["content"]
+    from ultrakb.application.sources import source_inventory
+
+    assert (
+        next(
+            unit
+            for unit in source_inventory(kb_dir)[0]["units"]
+            if unit["unit_id"] == gamma.unit_id
+        )["status"]
+        == "retired"
+    )
+    assert read["validity"] == "needs_refresh"
 
 
 def test_unextracted_background_picture_is_not_confirmed_empty(kb_dir, three_sheets):

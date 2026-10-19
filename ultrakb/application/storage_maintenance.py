@@ -22,6 +22,26 @@ class BackupResult:
 
 
 @dataclass(frozen=True)
+class NavigationRepair:
+    status: str
+    publication_id: str
+    knowledge_revision_id: str
+    tree_id: str
+
+
+def repair_knowledge_navigation(kb_dir, *, scope=None, identity=None) -> NavigationRepair:
+    from ultrakb.storage.knowledge_store import KnowledgeStore
+
+    maintenance = _maintenance(kb_dir, scope, identity)
+    knowledge = KnowledgeStore(maintenance.root, maintenance.identity)
+    publication = knowledge.diagnostic_publication().publication
+    tree = knowledge.repair_navigation(publication.publication_id, view_id=publication.view_id)
+    return NavigationRepair(
+        "completed", publication.publication_id, publication.revision_id, tree.tree_id
+    )
+
+
+@dataclass(frozen=True)
 class MaintenanceOverview:
     schema_version: int
     statistics_at: str

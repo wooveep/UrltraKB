@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass, field
 
-from ultrakb.agent.chat_session import ChatSession
 from ultrakb.conversation_turns import ConversationTurn
 from ultrakb.llm_execution import CompletionExecutor
 from ultrakb.model_tokenizer import ContextCapacityError
@@ -57,10 +56,6 @@ class PreparedConversationInput:
                 ],
             }
         ]
-
-
-def recent_input(session: ChatSession, question: str) -> PreparedConversationInput:
-    return _recent_input(session.turns, question)
 
 
 def _recent_input(turns: list[ConversationTurn], question: str) -> PreparedConversationInput:
@@ -123,28 +118,3 @@ def prepare_recent_input(
     diagnostics["recent_tokens"] = measure.payload_tokens([asdict(t) for t in recent])
     recall_allowance = min(2000, max(0, allowance - diagnostics["recent_tokens"]))
     return PreparedConversationInput(question, tuple(recent), (), diagnostics), recall_allowance
-
-
-def prepare_conversation_input(
-    session: ChatSession, question: str, executor: CompletionExecutor, *, agent=None, selection=None
-) -> PreparedConversationInput:
-    prepared, recall_allowance = prepare_recent_input(
-        session.turns, question, executor, agent=agent
-    )
-    diagnostics = prepared.diagnostics
-    recent = prepared.recent
-    recalled = []
-    if diagnostics["committed_user_tokens"] >= RECALL_THRESHOLD_TOKENS:
-        from ultrakb.context.conversation import ConversationMemory
-        from ultrakb.context.recall import recall_users
-
-        memory = ConversationMemory(session, executor)
-        state = memory.catch_up()
-        diagnostics["index"] = {**asdict(state), "diagnostics": list(state.diagnostics)}
-        items, recall = recall_users(
-            memory, state, question, selection, {t.turn_id for t in recent}, budget=recall_allowance
-        )
-        recalled = [IntentTurn(**item) for item in items]
-        diagnostics["recall"] = recall
-        diagnostics["status"] = "prepared" if recall["status"] == "completed" else "limited"
-    return PreparedConversationInput(question, tuple(recent), tuple(recalled), diagnostics)

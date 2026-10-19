@@ -295,7 +295,7 @@ def test_qt_does_not_substitute_an_unrelated_task_for_an_unlinked_queued_task(
                 and window.root == root
                 and window.isVisible()
             ):
-                if window.tasks.count():
+                if window.status.text() != "正在读取任务记录…":
                     observed.append((window.detail, window.body.toPlainText()))
                     poll.stop()
                     window.accept()
@@ -312,10 +312,10 @@ def test_qt_does_not_substitute_an_unrelated_task_for_an_unlinked_queued_task(
     poll.start(10)
     deadline.start(5000)
     try:
-        show_task_details(SimpleNamespace(kb_dir=str(root), model_usage=None), None)
+        show_task_details(SimpleNamespace(id="e" * 32, kb_dir=str(root), model_usage=None), None)
     finally:
         poll.stop()
         deadline.stop()
     assert observed
     assert observed[0][0] is None
-    assert "尚未关联" in observed[0][1]
+    assert "尚未记录执行" in observed[0][1]

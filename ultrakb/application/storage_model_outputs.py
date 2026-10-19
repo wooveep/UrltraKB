@@ -17,11 +17,12 @@ from .publications import publish_knowledge_changes
 
 
 class _StorageWriter:
-    def __init__(self, scope, outputs, check_cancelled, execution_id):
+    def __init__(self, scope, outputs, check_cancelled, execution_id, allowed_paths=None):
         assert scope.knowledge is not None
         self.scope, self.base = scope, scope.knowledge
         self.outputs, self.check_cancelled = outputs, check_cancelled
         self.execution_id = execution_id
+        self.allowed_paths = allowed_paths
         self.guard, self.active, self.failure, self.latest = RLock(), True, None, None
         self.accepted = None
         self.artifacts = ArtifactStore(scope.kb_dir, scope.knowledge.identity)
@@ -55,6 +56,8 @@ class _StorageWriter:
                 raise RuntimeError("Model output writer has finished")
             if scope != self.scope:
                 raise ValueError("Model output belongs to another fixed knowledge scope")
+            if self.allowed_paths is not None and path not in self.allowed_paths:
+                return "Access denied: this review can update only its selected artifact."
             self.check_cancelled()
             if path.startswith("output/"):
                 try:
@@ -143,9 +146,26 @@ class _StorageWriter:
 _writer: ContextVar[_StorageWriter | None] = ContextVar("storage_model_output_writer", default=None)
 
 
+def read_storage_model_output(scope, path):
+    """Read accepted bytes at this operation's epoch, including its own writes."""
+    wiki_path(path)
+    if not path.startswith("output/"):
+        raise ValueError("An artifact read requires an output path")
+    writer = _writer.get()
+    if writer is None:
+        return ArtifactStore(scope.kb_dir, scope.knowledge.identity).read(path)
+    with writer.guard:
+        if not writer.active or scope != writer.scope:
+            raise ValueError("Artifact reader belongs to a finished or different operation")
+        writer.check_cancelled()
+        return writer.artifacts.read(path, epoch=writer.artifact_epoch)
+
+
 @contextmanager
-def storage_model_output_scope(scope, outputs, *, check_cancelled, execution_id):
-    writer = _StorageWriter(scope, outputs, check_cancelled, execution_id)
+def storage_model_output_scope(
+    scope, outputs, *, check_cancelled, execution_id, allowed_paths=None
+):
+    writer = _StorageWriter(scope, outputs, check_cancelled, execution_id, allowed_paths)
     token = _writer.set(writer)
     try:
         yield writer

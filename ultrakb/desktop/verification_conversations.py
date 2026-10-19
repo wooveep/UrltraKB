@@ -6,17 +6,21 @@ from PySide6.QtWidgets import QApplication, QComboBox
 
 
 def verify_conversations(window, kb, root, wait):
-    from ultrakb.agent.chat_session import ChatSession
+    from ultrakb.desktop.verification_data import retain_conversation
     from ultrakb.desktop.verification_workbench import button
-    from ultrakb.locks import kb_ingest_lock
+    from ultrakb.locks import session_lock
     from ultrakb.runtime.records import TERMINAL
 
-    session = ChatSession.new(kb, "openai/verification", "zh")
-    session.record_turn("第一轮：介绍知识库", "第一轮的完整回答。", [])
-    session.record_turn(
-        "第二轮：继续展开",
-        "<think>private hidden reasoning</think>第二轮的完整回答。\n\n`<think>` 是代码示例。",
-        [],
+    session_id, store = retain_conversation(
+        kb,
+        [
+            ("第一轮：介绍知识库", "第一轮的完整回答。"),
+            (
+                "第二轮：继续展开",
+                "<think>private hidden reasoning</think>第二轮的完整回答。\n\n"
+                "`<think>` 是代码示例。",
+            ),
+        ],
     )
     window._refresh()
     button(window, "对话").click()
@@ -25,14 +29,14 @@ def verify_conversations(window, kb, root, wait):
     history = window.workspaces.panels["对话"][0]
     wait(
         lambda: any(
-            history.table.item(index, 0).data(Qt.ItemDataRole.UserRole) == session.id
+            history.table.item(index, 0).data(Qt.ItemDataRole.UserRole) == session_id
             for index in range(history.table.rowCount())
         )
     )
     row = next(
         index
         for index in range(history.table.rowCount())
-        if history.table.item(index, 0).data(Qt.ItemDataRole.UserRole) == session.id
+        if history.table.item(index, 0).data(Qt.ItemDataRole.UserRole) == session_id
     )
     QTest.mouseClick(
         history.table.viewport(),
@@ -47,12 +51,12 @@ def verify_conversations(window, kb, root, wait):
         combo.isVisible() and combo.accessibleName() in {"问答模式", "对话会话"}
         for combo in window.findChildren(QComboBox)
     )
-    assert window.conversations.active.identity == session.id
+    assert window.conversations.active.identity == session_id
     window.question.setPlainText("第三轮：在原对话中继续")
     # Queue/stop presentation only: the held lease prevents any model execution.
     previously_ready = window.onboarding.ready.get(kb, False)
     window.onboarding.ready[kb] = True
-    with kb_ingest_lock(kb / ".ultrakb"):
+    with session_lock(kb, session_id):
         before = len(window.manager.tasks())
         QTest.keyClick(window.question, Qt.Key.Key_Return)
         task = window.manager.tasks()[-1]
@@ -78,18 +82,17 @@ def verify_conversations(window, kb, root, wait):
 
     wait(
         lambda: any(
-            q == "第三轮：在原对话中继续" for q, _ in read_conversation(kb, session.id).timeline
+            q == "第三轮：在原对话中继续" for q, _ in read_conversation(kb, session_id).timeline
         )
     )
-    assert len(read_conversation(kb, session.id).turns) == 2
-    window._load_conversation(session.id)
+    assert len(read_conversation(kb, session_id).turns) == 2
+    window._load_conversation(session_id)
     wait(lambda: "第三轮：在原对话中继续" in window.chat.toPlainText())
     window.question.setPlainText("切换历史后保留的草稿")
-    another = ChatSession.new(kb, "openai/verification", "zh")
-    another.record_turn("另一段历史", "另一个回答", [])
-    window._load_conversation(another.id)
+    another, _ = retain_conversation(kb, [("另一段历史", "另一个回答")])
+    window._load_conversation(another)
     wait(lambda: "另一个回答" in window.chat.toPlainText())
-    window._load_conversation(session.id)
+    window._load_conversation(session_id)
     wait(lambda: "第二轮的完整回答" in window.chat.toPlainText())
     assert window.question.toPlainText() == "切换历史后保留的草稿"
     window.question.setPlainText("请接着说明，保持完整上下文。")

@@ -4,7 +4,6 @@ import asyncio
 import copy
 import json
 import re
-from unittest.mock import MagicMock
 
 import pytest
 from pageindex.config import IndexConfig
@@ -671,31 +670,3 @@ def test_real_collection_preserves_body_pages_and_publishes_only_a_valid_rebuild
         assert source.read_bytes() == b"Immutable original source"
     finally:
         client.close()
-
-
-@pytest.mark.parametrize("wrapped", [False, True])
-def test_ultrakb_does_not_restart_a_physical_recovery_that_made_no_progress(
-    kb_dir, monkeypatch, wrapped
-):
-    from pageindex.index.physical_sections import require_corrected_navigation
-
-    from ultrakb.indexer import index_long_document
-
-    with pytest.raises(IndexQualityError) as failure:
-        require_corrected_navigation([{"list_index": 0, "title": "系统", "page_number": 1296}])
-    error = failure.value
-    if wrapped:
-        outer = IndexQualityError("Index build failed")
-        outer.__cause__ = error
-        error = outer
-    collection = MagicMock()
-    collection.add.side_effect = error
-    client = MagicMock()
-    client.collection.return_value = collection
-    monkeypatch.setattr("ultrakb.indexer.LocalClient", lambda **kwargs: client)
-    monkeypatch.setattr("ultrakb.index_originals.retained_pdf_pages", lambda *a, **k: None)
-    source = kb_dir / "fixture.pdf"
-    source.write_bytes(b"offline fixture; no PDF parsing")
-    with pytest.raises(IndexQualityError, match="after correction"):
-        index_long_document(source, kb_dir)
-    assert collection.add.call_count == 1

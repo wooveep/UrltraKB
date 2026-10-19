@@ -24,7 +24,9 @@ UltraKB 使用 LLM 将文档整理为相互关联的 Markdown Wiki，再通过�
 - **生成输出**：带来源引用的问答、多轮会话、可分发的 Agent 技能、HTML 幻灯片和知识图谱。
 - **选择入口**：桌面、CLI 和 API 使用相同的应用与存储逻辑。
 
-Wiki 是普通 Markdown 文件，可以直接阅读，也可以把 `wiki/` 作为 Obsidian Vault 打开。
+`wiki/` 是已提交知识的 Markdown 工作副本，可以直接阅读或作为 Obsidian Vault 打开。
+用外部编辑器修改前，请在桌面维护面板暂停同步；完成后显式接纳或放弃差异。
+应用内阅读和问答始终使用主库中固定的知识版本。
 
 ## 从源码开始
 
@@ -111,6 +113,7 @@ Debian 安装包提供与 Python 安装相同的 `ultrakb`、`ultrakb-desktop` �
 | 导入文件、目录或 URL | `ultrakb add <path-or-url>` |
 | 问答 / 多轮会话 | `ultrakb query "问题"` / `ultrakb chat` |
 | 读取来源 | `ultrakb source SOURCE_ID` |
+| 阅读尚未发布的保留输入 | `ultrakb source SOURCE_ID --unit-revision UNIT_REVISION_ID` |
 | 重试未完成的来源 | `ultrakb retry-source SOURCE_ID` |
 | 查看 / 处理待办 | `ultrakb pending` / `ultrakb process-pending` |
 | 重编译已有处理结果 | `ultrakb recompile DOC_NAME` |
@@ -121,6 +124,7 @@ Debian 安装包提供与 Python 安装相同的 `ultrakb`、`ultrakb-desktop` �
 | 从知识库生成 Agent 技能 | `ultrakb skill new NAME "技能目标"` |
 | 生成 HTML 幻灯片 | `ultrakb deck new NAME "演示目标"` |
 | 查看有效配置 | `ultrakb settings` / `ultrakb settings --global` |
+| 查看任务 / 预览存储维护 | `ultrakb tasks list` / `ultrakb storage preview` |
 
 可以在任意目录使用 `ultrakb --kb-dir /path/to/kb <command>` 指定知识库，
 或通过 `ULTRAKB_DIR` 设置 CLI 使用的目录。
@@ -149,17 +153,21 @@ Debian 安装包提供与 Python 安装相同的 `ultrakb`、`ultrakb-desktop` �
 编译结果发布到 Wiki。来源更新或移除后，相关页面会记录待刷新状态；
 刷新使用当前有效的保留输入，并为需要审阅的人工修改保存差异。
 历史知识继续关联当时实际使用的来源。
-提交后通过公开指针发布不可变快照，导入期间桌面可继续浏览已公开知识。
+提交后原子切换公开版本，正文和附件按内容摘要保存在不可变 Blob 中，
+不为每次发布复制整套 Wiki 或索引数据库。导入期间可继续浏览已公开知识。
 HTTP Wiki 读取返回 `publication_id`，关联请求可携带该值固定同一版本；
 页面编辑同时检查公开身份和正文版本，冲突时保留已有内容。
 
 ```text
 my-kb/
 ├── .env                    # 本库模型凭据
-├── .ultrakb/               # 配置、任务、来源修订、索引与知识历史
+├── .ultrakb/
 │   ├── config.yaml
-│   └── format.json
-├── raw/                    # 接入的原始资料
+│   ├── kb.sqlite           # 第 2 版格式身份与统一业务主库
+│   ├── kb.sqlite-wal       # 活跃数据库的协调文件
+│   ├── kb.sqlite-shm
+│   └── blobs/              # 托管原件、正文、图片与恢复成果
+├── raw/                    # 接入目录；已接纳资料独立保存在托管存储
 └── wiki/
     ├── AGENTS.md            # Wiki 结构与维护约定
     ├── index.md
@@ -195,9 +203,17 @@ concurrency: 5
 
 ```bash
 ultrakb storage preview
+ultrakb storage repair-receipts
+ultrakb storage repair-navigation
 ultrakb storage backup --output /path/to/new-backup
 ultrakb storage restore /path/to/new-backup --output /path/to/new-library
 ```
+
+普通阅读不会修复缺失导航或自动接纳待确认回执。导航修复只重建已提交输入的
+确定性目录；回执修复接纳已经保留的响应与用量，两者都不重新发送模型请求。
+`retire-roots` 先释放可退役的恢复引用，`collect` 每次只清理一批当前无引用内容；
+真实读取或备份占用存储时返回忙碌。三入口的维护操作和身份检查一致。
+备份覆盖及暂停编辑说明见[存储维护指南](docs/storage-maintenance.md)。
 
 备份通过在线数据库快照捕获已提交状态，并校验所引用的内容。
 活跃库的 `kb.sqlite`、WAL 和 SHM 必须一起保留；协调文件缺失时会拒绝打开，
@@ -230,10 +246,11 @@ ultrakb-api --host 127.0.0.1 --port 7566
 
 Python 包及 CLI 已从 `openkb` 切换为 `ultrakb`，桌面和 API 的命令分别为
 `ultrakb-desktop` 与 `ultrakb-api`，环境变量前缀统一为 `ULTRAKB_`。
-知识库状态目录改为 `.ultrakb/`，格式标识为 `ultrakb.context-kb`，
+知识库状态目录为 `.ultrakb/`，格式标识为 `ultrakb.context-kb` 第 **2** 版，
 全局设置目录改为 `~/.config/ultrakb/`。
 
-此次切换不会自动改写旧知识库。保留原库、原始资料和历史输出，在新目录使用
+新版只打开按第 2 版格式创建的知识库，写入和模型调用前拒绝旧格式。
+此次切换不会迁移或兼容读取旧知识库。保留原库、原始资料和历史输出，在新目录使用
 `ultrakb init`，然后重新导入原件；仅重命名 `.openkb/` 目录不能完成格式与内部引用迁移。
 已有启动脚本、环境变量和 Agent 技能安装路径也需要同步。
 固定 SDK 版本中的 `+urltrakb.*` 是依赖来源身份，继续按锁文件保留。

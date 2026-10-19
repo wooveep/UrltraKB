@@ -24,9 +24,9 @@ def test_markdown_html_and_embedded_images_share_a_safe_asset_namespace(
     source = tmp_path / "assets.md"
     source.write_bytes(text.encode())
     result = processing_only(source)
-    saved = read_document_source(kb_dir, result.source_id)
+    saved = read_document_source(kb_dir, result.source_id, unit_revision_id=result.unit_revision_id)
     assert len(saved["assets"]) == 2 and not saved["diagnostics"]
-    assert '<img src="images/assets/embedded_1" width="30">' in saved["content"]
+    assert f'<img src="images/{saved["doc_name"]}/embedded_1" width="30">' in saved["content"]
     assert '`<img src="code.png">`' in saved["content"]
 
 
@@ -46,20 +46,39 @@ def test_markdown_keeps_text_positions_and_frozen_images(kb_dir, tmp_path, proce
     source.write_bytes(original.encode())
     result = processing_only(source)
     assert result.source_id is not None
-    retained = read_document_source(kb_dir, result.source_id)
-    expected = original.replace("(pixel.png)", "(images/note/pixel.png)")
+    retained = read_document_source(
+        kb_dir, result.source_id, unit_revision_id=result.unit_revision_id
+    )
+    expected = original.replace("(pixel.png)", f"(images/{retained['doc_name']}/pixel.png)")
     assert retained["content"] == expected
     assert retained["pages"] is None and retained["tokens"] > 0
-    selected = read_document_source(kb_dir, result.source_id, chars="3:5")
+    selected = read_document_source(
+        kb_dir, result.source_id, unit_revision_id=result.unit_revision_id, chars="3:5"
+    )
     assert selected["content"] == "e\u0301" and selected["char_range"] == [3, 5]
     assert selected["origin_locators"][0]["original_span"] == [3, 5]
     source.unlink()
     image.unlink()
     again = read_document_source(
-        kb_dir, result.source_id, source_revision_id=result.source_revision_id
+        kb_dir,
+        result.source_id,
+        source_revision_id=result.source_revision_id,
+        unit_revision_id=result.unit_revision_id,
     )
     assert again["content"] == expected
-    assert (kb_dir / again["base_path"] / "images/note/pixel.png").read_bytes() == original_pixels
+    from ultrakb.application.storage_sources import read_source_image
+    from ultrakb.application.views import published_scope
+
+    assert (
+        read_source_image(
+            kb_dir,
+            result.source_id,
+            result.unit_revision_id,
+            f"sources/images/{retained['doc_name']}/pixel.png",
+            identity=published_scope(kb_dir).knowledge.identity,
+        )[0]
+        == original_pixels
+    )
 
 
 def test_markdown_reference_images_preserve_code_and_titles(kb_dir, tmp_path, processing_only):
@@ -73,9 +92,13 @@ def test_markdown_reference_images_preserve_code_and_titles(kb_dir, tmp_path, pr
     path = tmp_path / "references.md"
     path.write_bytes(original.encode())
     result = processing_only(path)
-    source = read_document_source(kb_dir, result.source_id)
+    source = read_document_source(
+        kb_dir, result.source_id, unit_revision_id=result.unit_revision_id
+    )
     assert source["content"].startswith(original.split("> !")[0])
-    assert '> ![图](images/references/%E5%9B%BE%20%281%29.png "标题")' in source["content"]
+    assert (
+        f'> ![图](images/{source["doc_name"]}/%E5%9B%BE%20%281%29.png "标题")' in source["content"]
+    )
     assert len(source["assets"]) == 1 and not source["diagnostics"]
 
 
@@ -94,10 +117,22 @@ def test_text_measurement_and_character_ranges_reach_adapters(kb_dir, tmp_path, 
     result = processing_only(path)
     item = DocumentItem(**get_kb_list(kb_dir)["documents"][0])
     assert item.pages is None and item.tokens == 2 and item.characters == 11
-    source = DocumentSourceResponse(**read_document_source(kb_dir, result.source_id))
+    source = DocumentSourceResponse(
+        **read_document_source(kb_dir, result.source_id, unit_revision_id=result.unit_revision_id)
+    )
     assert source.tokens == 2 and source.char_range == [0, 11]
     command = CliRunner().invoke(
-        cli, ["--kb-dir", str(kb_dir), "source", result.source_id, "--chars", "6:11"]
+        cli,
+        [
+            "--kb-dir",
+            str(kb_dir),
+            "source",
+            result.source_id,
+            "--chars",
+            "6:11",
+            "--unit-revision",
+            result.unit_revision_id,
+        ],
     )
     assert command.exit_code == 0, command.output
     assert json.loads(command.output)["content"] == "world"
@@ -118,7 +153,9 @@ def test_unadmitted_generation_keeps_measured_text_readable(kb_dir, tmp_path, pr
     path = tmp_path / "hello.md"
     path.write_text("hello world", encoding="utf-8")
     result = processing_only(path)
-    saved = read_document_source(kb_dir, result.source_id, chars="6:11")
+    saved = read_document_source(
+        kb_dir, result.source_id, unit_revision_id=result.unit_revision_id, chars="6:11"
+    )
     assert saved["knowledge_revision_id"] is None and saved["content"] == "world"
     assert saved["tokens"] == 2 and saved["length_class"] == "short"
     assert get_kb_list(kb_dir)["documents"][0]["characters"] == 11

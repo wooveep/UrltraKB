@@ -1,6 +1,11 @@
 """Official DeepSeek summary schemas use the Responses bridge without another budget."""
 
 import pytest
+from compile_work_fixtures import accepted_payload
+
+from ultrakb.compile_checkpoints import digest
+
+pytest_plugins = ("compile_work_fixtures",)
 
 
 @pytest.mark.parametrize(
@@ -121,11 +126,8 @@ def test_old_deepseek_summary_layout_admission_is_retained():
 
 
 @pytest.mark.asyncio
-async def test_legacy_layout_upgrade_checks_schema_capacity_without_sending(kb_dir):
-    from types import SimpleNamespace
-
+async def test_native_summary_checks_schema_capacity_without_sending(kb_dir, compile_work):
     from ultrakb.agent.compiler import _llm_call_page_async
-    from ultrakb.compile_checkpoints import CompileCheckpoints
     from ultrakb.config import LlmCredentialBundle
     from ultrakb.execution_capacity import capacity_policy
     from ultrakb.llm_execution import CompletionExecutor, ModelCallPolicy, RoleBindings
@@ -147,11 +149,9 @@ async def test_legacy_layout_upgrade_checks_schema_capacity_without_sending(kb_d
         ModelCallPolicy(max_calls=1, retries=0),
     )
     executor.compile_capacity = TokenMeasure(capacity_policy(config, custom_endpoint=False))
-    checkpoint = CompileCheckpoints(
-        kb_dir, SimpleNamespace(task_id="c" * 32, parent_task_id=None), {"doc": "manual"}, {}
-    )
-    checkpoint.save("summary:1", "original", {"description": "Accepted", "sections": []})
-    before = checkpoint.path.read_bytes()
+    checkpoint = compile_work({"doc": "manual"}, {})
+    checkpoint.save("summary:1", digest("original"), {"description": "Accepted", "sections": []})
+    before = accepted_payload(checkpoint, "summary:1")
     with executor.activate(), pytest.raises(ContextCapacityError):
         await _llm_call_page_async(
             model,
@@ -163,7 +163,7 @@ async def test_legacy_layout_upgrade_checks_schema_capacity_without_sending(kb_d
             checkpoint_key="summary:3",
         )
     assert executor.calls == 0
-    assert checkpoint.path.read_bytes() == before
+    assert accepted_payload(checkpoint, "summary:1") == before
 
 
 @pytest.mark.parametrize("status", ["incomplete", "failed", "cancelled"])

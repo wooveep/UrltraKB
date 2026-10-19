@@ -4,22 +4,22 @@ import json
 
 import pytest
 from PIL import Image
+from reading_fixtures import publish_original
 from test_answer_evidence_regression import agent_for, invoke
 
 
 def pages(kb_dir, contents, images=()):
-    (kb_dir / "wiki/sources/manual.json").write_text(
-        json.dumps(
-            [
-                {
-                    "page": n,
-                    "unit_kind": "page",
-                    "content": body,
-                    "images": [{"path": p} for p in images],
-                }
-                for n, body in enumerate(contents, 1)
-            ]
-        )
+    publish_original(
+        kb_dir,
+        [
+            {
+                "page": n,
+                "unit_kind": "page",
+                "content": body,
+                "images": [{"path": p} for p in images],
+            }
+            for n, body in enumerate(contents, 1)
+        ],
     )
 
 

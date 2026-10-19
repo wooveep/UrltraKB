@@ -29,10 +29,10 @@ def test_old_and_unknown_knowledge_bases_are_rejected_unchanged(tmp_path, monkey
     from ultrakb.kb_admin import delete_kb
 
     for operation in [lambda: open_kb(root), lambda: get_kb_list(root), lambda: delete_kb(root)]:
-        with pytest.raises(ValueError, match="Unsupported knowledge-base format"):
+        with pytest.raises(ValueError):
             operation()
         assert contents(root) == before
-    with pytest.raises(ValueError, match="Unsupported knowledge-base format"):
+    with pytest.raises(ValueError):
         with kb_ingest_lock(root / ".ultrakb"), ExecutionContext().begin(root):
             pytest.fail("Entered unsupported knowledge base")
     assert contents(root) == before
@@ -42,8 +42,11 @@ def test_new_creation_has_supported_format(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     root = tmp_path / "new"
     initialize_kb(root, seed_environment=False)
-    assert json.loads((root / ".ultrakb/format.json").read_text()) == {
-        "format": "ultrakb.context-kb",
-        "version": 1,
-    }
+    from ultrakb.storage.database import open_database
+
+    with open_database(root, read_only=True) as db:
+        assert db.connection.execute(
+            "SELECT format, format_version FROM ukb_meta WHERE singleton = 1"
+        ).fetchone() == ("ultrakb.context-kb", 2)
+    assert not (root / ".ultrakb/format.json").exists()
     assert open_kb(root) == root

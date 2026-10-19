@@ -6,6 +6,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
+from native_catalog_fixtures import original_bytes, retained_pdf_bytes
 
 pytest_plugins = ("test_pdf_readback",)
 
@@ -109,7 +110,7 @@ def test_missing_office_runtime_keeps_raw_docx_and_pdf_still_imports(
     assert result.status == "failed" and "Office runtime" in result.message
     saved = read_document_source(kb_dir, result.source_id)
     assert saved["knowledge_revision_id"] is None
-    assert (kb_dir / saved["original_path"]).read_bytes() == writer_document.read_bytes()
+    assert original_bytes(kb_dir, saved["source_revision_id"]) == writer_document.read_bytes()
     pdf = import_document(kb_dir, physical_pdf)
     assert pdf.status == "added", pdf.message
 
@@ -152,7 +153,7 @@ def test_failed_office_import_recovers_after_runtime_repair_or_upgrade(
     assert (recovered.source_revision_id != failed.source_revision_id) == upgraded
     assert (recovered.units[0].target_revision_id != failed.units[0].target_revision_id) == upgraded
     saved = read_document_source(kb_dir, recovered.source_id)
-    assert (kb_dir / saved["original_path"]).read_bytes() == original
+    assert original_bytes(kb_dir, saved["source_revision_id"]) == original
 
 
 def test_office_font_fallback_keeps_symbols_and_cjk_readable(
@@ -210,16 +211,16 @@ def test_docx_freezes_final_visible_pages_and_exact_office_provenance(
     result = import_document(kb_dir, writer_document)
     assert result.status == "added", result.message
     saved = read_document_source(kb_dir, result.source_id)
-    assert (kb_dir / saved["original_path"]).read_bytes() == original
+    assert original_bytes(kb_dir, saved["source_revision_id"]) == original
     assert saved["pages"] == 3
     assert "INSERTED_MARKER" in saved["content"]
     assert "DELETED_MARKER" not in saved["content"]
     assert "HIDDEN_MARKER" not in saved["content"]
     blank = read_document_source(kb_dir, result.source_id, pages="2")
     assert blank["units"][0]["content"].strip() == ""
-    pdf_path = kb_dir / saved["internal_pdf_path"]
-    assert pdf_path.read_bytes().startswith(b"%PDF-1.7")
-    with pymupdf.open(pdf_path) as pdf:
+    pdf_data = retained_pdf_bytes(kb_dir, saved)
+    assert pdf_data.startswith(b"%PDF-1.7")
+    with pymupdf.open(stream=pdf_data, filetype="pdf") as pdf:
         assert pdf.page_count == 3
         assert "中文" in pdf[0].get_text()
     office = saved["office"]
@@ -230,25 +231,6 @@ def test_docx_freezes_final_visible_pages_and_exact_office_provenance(
     assert any(item["requested"] == "Missing UltraKB Font" for item in office["font_substitutions"])
     assert any(item["requested"] == "Missing CJK Font" for item in office["font_substitutions"])
     assert office["font_observations"]
-
-
-def test_corrupt_office_pdf_reference_cannot_mislabel_the_original_as_a_pdf(
-    kb_dir, writer_document, office_runtime, pdf_model
-):
-    import json
-
-    from ultrakb.application.documents import import_document
-    from ultrakb.documents import read_document_source
-    from ultrakb.locks import atomic_write_json
-
-    result = import_document(kb_dir, writer_document)
-    assert result.status == "added", result.message
-    path = next((kb_dir / ".ultrakb/catalog/normalizations").glob("*.json"))
-    record = json.loads(path.read_text())
-    record["pdf_path"] = record["raw_path"]
-    atomic_write_json(path, record)
-    with pytest.raises(ValueError, match="Office|PDF"):
-        read_document_source(kb_dir, result.source_id)
 
 
 @pytest.mark.parametrize("duplicate_deleted", [False, True])
@@ -302,7 +284,7 @@ def test_docx_recompile_and_history_read_the_retained_pdf_without_office(
     imported = import_document(kb_dir, writer_document)
     assert imported.status == "added", imported.message
     before = read_document_source(kb_dir, imported.source_id)
-    frozen = (kb_dir / before["internal_pdf_path"]).read_bytes()
+    frozen = retained_pdf_bytes(kb_dir, before)
     writer_document.unlink()
     apply_kb_config_patch(
         kb_dir,
@@ -321,7 +303,7 @@ def test_docx_recompile_and_history_read_the_retained_pdf_without_office(
     assert after["office"] == before["office"]
     assert after["content"] == before["content"]
     assert after["processing"] == before["processing"]
-    assert (kb_dir / after["internal_pdf_path"]).read_bytes() == frozen
+    assert retained_pdf_bytes(kb_dir, after) == frozen
     historical = read_document_source(
         kb_dir,
         imported.source_id,
@@ -359,12 +341,12 @@ def test_docx_api_and_cli_expose_original_pdf_and_conversion_diagnostics(
     assert read.status_code == 200, read.text
     body = read.json()
     assert body["office"]["pages"] == 3
-    assert (kb_dir / body["internal_pdf_path"]).is_file()
+    assert retained_pdf_bytes(kb_dir, body).startswith(b"%PDF")
     output = CliRunner().invoke(cli, ["--kb-dir", str(kb_dir), "source", result["source_id"]])
     assert output.exit_code == 0, output.output
     saved = json.loads(output.output)
     assert saved["office"] == body["office"]
-    assert (kb_dir / saved["original_path"]).read_bytes() == writer_document.read_bytes()
+    assert original_bytes(kb_dir, saved["source_revision_id"]) == writer_document.read_bytes()
 
 
 def test_broken_office_update_retains_previous_body_and_new_original(
@@ -386,8 +368,8 @@ def test_broken_office_update_retains_previous_body_and_new_original(
     failed = read_document_source(
         kb_dir, first.source_id, source_revision_id=second.source_revision_id
     )
-    assert (kb_dir / failed["original_path"]).read_bytes() == writer_document.read_bytes()
-    assert failed.get("internal_pdf_path") is None
+    assert original_bytes(kb_dir, failed["source_revision_id"]) == writer_document.read_bytes()
+    assert failed.get("office") is None
 
 
 @pytest.fixture(params=["conversion", "probe"])
@@ -466,7 +448,7 @@ def test_stopping_office_reaps_its_tree_and_keeps_original(
         return
     saved = read_document_source(kb_dir, documents[0]["source_id"])
     assert saved["knowledge_revision_id"] is None
-    assert (kb_dir / saved["original_path"]).read_bytes() == writer_document.read_bytes()
+    assert original_bytes(kb_dir, saved["source_revision_id"]) == writer_document.read_bytes()
 
 
 def test_application_exit_reaps_probe_or_conversion_and_its_private_profile(

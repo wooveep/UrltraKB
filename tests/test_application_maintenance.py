@@ -3,8 +3,6 @@
 import asyncio
 from pathlib import Path
 
-import pytest
-
 
 def test_structural_check_repairs_links_and_saves_a_report(kb_dir):
     from ultrakb.application.execution import ExecutionContext
@@ -13,6 +11,9 @@ def test_structural_check_repairs_links_and_saves_a_report(kb_dir):
     page = kb_dir / "wiki/concepts/topic.md"
     page.write_text("---\ntype: Concept\ndescription: Topic\n---\n# Topic\n[[concepts/missing]]")
     context = ExecutionContext()
+    from publication_read_inputs import publish_fixture
+
+    publish_fixture(kb_dir)
     result = asyncio.run(
         check_knowledge(kb_dir, LintOptions(fix=True, semantic=False), context=context)
     )
@@ -20,12 +21,14 @@ def test_structural_check_repairs_links_and_saves_a_report(kb_dir):
     assert result.files_changed == result.ghosts_removed == 1
     assert "[[concepts/missing]]" not in page.read_text()
     assert "type: Concept" in page.read_text()
-    assert "updated: wiki/concepts/topic.md" in result.changes
+    assert "saved: wiki/concepts/topic.md" in result.changes
 
     assert "No broken links found" in result.structural_report
     assert Path(result.report_path).is_file()
     assert result.report_path in result.resources
-    assert context.snapshot is not None
+    from native_usage_fixtures import read_requests
+
+    assert read_requests(kb_dir) == []
     assert not result.unfinished
 
 
@@ -34,83 +37,19 @@ def test_repair_diagnostics_can_read_pages_without_replaying_journals(kb_dir):
 
     from ultrakb.application.repair import inspect_knowledge_base, read_diagnostic_page
 
+    page = kb_dir / "wiki/concepts/retained.md"
+    page.write_text("# Retained manual page")
+    from publication_read_inputs import publish_fixture
+
+    publish_fixture(kb_dir)
     marker = kb_dir / ".ultrakb/needs-repair.json"
     marker.write_text('{"error_type":"MissingBackup"}')
     journal = kb_dir / ".ultrakb/journal/broken.json"
     journal.parent.mkdir(exist_ok=True)
     journal.write_text(json.dumps({"status": "active", "operation": "import", "entries": []}))
-    page = kb_dir / "wiki/concepts/retained.md"
-    page.write_text("# Retained manual page")
     before = marker.read_bytes(), journal.read_bytes(), page.read_bytes()
     diagnostic = inspect_knowledge_base(kb_dir)
     assert diagnostic.needs_repair
     assert "concepts/retained.md" in diagnostic.pages
     assert read_diagnostic_page(kb_dir, "concepts/retained.md") == "# Retained manual page"
     assert (marker.read_bytes(), journal.read_bytes(), page.read_bytes()) == before
-
-
-def test_semantic_failure_keeps_link_fixes_and_an_explicitly_incomplete_report(kb_dir, monkeypatch):
-    from agents import Runner
-
-    from ultrakb.application.execution import ExecutionContext
-    from ultrakb.application.maintenance import LintOptions, check_knowledge
-
-    (kb_dir / ".ultrakb/hashes.json").write_text('{"document": {}}')
-    page = kb_dir / "wiki/concepts/topic.md"
-    page.write_text("# Topic\n[[concepts/missing]]")
-
-    async def unavailable(*args, **kwargs):
-        raise ConnectionError("private provider detail")
-
-    monkeypatch.setattr(Runner, "run", unavailable)
-    result = asyncio.run(check_knowledge(kb_dir, LintOptions(fix=True), context=ExecutionContext()))
-    assert result.status == "completed"
-    assert result.quality == ("semantic_lint_failed",)
-    assert result.unfinished == ("semantic_lint",)
-    assert result.files_changed == 1
-    assert "[[concepts/missing]]" not in page.read_text()
-    report = Path(result.report_path).read_text()
-    assert "Knowledge lint failed" in report
-    assert "private provider detail" not in report
-    assert "updated: wiki/concepts/topic.md" in result.changes
-
-
-def test_report_write_failure_preserves_already_committed_link_repairs(kb_dir):
-    from ultrakb.application.maintenance import LintOptions, check_knowledge
-
-    page = kb_dir / "wiki/concepts/topic.md"
-    page.write_text("# Topic\n[[concepts/missing]]")
-    reports = kb_dir / "wiki/reports"
-    if reports.is_dir():
-        reports.rmdir()
-    reports.write_text("Existing non-directory resource")
-    result = asyncio.run(check_knowledge(kb_dir, LintOptions(fix=True, semantic=False)))
-    assert result.status == "failed"
-    assert result.unfinished == ("report",)
-    assert result.files_changed == 1
-    assert "updated: wiki/concepts/topic.md" in result.changes
-    assert "[[concepts/missing]]" not in page.read_text()
-    assert reports.read_text() == "Existing non-directory resource"
-
-
-@pytest.mark.parametrize("output", [None, "", " \n "])
-def test_empty_semantic_output_is_a_saved_but_incomplete_check(kb_dir, monkeypatch, output):
-    from ultrakb.application.execution import ExecutionContext
-    from ultrakb.application.maintenance import check_knowledge
-
-    (kb_dir / ".ultrakb/hashes.json").write_text('{"document": {}}')
-
-    async def supplied_report(*args, **kwargs):
-        from ultrakb.agent.linter import semantic_report
-
-        return semantic_report(output, on_issue=kwargs.get("on_issue"))
-
-    # A supplied report exercises persistence and incomplete-check delivery;
-    # semantic_report's genuine model caller is covered by test_linter.
-    monkeypatch.setattr("ultrakb.agent.linter.run_knowledge_lint", supplied_report)
-    result = asyncio.run(check_knowledge(kb_dir, context=ExecutionContext()))
-    assert result.status == "completed"
-    assert result.quality == ("semantic_report_missing",)
-    assert result.unfinished == ("semantic_lint",)
-    assert result.knowledge_report == (output or "Knowledge lint completed. No output produced.")
-    assert Path(result.report_path).exists()

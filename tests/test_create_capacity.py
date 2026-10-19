@@ -1,14 +1,14 @@
 """New pages size the final input, retain every original, and resume accepted parts."""
 
 import json
-from types import SimpleNamespace
 
 import pytest
 
 
 def creation_inputs(kb, *, kind="concepts", limit=9000):
+    from compile_work_fixtures import new_compile_work
+
     from ultrakb.agent.source_windows import CompileSourceWindows
-    from ultrakb.compile_checkpoints import CompileCheckpoints
 
     wiki = kb / "wiki"
     text = "\n\n".join(f"Operation {i}: retain its independent condition." for i in range(160))
@@ -18,12 +18,7 @@ def creation_inputs(kb, *, kind="concepts", limit=9000):
     originals = reader.prepare(
         {"name": "rules", "reading_locations": {"chars": f"0:{len(text)}"}}, long=True
     )
-    cp = CompileCheckpoints(
-        kb,
-        SimpleNamespace(task_id="a" * 32, parent_task_id=None),
-        {"document": "manual"},
-        {"protocol": "retained-create-test"},
-    )
+    cp = new_compile_work(kb, {"document": "manual"}, {"protocol": "retained-create-test"})
     options = dict(
         windows=reader,
         originals=originals,
@@ -166,8 +161,10 @@ async def test_creation_repair_is_persisted_and_never_reopened_on_resume(kb_dir,
     monkeypatch.setattr(compiler, "_llm_call_async", delivered)
     await prepared.generate()
     first = prepared.batches[0]
-    _, entry = cp._entry(first.key, first.signature)
-    assert entry["state"] == "accepted" and entry["repair_used"] is True
+    from compile_work_fixtures import checkpoint_record
+
+    entry = checkpoint_record(cp, first.key)
+    assert cp.load(first.key, first.signature) is not None and entry["repair_used"] is True
     assert len(calls) == len(prepared.batches) + 1
     calls.clear()
     await prepare_page_creation(**options).generate()

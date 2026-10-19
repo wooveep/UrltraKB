@@ -1,78 +1,54 @@
-"""Replay a validated index package through actual import/reprocessing failures."""
-
-import json
-import shutil
+"""Actual index acceptance survives later compiler failure in imports and reprocessing."""
 
 import pytest
+from index_recovery_fixtures import index_ids
 
-pytest_plugins = ("test_import_capacity_recovery",)
+from ultrakb.application.documents import import_document
+from ultrakb.application.reprocessing import preview_reprocessing, reprocess_source
+from ultrakb.application.source_retry import retry_source
+from ultrakb.application.views import published_scope
+from ultrakb.storage.catalog_store import CatalogStore
+from ultrakb.storage.coordination import storage_stage
+from ultrakb.storage.index_store import IndexStore
+
+pytest_plugins = ("index_recovery_fixtures",)
 
 
 @pytest.mark.parametrize("operation", ["import", "reprocess"])
 def test_new_index_is_durable_before_compilation_and_reused_on_retry(
-    retained_index, tmp_path, monkeypatch, operation
+    retained_index, tmp_path, operation
 ):
-    from ultrakb.application.documents import import_document
-    from ultrakb.application.reprocessing import preview_reprocessing, reprocess_source
-    from ultrakb.application.source_retry import retry_source
-    from ultrakb.compilation_report import CompilationIncomplete
-    from ultrakb.condb_storage import ConDBPageIndexStorage
-    from ultrakb.index_checkpoint import IndexCheckpoint
-    from ultrakb.index_location import IndexLocation
-    from ultrakb.index_packages import copy_index_package
-    from ultrakb.indexer import IndexResult, _convert_pdf_to_pages, _write_long_doc_artifacts
-    from ultrakb.state import HashRegistry
-    from ultrakb.unit_publication import read_head
-
-    root, admission, _, original_marker, service, _ = retained_index
-    frozen = tmp_path / "frozen-index"
-    shutil.copytree(original_marker.parent / "data/index", frozen)
-    saved = IndexCheckpoint.model_validate_json(original_marker.read_text())
-    built = []
-
-    def replay_index(index_input, kb_dir, *, doc_name, scope, storage_path):
-        # Historical index data, not an invented successful model reply. The real
-        # reusable_index still validates, seals, hashes and commits this package.
-        built.append(doc_name)
-        copy_index_package(frozen, storage_path, document_id=saved.document_id)
-        location = IndexLocation.package(storage_path)
-        with ConDBPageIndexStorage(location) as storage:
-            document = storage.get_document("default", saved.document_id)
-        tree = {key: document[key] for key in ("doc_name", "doc_description", "structure")}
-        pages = _convert_pdf_to_pages(index_input, doc_name, scope.wiki_dir / "sources/images")
-        _write_long_doc_artifacts(tree, pages, doc_name, saved.document_id, kb_dir, scope=scope)
-        return IndexResult(saved.document_id, saved.description, tree)
-
-    async def fail_after_index(*args, **kwargs):
-        raise CompilationIncomplete(("entity_generation_incomplete",), ("entities",))
-
-    monkeypatch.setattr("ultrakb.indexer.index_long_document", replay_index)
-    monkeypatch.setattr("ultrakb.agent.compiler.compile_long_doc", fail_after_index)
-    head = read_head(root)
+    data = retained_index
+    before = len(data.service.requests)
     if operation == "import":
-        source = tmp_path / "fresh.pdf"
-        shutil.copyfile(root / admission.revision.original, source)
-        result = import_document(root, source)
+        original = tmp_path / "fresh.pdf"
+        original.write_bytes(data.original)
+        result = import_document(data.root, original)
+        original.unlink()
     else:
-        preview = preview_reprocessing(root, admission.source.source_id)
-        assert preview["status"] == "ready"
-        result = reprocess_source(root, admission.source.source_id, version=preview["version"])
-    assert result.status == "failed", result.message
+        preview = preview_reprocessing(data.root, data.target.source_id)
+        assert preview["status"] == "ready", preview
+        result = reprocess_source(data.root, data.target.source_id, version=preview["version"])
+    assert result.status in {"failed", "blocked"}, result.message
     [unit] = result.units
-    assert unit.completed_stages == ("conversion", "indexing")
-    marker = root / unit.recovery_point
-    assert marker != original_marker and marker.is_file()
-    retained = marker.read_bytes()
-    manifest = json.loads(retained)
-    assert {
-        name: HashRegistry.hash_file(marker.parent / "data" / name) for name in manifest["files"]
-    } == manifest["files"]
-    assert read_head(root) == head and len(built) == 1
-
-    if operation == "import":
-        retried = retry_source(root, result.source_id)
-    else:
-        retried = reprocess_source(root, result.source_id, version=preview["version"])
-    assert retried.status == "failed"
-    assert len(built) == 1 and marker.read_bytes() == retained
-    assert read_head(root) == head and service.requests == []
+    target = CatalogStore(data.root, data.identity).unit(unit.unit_id)
+    [index] = index_ids(data.root, data.identity, target.unit_revision_id)
+    assert index != data.index
+    document = IndexStore(data.root, data.identity).document(index)
+    sent = len(data.service.requests)
+    assert sent > before
+    assert published_scope(data.root).publication_id == data.publication_id
+    again = retry_source(data.root, result.source_id)
+    assert again.status in {"failed", "blocked"}, again.message
+    assert len(data.service.requests) == sent
+    assert IndexStore(data.root, data.identity).document(index) == document
+    with storage_stage(data.root, data.identity) as db:
+        db.connection.execute("DROP TRIGGER interrupt_summary_generation")
+    completed = retry_source(data.root, result.source_id)
+    assert completed.status == "added", completed.message
+    assert len(data.service.requests) == sent + 2
+    assert index in published_scope(data.root).knowledge.index_revisions()
+    assert (
+        published_scope(data.root).knowledge.read("concepts/operator-note.md")
+        == b"# Human note\nKeep the reviewed procedure.\n"
+    )

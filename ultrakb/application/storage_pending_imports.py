@@ -44,7 +44,12 @@ def import_recovered(scope, work, context, bundle):
                 validate_text_preflight(ready, assessment)
             except ImportTextRejected as error:
                 if not retainable_without_text(error.assessment):
-                    return rejection_result(ready, error)
+                    return confirm_import_usage(
+                        rejection_result(ready, error),
+                        context,
+                        scope.kb_dir,
+                        scope.knowledge.identity,
+                    )
             catalog = CatalogStore(scope.kb_dir, scope.knowledge.identity)
             with task_stage(context, "import.admit.v1", work_key=ready.digest):
                 revision = catalog.admit(

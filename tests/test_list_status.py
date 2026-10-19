@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from unittest.mock import patch
 
 from click.testing import CliRunner
+from publication_read_inputs import publish_fixture
 
 from ultrakb.cli import cli
+from ultrakb.desktop.verification_data import retain_document
 
 
 def _setup_kb(tmp_path: Path) -> Path:
@@ -26,11 +27,21 @@ def _setup_kb(tmp_path: Path) -> Path:
     from kb_fixtures import mark_current_kb
 
     mark_current_kb(ultrakb_dir.parent)
-    (ultrakb_dir / "hashes.json").write_text(json.dumps({}))
     (kb_dir / "wiki" / "index.md").write_text(
         "# Knowledge Base Index\n\n## Documents\n\n## Concepts\n"
     )
     return kb_dir
+
+
+def _retain_documents(kb, records):
+    for item in records.values():
+        name = item["name"]
+        pages = (
+            [{"page": 1, "unit_kind": "page", "content": "A retained PDF source."}]
+            if name.endswith(".pdf")
+            else None
+        )
+        retain_document(kb, name, Path(name).stem, "A retained source.", pages=pages)
 
 
 class TestListCommand:
@@ -45,6 +56,7 @@ class TestListCommand:
 
     def test_list_empty_kb(self, tmp_path):
         kb_dir = _setup_kb(tmp_path)
+        publish_fixture(kb_dir)
         runner = CliRunner()
         with patch("ultrakb.cli._find_kb_dir", return_value=kb_dir):
             result = runner.invoke(cli, ["list"])
@@ -56,8 +68,9 @@ class TestListCommand:
             "abc123": {"name": "paper.pdf", "type": "pdf"},
             "def456": {"name": "notes.md", "type": "md"},
         }
-        (kb_dir / ".ultrakb" / "hashes.json").write_text(json.dumps(hashes))
+        _retain_documents(kb_dir, hashes)
 
+        publish_fixture(kb_dir)
         runner = CliRunner()
         with patch("ultrakb.cli._find_kb_dir", return_value=kb_dir):
             result = runner.invoke(cli, ["list"])
@@ -70,10 +83,11 @@ class TestListCommand:
     def test_list_shows_concepts(self, tmp_path):
         kb_dir = _setup_kb(tmp_path)
         hashes = {"abc": {"name": "paper.pdf", "type": "pdf"}}
-        (kb_dir / ".ultrakb" / "hashes.json").write_text(json.dumps(hashes))
+        _retain_documents(kb_dir, hashes)
         (kb_dir / "wiki" / "concepts" / "attention.md").write_text("# Attention")
         (kb_dir / "wiki" / "concepts" / "transformer.md").write_text("# Transformer")
 
+        publish_fixture(kb_dir)
         runner = CliRunner()
         with patch("ultrakb.cli._find_kb_dir", return_value=kb_dir):
             result = runner.invoke(cli, ["list"])
@@ -84,8 +98,9 @@ class TestListCommand:
     def test_list_no_concepts_section_when_empty(self, tmp_path):
         kb_dir = _setup_kb(tmp_path)
         hashes = {"abc": {"name": "paper.pdf", "type": "pdf"}}
-        (kb_dir / ".ultrakb" / "hashes.json").write_text(json.dumps(hashes))
+        _retain_documents(kb_dir, hashes)
 
+        publish_fixture(kb_dir)
         runner = CliRunner()
         with patch("ultrakb.cli._find_kb_dir", return_value=kb_dir):
             result = runner.invoke(cli, ["list"])
@@ -97,10 +112,11 @@ class TestListCommand:
     def test_list_shows_entities(self, tmp_path):
         kb_dir = _setup_kb(tmp_path)
         hashes = {"abc": {"name": "paper.pdf", "type": "pdf"}}
-        (kb_dir / ".ultrakb" / "hashes.json").write_text(json.dumps(hashes))
+        _retain_documents(kb_dir, hashes)
         (kb_dir / "wiki" / "entities" / "ada-lovelace.md").write_text("# Ada")
         (kb_dir / "wiki" / "entities" / "openai.md").write_text("# OpenAI")
 
+        publish_fixture(kb_dir)
         runner = CliRunner()
         with patch("ultrakb.cli._find_kb_dir", return_value=kb_dir):
             result = runner.invoke(cli, ["list"])
@@ -112,8 +128,9 @@ class TestListCommand:
     def test_list_no_entities_section_when_empty(self, tmp_path):
         kb_dir = _setup_kb(tmp_path)
         hashes = {"abc": {"name": "paper.pdf", "type": "pdf"}}
-        (kb_dir / ".ultrakb" / "hashes.json").write_text(json.dumps(hashes))
+        _retain_documents(kb_dir, hashes)
 
+        publish_fixture(kb_dir)
         runner = CliRunner()
         with patch("ultrakb.cli._find_kb_dir", return_value=kb_dir):
             result = runner.invoke(cli, ["list"])
@@ -141,6 +158,7 @@ class TestStatusCommand:
         (kb_dir / "wiki" / "summaries" / "sum1.md").write_text("# Sum 1")
         (kb_dir / "wiki" / "concepts" / "concept1.md").write_text("# Concept")
 
+        publish_fixture(kb_dir)
         runner = CliRunner()
         with patch("ultrakb.cli._find_kb_dir", return_value=kb_dir):
             result = runner.invoke(cli, ["status"])
@@ -158,8 +176,9 @@ class TestStatusCommand:
             "def": {"name": "b.pdf", "type": "pdf"},
             "ghi": {"name": "c.md", "type": "md"},
         }
-        (kb_dir / ".ultrakb" / "hashes.json").write_text(json.dumps(hashes))
+        _retain_documents(kb_dir, hashes)
 
+        publish_fixture(kb_dir)
         runner = CliRunner()
         with patch("ultrakb.cli._find_kb_dir", return_value=kb_dir):
             result = runner.invoke(cli, ["status"])
@@ -171,6 +190,7 @@ class TestStatusCommand:
         (kb_dir / "raw" / "file1.pdf").write_bytes(b"PDF")
         (kb_dir / "raw" / "file2.pdf").write_bytes(b"PDF")
 
+        publish_fixture(kb_dir)
         runner = CliRunner()
         with patch("ultrakb.cli._find_kb_dir", return_value=kb_dir):
             result = runner.invoke(cli, ["status"])
@@ -180,6 +200,7 @@ class TestStatusCommand:
     def test_status_exit_code_zero(self, tmp_path):
         kb_dir = _setup_kb(tmp_path)
 
+        publish_fixture(kb_dir)
         runner = CliRunner()
         with patch("ultrakb.cli._find_kb_dir", return_value=kb_dir):
             result = runner.invoke(cli, ["status"])
@@ -194,6 +215,7 @@ class TestStatusKbPath:
     def test_status_prints_kb_path_first(self, tmp_path):
         kb_dir = _setup_kb(tmp_path)
 
+        publish_fixture(kb_dir)
         runner = CliRunner()
         with patch("ultrakb.cli._find_kb_dir", return_value=kb_dir):
             result = runner.invoke(cli, ["status"])
