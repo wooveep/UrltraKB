@@ -166,9 +166,9 @@ class RootRetirement:
     def __init__(self, root, identity):
         self.root, self.identity = root.resolve(), identity
 
-    def preview(self, *, max_items=128, max_bytes=256 * 1024):
+    def preview(self, *, max_items=128, max_bytes=256 * 1024, cancelled=None):
         _limits(max_items, max_bytes)
-        with storage_stage(self.root, self.identity, read_only=True) as db:
+        with storage_stage(self.root, self.identity, read_only=True, cancelled=cancelled) as db:
             reason = pending_reclamation_barrier(db)
             protected = db.connection.execute(
                 "SELECT count(*) FROM ukb_conversation_checkpoints c "

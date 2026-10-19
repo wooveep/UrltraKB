@@ -5,8 +5,10 @@ from pathlib import Path
 
 from ultrakb.knowledge_scope import resolve_scope
 from ultrakb.storage.database import DatabaseIdentity, open_database
-from ultrakb.storage.maintenance import Maintenance
-from ultrakb.storage.root_retirement import RootRetirement
+from ultrakb.storage.execution_store import now
+from ultrakb.storage.maintenance import CollectionPreview, Maintenance
+from ultrakb.storage.receipt_store import ReceiptStore
+from ultrakb.storage.root_retirement import RootRetirement, RootRetirementPreview
 
 
 @dataclass(frozen=True)
@@ -17,8 +19,18 @@ class BackupResult:
     coverage: dict[str, str]
 
 
-def backup_knowledge(kb_dir: Path, destination: Path, *, scope=None) -> BackupResult:
-    receipt = _maintenance(kb_dir, scope).backup_package(destination)
+@dataclass(frozen=True)
+class MaintenanceOverview:
+    schema_version: int
+    statistics_at: str
+    kb_id: str
+    generation: str
+    roots: RootRetirementPreview
+    garbage: CollectionPreview
+
+
+def backup_knowledge(kb_dir: Path, destination: Path, *, scope=None, identity=None) -> BackupResult:
+    receipt = _maintenance(kb_dir, scope, identity).backup_package(destination)
     return BackupResult("completed", str(destination.resolve()), receipt.identity, receipt.coverage)
 
 
@@ -27,33 +39,90 @@ def restore_knowledge(backup: Path, destination: Path) -> BackupResult:
     return BackupResult("completed", str(destination.resolve()), receipt.identity, receipt.coverage)
 
 
-def _maintenance(kb_dir, scope):
+def _maintenance(kb_dir, scope, identity=None):
     if scope is None:
-        with open_database(kb_dir, read_only=True) as db:
+        with open_database(kb_dir, expected=identity, read_only=True) as db:
             return Maintenance(db.root, db.identity)
     scope = resolve_scope(kb_dir, scope)
     if scope.knowledge is None:
         raise ValueError("Collection requires a main-store knowledge base")
+    if identity is not None and scope.knowledge.identity != identity:
+        raise ValueError("Maintenance belongs to another knowledge-base generation")
     return Maintenance(scope.kb_dir, scope.knowledge.identity)
 
 
-def preview_collection(kb_dir: Path, *, scope=None, max_items=128, max_bytes=64 * 1024**2):
-    return _maintenance(kb_dir, scope).preview(max_items=max_items, max_bytes=max_bytes)
+def preview_collection(
+    kb_dir: Path,
+    *,
+    scope=None,
+    identity=None,
+    max_items=128,
+    max_bytes=64 * 1024**2,
+    cancelled=None,
+):
+    return _maintenance(kb_dir, scope, identity).preview(
+        max_items=max_items, max_bytes=max_bytes, cancelled=cancelled
+    )
 
 
-def collect_garbage(kb_dir: Path, *, scope=None, max_items=128, max_bytes=64 * 1024**2):
-    return _maintenance(kb_dir, scope).collect(max_items=max_items, max_bytes=max_bytes)
+def collect_garbage(
+    kb_dir: Path, *, scope=None, identity=None, max_items=128, max_bytes=64 * 1024**2
+):
+    return _maintenance(kb_dir, scope, identity).collect(max_items=max_items, max_bytes=max_bytes)
 
 
-def preview_root_retirement(kb_dir: Path, *, scope=None, max_items=128, max_bytes=256 * 1024):
-    maintenance = _maintenance(kb_dir, scope)
+def preview_root_retirement(
+    kb_dir: Path,
+    *,
+    scope=None,
+    identity=None,
+    max_items=128,
+    max_bytes=256 * 1024,
+    cancelled=None,
+):
+    maintenance = _maintenance(kb_dir, scope, identity)
     return RootRetirement(maintenance.root, maintenance.identity).preview(
+        max_items=max_items, max_bytes=max_bytes, cancelled=cancelled
+    )
+
+
+def retire_unused_roots(
+    kb_dir: Path, *, scope=None, identity=None, max_items=128, max_bytes=256 * 1024
+):
+    maintenance = _maintenance(kb_dir, scope, identity)
+    return RootRetirement(maintenance.root, maintenance.identity).retire(
         max_items=max_items, max_bytes=max_bytes
     )
 
 
-def retire_unused_roots(kb_dir: Path, *, scope=None, max_items=128, max_bytes=256 * 1024):
-    maintenance = _maintenance(kb_dir, scope)
-    return RootRetirement(maintenance.root, maintenance.identity).retire(
-        max_items=max_items, max_bytes=max_bytes
+def preview_storage_maintenance(
+    kb_dir: Path,
+    *,
+    scope=None,
+    identity=None,
+    max_items=128,
+    max_bytes=64 * 1024**2,
+    cancelled=None,
+) -> MaintenanceOverview:
+    maintenance = _maintenance(kb_dir, scope, identity)
+    roots = RootRetirement(maintenance.root, maintenance.identity).preview(
+        max_items=max_items, max_bytes=min(max_bytes, 256 * 1024), cancelled=cancelled
+    )
+    garbage = maintenance.preview(max_items=max_items, max_bytes=max_bytes, cancelled=cancelled)
+    return MaintenanceOverview(
+        1, now(), maintenance.identity.kb_id, maintenance.identity.generation, roots, garbage
+    )
+
+
+def repair_knowledge_receipts(
+    kb_dir: Path,
+    *,
+    scope=None,
+    identity=None,
+    max_items=128,
+    max_bytes=64 * 1024**2,
+):
+    maintenance = _maintenance(kb_dir, scope, identity)
+    return ReceiptStore(maintenance.root, maintenance.identity).repair(
+        limit=max_items, byte_limit=max_bytes
     )

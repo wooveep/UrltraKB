@@ -152,11 +152,11 @@ class Maintenance:
     def __init__(self, root: Path, identity: DatabaseIdentity):
         self.root, self.identity = root.resolve(), identity
 
-    def preview(self, *, max_items: int = 128, max_bytes: int = 64 * 1024 * 1024):
+    def preview(self, *, max_items: int = 128, max_bytes: int = 64 * 1024 * 1024, cancelled=None):
         _limits(max_items, max_bytes)
         with (
-            storage_stage(self.root, self.identity, read_only=True) as db,
-            file_write_lock(self.root / ".ultrakb/ingest.lock"),
+            storage_stage(self.root, self.identity, read_only=True, cancelled=cancelled) as db,
+            file_write_lock(self.root / ".ultrakb/ingest.lock", cancelled=cancelled),
         ):
             from .tree_reclamation import tree_candidates
 

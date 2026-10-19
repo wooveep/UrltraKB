@@ -170,6 +170,9 @@ def create_app() -> FastAPI:
     from ultrakb.api_tasks import tasks_router
 
     app.include_router(tasks_router)
+    from ultrakb.api_storage import storage_router
+
+    app.include_router(storage_router)
 
     @app.get("/api/v1/kbs", response_model=KbListResponse)
     async def list_kbs_endpoint(

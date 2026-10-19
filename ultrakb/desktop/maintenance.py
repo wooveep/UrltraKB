@@ -50,6 +50,9 @@ class MaintenanceDialog(QDialog):
             button.clicked.connect(callback)
             actions.addWidget(button)
         layout.addLayout(actions)
+        storage_button = QPushButton("存储维护与备份…")
+        storage_button.clicked.connect(self.open_storage)
+        layout.addWidget(storage_button)
         self.status = QLabel("结构检查会报告链接、孤立页、索引与页面元数据问题。")
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
@@ -115,6 +118,11 @@ class MaintenanceDialog(QDialog):
             kb=self.kb,
             obsolete=lambda: self._closed,
         )
+
+    def open_storage(self):
+        from ultrakb.desktop.storage_maintenance import StorageMaintenanceDialog
+
+        StorageMaintenanceDialog(self.kb, self).exec()
 
     def poll(self):
         if not self._task:

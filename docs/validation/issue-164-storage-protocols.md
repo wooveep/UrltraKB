@@ -1298,3 +1298,32 @@ source modules, with Ruff and format checks passing. Spec review independently
 passes all ten new cases. Remaining archival/audit policy, maintenance adapters,
 compiler migration and P8 activation are separate unfinished work; issue 164
 remains open.
+
+### Shared explicit storage maintenance in CLI, HTTP and native Qt
+
+CLI `storage` and authenticated `/api/v1/storage` now expose the shared preview,
+bounded root retirement/collection, retained-receipt repair and verified backup/
+new-directory restore. Mutating HTTP requests require the reviewed KB identity
+and generation; CLI accepts the same precondition pair. A native storage dialog
+is reachable from maintenance and uses those same application operations through
+LocalIO, without a legacy outer KB lock. Its initial identity stays fixed across
+refresh and subsequent actions. The shared preview separates reference bytes
+from unique physical candidates and exposes protected counts and blocked reasons.
+
+Real Qt event delivery continues while preview waits for reclamation; closing
+cancels that wait before the exclusive lease is released. Actual mutation keeps
+the dialog open through I/O completion. Independent restore remains available
+when the current main database cannot be opened. Successful backup/restore
+receipts render before refreshing; a later read error preserves the completed
+path, coverage and result instead of hiding them behind a preview diagnostic.
+
+Seven entrypoint regressions compare CLI/HTTP/Qt against the shared result,
+reject stale-generation mutations, back up and independently restore fixed
+history, repair an actual retained paid response with one total model send,
+and inject source-database loss after a completed backup. Forty-one related
+application/adapter/size/boundary cases pass; full mypy passes 532 modules, final
+targeted mypy passes nine changed modules, and Ruff/format checks pass. An actual
+offscreen Qt render confirms labels and six controls fit the dialog. Both review
+axes independently verify the final result-preservation and recovery fixes.
+These commands do not activate normal-format creation or complete the remaining
+compiler, observation, audit/archive and P8 acceptance work. Issue 164 is open.
