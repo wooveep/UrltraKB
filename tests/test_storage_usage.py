@@ -171,6 +171,61 @@ def test_late_compile_delivery_cannot_replace_a_later_execution_response(tmp_pat
     assert retained[0] == "new response"
 
 
+def test_late_response_is_retained_when_a_new_claim_wins_its_pointer_race(tmp_path, monkeypatch):
+    from ultrakb.storage import compile_deliveries
+    from ultrakb.storage.blobs import read_bytes
+    from ultrakb.storage.checkpoint_store import CompileCheckpointStore
+    from ultrakb.storage.coordination import storage_stage
+    from ultrakb.storage.database import create_database
+    from ultrakb.storage.execution_store import ExecutionStore
+
+    root = tmp_path / "kb"
+    identity = create_database(root)
+    executions, checkpoints = ExecutionStore(root, identity), CompileCheckpointStore(root, identity)
+    first = executions.begin("import", fingerprint="a" * 64, max_calls=3)
+    original = checkpoints.for_work(
+        first.model_budget_id,
+        object_id={"unit": "body"},
+        conditions={"policy": "v1"},
+        execution_id=first.execution_id,
+    )
+    original.claim_generation("summary", "b" * 64, stage="compile.summary")
+    executions.finish(first.execution_id, state="failed")
+    second = executions.begin(
+        "import", fingerprint="a" * 64, max_calls=3, resume=first.execution_id
+    )
+    resumed = checkpoints.for_work(
+        second.model_budget_id,
+        object_id={"unit": "body"},
+        conditions={"policy": "v1"},
+        execution_id=second.execution_id,
+    )
+    encode, advanced = compile_deliveries._json, []
+
+    def advance_before_commit(record, **options):
+        if isinstance(record, dict) and record.get("execution_id") == first.execution_id:
+            resumed.claim_generation("summary", "b" * 64, stage="compile.summary")
+            advanced.append(True)
+        return encode(record, **options)
+
+    monkeypatch.setattr(compile_deliveries, "_json", advance_before_commit)
+    reference = original.record_received_response(
+        "summary",
+        "b" * 64,
+        "old paid delivery",
+        stage="summary",
+        response_protocol="summary-page-json",
+        expected_sections=(),
+    )
+    assert advanced
+    with storage_stage(root, identity, read_only=True) as db:
+        [digest] = db.connection.execute(
+            "SELECT content_digest FROM ukb_compile_responses WHERE response_id = ?",
+            (reference.removeprefix("compile-response/"),),
+        ).fetchone()
+        assert read_bytes(db, digest) == b"old paid delivery"
+
+
 def test_receipt_field_versions_merge_independently_and_retry_keeps_spent_budget(tmp_path):
     from ultrakb.llm_usage import UsageRequest
     from ultrakb.storage.database import create_database

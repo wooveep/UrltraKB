@@ -111,7 +111,7 @@ class CompileWork:
     def _record(self, db, key, signature):
         return self._record_snapshot(db, key, signature)[1]
 
-    def _write_record(self, connection, key, signature, previous, encoded):
+    def _write_record(self, connection, key, signature, previous, encoded, *, required=True):
         if previous is None:
             changed = connection.execute(
                 "INSERT INTO ukb_compile_records VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING",
@@ -123,10 +123,11 @@ class CompileWork:
                 "AND step_key = ? AND request_digest = ? AND record_json = ?",
                 (encoded, self.work_id, key, signature, previous),
             ).rowcount
-        if changed != 1:
+        if required and changed != 1:
             raise PageResponseError(
                 "compile_checkpoint_changed", "The checkpoint changed before its exact commit"
             )
+        return changed == 1
 
     def _require_record_request(self, connection, key, signature):
         row = connection.execute(

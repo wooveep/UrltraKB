@@ -49,6 +49,7 @@ def capture_response(work, key, signature, response, metadata):
         encoded = _json({**saved, "latest_response": identifier}, bounded=True)
         with db.transaction() as connection:
             work._provenance(connection)
+            work._require_record_request(connection, key, signature)
             connection.execute(
                 "INSERT INTO ukb_compile_responses VALUES (?, ?, ?, ?, ?, ?)",
                 (identifier, work.work_id, key, signature, body.digest, attributes.digest),
@@ -56,7 +57,7 @@ def capture_response(work, key, signature, response, metadata):
             retain_blob(connection, "compile-response", identifier, "body", body)
             retain_blob(connection, "compile-response", identifier, "metadata", attributes)
             if invocation_id == saved.get("latest_invocation"):
-                work._write_record(connection, key, signature, previous, encoded)
+                work._write_record(connection, key, signature, previous, encoded, required=False)
     return "compile-response/" + identifier
 
 
@@ -163,6 +164,7 @@ def provider_delivery(db, work, key, signature):
 
 def capture_resolution(work, key, signature, raw, delivered, resolutions):
     record = {
+        "execution_id": work.execution_id,
         "policy": "source-resolution-v1",
         "response_sha256": hashlib.sha256(raw.encode()).hexdigest(),
         "delivered_sha256": hashlib.sha256(delivered.encode()).hexdigest(),
@@ -174,6 +176,7 @@ def capture_resolution(work, key, signature, raw, delivered, resolutions):
         encoded = _json({**saved, "delivery_resolution": attributes.digest}, bounded=True)
         with db.transaction() as connection:
             work._provenance(connection)
+            work._require_record_request(connection, key, signature)
             retain_blob(
                 connection,
                 "compile-resolution",
@@ -181,5 +184,5 @@ def capture_resolution(work, key, signature, raw, delivered, resolutions):
                 key + ":" + attributes.digest,
                 attributes,
             )
-            work._write_record(connection, key, signature, previous, encoded)
+            work._write_record(connection, key, signature, previous, encoded, required=False)
     return "blob/" + attributes.digest

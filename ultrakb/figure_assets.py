@@ -190,7 +190,11 @@ def freeze_figures(
                     )
                 )
         for path, location, ordinal, caption, expected, reference_span in entries:
-            original = (wiki / path).resolve()
+            from ultrakb.storage.compile_binding import bound_inputs
+
+            captured = bound_inputs()
+            selected = captured.figure_asset(source_path, path) if captured is not None else path
+            original = (wiki / selected).resolve()
             if not original.is_relative_to(wiki.resolve()) or not original.is_file():
                 from ultrakb.processing_policy import ReprocessingRequired
 

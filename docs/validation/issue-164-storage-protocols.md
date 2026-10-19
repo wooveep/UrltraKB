@@ -897,3 +897,26 @@ invalid capture; and examine the invocation's received/uncertain attempts rather
 than treating its last known-unsent retry as proof that nothing was sent. A late
 older execution can retain a response without replacing a newer delivery pointer.
 New failing-first application and storage-window cases cover these findings.
+
+### Compiler image inputs and late-response races
+
+A raw delivery is now retained independently even if a newer invocation wins
+the optional latest-response pointer race. The final transaction still checks
+the frozen request and provenance. The competing invocation regression fails
+before this fix and passes after it; both review axes independently confirmed
+the original recovery findings and this adjacent race are resolved.
+
+Compiler inputs now map a native source's image filename to its exact retained
+processing revision. Old and current sources may name the same image while
+preserving different bytes and occurrence identities. The private workspace
+selects existing inline and historical-gallery attachments from the complete
+fixed Markdown baseline, including galleries without a remaining factual input
+basis. It copies referenced native images rather than every image in a processing
+manifest. Application witnesses update the same shared page with red/blue source
+versions after deleting the external originals; both images remain readable,
+the prior publication is unchanged, and unrelated publication/processing images
+and private index databases are not copied.
+
+Related compiler, usage, figure and retained-source regressions pass 41 tests
+(11 live cases deselected); mypy passes all 500 source modules. The remaining
+integration and activation gates above still apply. No live model was called.

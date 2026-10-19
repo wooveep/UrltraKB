@@ -1,6 +1,12 @@
 """Exact retained source identities and private inputs for the file compiler."""
 
+import json
 from dataclasses import dataclass
+from pathlib import PurePosixPath
+
+from ultrakb.agent.page_figures import split_gallery
+from ultrakb.markdown_images import ImageReference, image_references
+from ultrakb.source_qualification import source_images
 
 from .blobs import Blob, materialize_private
 from .catalog_store import CatalogStore
@@ -12,6 +18,7 @@ from .knowledge_inputs import image_paths, source_paths
 class CompileInputs:
     identities: dict
     originals: dict
+    assets: dict
 
     def identity(self, path):
         return dict(self.identities.get(path, {}))
@@ -19,15 +26,73 @@ class CompileInputs:
     def page_originals(self, page):
         return self.originals.get(page)
 
+    def figure_asset(self, source, path):
+        return self.assets.get((source, path), path)
+
+
+def _required_attachments(baseline):
+    """Select references in captured Markdown, including historical gallery records."""
+    selected = set()
+    for path in baseline.files:
+        if not path.endswith(".md"):
+            continue
+        text = (baseline.directory / path).read_text("utf-8")
+        _, gallery = split_gallery(text)
+        for entry in gallery:
+            asset = entry["figure"]["asset_path"]
+            if asset not in baseline.files:
+                raise FileNotFoundError(asset)
+            selected.add(asset)
+        for reference in image_references(text):
+            if reference.local_path is None:
+                continue
+            target = (baseline.directory / path).parent / reference.local_path
+            target = target.resolve()
+            if target.is_relative_to(baseline.directory):
+                relative = target.relative_to(baseline.directory).as_posix()
+                if relative in baseline.files:
+                    selected.add(relative)
+    if any(
+        PurePosixPath(path).suffix.lower() in {".db", ".sqlite", ".sqlite3"} for path in selected
+    ):
+        raise ValueError("Index databases cannot be compile inputs")
+    return selected
+
+
+def _input_images(processing, native):
+    text = native.read_text("utf-8")
+    raw = text if processing.source_kind == "markdown" else json.loads(text)
+    if isinstance(raw, list):
+        paths = [entry["path"] for page in raw for entry in page.get("images", [])]
+    else:
+        references = (
+            image_references(raw)
+            if isinstance(raw, str)
+            else [ImageReference(**ref) for ref in source_images(raw)]
+        )
+        paths = [ref.local_path for ref in references if ref.local_path is not None]
+    return {f"sources/{path.removeprefix('sources/')}" for path in paths}
+
 
 def materialize_inputs(base, baseline, target):
     """Keep old page inputs distinct when a document's current target advances."""
-    identities, paths = {}, {}
+    identities, paths, assets = {}, {}, {}
     current = {unit.unit_revision_id for unit in base.input_units()}
     basis = base.page_input_revisions()
     units = current | {target.unit_revision_id} | {u for values in basis.values() for u in values}
     native = {}
+    attachments = _required_attachments(baseline)
     with storage_stage(base.root, base.identity, read_only=True) as db:
+        for path in sorted(attachments):
+            if (baseline.directory / path).exists():
+                continue
+            digest = baseline.files[path]
+            size = db.connection.execute(
+                "SELECT byte_count FROM ukb_blobs WHERE digest = ? AND state = 'live'", (digest,)
+            ).fetchone()
+            if size is None:
+                raise FileNotFoundError(path)
+            materialize_private(db, Blob(digest, size[0]), baseline.private, path)
         for revision in sorted(units):
             unit = CatalogStore._unit_revision(db, revision)
             processing = CatalogStore._processing(db, unit.processing_id)
@@ -37,7 +102,7 @@ def materialize_inputs(base, baseline, target):
             aliases = source_paths(unit, processing, retained=retained)
             files = {file.path: file for file in processing.files}
             native[revision] = aliases[-1][0]
-            for alias, original in (*aliases, *image_paths(unit, processing, retained=retained)):
+            for alias, original in aliases:
                 file = files[original]
                 previous = paths.get(alias)
                 if previous is not None and previous != file.digest:
@@ -54,9 +119,30 @@ def materialize_inputs(base, baseline, target):
                     "source_revision_id": unit.source_revision_id,
                     "processing_revision_id": unit.unit_revision_id,
                 }
+            required = _input_images(processing, baseline.directory / native[revision])
+            for alias, original in image_paths(unit, processing, retained=retained):
+                canonical = f"sources/{original.removeprefix('sources/')}"
+                if canonical not in required:
+                    continue
+                file = files[original]
+                previous = paths.get(alias)
+                if previous is not None and previous != file.digest:
+                    raise ValueError("Compile image aliases must identify one retained input")
+                paths[alias] = file.digest
+                materialize_private(
+                    db,
+                    Blob(file.digest, file.byte_count),
+                    baseline.private,
+                    alias,
+                    replace=(baseline.directory / alias).exists(),
+                )
+                for source, _ in aliases:
+                    assets[source, original] = alias
+                    assets[source, canonical] = alias
     return CompileInputs(
         identities,
         {page: sorted({native[unit] for unit in revisions}) for page, revisions in basis.items()},
+        assets,
     )
 
 
