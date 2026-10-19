@@ -37,6 +37,8 @@ def _result_text(result):
         "retired_checkpoints": "已释放会话检查点",
         "retired_plans": "已释放同步计划明细",
         "retired_sync_items": "已释放同步条目",
+        "retired_generator_plans": "已释放未封存生成计划",
+        "retired_generator_files": "已释放生成计划文件引用",
         "released_reference_bytes": "已释放引用载荷字节（可重复引用同一内容）",
         "deleted_count": "已删除孤立内容",
         "unregistered_deleted": "其中未登记孤立内容",
@@ -180,6 +182,8 @@ class StorageMaintenanceDialog(QDialog):
                 f"同步计划 {roots.candidate_plans}。",
                 f"受保护恢复材料：检查点 {roots.protected_checkpoints}，"
                 f"同步计划 {roots.protected_plans}。",
+                f"未封存生成计划：可释放 {roots.candidate_generator_plans}，"
+                f"受保护 {roots.protected_generator_plans}。",
                 f"候选引用载荷：{roots.candidate_reference_bytes} 字节（不是磁盘回收量）。",
                 f"可回收孤立内容：{garbage.candidate_count} 项，{garbage.candidate_bytes} 字节；"
                 f"检索树 {garbage.candidate_trees}。",

@@ -2250,3 +2250,32 @@ adapters. The final maintenance/conversation/tree/backup/usage/boundary/size
 matrix passes 75 tests (5 live tests deselected). Mypy passes 593 modules; focused
 Ruff, formatting and diff checks and both static readonly review axes pass.
 Remaining obsolete-root and final P8 activation work continues.
+
+### Abandoned unsealed generator plans
+
+The explicit shared root-retirement operation now includes abandoned
+`building` generator plans and resumes its own `retiring` plans. Any active
+execution on their original model budget, already linked accepted/conflict
+artifact revision, or unexpected owned reference protects the plan. Ready plans
+remain retained recovery results. This does not expire accepted calculations,
+provider receipts, core budgets or artifact history.
+
+Selection shares the remaining object and encoded-byte budgets with session
+checkpoints and sync plans. Encoding happens outside the SQL writer. Under
+exclusive reclamation the operation rechecks eligibility, durably marks a plan
+retiring, and removes each selected file row and its exact owned Blob reference
+in one transaction. Only an empty retiring plan releases its details reference.
+Every transaction has bounded row/parameter work; a later batch can continue
+after a file-deletion failure. Physical CAS deletion remains a separate GC step.
+
+A real SQL seal failure after two actual SDK loopback sends leaves a building
+plan with two files. Bounded retirement preserves paid requests, original budget
+and all accepted compiler steps. Actual generation resumes successfully with
+the same two sends. Additional witnesses cover an active continuation budget,
+insufficient byte budget, interrupted retirement, ready-plan protection and
+CLI/authenticated generation-guarded HTTP/native Qt operations.
+
+The final generator/root/maintenance/orphan/boundary/size matrix passes 57 tests;
+mypy passes 594 modules. Focused Ruff, formatting and diff checks and both static
+readonly review axes pass. Other obsolete knowledge/review candidates and the
+sole P8 activation remain unfinished.

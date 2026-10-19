@@ -4,6 +4,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 
+from . import generator_retirement
 from .coordination import storage_stage, try_reclamation
 from .maintenance import _limits
 from .receipt_store import pending_reclamation_barrier
@@ -39,6 +40,9 @@ class RootRetirementPreview:
     candidate_plans: int = 0
     protected_plans: int = 0
     candidate_sync_items: int = 0
+    candidate_generator_plans: int = 0
+    protected_generator_plans: int = 0
+    candidate_generator_files: int = 0
 
 
 @dataclass(frozen=True)
@@ -51,6 +55,8 @@ class RootRetirementResult:
     blocked_reason: str | None = None
     retired_plans: int = 0
     retired_sync_items: int = 0
+    retired_generator_plans: int = 0
+    retired_generator_files: int = 0
 
 
 @dataclass(frozen=True)
@@ -109,8 +115,8 @@ def _plans(db, max_items, max_bytes):
         spent += cost
         max_items -= max(1, len(selected))
         if len(selected) < len(rows):
-            return work, True
-    return work, len(work) < len(plans)
+            return work, True, spent
+    return work, len(work) < len(plans), spent
 
 
 def _retire_plan(db, plan, items):
@@ -175,8 +181,17 @@ class RootRetirement:
                 + ("" if reason else f"WHERE NOT ({_UNBOUND_CHECKPOINT})")
             ).fetchone()[0]
             rows, more, spent = ([], False, 0) if reason else _checkpoints(db, max_items, max_bytes)
-            plans, plans_more = (
-                ([], False) if reason else _plans(db, max_items - len(rows), max_bytes - spent)
+            plans, plans_more, plan_spent = (
+                ([], False, 0) if reason else _plans(db, max_items - len(rows), max_bytes - spent)
+            )
+            generators, generators_more = (
+                ([], False)
+                if reason
+                else generator_retirement.select(
+                    db,
+                    max_items - len(rows) - sum(max(1, len(batch.items)) for batch in plans),
+                    max_bytes - spent - plan_spent,
+                )
             )
             protected_plans = db.connection.execute(
                 "SELECT count(*) FROM ukb_sync_plans p WHERE p.state != 'retired' "
@@ -190,12 +205,17 @@ class RootRetirement:
             return RootRetirementPreview(
                 len(rows),
                 protected,
-                sum(row[2] for row in rows) + plan_bytes,
-                more or plans_more,
+                sum(row[2] for row in rows)
+                + plan_bytes
+                + generator_retirement.reference_bytes(generators),
+                more or plans_more or generators_more,
                 reason,
                 len(plans),
                 protected_plans,
                 sum(len(batch.items) for batch in plans),
+                len(generators),
+                generator_retirement.protected_count(db, blocked=bool(reason)),
+                sum(len(batch.files) for batch in generators),
             )
 
     def retire(self, *, max_items=128, max_bytes=256 * 1024):
@@ -206,7 +226,12 @@ class RootRetirement:
             if reason := pending_reclamation_barrier(db):
                 return RootRetirementResult("blocked", blocked_reason=reason)
             rows, more, spent = _checkpoints(db, max_items, max_bytes)
-            plans, plans_more = _plans(db, max_items - len(rows), max_bytes - spent)
+            plans, plans_more, plan_spent = _plans(db, max_items - len(rows), max_bytes - spent)
+            generators, generators_more = generator_retirement.select(
+                db,
+                max_items - len(rows) - sum(max(1, len(batch.items)) for batch in plans),
+                max_bytes - spent - plan_spent,
+            )
             retired = references = byte_count = 0
             for checkpoint_id, digest, size in rows:
                 with db.transaction() as connection:
@@ -233,12 +258,21 @@ class RootRetirement:
                 retired_items += count
                 references += refs
                 byte_count += size
+            retired_generators = generator_files = 0
+            for batch in generators:
+                done, count, refs, size = generator_retirement.retire(db, batch)
+                retired_generators += done
+                generator_files += count
+                references += refs
+                byte_count += size
             return RootRetirementResult(
                 "completed",
                 retired,
                 references,
                 byte_count,
-                more or plans_more,
+                more or plans_more or generators_more,
                 retired_plans=retired_plans,
                 retired_sync_items=retired_items,
+                retired_generator_plans=retired_generators,
+                retired_generator_files=generator_files,
             )
