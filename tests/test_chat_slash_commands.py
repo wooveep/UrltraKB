@@ -312,7 +312,8 @@ def test_save_transcript_strips_ghost_wikilinks(tmp_path):
     )
     session.title = "transformer-q"
 
-    path = _save_transcript(kb_dir, session, name=None)
+    result = _save_transcript(kb_dir, session, name=None)
+    path = Path(result.resources[0])
 
     text = path.read_text(encoding="utf-8")
     # Valid link preserved

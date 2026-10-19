@@ -134,24 +134,26 @@ def resolve_scope(
 
 
 @contextmanager
-def reading_scope(scope: KnowledgeScope):
+def reading_scope(scope: KnowledgeScope, *, cancelled=None):
     """Only an explicitly fixed public snapshot can bypass the writer's lease."""
     if scope.knowledge is not None:
         from ultrakb.lifecycle import read_lifecycle
 
-        with read_lifecycle(scope.kb_dir, database_identity=scope.knowledge.identity):
+        with read_lifecycle(
+            scope.kb_dir, database_identity=scope.knowledge.identity, cancelled=cancelled
+        ):
             yield
     elif scope.publication is None:
         from ultrakb.locks import kb_read_lock
 
-        with kb_read_lock(scope.kb_dir / ".ultrakb"):
+        with kb_read_lock(scope.kb_dir / ".ultrakb", cancelled=cancelled):
             yield
     else:
         from ultrakb.lifecycle import expected_generation, read_lifecycle
 
         with (
             expected_generation(scope.kb_dir, scope.publication.generation),
-            read_lifecycle(scope.kb_dir),
+            read_lifecycle(scope.kb_dir, cancelled=cancelled),
         ):
             yield
 

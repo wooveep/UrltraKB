@@ -279,14 +279,22 @@ def initialize_kb(
         }
 
 
-def get_kb_list(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> dict[str, Any]:
+def get_kb_list(
+    kb_dir: Path, *, scope: KnowledgeScope | None = None, context=None
+) -> dict[str, Any]:
     """Return a structured inventory of the knowledge base (REST ``/list``)."""
     selected = resolve_scope(kb_dir, scope)
+    cancelled = context.cancelled if context else None
     if selected.knowledge is not None:
+        from ultrakb.storage.coordination import storage_stage
+
         from .storage_inventory import knowledge_inventory
 
-        return knowledge_inventory(selected)
-    with reading_scope(selected):
+        with storage_stage(
+            selected.kb_dir, selected.knowledge.identity, read_only=True, cancelled=cancelled
+        ):
+            return knowledge_inventory(selected)
+    with reading_scope(selected, cancelled=cancelled):
         metadata_root = selected.publication.metadata_dir if selected.publication else kb_dir
         ultrakb_dir = metadata_root / ".ultrakb"
         hashes_file = ultrakb_dir / "hashes.json"
@@ -345,14 +353,22 @@ def get_kb_list(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> dict[st
         }
 
 
-def get_kb_status(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> dict[str, Any]:
+def get_kb_status(
+    kb_dir: Path, *, scope: KnowledgeScope | None = None, context=None
+) -> dict[str, Any]:
     """Return structured status for the knowledge base (REST ``/status``)."""
     selected = resolve_scope(kb_dir, scope)
+    cancelled = context.cancelled if context else None
     if selected.knowledge is not None:
+        from ultrakb.storage.coordination import storage_stage
+
         from .storage_status import knowledge_status
 
-        return knowledge_status(selected)
-    with reading_scope(selected):
+        with storage_stage(
+            selected.kb_dir, selected.knowledge.identity, read_only=True, cancelled=cancelled
+        ):
+            return knowledge_status(selected)
+    with reading_scope(selected, cancelled=cancelled):
         from ultrakb.application.refresh import refresh_status
 
         reasons = (

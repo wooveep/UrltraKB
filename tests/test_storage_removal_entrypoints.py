@@ -41,7 +41,9 @@ def test_source_withdrawal_adapters_preserve_publication_and_projection_result(
 
         monkeypatch.delenv("ULTRAKB_API_TOKEN", raising=False)
         monkeypatch.setattr(api, "_resolve_kb", lambda *args: root)
-        monkeypatch.setattr(api_views, "view_scope", lambda *args: storage_scope(root, identity))
+        monkeypatch.setattr(
+            api_views, "view_scope", lambda *args, **kwargs: storage_scope(root, identity)
+        )
         with TestClient(api.create_app()) as client:
             reviewed = client.post(
                 "/api/v1/remove",

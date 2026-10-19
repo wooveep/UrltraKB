@@ -335,12 +335,14 @@ async def test_refresh_rebuilds_every_retained_unit_into_one_publication(tmp_pat
 async def test_segmented_refresh_reuses_its_exact_ready_shared_index(tmp_path):
     from test_storage_indexing import indexing_response
 
-    from ultrakb.config import save_config
+    from ultrakb.config import load_config, save_config
 
     root, identity, unit = compile_input(
         tmp_path, segmented=True, body_text="# Fixture\nThe value is 17.\n"
     )
-    save_config(root / ".ultrakb/config.yaml", {"model_policy": {"max_calls": 16, "retries": 0}})
+    config = load_config(root / ".ultrakb/config.yaml")
+    config["model_policy"] = {"max_calls": 16, "retries": 0}
+    save_config(root / ".ultrakb/config.yaml", config)
     with StreamTransport(indexing_response) as service:
         (root / ".env").write_text(f"LLM_API_KEY=test-key\nOPENAI_API_BASE={service.url}\n")
         before = await compiled(root, identity, unit)

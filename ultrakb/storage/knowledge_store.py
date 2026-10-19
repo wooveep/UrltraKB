@@ -578,8 +578,10 @@ class KnowledgeStore:
                 raise FileNotFoundError("This publication has no committed receipt")
             return PublicationReceipt(*row)
 
-    def bind(self, publication_id: str | None = None, *, view_id: str = "legacy") -> BoundKnowledge:
-        with storage_stage(self.root, self.identity, read_only=True) as db:
+    def bind(
+        self, publication_id: str | None = None, *, view_id: str = "legacy", cancelled=None
+    ) -> BoundKnowledge:
+        with storage_stage(self.root, self.identity, read_only=True, cancelled=cancelled) as db:
             if publication_id is None:
                 head = db.connection.execute(
                     "SELECT publication_id FROM ukb_heads WHERE view_id = ?", (view_id,)

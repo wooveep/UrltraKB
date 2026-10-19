@@ -2435,3 +2435,31 @@ unchanged, restored original content is identical, and old callbacks fail.
 The final database/candidate/maintenance/backup/package/boundary/size matrix
 passes 60 tests. Mypy passes 598 modules; focused Ruff, format, diff and offline
 lockfile checks pass. Public activation and the full final suite remain pending.
+
+### Conversation adapters before joint activation
+
+The interactive terminal retains only a five-exchange display window and uses
+the shared conversation operations for questions, restore, deletion and explicit
+export. New terminal sessions allocate an identity without writing a second
+conversation store. Each new command binds the current public head within the
+captured database generation. Repeated exports allocate distinct publications;
+paused projection and conflict/candidate results remain visible in the REPL.
+
+Authenticated HTTP conversation lists and history expose bounded cursors,
+original question/answer pages, incomplete submissions and the exact activity
+version. Native deletion requires the reviewed version. The pre-activation old
+factory's full-list behavior remains unchanged until its removal at P8.
+
+Cancellation now reaches the actual selection/read/session-lock wait and waits
+for the worker to settle. Complete history DTO assembly, including restored
+answer provenance checks, stays inside a cancellable storage stage. Actual
+ASGI and REPL regressions cancel while reclamation/session locks remain held;
+cancelled deletion/export cannot execute later after unlock. Help and exit do
+not read the database. These changes do not activate the public factories.
+
+The final session/question/refresh/lint/adapter/boundary/size matrix passes
+305 tests (7 live tests deselected); Mypy passes 599 modules. Ruff, formatting,
+diff checks and both strict static readonly review axes pass. Three older API
+expectations and scope-factory test signatures were aligned with their current
+contracts. A segmented-refresh fixture now preserves its explicit model and
+tokenizer settings when increasing its call budget, rather than replacing them.

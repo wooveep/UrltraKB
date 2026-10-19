@@ -1089,21 +1089,19 @@ def chat(ctx, resume, list_sessions_flag, delete_id, no_color, raw):
         click.echo("No knowledge base found. Run `ultrakb init` first.")
         return
 
-    from ultrakb.agent.chat_session import (
-        ChatSession,
-        relative_time,
-    )
+    from ultrakb.agent.chat_session import relative_time
     from ultrakb.application.sessions import (
         delete_conversation,
         list_conversations,
-        load_conversation,
         resolve_conversation,
     )
+    from ultrakb.terminal_chat_state import TerminalConversation
 
-    view_id = resolve_scope(kb_dir, _selected_scope(ctx, kb_dir)).view_id
+    selected = resolve_scope(kb_dir, _selected_scope(ctx, kb_dir))
+    view_id = selected.view_id
 
     if list_sessions_flag:
-        sessions = list_conversations(kb_dir, view_id=view_id)
+        sessions = list_conversations(kb_dir, view_id=view_id, scope=selected)
         if not sessions:
             click.echo("No chat sessions yet.")
             return
@@ -1113,19 +1111,22 @@ def chat(ctx, resume, list_sessions_flag, delete_id, no_color, raw):
             rel = relative_time(s.get("updated_at", ""))
             title = s.get("title") or "(empty)"
             click.echo(f"  {s['id']:<22} {s['turn_count']:<6} {rel:<12} {title}")
-        click.echo(f"\n{len(sessions)} session(s) in {kb_dir / '.ultrakb' / 'chats'}")
+        click.echo(f"\n{len(sessions)} session(s) shown in {kb_dir}")
         return
 
     if delete_id is not None:
         try:
-            resolved = resolve_conversation(kb_dir, delete_id, view_id=view_id)
+            resolved = resolve_conversation(kb_dir, delete_id, view_id=view_id, scope=selected)
         except ValueError as exc:
             click.echo(f"[ERROR] {exc}")
             return
         if not resolved:
             click.echo(f"No matching session: {delete_id}")
             return
-        if delete_conversation(kb_dir, resolved, view_id=view_id).status == "deleted":
+        if (
+            delete_conversation(kb_dir, resolved, view_id=view_id, scope=selected).status
+            == "deleted"
+        ):
             click.echo(f"Deleted session {resolved}")
         else:
             click.echo(f"Could not delete session: {resolved}")
@@ -1135,7 +1136,7 @@ def chat(ctx, resume, list_sessions_flag, delete_id, no_color, raw):
 
     if resume is not None:
         try:
-            resolved = resolve_conversation(kb_dir, resume, view_id=view_id)
+            resolved = resolve_conversation(kb_dir, resume, view_id=view_id, scope=selected)
         except ValueError as exc:
             click.echo(f"[ERROR] {exc}")
             return
@@ -1145,16 +1146,11 @@ def chat(ctx, resume, list_sessions_flag, delete_id, no_color, raw):
             else:
                 click.echo(f"No matching session: {resume}")
             return
-        session = load_conversation(kb_dir, resolved, view_id=view_id)
+        session = TerminalConversation.resume(kb_dir, resolved, scope=selected)
     else:
         model: str = config.get("model", DEFAULT_CONFIG["model"])
         language: str = config.get("language", "en")
-        session = ChatSession.new(
-            kb_dir,
-            model,
-            language,
-            view_id=resolve_scope(kb_dir, _selected_scope(ctx, kb_dir)).view_id,
-        )
+        session = TerminalConversation.new(kb_dir, model, language, scope=selected)
 
     from ultrakb.agent.chat import run_chat
 

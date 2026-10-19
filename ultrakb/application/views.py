@@ -6,12 +6,16 @@ from ultrakb.knowledge_scope import KnowledgeScope, live_scope
 from ultrakb.locks import kb_ingest_lock, kb_read_lock
 
 
-def storage_scope(kb_dir, identity, *, publication_id=None, view_id="legacy") -> KnowledgeScope:
+def storage_scope(
+    kb_dir, identity, *, publication_id=None, view_id="legacy", cancelled=None
+) -> KnowledgeScope:
     """Joint-development selection; no implicit format switch or worktree snapshot."""
     from ultrakb.storage.knowledge_store import KnowledgeStore
 
     root = kb_dir.expanduser().resolve()
-    bound = KnowledgeStore(root, identity).bind(publication_id, view_id=view_id)
+    bound = KnowledgeStore(root, identity).bind(
+        publication_id, view_id=view_id, cancelled=cancelled
+    )
     return KnowledgeScope(root, root / "wiki", view_id, knowledge=bound)
 
 
@@ -47,10 +51,10 @@ def map_legacy_sources(kb_dir: Path) -> dict:
 
 
 def view_scope(
-    kb_dir: Path, view_id: str, *, historical_revision: str | None = None
+    kb_dir: Path, view_id: str, *, historical_revision: str | None = None, cancelled=None
 ) -> KnowledgeScope:
     root = kb_dir.resolve()
-    with kb_read_lock(root / ".ultrakb"):
+    with kb_read_lock(root / ".ultrakb", cancelled=cancelled):
         from pydantic import TypeAdapter
 
         from ultrakb.source_records import ViewId

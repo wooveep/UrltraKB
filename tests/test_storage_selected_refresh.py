@@ -396,7 +396,7 @@ def test_selected_summary_has_the_same_partial_outcome_in_each_adapter(
             monkeypatch.delenv("ULTRAKB_API_TOKEN", raising=False)
             monkeypatch.setattr(api_refresh, "_resolve_kb", lambda *args: root)
             monkeypatch.setattr(
-                api_views, "view_scope", lambda *args: storage_scope(root, identity)
+                api_views, "view_scope", lambda *args, **kwargs: storage_scope(root, identity)
             )
             with TestClient(api.create_app()) as client:
                 result = client.post(

@@ -40,6 +40,7 @@ def list_conversations(
     scope: KnowledgeScope | None = None,
     limit: int = 63,
     after: str | None = None,
+    context: ExecutionContext | None = None,
 ) -> list[dict]:
     """List the selected view's conversations, newest first; default to legacy."""
     from ultrakb.agent.chat_session import list_sessions
@@ -52,9 +53,12 @@ def list_conversations(
         if view_id is not None and view_id != scope.view_id:
             raise ValueError("Conversation scope and view do not match")
         return SessionCatalog(scope.kb_dir, scope.knowledge.identity).list(
-            view_id=scope.view_id, limit=limit, after=after
+            view_id=scope.view_id,
+            limit=limit,
+            after=after,
+            cancelled=context.cancelled if context else None,
         )
-    with kb_read_lock(kb_dir / ".ultrakb"):
+    with kb_read_lock(kb_dir / ".ultrakb", cancelled=context.cancelled if context else None):
         return [item for item in list_sessions(kb_dir) if item["view_id"] == (view_id or "legacy")]
 
 
@@ -82,8 +86,14 @@ def resolve_conversation(
     return matches[0] if matches else None
 
 
-def load_conversation(kb_dir: Path, session_id: str, *, view_id: str | None = None) -> ChatSession:
-    with kb_read_lock(kb_dir / ".ultrakb"):
+def load_conversation(
+    kb_dir: Path,
+    session_id: str,
+    *,
+    view_id: str | None = None,
+    context: ExecutionContext | None = None,
+) -> ChatSession:
+    with kb_read_lock(kb_dir / ".ultrakb", cancelled=context.cancelled if context else None):
         session = load_session(kb_dir, session_id)
         session.require_view(view_id or "legacy")
         return session

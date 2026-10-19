@@ -50,7 +50,7 @@ def test_empty_refresh_adapters_publish_without_model_work(tmp_path, monkeypatch
             monkeypatch.delenv("ULTRAKB_API_TOKEN", raising=False)
             monkeypatch.setattr(api_refresh, "_resolve_kb", lambda *args: root)
             monkeypatch.setattr(
-                api_views, "view_scope", lambda *args: storage_scope(root, identity)
+                api_views, "view_scope", lambda *args, **kwargs: storage_scope(root, identity)
             )
             with TestClient(api.create_app()) as client:
                 result = client.post("/api/v1/refresh", json={"kb": "fixture"})
@@ -112,7 +112,9 @@ def test_empty_confirmation_adapters_recover_the_same_committed_receipt(
 
         monkeypatch.delenv("ULTRAKB_API_TOKEN", raising=False)
         monkeypatch.setattr(api_refresh, "_resolve_kb", lambda *args: root)
-        monkeypatch.setattr(api_views, "view_scope", lambda *args: storage_scope(root, identity))
+        monkeypatch.setattr(
+            api_views, "view_scope", lambda *args, **kwargs: storage_scope(root, identity)
+        )
         with TestClient(api.create_app()) as client:
             for _ in range(2):
                 result = client.post(

@@ -62,10 +62,13 @@ def restored_answer_citations(scope, snapshot):
     return {**snapshot, "references": references}
 
 
-def read_stored_conversation(scope, session_id, **page):
+def read_stored_conversation(scope, session_id, *, context=None, **page):
     assert scope.knowledge is not None
     history = SessionCatalog(scope.kb_dir, scope.knowledge.identity).read(
-        session_id, view_id=scope.view_id, **page
+        session_id,
+        view_id=scope.view_id,
+        cancelled=context.cancelled if context else None,
+        **page,
     )
     turns, answers = [], []
     for turn, metadata in zip(history.turns, history.metadata, strict=True):

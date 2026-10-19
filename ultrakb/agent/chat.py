@@ -15,6 +15,7 @@ import time
 from collections.abc import AsyncGenerator
 from contextlib import aclosing
 from pathlib import Path
+from threading import Event
 from typing import Any
 
 from prompt_toolkit import PromptSession
@@ -34,6 +35,7 @@ from ultrakb.config import LlmCredentialBundle
 from ultrakb.knowledge_scope import KnowledgeScope, resolve_scope
 from ultrakb.log import append_log
 from ultrakb.model_outputs import ModelOutputs, model_output_scope
+from ultrakb.terminal_chat_state import TerminalConversation
 
 _STYLE_DICT: dict[str, str] = {
     "prompt": "bold #5fa0e0",
@@ -143,7 +145,19 @@ def _display_kb_dir(kb_dir: Path) -> str:
     return s
 
 
-def _print_header(session: ChatSession, kb_dir: Path, style: Style) -> None:
+def _repl_scope(kb_dir: Path, scope: KnowledgeScope | None, *, cancelled=None) -> KnowledgeScope:
+    """A new command sees the current head, within the captured database generation."""
+    selected = resolve_scope(kb_dir, scope)
+    if selected.knowledge is not None:
+        from ultrakb.application.views import storage_scope
+
+        return storage_scope(
+            kb_dir, selected.knowledge.identity, view_id=selected.view_id, cancelled=cancelled
+        )
+    return selected
+
+
+def _print_header(session: TerminalConversation, kb_dir: Path, style: Style) -> None:
     disp_dir = _display_kb_dir(kb_dir)
     version = _ultrakb_version()
     version_suffix = f" v{version}\n" if version else "\n"
@@ -170,13 +184,13 @@ def _print_header(session: ChatSession, kb_dir: Path, style: Style) -> None:
     print()
 
 
-def _print_resume_view(session: ChatSession, style: Style) -> None:
+def _print_resume_view(session: TerminalConversation, style: Style) -> None:
     turns = list(zip(session.user_turns, session.assistant_texts))
     if not turns:
         return
-    total = len(turns)
-    if total > 5:
-        omitted = total - 5
+    total = session.turn_count
+    omitted = total - min(5, len(turns))
+    if omitted:
         _fmt(
             style,
             ("class:header", f"... {omitted} earlier turn(s) omitted\n"),
@@ -209,7 +223,7 @@ def _print_resume_view(session: ChatSession, style: Style) -> None:
     print()
 
 
-def _bottom_toolbar(session: ChatSession) -> FormattedText:
+def _bottom_toolbar(session: TerminalConversation) -> FormattedText:
     return FormattedText(
         [
             ("class:toolbar", " session "),
@@ -283,7 +297,7 @@ class _ChatCompleter(Completer):
 
 
 def _make_prompt_session(
-    session: ChatSession, style: Style, use_color: bool, kb_dir: Path
+    session: TerminalConversation, style: Style, use_color: bool, kb_dir: Path
 ) -> PromptSession:
     from prompt_toolkit.filters import has_completions
     from prompt_toolkit.history import FileHistory
@@ -339,7 +353,7 @@ def _make_markdown(text: str) -> Any:
 
 
 async def _run_turn(
-    session: ChatSession,
+    session: TerminalConversation,
     user_input: str,
     style: Style,
     *,
@@ -349,35 +363,47 @@ async def _run_turn(
 ) -> None:
     from ultrakb.application.conversations import continue_conversation
     from ultrakb.application.execution import ExecutionContext
+    from ultrakb.context.workers import run_blocking
     from ultrakb.terminal_answers import AnswerRenderer
 
-    root = session.path.parent.parent.parent
+    root = session.kb_dir
+    stopped = Event()
+    selected = await run_blocking(
+        lambda: _repl_scope(root, scope or session.scope, cancelled=stopped.is_set),
+        on_cancel=stopped.set,
+    )
+    identity = selected.knowledge.identity if selected.knowledge else None
     with AnswerRenderer(use_color=use_color, raw=raw) as renderer:
+        context = ExecutionContext(
+            on_event=renderer, storage_identity=identity, cancelled=stopped.is_set
+        )
         result = await continue_conversation(
             root,
             user_input,
-            session_id=session.id if session._version is not None else None,
-            new_session_id=session.id if session._version is None else None,
-            context=ExecutionContext(on_event=renderer),
-            scope=scope,
+            session_id=session.id if session.persisted else None,
+            new_session_id=session.id if not session.persisted else None,
+            context=context,
+            scope=selected,
         )
         if result.status == "completed":
             renderer.finish(result.answer)
-    await asyncio.to_thread(session.reload)
+    await run_blocking(lambda: session.reload(context=context), on_cancel=stopped.set)
     if result.status != "completed":
         raise RuntimeError(result.error or result.status)
 
 
 def _save_transcript(
-    kb_dir: Path, session: ChatSession, name: str | None, *, scope: KnowledgeScope | None = None
-) -> Path:
+    kb_dir: Path,
+    session: TerminalConversation,
+    name: str | None,
+    *,
+    scope: KnowledgeScope | None = None,
+    context=None,
+):
     scope = resolve_scope(kb_dir, scope)
     from ultrakb.application.sessions import export_conversation
 
-    result = export_conversation(kb_dir, session, name, scope=scope)
-    if result.status != "exported":
-        raise FileNotFoundError("Conversation was deleted before export")
-    return Path(result.resources[0])
+    return export_conversation(kb_dir, session.id, name, scope=scope, context=context)
 
 
 async def _run_add(
@@ -640,7 +666,7 @@ async def _handle_slash_deck(
 async def _handle_slash(
     cmd: str,
     kb_dir: Path,
-    session: ChatSession,
+    session: TerminalConversation,
     style: Style,
     *,
     scope: KnowledgeScope | None = None,
@@ -678,30 +704,58 @@ async def _handle_slash(
         if not session.user_turns:
             _fmt(style, ("class:error", "Nothing to save yet.\n"))
             return None
-        from ultrakb.locks import async_kb_lock, async_session_lock
+        from ultrakb.application.execution import ExecutionContext
+        from ultrakb.context.workers import run_blocking
 
-        # Wait cooperatively in the REPL task. Cancelling a to_thread waiter
-        # would leave its thread free to export later, after the user stopped.
-        async with async_session_lock(kb_dir, session.id):
-            async with async_kb_lock(kb_dir / ".ultrakb", exclusive=True):
-                path = _save_transcript(kb_dir, session, arg or None, scope=scope)
-        _fmt(style, ("class:slash.ok", f"Saved to {path}\n"))
+        stopped = Event()
+        context = ExecutionContext(cancelled=stopped.is_set)
+        result = await run_blocking(
+            lambda: _save_transcript(
+                kb_dir,
+                session,
+                arg or None,
+                scope=_repl_scope(kb_dir, scope, cancelled=stopped.is_set),
+                context=context,
+            ),
+            on_cancel=stopped.set,
+        )
+        if result.status == "exported":
+            _fmt(style, ("class:slash.ok", f"Saved to {result.resources[0]}\n"))
+            if result.publication_id:
+                _fmt(style, ("class:slash.ok", f"Publication: {result.publication_id}\n"))
+            if result.projection and result.projection.status not in {"synced", "obsolete"}:
+                _fmt(
+                    style,
+                    ("class:slash.help", f"Wiki synchronization: {result.projection.status}\n"),
+                )
+        else:
+            _fmt(style, ("class:error", f"Transcript export: {result.status}\n"))
+        if result.candidate_revision_id:
+            _fmt(style, ("class:slash.help", f"Candidate: {result.candidate_revision_id}\n"))
         return None
 
     if head == "/status":
-        from ultrakb.locks import async_kb_lock
+        from ultrakb.application.execution import ExecutionContext
+        from ultrakb.context.workers import run_blocking
         from ultrakb.terminal_maintenance import print_status
 
-        async with async_kb_lock(kb_dir / ".ultrakb", exclusive=False):
-            print_status(kb_dir, scope=scope)
+        stopped = Event()
+        context = ExecutionContext(cancelled=stopped.is_set)
+        await run_blocking(
+            lambda: print_status(kb_dir, scope=scope, context=context), on_cancel=stopped.set
+        )
         return None
 
     if head == "/list":
-        from ultrakb.locks import async_kb_lock
+        from ultrakb.application.execution import ExecutionContext
+        from ultrakb.context.workers import run_blocking
         from ultrakb.terminal_maintenance import print_list
 
-        async with async_kb_lock(kb_dir / ".ultrakb", exclusive=False):
-            print_list(kb_dir, scope=scope)
+        stopped = Event()
+        context = ExecutionContext(cancelled=stopped.is_set)
+        await run_blocking(
+            lambda: print_list(kb_dir, scope=scope, context=context), on_cancel=stopped.set
+        )
         return None
 
     if head == "/lint":
@@ -910,7 +964,7 @@ async def iter_chat_turn_events(
 
 async def run_chat(
     kb_dir: Path,
-    session: ChatSession,
+    session: TerminalConversation,
     *,
     no_color: bool = False,
     raw: bool = False,
@@ -957,11 +1011,14 @@ async def run_chat(
             except KeyboardInterrupt:
                 _fmt(style, ("class:error", "\n[aborted]\n"))
                 continue
+            except Exception as exc:
+                _fmt(style, ("class:error", f"[ERROR] {exc}\n"))
+                continue
             if action == "exit":
                 return
             if action == "new_session":
-                session = ChatSession.new(
-                    kb_dir, session.model, session.language, view_id=scope.view_id
+                session = TerminalConversation.new(
+                    kb_dir, session.model, session.language, scope=scope
                 )
                 prompt_session = _make_prompt_session(session, style, use_color, kb_dir)
             continue

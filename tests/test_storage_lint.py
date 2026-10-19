@@ -407,7 +407,7 @@ def test_each_adapter_reports_the_committed_lint_when_projection_is_pending(
 
             monkeypatch.delenv("ULTRAKB_API_TOKEN", raising=False)
             monkeypatch.setattr(api, "_resolve_kb", lambda *args: root)
-            monkeypatch.setattr(api_views, "view_scope", lambda *args: scope)
+            monkeypatch.setattr(api_views, "view_scope", lambda *args, **kwargs: scope)
             with TestClient(api.create_app()) as client:
                 response = client.post(
                     "/api/v1/lint", json={"kb": str(root), "view_id": "legacy", "fix": True}

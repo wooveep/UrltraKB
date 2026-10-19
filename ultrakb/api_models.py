@@ -76,11 +76,20 @@ class ChatSessionItem(BaseModel):
     turn_count: int
     updated_at: str
     model: str
+    version: str = ""
+    cursor: str | None = None
+
+
+class ChatSessionListRequest(ViewRequest):
+    kb: str = Field(..., min_length=1)
+    limit: int = Field(default=63, ge=1, le=127)
+    after: str | None = Field(default=None, max_length=2048)
 
 
 class ChatSessionListResponse(BaseModel):
     kb: str
     sessions: list[ChatSessionItem]
+    next_after: str | None = None
 
 
 class ChatTraceStep(BaseModel):
@@ -107,16 +116,25 @@ class ChatSessionLoadResponse(BaseModel):
     # Parallel to assistant_texts (1:1 by index); an empty inner list means
     # "no trace for this turn — render the flat assistant_texts entry instead".
     assistant_traces: list[list[ChatTraceStep]] = Field(default_factory=list)
+    version: str
+    start_ordinal: int = 0
+    older_before: int | None = None
+    incomplete: tuple[tuple[int, str], ...] = ()
+    next_pending: str | None = None
 
 
 class ChatSessionLoadRequest(ViewRequest):
     kb: str = Field(..., min_length=1)
     session_id: str = Field(..., min_length=1)
+    limit: int = Field(default=63, ge=1, le=128)
+    before: int | None = Field(default=None, ge=0)
+    pending_after: str | None = Field(default=None, max_length=2048)
 
 
 class ChatSessionDeleteRequest(ViewRequest):
     kb: str = Field(..., min_length=1)
     session_id: str = Field(..., min_length=1)
+    version: str | None = Field(default=None, min_length=1, max_length=256)
 
 
 class ChatSessionDeleteResponse(BaseModel):

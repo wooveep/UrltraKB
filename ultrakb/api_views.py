@@ -2,6 +2,7 @@
 
 import asyncio
 from pathlib import Path
+from threading import Event
 
 from fastapi import HTTPException
 from pydantic import BaseModel
@@ -23,7 +24,12 @@ async def resolve_api_scope(root: Path, view_id: str | None) -> KnowledgeScope |
     if view_id is None:
         return None
     try:
-        return await asyncio.to_thread(view_scope, root, view_id)
+        from ultrakb.context.workers import run_blocking
+
+        stopped = Event()
+        return await run_blocking(
+            lambda: view_scope(root, view_id, cancelled=stopped.is_set), on_cancel=stopped.set
+        )
     except (OSError, ValueError) as exc:
         raise HTTPException(status_code=400, detail="Unknown knowledge view") from exc
 

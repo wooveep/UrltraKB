@@ -53,11 +53,11 @@ async def run_lint(
     return Path(result.report_path)
 
 
-def print_list(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> None:
+def print_list(kb_dir: Path, *, scope: KnowledgeScope | None = None, context=None) -> None:
     """Print all documents in the knowledge base. Usable from CLI and chat REPL."""
     from ultrakb.application.knowledge_bases import get_kb_list
 
-    inventory = get_kb_list(kb_dir, scope=scope)
+    inventory = get_kb_list(kb_dir, scope=scope, context=context)
     documents = inventory["documents"]
     if not documents:
         click.echo("No documents indexed yet.")
@@ -117,10 +117,10 @@ def print_list(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> None:
                 click.echo(f"  - {name}")
 
 
-def print_status(kb_dir: Path, *, scope: KnowledgeScope | None = None) -> None:
+def print_status(kb_dir: Path, *, scope: KnowledgeScope | None = None, context=None) -> None:
     from ultrakb.application.knowledge_bases import get_kb_status
 
-    status = get_kb_status(kb_dir, scope=scope)
+    status = get_kb_status(kb_dir, scope=scope, context=context)
     click.echo(f"Knowledge base: {kb_dir}")
     for view_id, reasons in status["needs_refresh"].items():
         click.echo(f"  Needs refresh: {view_id} ({len(reasons)} pages)")

@@ -7,6 +7,7 @@ import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
+from threading import Event
 from typing import Any
 
 import litellm
@@ -60,6 +61,7 @@ from ultrakb.api_models import (
     ChatResponse,
     ChatSessionDeleteRequest,
     ChatSessionDeleteResponse,
+    ChatSessionListRequest,
     ChatSessionListResponse,
     ChatSessionLoadRequest,
     ChatSessionLoadResponse,
@@ -102,6 +104,15 @@ from ultrakb.config import (
 from ultrakb.watch_service import WatchRegistry
 
 logger = logging.getLogger(__name__)
+
+
+async def _session_operation(operation):
+    from ultrakb.application.execution import ExecutionContext
+    from ultrakb.context.workers import run_blocking
+
+    stopped = Event()
+    context = ExecutionContext(cancelled=stopped.is_set)
+    return await run_blocking(lambda: operation(context), on_cancel=stopped.set)
 
 
 def create_app() -> FastAPI:
@@ -319,17 +330,20 @@ def create_app() -> FastAPI:
     ) -> Any:
         kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
         selected = await resolve_api_scope(kb_dir, request.view_id)
-        from ultrakb.application.conversations import continue_conversation
-        from ultrakb.application.sessions import load_conversation
+        from ultrakb.application.conversations import continue_conversation, read_conversation
 
         # Fail before opening an SSE response for a missing or mismatched session.
         if request.session_id:
             try:
-                await asyncio.to_thread(
-                    load_conversation,
-                    kb_dir,
-                    request.session_id,
-                    view_id=selected.view_id if selected else None,
+                await _session_operation(
+                    lambda context: read_conversation(
+                        kb_dir,
+                        request.session_id,
+                        view_id=selected.view_id if selected else None,
+                        scope=selected,
+                        limit=1,
+                        context=context,
+                    )
                 )
             except FileNotFoundError as exc:
                 raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -364,20 +378,39 @@ def create_app() -> FastAPI:
 
     @app.post("/api/v1/chat/sessions", response_model=ChatSessionListResponse)
     async def chat_sessions_endpoint(
-        request: KbRequest,
+        request: ChatSessionListRequest,
         _: None = Depends(require_bearer_token),
     ) -> ChatSessionListResponse:
         kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
         from ultrakb.application.sessions import list_conversations
 
+        selected = await resolve_api_scope(kb_dir, request.view_id)
         try:
-            sessions = await asyncio.to_thread(list_conversations, kb_dir, view_id=request.view_id)
+            sessions = await _session_operation(
+                lambda context: list_conversations(
+                    kb_dir,
+                    view_id=request.view_id,
+                    scope=selected,
+                    limit=request.limit + 1,
+                    after=request.after,
+                    context=context,
+                )
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         except Exception as exc:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"List sessions failed: {exc}",
             ) from exc
-        return ChatSessionListResponse(kb=request.kb, sessions=sessions)
+        native = selected is not None and selected.knowledge is not None
+        more = native and len(sessions) > request.limit
+        sessions = sessions[: request.limit] if native else sessions
+        return ChatSessionListResponse(
+            kb=request.kb,
+            sessions=sessions,
+            next_after=sessions[-1].get("cursor") if more else None,
+        )
 
     @app.post("/api/v1/chat/sessions/load", response_model=ChatSessionLoadResponse)
     async def chat_session_load_endpoint(
@@ -385,11 +418,21 @@ def create_app() -> FastAPI:
         _: None = Depends(require_bearer_token),
     ) -> ChatSessionLoadResponse:
         kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
-        from ultrakb.application.sessions import load_conversation
+        from ultrakb.application.conversations import read_conversation
 
+        selected = await resolve_api_scope(kb_dir, request.view_id)
         try:
-            session = await asyncio.to_thread(
-                load_conversation, kb_dir, request.session_id, view_id=request.view_id
+            session = await _session_operation(
+                lambda context: read_conversation(
+                    kb_dir,
+                    request.session_id,
+                    view_id=request.view_id,
+                    scope=selected,
+                    limit=request.limit,
+                    before=request.before,
+                    pending_after=request.pending_after,
+                    context=context,
+                )
             )
         except FileNotFoundError as exc:
             raise HTTPException(
@@ -406,11 +449,16 @@ def create_app() -> FastAPI:
         return ChatSessionLoadResponse(
             session_id=session.id,
             title=session.title,
-            turn_count=session.turn_count,
-            user_turns=session.user_turns,
-            assistant_texts=session.assistant_texts,
-            assistant_traces=session.assistant_traces,
+            turn_count=session.total_turns,
+            user_turns=[user for user, _ in session.turns],
+            assistant_texts=[answer for _, answer in session.turns],
+            assistant_traces=[answer.trace for answer in session.answers],
             answer_outcomes=session.answer_outcomes,
+            version=session.version,
+            start_ordinal=session.start_ordinal,
+            older_before=session.older_before,
+            incomplete=session.incomplete,
+            next_pending=session.next_pending,
         )
 
     @app.post("/api/v1/chat/sessions/delete", response_model=ChatSessionDeleteResponse)
@@ -421,14 +469,25 @@ def create_app() -> FastAPI:
         kb_dir = await asyncio.to_thread(_resolve_kb, request.kb)
         from ultrakb.application.sessions import delete_conversation
 
+        selected = await resolve_api_scope(kb_dir, request.view_id)
+        if selected is not None and selected.knowledge is not None and request.version is None:
+            raise HTTPException(status_code=428, detail="Reload the conversation before deletion")
         try:
-            result = await run_in_threadpool(
-                delete_conversation,
-                kb_dir,
-                request.session_id,
-                view_id=request.view_id or "legacy",
+            result = await _session_operation(
+                lambda context: delete_conversation(
+                    kb_dir,
+                    request.session_id,
+                    view_id=request.view_id or "legacy",
+                    scope=selected,
+                    version=request.version,
+                    context=context,
+                )
             )
+            if result.status == "conflict":
+                raise HTTPException(status_code=409, detail="Conversation changed; reload it")
             deleted = result.status == "deleted"
+        except HTTPException:
+            raise
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except Exception as exc:

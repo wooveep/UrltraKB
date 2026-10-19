@@ -64,10 +64,10 @@ class SessionCatalog:
             ).encode()
         ).hexdigest()
 
-    def list(self, *, view_id, limit=63, after=None):
+    def list(self, *, view_id, limit=63, after=None, cancelled=None):
         _limit(limit)
         cursor = _cursor(after, (str, int))
-        with storage_stage(self.root, self.identity, read_only=True) as db:
+        with storage_stage(self.root, self.identity, read_only=True, cancelled=cancelled) as db:
             rows = db.connection.execute(
                 "SELECT session_id, title, turn_count, updated_at, model, view_id, "
                 "sequence, activity_version FROM ukb_conversations "
@@ -115,12 +115,14 @@ class SessionCatalog:
                 raise ValueError("Conversation prefix is ambiguous")
             return rows[0][0] if rows else None
 
-    def read(self, session_id, *, view_id, limit=63, before=None, pending_after=None):
+    def read(
+        self, session_id, *, view_id, limit=63, before=None, pending_after=None, cancelled=None
+    ):
         _limit(limit)
         if before is not None and (type(before) is not int or before < 0):
             raise ValueError("Conversation history requires a nonnegative ordinal cursor")
         pending_cursor = _cursor(pending_after, (int, int, int))
-        with storage_stage(self.root, self.identity, read_only=True) as db:
+        with storage_stage(self.root, self.identity, read_only=True, cancelled=cancelled) as db:
             row = db.connection.execute(
                 "SELECT title, model, language, activity_version, created_at, turn_count "
                 "FROM ukb_conversations WHERE session_id = ? AND view_id = ? AND deleted = 0",
@@ -198,7 +200,7 @@ class SessionCatalog:
                 on_wait=on_wait,
                 database_identity=self.identity,
             ),
-            storage_stage(self.root, self.identity) as db,
+            storage_stage(self.root, self.identity, cancelled=cancelled) as db,
         ):
             query = (
                 "SELECT activity_version, deleted, view_id FROM ukb_conversations "

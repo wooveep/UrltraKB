@@ -102,7 +102,9 @@ def test_history_adapters_read_the_same_retained_revision(tmp_path, monkeypatch,
 
         monkeypatch.delenv("ULTRAKB_API_TOKEN", raising=False)
         monkeypatch.setattr(api_refresh, "_resolve_kb", lambda *args: root)
-        monkeypatch.setattr(api_views, "view_scope", lambda *args: storage_scope(root, identity))
+        monkeypatch.setattr(
+            api_views, "view_scope", lambda *args, **kwargs: storage_scope(root, identity)
+        )
         with TestClient(api.create_app()) as client:
             response = client.get(
                 "/api/v1/refresh/history",

@@ -585,19 +585,34 @@ def read_conversation(
     limit: int = 63,
     before: int | None = None,
     pending_after: str | None = None,
+    context: ExecutionContext | None = None,
 ) -> ConversationView:
     if scope is not None and scope.knowledge is not None:
+        from ultrakb.storage.coordination import storage_stage
+
         from .stored_session_history import read_stored_conversation
 
         scope = resolve_scope(kb_dir, scope)
+        assert scope.knowledge is not None
         if view_id is not None and view_id != scope.view_id:
             raise ValueError("Conversation scope and view do not match")
-        return read_stored_conversation(
-            scope, session_id, limit=limit, before=before, pending_after=pending_after
-        )
+        with storage_stage(
+            scope.kb_dir,
+            scope.knowledge.identity,
+            read_only=True,
+            cancelled=context.cancelled if context else None,
+        ):
+            return read_stored_conversation(
+                scope,
+                session_id,
+                limit=limit,
+                before=before,
+                pending_after=pending_after,
+                context=context,
+            )
     from ultrakb.application.sessions import load_conversation
 
-    session = load_conversation(kb_dir, session_id, view_id=view_id)
+    session = load_conversation(kb_dir, session_id, view_id=view_id, context=context)
     from ultrakb.application.answer_records import completed_answers
 
     return ConversationView(
@@ -611,4 +626,5 @@ def read_conversation(
         session.token_usage,
         tuple(session.answer_outcomes),
         completed_answers(session),
+        total_turns=len(session.user_turns),
     )

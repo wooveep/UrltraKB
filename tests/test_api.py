@@ -977,6 +977,10 @@ def test_lint_endpoint_skips_empty_kb(monkeypatch, kb_dir):
         "report_path": None,
         "lint_files_changed": None,
         "lint_ghosts_removed": None,
+        "publication_id": None,
+        "projection_pending": False,
+        "quality": [],
+        "unfinished": [],
     }
     assert list((kb_dir / "wiki" / "reports").glob("*.md")) == []
 
@@ -1167,7 +1171,7 @@ def test_remove_dry_run_returns_plan(monkeypatch, kb_dir):
 
     captured = {}
 
-    def fake(kb_dir, identifier, *, keep_raw, keep_empty, dry_run, scope=None):
+    def fake(kb_dir, identifier, *, keep_raw, keep_empty, dry_run, scope=None, version=None):
         captured["dry_run"] = dry_run
         captured["keep_raw"] = keep_raw
         return {
@@ -1198,7 +1202,7 @@ def test_remove_passes_keep_empty(monkeypatch, kb_dir):
 
     captured = {}
 
-    def fake(kb_dir, identifier, *, keep_raw, keep_empty, dry_run, scope=None):
+    def fake(kb_dir, identifier, *, keep_raw, keep_empty, dry_run, scope=None, version=None):
         captured["keep_empty"] = keep_empty
         return {"status": "removed", "name": "p", "doc_name": "p", "actions": []}
 
