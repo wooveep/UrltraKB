@@ -168,7 +168,10 @@ def show_task_details(task, parent):
 
         executions = (task.model_usage or {}).get("execution_ids", [])
         KnowledgeTasksDialog(
-            task.kb_dir, parent, execution_id=executions[-1] if executions else None
+            task.kb_dir,
+            parent,
+            execution_id=executions[-1] if executions else None,
+            select_first=bool(executions),
         ).exec()
         return
     TaskDetailsDialog(task, parent).exec()

@@ -1158,3 +1158,14 @@ modules; the subsequently extended query DTO and adapters also pass targeted
 mypy. This is task presentation integration, not completion of P6/P7/P8: input
 drilldown, remaining real stage producers, archival/statistical maintenance and
 normal-format activation remain unfinished. Issue 164 remains open.
+
+Both review axes reproduced adapter-only gaps: old directory discovery rejected
+an unpublished main store without configuration/projection, a paged-out selected
+execution was mislabeled latest, and export could silently follow a newly added
+execution after refresh was paused. Task routes now resolve only the existing
+KB alias and let the shared main-store gate validate authority; CLI explicit
+paths/current ancestors likewise reach that gate. Qt independently preserves
+the selected execution, anchors export to the displayed execution, and leaves
+an unlinked queued task unselected with an explicit message. Real SQLite/Qt
+regressions cover each boundary; all 27 related task, UI and size cases pass,
+as does targeted mypy.

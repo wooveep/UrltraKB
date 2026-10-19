@@ -104,10 +104,13 @@ def detail_text(detail):
 
 
 class KnowledgeTasksDialog(QDialog):
-    def __init__(self, kb_dir, parent=None, *, task_id=None, execution_id=None, limit=63):
+    def __init__(
+        self, kb_dir, parent=None, *, task_id=None, execution_id=None, limit=63, select_first=True
+    ):
         super().__init__(parent)
         self.root, self.limit = Path(kb_dir), limit
         self.task_id, self.execution_id = task_id, execution_id
+        self.select_first = select_first
         self.identity, self.detail, self.list_cursor = None, None, None
         self.cursors = {name + "_after": 0 for name in _PAGES}
         self._closed, self._busy, self._sequence = False, False, 0
@@ -130,6 +133,8 @@ class KnowledgeTasksDialog(QDialog):
         layout.addWidget(self.executions)
         self.body = QPlainTextEdit()
         self.body.setReadOnly(True)
+        if not select_first:
+            self.body.setPlainText("尚未关联到此任务的执行。可从知识库任务列表显式选择记录。")
         layout.addWidget(self.body, 1)
         navigation = QHBoxLayout()
         self.next_buttons = {}
@@ -219,7 +224,10 @@ class KnowledgeTasksDialog(QDialog):
             self.executions.blockSignals(True)
             self.executions.clear()
             self.executions.addItem("最新执行", None)
-            for execution in self.detail.executions:
+            choices = {execution.execution_id: execution for execution in self.detail.executions}
+            if self.execution_id is not None:
+                choices.setdefault(self.detail.execution_id, self.detail.execution)
+            for execution in choices.values():
                 self.executions.addItem(
                     f"{execution.started_at} · {_STATES.get(execution.state, execution.state)}",
                     execution.execution_id,
@@ -255,7 +263,7 @@ class KnowledgeTasksDialog(QDialog):
                 self.tasks.addItem(item)
             self.tasks.blockSignals(False)
             self.status.setText("任务列表 · " + ("还有下一页" if page.next_cursor else "已到末页"))
-            if page.tasks:
+            if page.tasks and self.select_first:
                 self.tasks.setCurrentRow(0)
 
         self.submit(read, loaded)
@@ -292,6 +300,7 @@ class KnowledgeTasksDialog(QDialog):
         if self.detail is None:
             return
         options, task_id = self.options(), self.task_id
+        options["execution_id"] = self.detail.execution_id
         self.submit(
             lambda: export_knowledge_task(self.root, task_id, Path(destination), **options),
             lambda result: self.status.setText("已导出当前分页范围的任务记录。"),

@@ -29,7 +29,17 @@ def _run(ctx, operation, *args, **options):
     from ultrakb.cli import _require_kb_root
 
     try:
-        result = operation(_require_kb_root(ctx), *args, **options)
+        root = ctx.obj.get("kb_dir_override")
+        if root is None:
+            root = next(
+                (
+                    path
+                    for path in (Path.cwd(), *Path.cwd().parents)
+                    if (path / ".ultrakb/kb.sqlite").is_file()
+                ),
+                None,
+            )
+        result = operation(root or _require_kb_root(ctx), *args, **options)
     except (ValueError, OSError, KeyError) as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo(result.model_dump_json(indent=2))

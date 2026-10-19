@@ -4,8 +4,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from starlette.concurrency import run_in_threadpool
 
-from ultrakb.api_helpers import _resolve_kb, require_bearer_token
+from ultrakb.api_helpers import require_bearer_token
 from ultrakb.application.knowledge_tasks import list_knowledge_tasks, read_knowledge_task
+from ultrakb.config import resolve_kb_alias
 from ultrakb.task_records import TaskDetail, TaskList
 
 tasks_router = APIRouter(prefix="/api/v1/tasks", dependencies=[Depends(require_bearer_token)])
@@ -31,7 +32,7 @@ def detail_options(
 
 async def _query(operation, kb, *args, **options):
     def read():
-        return operation(_resolve_kb(kb), *args, **options)
+        return operation(resolve_kb_alias(kb), *args, **options)
 
     try:
         return await run_in_threadpool(read)
