@@ -38,6 +38,15 @@ def knowledge_status(scope):
             "ORDER BY r.rowid DESC LIMIT 1",
             (scope.view_id, bound.publication_id),
         ).fetchone()
+        linted = db.connection.execute(
+            "SELECT r.published_at FROM ukb_publication_receipts r "
+            "JOIN ukb_lint_candidates l ON l.revision_id = r.revision_id "
+            "JOIN ukb_publications p ON p.publication_id = r.publication_id "
+            "WHERE p.view_id = ? AND r.rowid <= "
+            "(SELECT rowid FROM ukb_publication_receipts WHERE publication_id = ?) "
+            "ORDER BY r.rowid DESC LIMIT 1",
+            (scope.view_id, bound.publication_id),
+        ).fetchone()
     reasons = validity["needs_refresh"]
     return {
         "publication_id": bound.publication_id,
@@ -51,6 +60,6 @@ def knowledge_status(scope):
         "published_at": published_at,
         "last_compile": compiled[0] if compiled else None,
         "last_compile_availability": "known" if compiled else "unrecorded",
-        "last_lint": None,
-        "last_lint_availability": "unrecorded",
+        "last_lint": linted[0] if linted else None,
+        "last_lint_availability": "known" if linted else "unrecorded",
     }

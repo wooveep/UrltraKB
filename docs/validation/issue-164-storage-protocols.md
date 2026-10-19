@@ -1386,6 +1386,46 @@ result retention. Normal factories remain at the P8 gate; remaining compiler
 matrix, source maintenance, observation/archive/audit and final enablement are
 unfinished. Issue 164 remains open.
 
+### Main-store lint and link maintenance
+
+Link repair and structural/semantic checks now read a fixed complete private
+Markdown workspace backed by the main publication and retained native inputs.
+Preview consent binds the database generation and publication, without a legacy
+registry or whole-operation ingest/reclamation lease. Structural-only checks do
+not need model configuration. Mechanical repair preserves the existing image
+references and bytes; compiler image freezing retains its default behavior.
+
+Repairs, the report and operation log publish together. The schema-24 lint
+candidate record joins the exact ready revision, execution and result Blob;
+published receipts determine lint history and fixed-publication status. A failed
+projection keeps the committed report and exposes pending synchronization. A
+replay uses the original publication. Unpublished candidates whose applied
+projection epoch changed are rebuilt from retained semantic work, without paid
+resends. A concurrent knowledge publication rejects the candidate instead of
+overwriting the newer version.
+
+Semantic lint preserves each accepted native SDK response and the final report
+independently. Exact invocation identities connect gateway receipts to the work
+step. Cancellation or a checkpoint write failure after receiving a response
+recovers through the pinned SDK's native conversion, including tool calls; an
+uncertain or incomplete receipt requires recovery and cannot silently resend.
+Serialization preserves whether optional SDK fields were originally present.
+Explicit credentials bind the actual executor and cannot replace a frozen
+execution. Ordinary semantic errors retain mechanical repairs and a report with
+an explicit unfinished semantic check. CLI, HTTP and a real native spawn worker
+expose the committed/pending outcome consistently.
+
+Twenty main-store lint cases and the expanded maintenance/publication/figure/
+usage/size/boundary set pass 68 checks. Mypy passes 559 modules; Ruff and diff
+checks pass. Model-wait witnesses allow unrelated orphan collection and reject
+late publication conflicts. Fault witnesses cover report and SDK acceptance,
+cancellation, publication and projection, as well as the real applied-epoch race.
+Both independent reviews confirm their findings are closed; the final unknown
+usage witness preserves the exact report text with one actual provider send.
+The generators, remaining management connections, observation/archive/audit work
+and P8 activation are still unfinished; normal factories remain behind the sole
+activation gate and issue 164 remains open.
+
 ### Durable compiler diagnostics and capacity recovery matrix
 
 Development schema 20 binds a validated, bounded compiler outcome to each import

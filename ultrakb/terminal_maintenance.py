@@ -46,6 +46,10 @@ async def run_lint(
     if result.status != "completed" or result.report_path is None:
         raise RuntimeError(f"Lint failed ({result.error_type or result.status})")
     click.echo(f"\nReport written to {result.report_path}")
+    if result.projection_pending:
+        click.echo("Wiki synchronization pending; the report and repairs are committed.")
+    if "semantic_lint" in result.unfinished:
+        click.echo("Semantic checks unfinished; see the report for details.")
     return Path(result.report_path)
 
 

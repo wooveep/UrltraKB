@@ -38,4 +38,8 @@ async def run_lint_report(
         "report_path": result.report_path,
         "lint_files_changed": result.files_changed,
         "lint_ghosts_removed": result.ghosts_removed,
+        "publication_id": result.publication_id,
+        "projection_pending": result.projection_pending,
+        "quality": result.quality,
+        "unfinished": result.unfinished,
     }

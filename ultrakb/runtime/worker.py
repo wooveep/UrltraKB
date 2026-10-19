@@ -390,6 +390,7 @@ def _execute(
         )
         return UnitResult(
             "failed" if checked.status == "conflict" else checked.status,
+            revision=checked.publication_id,
             resources=checked.resources,
             changes=checked.changes,
             quality=checked.quality,

@@ -118,7 +118,9 @@ def _freeze_inline_assets(db, baseline):
             baseline.normalized_pages[page] = digest
 
 
-def materialize_inputs(base, baseline, target, *, page_basis=None, active_units=None):
+def materialize_inputs(
+    base, baseline, target, *, page_basis=None, active_units=None, freeze_images=True
+):
     """Keep old page inputs distinct when a document's current target advances."""
     identities, paths, assets = {}, {}, {}
     current = set(base.unit_revisions() if active_units is None else active_units)
@@ -139,7 +141,8 @@ def materialize_inputs(base, baseline, target, *, page_basis=None, active_units=
             if size is None:
                 raise FileNotFoundError(path)
             materialize_private(db, Blob(digest, size[0]), baseline.private, path)
-        _freeze_inline_assets(db, baseline)
+        if freeze_images:
+            _freeze_inline_assets(db, baseline)
         for revision in sorted(units):
             unit = CatalogStore._unit_revision(db, revision)
             processing = CatalogStore._processing(db, unit.processing_id)

@@ -42,6 +42,8 @@ class LintResult:
     quality: tuple[str, ...] = ()
     unfinished: tuple[str, ...] = ()
     error_type: str | None = None
+    publication_id: str | None = None
+    projection_pending: bool = False
 
 
 def describe_repairs(files_changed: int | None, ghosts: int | None) -> str:
@@ -59,6 +61,10 @@ def preview_link_repair(kb_dir: Path, *, scope: KnowledgeScope | None = None) ->
     """Bind overwrite consent to the existing wiki and show its structural issues."""
     root = kb_dir.resolve()
     scope = resolve_scope(root, scope)
+    if scope.knowledge is not None:
+        from .storage_lint import preview_stored_lint
+
+        return preview_stored_lint(scope)
     with kb_read_lock(root / ".ultrakb"):
         return _wiki_version(scope), run_structural_lint(root, scope=scope)
 
@@ -74,6 +80,11 @@ async def check_knowledge(
 ) -> LintResult:
     context = context or ExecutionContext(on_event=on_event or (lambda event: None))
     root = kb_dir.resolve()
+    scope = resolve_scope(root, scope)
+    if scope.knowledge is not None:
+        from .storage_lint import check_stored_knowledge
+
+        return await check_stored_knowledge(scope, options, context, bundle=bundle)
     scope = resolve_scope(root, scope, writable=True)
     wiki = scope.wiki_dir
     cancelled = context.cancelled

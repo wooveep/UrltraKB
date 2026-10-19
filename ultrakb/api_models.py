@@ -241,6 +241,10 @@ class LintResponse(BaseModel):
     report_path: str | None = None
     lint_files_changed: int | None = None
     lint_ghosts_removed: int | None = None
+    publication_id: str | None = None
+    projection_pending: bool = False
+    quality: tuple[str, ...] = ()
+    unfinished: tuple[str, ...] = ()
 
 
 class RemoveRequest(ViewRequest):

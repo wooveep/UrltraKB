@@ -95,7 +95,7 @@ class StreamTransport:
                                     else "stop",
                                 }
                             ],
-                            "usage": chunks[-1]["usage"],
+                            **({"usage": chunks[-1]["usage"]} if "usage" in chunks[-1] else {}),
                         }
                     ).encode()
                 )
