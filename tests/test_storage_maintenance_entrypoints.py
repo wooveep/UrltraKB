@@ -14,10 +14,11 @@ pytestmark = pytest.mark.integration
 
 def _snapshot(payload):
     payload = {key: value for key, value in payload.items() if key != "statistics_at"}
-    if "observations" in payload:
-        payload["observations"] = {
-            key: value for key, value in payload["observations"].items() if key != "cutoff_at"
-        }
+    for section in ("observations", "diagnostics"):
+        if section in payload:
+            payload[section] = {
+                key: value for key, value in payload[section].items() if key != "cutoff_at"
+            }
     return payload
 
 

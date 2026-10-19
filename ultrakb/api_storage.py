@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ultrakb.api_helpers import require_bearer_token
 from ultrakb.application.storage_maintenance import (
+    archive_compiler_diagnostics,
     archive_task_observations,
     audit_knowledge_usage,
     backup_knowledge,
@@ -147,6 +148,17 @@ async def backup(request: BackupRequest):
             Path(request.destination).expanduser(),
             identity=DatabaseIdentity(request.kb_id, request.generation),
         )
+    )
+
+
+@storage_router.post("/archive-diagnostics")
+async def archive_diagnostics(request: MaintenanceRequest):
+    return await _cancellable(
+        archive_compiler_diagnostics,
+        request.kb,
+        identity=DatabaseIdentity(request.kb_id, request.generation),
+        max_items=request.max_items,
+        max_bytes=request.max_bytes,
     )
 
 

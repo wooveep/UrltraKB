@@ -7,6 +7,7 @@ from pathlib import Path
 import click
 
 from ultrakb.application.storage_maintenance import (
+    archive_compiler_diagnostics,
     archive_task_observations,
     audit_knowledge_usage,
     backup_knowledge,
@@ -133,3 +134,12 @@ def restore(backup, output):
 def archive_observations(ctx, **options):
     """Archive one expired optional-detail batch, retaining core task records."""
     _run(ctx, archive_task_observations, **options)
+
+
+@storage.command("archive-diagnostics")
+@_limits()
+@_identity
+@click.pass_context
+def archive_diagnostics(ctx, **options):
+    """Retire unused diagnostic copies, keeping exact receipts and accepted work."""
+    _run(ctx, archive_compiler_diagnostics, **options)

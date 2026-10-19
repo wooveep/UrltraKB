@@ -52,7 +52,8 @@ class CompileCheckpointStore:
             ).fetchone() != (model_budget_id,):
                 raise ValueError("Compile work belongs to another model budget")
             connection.execute(
-                "INSERT INTO ukb_compile_work VALUES (?, ?, ?, ?, ?, ?) "
+                "INSERT INTO ukb_compile_work(work_id, model_budget_id, object_digest, "
+                "conditions_digest, object_json, conditions_json) VALUES (?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(model_budget_id, object_digest, conditions_digest) DO NOTHING",
                 (
                     uuid4().hex,

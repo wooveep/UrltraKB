@@ -2191,3 +2191,32 @@ The final archive/maintenance/audit/visibility/root/boundary/size matrix passes
 47 tests; mypy passes 591 modules. Ruff, format and diff checks and both static
 readonly review axes pass. The 30-day/512 MiB optional diagnostic policy,
 remaining obsolete roots and sole P8 activation are still unfinished.
+
+### Manual optional compiler-diagnostic archive
+
+Development schema 37 records each diagnostic's actual execution and capture
+time. Explicit maintenance applies a 30-day / 512 MiB diagnostic-payload target;
+unfinished tasks, latest response pointers, accepted response references and any
+unpublished knowledge revision remain protected. Unsupported, missing or
+malformed accepted metadata blocks archiving conservatively. Its version and
+complete response-reference shape, identity and digest are validated strictly.
+
+Selection runs outside the writer. A batch retires at most 32 diagnostic records
+(at most 128 SQL row mutations), bounds encoded parameters to 256 KiB and payload
+references to the caller's byte budget, then rechecks eligibility and the latest
+execution sequence inside its transaction. A concurrent continuation invalidates
+the old selection. Provider responses, paid usage, budgets, accepted calculations
+and publication records remain intact. Retired diagnostic reference counts and
+bytes remain visible in task coverage. Unique logical diagnostic payload and
+released reference bytes are distinct from physical disk reclamation; ordinary
+explicit GC handles unreferenced CAS files later.
+
+CLI, authenticated generation-guarded HTTP and native Qt use the same operation.
+Real SDK loopback fixtures preserve their original three sends through recovery
+and archive. Actual storage/codec faults cover accepted old response references,
+unpublished review protection, missing metadata, malformed reference shapes,
+continuation races and cancellation during metadata reads. The final diagnostic,
+compiler, adapter, database, boundary and size matrix passes 79 tests. Mypy passes
+592 modules. Focused Ruff, formatting and diff checks and both static readonly
+review axes pass. Remaining obsolete roots, physical unregistered CAS orphans
+and the sole P8 activation are still pending; issue 164 remains open.

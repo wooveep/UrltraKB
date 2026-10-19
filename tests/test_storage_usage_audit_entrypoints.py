@@ -127,6 +127,7 @@ def test_native_audit_and_explicit_repair_match_the_shared_result(imported_task)
         ("usage-audit", "ultrakb.storage.usage_audit", "GET"),
         ("preview", "ultrakb.storage.root_retirement", "GET"),
         ("archive-observations", "ultrakb.storage.observation_retention", "POST"),
+        ("archive-diagnostics", "ultrakb.storage.diagnostic_retention", "POST"),
     ],
 )
 async def test_http_cancellation_joins_the_real_storage_reader(

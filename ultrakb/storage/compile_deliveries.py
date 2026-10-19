@@ -10,6 +10,7 @@ from ultrakb.mutation import RecoveryRequired
 from .blobs import put_blob, read_bytes, retain_blob
 from .checkpoint_store import _json
 from .coordination import storage_stage
+from .execution_store import now
 
 
 def capture_response(work, key, signature, response, metadata):
@@ -47,12 +48,22 @@ def capture_response(work, key, signature, response, metadata):
         record["invocation_id"] = invocation_id
         attributes = put_blob(db, _json(record).encode())
         encoded = _json({**saved, "latest_response": identifier}, bounded=True)
+        timestamp = now()
         with db.transaction() as connection:
             work._provenance(connection)
             work._require_record_request(connection, key, signature)
             connection.execute(
-                "INSERT INTO ukb_compile_responses VALUES (?, ?, ?, ?, ?, ?)",
-                (identifier, work.work_id, key, signature, body.digest, attributes.digest),
+                "INSERT INTO ukb_compile_responses VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    identifier,
+                    work.work_id,
+                    key,
+                    signature,
+                    body.digest,
+                    attributes.digest,
+                    record["execution_id"],
+                    timestamp,
+                ),
             )
             retain_blob(connection, "compile-response", identifier, "body", body)
             retain_blob(connection, "compile-response", identifier, "metadata", attributes)

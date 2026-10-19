@@ -125,6 +125,8 @@ def detail_text(detail):
     )
     if detail.coverage.get("storage_costs_retired"):
         lines.append("部分详细观测已归档；核心阶段、用量和成果仍保留。")
+    if detail.coverage.get("compiler_diagnostics") == "partial":
+        lines.append("部分诊断载荷已归档；核心成果和用量仍保留。")
     return "\n".join(lines)
 
 

@@ -234,6 +234,8 @@ SCHEMA = (
         navigation_fingerprint TEXT NOT NULL,
         state TEXT NOT NULL CHECK (state IN ('draft', 'sealed', 'ready', 'published', 'retiring'))
     )""",
+        "CREATE INDEX ukb_unpublished_revisions ON ukb_knowledge_revisions(state) "
+        "WHERE state IN ('draft', 'sealed', 'ready')",
         """CREATE TABLE ukb_revision_files (
         revision_id TEXT NOT NULL REFERENCES ukb_knowledge_revisions(revision_id),
         path TEXT NOT NULL,

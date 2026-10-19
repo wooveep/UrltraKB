@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 
 from ultrakb.application.storage_maintenance import (
     MaintenanceOverview,
+    archive_compiler_diagnostics,
     archive_task_observations,
     audit_knowledge_usage,
     backup_knowledge,
@@ -55,6 +56,8 @@ def _result_text(result):
     }
     if "repaired_counters" in values:
         labels["remaining"] = "剩余统计桶"
+    if "archived_count" in values and "released_reference_bytes" in values:
+        labels["archived_count"] = "已归档重复诊断"
     lines = [
         f"{label}：{values[key] if values[key] is not None else '未知'}"
         for key, label in labels.items()
@@ -111,6 +114,7 @@ class StorageMaintenanceDialog(QDialog):
                 ("核对用量统计", self.audit_usage),
                 ("重建用量统计", self.repair_usage),
                 ("归档过期观测", self.archive_observations),
+                ("归档重复诊断", self.archive_diagnostics),
                 ("备份到新目录…", self.choose_backup),
                 ("从备份恢复到新目录…", self.choose_restore),
             )
@@ -163,6 +167,7 @@ class StorageMaintenanceDialog(QDialog):
         if overview is not None:
             roots, garbage = overview.roots, overview.garbage
             observations = overview.observations
+            diagnostics = overview.diagnostics
             reason = roots.blocked_reason or garbage.blocked_reason
             self.status.setText(
                 "存在归属尚未确认的回执，暂不能清理。"
@@ -182,9 +187,15 @@ class StorageMaintenanceDialog(QDialog):
                 f"过期观测候选：{observations.candidate_count} 项，"
                 f"{observations.candidate_bytes} 字节；受保护观测："
                 f"{observations.protected_count} 项，{observations.protected_bytes} 字节。",
+                f"可选诊断保留 {diagnostics.retention_days} 天，载荷目标 "
+                f"{diagnostics.payload_target_bytes // 1024**2} MiB；不会强删受保护材料。",
+                f"诊断候选：{diagnostics.candidate_count} 项；受保护诊断："
+                f"{diagnostics.protected_count} 项。引用载荷与实际磁盘回收量分别计量。",
                 "预览和执行均有批次上限；可继续刷新并处理下一批。",
                 f"统计时间：{overview.statistics_at}",
             ]
+            if diagnostics.blocked_reason:
+                lines.append("尚有待确认成果或无法核验的恢复材料，诊断继续保留。")
         if self.last_result is not None:
             state = getattr(self.last_result, "status", "completed")
             states = {
@@ -243,6 +254,9 @@ class StorageMaintenanceDialog(QDialog):
 
     def archive_observations(self):
         self._maintain(archive_task_observations)
+
+    def archive_diagnostics(self):
+        self._maintain(archive_compiler_diagnostics)
 
     def choose_backup(self):
         destination, _ = QFileDialog.getSaveFileName(self, "选择新备份目录", "ultrakb-backup")

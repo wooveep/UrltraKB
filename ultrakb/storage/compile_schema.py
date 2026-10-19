@@ -14,7 +14,9 @@ COMPILE_SCHEMA = (
         step_key TEXT NOT NULL,
         request_digest TEXT NOT NULL,
         content_digest TEXT NOT NULL REFERENCES ukb_blobs(digest),
-        metadata_digest TEXT NOT NULL REFERENCES ukb_blobs(digest)
+        metadata_digest TEXT NOT NULL REFERENCES ukb_blobs(digest),
+        execution_id TEXT NOT NULL REFERENCES ukb_executions(execution_id),
+        created_at TEXT NOT NULL
     )""",
     "CREATE INDEX ukb_compile_response_work ON ukb_compile_responses(work_id, step_key)",
     """CREATE TABLE ukb_compile_invocations (

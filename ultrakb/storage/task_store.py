@@ -390,6 +390,13 @@ class TaskStore:
                     "storage_costs_retired": any(
                         item.observation_coverage == "retired" for item in stage_page
                     ),
+                    "compiler_diagnostics": "partial"
+                    if db.connection.execute(
+                        "SELECT 1 FROM ukb_compile_work WHERE model_budget_id = ? "
+                        "AND diagnostics_retired_count > 0 LIMIT 1",
+                        (task.budget.model_budget_id,),
+                    ).fetchone()
+                    else "recorded",
                     "pricing": "not_recorded",
                     "projection_details": "retired"
                     if any(row[8] in {"retiring", "retired"} for row in publications[:limit])

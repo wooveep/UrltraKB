@@ -5,6 +5,7 @@ from pathlib import Path
 
 from ultrakb.knowledge_scope import resolve_scope
 from ultrakb.storage.database import DatabaseIdentity, open_database
+from ultrakb.storage.diagnostic_retention import DiagnosticRetention, DiagnosticRetentionPreview
 from ultrakb.storage.execution_store import now
 from ultrakb.storage.maintenance import CollectionPreview, Maintenance
 from ultrakb.storage.observation_retention import ObservationRetention, ObservationRetentionPreview
@@ -29,6 +30,7 @@ class MaintenanceOverview:
     roots: RootRetirementPreview
     garbage: CollectionPreview
     observations: ObservationRetentionPreview
+    diagnostics: DiagnosticRetentionPreview
 
 
 def backup_knowledge(kb_dir: Path, destination: Path, *, scope=None, identity=None) -> BackupResult:
@@ -114,6 +116,9 @@ def preview_storage_maintenance(
     observations = ObservationRetention(maintenance.root, maintenance.identity).preview(
         max_items=max_items, max_bytes=max_bytes, cancelled=cancelled
     )
+    diagnostics = DiagnosticRetention(maintenance.root, maintenance.identity).preview(
+        max_items=max_items, max_bytes=max_bytes, cancelled=cancelled
+    )
     return MaintenanceOverview(
         1,
         now(),
@@ -122,6 +127,7 @@ def preview_storage_maintenance(
         roots,
         garbage,
         observations,
+        diagnostics,
     )
 
 
@@ -131,6 +137,22 @@ def archive_task_observations(
     """Archive only expired optional stage details, preserving all core task facts."""
     maintenance = _maintenance(kb_dir, scope, identity)
     return ObservationRetention(maintenance.root, maintenance.identity).archive(
+        max_items=max_items, max_bytes=max_bytes, cancelled=cancelled
+    )
+
+
+def archive_compiler_diagnostics(
+    kb_dir: Path,
+    *,
+    scope=None,
+    identity=None,
+    max_items=128,
+    max_bytes=64 * 1024**2,
+    cancelled=None,
+):
+    """Retire only unused diagnostic copies; provider receipts and recovery stay intact."""
+    maintenance = _maintenance(kb_dir, scope, identity)
+    return DiagnosticRetention(maintenance.root, maintenance.identity).archive(
         max_items=max_items, max_bytes=max_bytes, cancelled=cancelled
     )
 

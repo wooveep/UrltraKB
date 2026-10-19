@@ -123,8 +123,12 @@ EXECUTION_SCHEMA = (
         conditions_digest TEXT NOT NULL,
         object_json TEXT NOT NULL CHECK (json_valid(object_json)),
         conditions_json TEXT NOT NULL CHECK (json_valid(conditions_json)),
+        diagnostics_retired_count INTEGER NOT NULL DEFAULT 0 CHECK (diagnostics_retired_count >= 0),
+        diagnostics_retired_bytes INTEGER NOT NULL DEFAULT 0 CHECK (diagnostics_retired_bytes >= 0),
         UNIQUE (model_budget_id, object_digest, conditions_digest)
     )""",
+    "CREATE INDEX ukb_retired_diagnostics_budget ON ukb_compile_work(model_budget_id) "
+    "WHERE diagnostics_retired_count > 0",
     """CREATE TABLE ukb_compile_steps (
         work_id TEXT NOT NULL REFERENCES ukb_compile_work(work_id),
         step_key TEXT NOT NULL,
