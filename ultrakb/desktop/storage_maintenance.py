@@ -39,6 +39,7 @@ def _result_text(result):
         "retired_sync_items": "已释放同步条目",
         "released_reference_bytes": "已释放引用载荷字节（可重复引用同一内容）",
         "deleted_count": "已删除孤立内容",
+        "unregistered_deleted": "其中未登记孤立内容",
         "deleted_bytes": "已删除内容字节",
         "trees_deleted": "已删除无引用检索树",
         "tree_rows_deleted": "已删除检索树条目",
@@ -182,6 +183,8 @@ class StorageMaintenanceDialog(QDialog):
                 f"候选引用载荷：{roots.candidate_reference_bytes} 字节（不是磁盘回收量）。",
                 f"可回收孤立内容：{garbage.candidate_count} 项，{garbage.candidate_bytes} 字节；"
                 f"检索树 {garbage.candidate_trees}。",
+                f"其中未登记孤立内容：{garbage.unregistered_count} 项，"
+                f"{garbage.unregistered_bytes} 字节。",
                 f"受保护内容：{garbage.protected_count} 项，{garbage.protected_bytes} 字节。",
                 f"完成任务观测保留 {observations.retention_days} 天；仅手动归档过期详情。",
                 f"过期观测候选：{observations.candidate_count} 项，"

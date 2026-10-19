@@ -41,6 +41,8 @@ class CollectionPreview:
     candidate_trees: int = 0
     protected_trees: int = 0
     blocked_reason: str | None = None
+    unregistered_count: int = 0
+    unregistered_bytes: int = 0
 
 
 @dataclass(frozen=True)
@@ -51,6 +53,7 @@ class CollectionResult:
     trees_deleted: int = 0
     tree_rows_deleted: int = 0
     blocked_reason: str | None = None
+    unregistered_deleted: int = 0
 
 
 @dataclass(frozen=True)
@@ -152,8 +155,20 @@ class Maintenance:
     def __init__(self, root: Path, identity: DatabaseIdentity):
         self.root, self.identity = root.resolve(), identity
 
+    def _discover_orphans(self, max_items, max_bytes, cancelled=None):
+        from .physical_orphans import candidates
+
+        # Names/stat metadata discovery may race GC, but keeps this generation
+        # stable without taking content, ingest or SQL transaction locks.
+        with (
+            read_lifecycle(self.root, database_identity=self.identity, cancelled=cancelled),
+            open_database(self.root, expected=self.identity, read_only=True) as reader,
+        ):
+            return candidates(reader, max_items, max_bytes, cancelled=cancelled)
+
     def preview(self, *, max_items: int = 128, max_bytes: int = 64 * 1024 * 1024, cancelled=None):
         _limits(max_items, max_bytes)
+        orphans, orphans_more = self._discover_orphans(max_items, max_bytes, cancelled)
         with (
             storage_stage(self.root, self.identity, read_only=True, cancelled=cancelled) as db,
             file_write_lock(self.root / ".ultrakb/ingest.lock", cancelled=cancelled),
@@ -169,6 +184,14 @@ class Maintenance:
             trees = tree_candidates(db, max_items + 1)
             tree_count = min(len(trees), max_items)
             rows, has_more = _candidates(db, max_items - tree_count, max_bytes)
+            from .physical_orphans import recheck as recheck_orphans
+
+            orphans, bounded_more = recheck_orphans(
+                db,
+                orphans,
+                max_items - tree_count - len(rows),
+                max_bytes - sum(size for _, size in rows),
+            )
             protected_trees = db.connection.execute(
                 "SELECT count(*) FROM ukb_tree_builds b WHERE EXISTS "
                 "(SELECT 1 FROM ukb_tree_refs r WHERE r.tree_id = b.tree_id) OR EXISTS "
@@ -179,17 +202,22 @@ class Maintenance:
                 "(SELECT 1 FROM ukb_blob_refs r WHERE r.digest = b.digest)"
             ).fetchone()
             return CollectionPreview(
-                len(rows),
-                sum(size for _, size in rows),
+                len(rows) + len(orphans),
+                sum(size for _, size in (*rows, *orphans)),
                 protected[0],
                 protected[1],
-                has_more or len(trees) > max_items,
+                has_more or orphans_more or bounded_more or len(trees) > max_items,
                 tree_count,
                 protected_trees,
+                unregistered_count=len(orphans),
+                unregistered_bytes=sum(size for _, size in orphans),
             )
 
     def collect(self, *, max_items: int = 128, max_bytes: int = 64 * 1024 * 1024):
         _limits(max_items, max_bytes)
+        from .physical_orphans import collect as collect_orphans
+
+        orphans, _ = self._discover_orphans(max_items, max_bytes)
         with try_reclamation(self.root, self.identity) as db:
             if db is None:
                 return CollectionResult("busy")
@@ -221,8 +249,16 @@ class Maintenance:
                     )
                 deleted_count += 1
                 deleted_bytes += byte_count
+            orphan_count, orphan_bytes = collect_orphans(
+                db, orphans, blob_limit - deleted_count, max_bytes - deleted_bytes
+            )
             return CollectionResult(
-                "completed", deleted_count, deleted_bytes, trees_deleted, tree_rows_deleted
+                "completed",
+                deleted_count + orphan_count,
+                deleted_bytes + orphan_bytes,
+                trees_deleted,
+                tree_rows_deleted,
+                unregistered_deleted=orphan_count,
             )
 
     def backup(self, destination: Path) -> DatabaseIdentity:

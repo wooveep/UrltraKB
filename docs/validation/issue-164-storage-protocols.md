@@ -2220,3 +2220,33 @@ compiler, adapter, database, boundary and size matrix passes 79 tests. Mypy pass
 592 modules. Focused Ruff, formatting and diff checks and both static readonly
 review axes pass. Remaining obsolete roots, physical unregistered CAS orphans
 and the sole P8 activation are still pending; issue 164 remains open.
+
+### Physical CAS registration-gap recovery
+
+Explicit GC now discovers canonical regular CAS files left after durable file
+publication but before the Blob registry transaction committed. Preview and
+collection count them separately while sharing the existing object/byte batch
+budget. Unknown names, directories and symbolic links are retained. No automatic
+scanner or background collector is introduced.
+
+The directory scan reads names and stat metadata only, with a generation
+lifecycle lease and no content/reclaim lease, ingest lock or SQL transaction.
+It can traverse the whole CAS directory, so its total discovery time is not
+bounded by candidate count; only the retained candidate batch is bounded.
+Preview performs bounded verification under its existing read locks. Deletion
+holds exclusive reclamation, checks pending receipt ownership and rechecks each
+candidate's registration, canonical path, regular-file type and size. A new
+registry row protects the file even when it currently has no business reference.
+No SQL row is created merely to delete an unregistered name. An interrupted
+durable unlink can be retried by a later explicit batch.
+
+Real SQLite triggers first reproduce the missing-orphan behavior. Actual
+directory-I/O delay then exposes a preview lease regression and verifies its
+repair: both discovery paths permit independent exclusive reclamation and
+ingest-lock acquisition while discovery is paused. Additional witnesses cover
+readmission between discovery and exclusive acquisition, byte/count limits,
+unresolved receipts, busy content access and all three actual maintenance
+adapters. The final maintenance/conversation/tree/backup/usage/boundary/size
+matrix passes 75 tests (5 live tests deselected). Mypy passes 593 modules; focused
+Ruff, formatting and diff checks and both static readonly review axes pass.
+Remaining obsolete-root and final P8 activation work continues.
