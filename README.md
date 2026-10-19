@@ -170,6 +170,7 @@ my-kb/
 ```
 
 全局配置位于 `~/.config/ultrakb/global.yaml`。
+启动进程前可通过 `ULTRAKB_CONFIG_DIR` 指定独立的全局配置目录，子进程继承此设置。
 本库配置可覆盖全局设置；模型凭据按本库 `.env`、进程环境、全局 `.env` 的顺序解析。
 
 ```yaml

@@ -6,6 +6,20 @@ pytest_plugins = ("live_llm", "model_service_fixtures", "test_layers", "pytester
 
 
 @pytest.fixture(autouse=True)
+def _isolate_offline_application_config(request, tmp_path, monkeypatch):
+    """Keep test discovery, credentials and subprocesses out of real user settings."""
+    if request.node.get_closest_marker("live") is not None:
+        return
+    from ultrakb import config
+
+    private = tmp_path / "application-config"
+    monkeypatch.setenv("ULTRAKB_CONFIG_DIR", str(private))
+    monkeypatch.setattr(config, "GLOBAL_CONFIG_DIR", private)
+    monkeypatch.setattr(config, "GLOBAL_CONFIG_PATH", private / "global.yaml")
+    monkeypatch.setattr(config, "GLOBAL_CONFIG_LOCK_PATH", private / "global.lock")
+
+
+@pytest.fixture(autouse=True)
 def _reset_extra_headers():
     """Keep the process-wide LLM extra-headers / timeout / parallel-tool-calls
     stashes from leaking across tests."""

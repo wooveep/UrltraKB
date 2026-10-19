@@ -14,10 +14,10 @@ from PySide6.QtWidgets import (
     QSystemTrayIcon,
 )
 
+from ultrakb import config
 from ultrakb.application.catalog import knowledge_bases
 from ultrakb.application.pages import Page, read_page
 from ultrakb.application.reading import read_knowledge_context, read_page_context
-from ultrakb.config import GLOBAL_CONFIG_DIR
 from ultrakb.desktop.brand import NAME
 from ultrakb.desktop.editor import DraftDialog, PageDraft
 from ultrakb.desktop.io import LocalIO
@@ -57,7 +57,7 @@ class Workbench(QMainWindow):
         self.io = LocalIO(self)
         self.control_io = LocalIO(self)
         self.manager = TaskManager(
-            history_dir=history_dir or GLOBAL_CONFIG_DIR / "desktop/tasks",
+            history_dir=history_dir or config.GLOBAL_CONFIG_DIR / "desktop/tasks",
             require_verified_connection=True,
         )
         self.watch_registry = NativeWatchRegistry(self.manager)

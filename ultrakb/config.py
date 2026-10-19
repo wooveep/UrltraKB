@@ -68,7 +68,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "entity_types": list(DEFAULT_ENTITY_TYPES),
 }
 
-GLOBAL_CONFIG_DIR = Path.home() / ".config" / "ultrakb"
+GLOBAL_CONFIG_DIR = (
+    Path(os.environ.get("ULTRAKB_CONFIG_DIR") or Path.home() / ".config" / "ultrakb")
+    .expanduser()
+    .resolve()
+)
 GLOBAL_CONFIG_PATH = GLOBAL_CONFIG_DIR / "global.yaml"
 GLOBAL_CONFIG_LOCK_PATH = GLOBAL_CONFIG_DIR / "global.lock"
 

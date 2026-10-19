@@ -285,19 +285,37 @@ def test_qt_does_not_substitute_an_unrelated_task_for_an_unlinked_queued_task(
     root, _, _ = imported_task
     app = widgets.QApplication.instance() or widgets.QApplication([])
     observed = []
+    poll, deadline = QTimer(), QTimer()
+    deadline.setSingleShot(True)
 
     def inspect():
         for window in app.topLevelWidgets():
-            if isinstance(window, KnowledgeTasksDialog) and window.isVisible():
+            if (
+                isinstance(window, KnowledgeTasksDialog)
+                and window.root == root
+                and window.isVisible()
+            ):
                 if window.tasks.count():
                     observed.append((window.detail, window.body.toPlainText()))
+                    poll.stop()
                     window.accept()
                     return
-        QTimer.singleShot(10, inspect)
 
-    QTimer.singleShot(10, inspect)
-    QTimer.singleShot(5000, lambda: [w.close() for w in app.topLevelWidgets()])
-    show_task_details(SimpleNamespace(kb_dir=str(root), model_usage=None), None)
+    poll.timeout.connect(inspect)
+    deadline.timeout.connect(
+        lambda: [
+            window.close()
+            for window in app.topLevelWidgets()
+            if isinstance(window, KnowledgeTasksDialog) and window.root == root
+        ]
+    )
+    poll.start(10)
+    deadline.start(5000)
+    try:
+        show_task_details(SimpleNamespace(kb_dir=str(root), model_usage=None), None)
+    finally:
+        poll.stop()
+        deadline.stop()
     assert observed
     assert observed[0][0] is None
     assert "尚未关联" in observed[0][1]

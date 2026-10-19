@@ -2361,3 +2361,28 @@ input nodes. Both fixes pass the final 38-test import/task/native/boundary/size
 matrix. Mypy passes 596 modules; focused Ruff, formatting, diff checks and both
 static readonly review axes pass. Public activation remains gated by the
 outstanding maintenance, equivalence and packaging acceptance.
+
+### Offline settings isolation and Qt test lifetime
+
+Validation exposed an existing gap: some offline task-adapter tests wrote real
+application discovery/default settings, and the first legacy-reference runner
+also registered its disposable libraries. The latter runner's three exact
+registrations and temporary default were removed; unrelated configuration was
+preserved. The previous intended default could not be established from the
+remaining settings, so the user was asked to select it. This is not recorded as
+having restored the previous default.
+
+`ULTRAKB_CONFIG_DIR` now selects an explicit application settings directory at
+process startup. Offline tests isolate both module paths and the inherited
+worker environment; live tests retain their existing setup. Desktop default
+task storage resolves the current configuration module path rather than an
+import-time copy. Actual child-process registration verifies private writes
+and unchanged bytes in the user's real global settings.
+
+A combined regression run also reproduced an unrelated Qt test-lifetime fault:
+a discarded five-second fallback timer closed windows from later tests. The
+test now owns and stops both timers and scopes closing to its own library.
+The same config/task/native/session/boundary/size matrix then passes 102 tests
+(1 live test deselected); the separate native Workbench/configuration matrix
+passes 4 tests. Mypy passes 596 modules. Focused Ruff, formatting, diff checks
+and both static readonly review axes pass. Public activation is still pending.
