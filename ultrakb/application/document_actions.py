@@ -54,6 +54,7 @@ _STATUS = {
     "rejected": "原文不可用",
     "empty": "贡献已清空",
     "retired": "已停用",
+    "removed": "已撤下",
     "awaiting_confirmation": "等待确认贡献",
 }
 
@@ -133,7 +134,7 @@ def document_inventory(
                     unit.get("successful_source_revision_id") in readable_revisions
                     for unit in units
                 )
-            mutable = not scope.historical
+            mutable = not scope.historical and not doc.get("removed")
             unfinished = identity.kind == "source" and (
                 not units
                 or any(
@@ -185,7 +186,12 @@ def document_inventory(
                         actions[name] = Eligibility(False, body_error)
             if not mutable:
                 for name in ("retry", "recompile", "reprocess", "remove", "empty"):
-                    actions[name] = Eligibility(False, "历史快照只读，请返回当前知识库操作。")
+                    actions[name] = Eligibility(
+                        False,
+                        "资料已撤下，保留历史读取。"
+                        if doc.get("removed")
+                        else "历史快照只读，请返回当前知识库操作。",
+                    )
             status = _STATUS.get(doc.get("status"), "已导入（旧资料）")
             if doc.get("validity") == "needs_refresh" or any(
                 unit.get("successful_source_revision_id")
@@ -194,7 +200,9 @@ def document_inventory(
                 for unit in units
             ):
                 status += " · 知识待更新"
-            elif doc.get("validity") in {"empty", "historical", "withdrawn"}:
+            elif doc.get("validity") in {"empty", "historical", "withdrawn"} and not doc.get(
+                "removed"
+            ):
                 status += (
                     " · "
                     + {"empty": "贡献已清空", "historical": "历史依据", "withdrawn": "已撤下"}[

@@ -160,6 +160,15 @@ def _payload(
         "doc_name": target.doc_name,
         "source_revision_id": target.source_revision_id,
         "target_source_revision_id": source.revision_id,
+        "removed": source.removed,
+        "validity": "withdrawn"
+        if source.removed
+        else "historical"
+        if retained
+        else "needs_refresh"
+        if source.revision_id != target.source_revision_id
+        or catalog.unit(target.unit_id).unit_revision_id != target.unit_revision_id
+        else "current",
         "unit_revision_id": target.unit_revision_id,
         "knowledge_revision_id": publication.revision_id if publication else None,
         "publication_id": publication.publication_id if publication else None,

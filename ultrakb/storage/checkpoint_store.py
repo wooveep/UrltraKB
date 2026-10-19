@@ -293,6 +293,7 @@ class CompileWork:
 
     def require_generation(self, key, request_digest):
         with storage_stage(self.root, self.identity, read_only=True) as db:
+            self._require_current_target(db.connection)
             if self._record(db, key, request_digest).get("repair_used"):
                 raise PageResponseError(
                     "compile_repair_exhausted", "The retained response repair was already consumed"
@@ -328,6 +329,7 @@ class CompileWork:
             encoded = _json({**record, "latest_invocation": invocation}, bounded=True)
             with db.transaction() as connection:
                 self._active(connection)
+                self._require_current_target(connection)
                 check_model_stop()
                 self._invocation(connection, key, request_digest, stage, "generation", invocation)
                 self._write_record(connection, key, request_digest, previous, encoded)
@@ -358,11 +360,27 @@ class CompileWork:
             encoded = _json({**record, flag: True, "latest_invocation": invocation}, bounded=True)
             with db.transaction() as connection:
                 self._active(connection)
+                self._require_current_target(connection)
                 check_model_stop()
                 self._invocation(
                     connection, key, signature, previous[0] if previous else key, kind, invocation
                 )
                 self._write_record(connection, key, signature, before, encoded)
+
+    def _require_current_target(self, connection):
+        from .pending_store import _current
+
+        row = connection.execute(
+            "SELECT p.source_revision_id, r.unit_revision_id FROM ukb_compile_work w "
+            "JOIN ukb_unit_revisions r "
+            "ON r.unit_revision_id = coalesce(json_extract(w.object_json, '$.unit_revision_id'), "
+            "json_extract(w.object_json, '$.index_unit_revision')) "
+            "JOIN ukb_processing_versions p ON p.processing_id = r.processing_id "
+            "WHERE w.work_id = ?",
+            (self.work_id,),
+        ).fetchone()
+        if row is not None:
+            _current(connection, *row)
 
     def model_work_key(self, stage):
         stage = stage.removeprefix("compile.").removesuffix(" (repair)")

@@ -448,6 +448,7 @@ def run_remove_for_api(
     keep_empty: bool = False,
     dry_run: bool = False,
     scope: KnowledgeScope | None = None,
+    version: str | None = None,
 ) -> dict:
     """Resolve ``identifier`` and run remove under the KB ingest lock.
 
@@ -462,6 +463,38 @@ def run_remove_for_api(
 
     from ultrakb.application.source_removal import preview_source_removal, unmapped_removal_matches
 
+    if scope is not None and scope.knowledge is not None:
+        preview = preview_removal(kb_dir, identifier, scope=scope)
+        if preview.status != "ready" and (dry_run or version is None):
+            return {
+                "status": preview.status,
+                "candidates": [{"name": name} for name in preview.candidates],
+            }
+        if dry_run:
+            assert preview.plan is not None
+            return {
+                "status": "dry_run",
+                "name": preview.plan.name,
+                "doc_name": preview.plan.doc_name,
+                "actions": [asdict(action) for action in preview.plan.actions],
+                "version": preview.version,
+                "publication_id": scope.publication_id,
+            }
+        outcome = remove_document(
+            kb_dir,
+            identifier,
+            version=version if version is not None else preview.version,
+            scope=scope,
+        )
+        return {
+            **(asdict(outcome.result) if outcome.result else {}),
+            "status": outcome.status,
+            "retained": outcome.retained,
+            "unfinished": outcome.unfinished,
+            "publication_id": outcome.publication_id,
+            "projection_pending": outcome.projection_pending,
+            "message": outcome.message or (outcome.result.message if outcome.result else None),
+        }
     with kb_ingest_lock(kb_dir / ".ultrakb"):
         admitted = preview_source_removal(kb_dir.resolve(), identifier, scope)
         if admitted is not None:
@@ -483,7 +516,7 @@ def run_remove_for_api(
                 identifier,
                 keep_raw=keep_raw,
                 keep_empty=keep_empty,
-                version=admitted.version,
+                version=version if version is not None else admitted.version,
                 scope=scope,
             )
             return {
@@ -516,6 +549,8 @@ def run_remove_for_api(
         plan = _build_remove_plan(
             kb_dir, file_hash, meta, keep_raw=keep_raw, keep_empty=keep_empty, scope=scope
         )
+        if version is not None and version != _plan_version(kb_dir, plan, scope=scope):
+            return {"status": "conflict"}
         if dry_run:
             return {
                 "status": "dry_run",
@@ -610,6 +645,10 @@ class RemovalOutcome:
     result: RemoveResult | None = None
     retained: tuple[str, ...] = ()
     unfinished: tuple[str, ...] = ()
+    publication_id: str | None = None
+    projection_pending: bool = False
+    message: str | None = None
+    error_type: str | None = None
 
 
 def preview_removal(
@@ -624,6 +663,10 @@ def preview_removal(
 
     if scope is not None:
         scope = resolve_scope(kb_dir, scope)
+    if scope is not None and scope.knowledge is not None:
+        from .storage_removal import preview_stored_removal
+
+        return preview_stored_removal(scope, identifier)
     with kb_read_lock(kb_dir / ".ultrakb"):
         admitted = preview_source_removal(kb_dir.resolve(), identifier, scope)
     if admitted is not None:
@@ -668,6 +711,11 @@ def remove_document(
     """
     from ultrakb.application.source_removal import preview_source_removal, withdraw_source
 
+    if scope is not None and scope.knowledge is not None:
+        from .storage_removal import remove_stored_source
+
+        scope = resolve_scope(kb_dir, scope)
+        return remove_stored_source(scope, identifier, version=version, context=context)
     if scope is not None:
         scope = resolve_scope(kb_dir, scope, writable=True)
     kb_dir = kb_dir.resolve()

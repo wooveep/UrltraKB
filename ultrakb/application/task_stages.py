@@ -12,11 +12,13 @@ logger = logging.getLogger(__name__)
 
 
 @contextmanager
-def task_stage(context, code, *, ensure_work=False, allow_stopping=False, **identity):
+def task_stage(context, code, *, root=None, ensure_work=False, allow_stopping=False, **identity):
     execution = context.storage_execution
     if execution is None:
         raise RuntimeError("A durable stage requires its top-level execution first")
-    root = Path(context.snapshot.kb_dir)
+    if root is None and context.snapshot is None:
+        raise ValueError("A non-model stage requires its explicit database root")
+    root = Path(root if root is not None else context.snapshot.kb_dir)
     store = ExecutionStore(root, context.storage_identity)
     try:
         stage_id = store.start_stage(

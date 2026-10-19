@@ -21,6 +21,7 @@ from .navigation_store import (
 )
 from .pending_store import PendingWork
 from .publication_guards import capture_import_claim, import_claim
+from .source_withdrawal import SourceWithdrawal, require_source, withdrawal_manifest
 from .wiki_paths import validate_file_tree
 from .wiki_projection import prepare_sync_plan, require_sync_plan
 
@@ -37,7 +38,12 @@ def prepare_revision(
     compile_outcome=None,
     page_inputs: dict[str, tuple[str, ...]] | None = None,
     base: BoundKnowledge | None = None,
+    withdrawal=None,
 ) -> PreparedRevision:
+    if withdrawal is not None:
+        withdrawal = SourceWithdrawal.model_validate(withdrawal)
+        if import_work is not None:
+            raise ValueError("An import cannot also withdraw a source")
     compile_outcome = CompileOutcome.model_validate(compile_outcome or {})
     encoded_outcome = compile_outcome.model_dump_json()
     if len(encoded_outcome.encode()) > 64 * 1024 or compile_outcome.unfinished:
@@ -62,6 +68,8 @@ def prepare_revision(
         TypeAdapter(RecordId).validate_python(index_id)
     revision_id, publication_id, plan_id = (uuid.uuid4().hex for _ in range(3))
     with storage_stage(store.root, store.identity) as db:
+        if withdrawal is not None:
+            require_source(db.connection, withdrawal)
         claim = (
             capture_import_claim(db.connection, store.identity, import_work)
             if import_work is not None
@@ -113,6 +121,7 @@ def prepare_revision(
                     "import_claim": claim,
                     "compile_outcome": compile_outcome.model_dump(mode="json"),
                     "page_inputs": page_rows,
+                    "source_withdrawal": withdrawal.model_dump(mode="json") if withdrawal else None,
                 }
             ),
         )
@@ -140,6 +149,16 @@ def prepare_revision(
             )
             retain_blob(connection, "knowledge-revision", revision_id, "manifest", manifest)
             bind_navigation(connection, revision_id, navigation)
+            if withdrawal is not None:
+                connection.execute(
+                    "INSERT INTO ukb_revision_withdrawals VALUES (?, ?, ?, ?)",
+                    (
+                        revision_id,
+                        withdrawal.source_id,
+                        withdrawal.source_revision_id,
+                        withdrawal.source_generation,
+                    ),
+                )
             if claim is not None:
                 connection.execute(
                     "INSERT INTO ukb_revision_import VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -212,6 +231,7 @@ def prepare_revision(
                 "sync_plan": plan_id,
                 "import_claim": import_claim(db.connection, revision_id),
                 "compile_outcome": read_outcome(db.connection, revision_id).model_dump(mode="json"),
+                "source_withdrawal": withdrawal_manifest(db.connection, revision_id),
                 "page_inputs": db.connection.execute(
                     "SELECT path, unit_revision_id FROM ukb_revision_page_inputs "
                     "WHERE revision_id = ? ORDER BY path, unit_revision_id",

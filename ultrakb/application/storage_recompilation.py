@@ -19,6 +19,7 @@ def target_fingerprint(scope, *, sources=None):
         (
             source.source_id,
             source.revision_id,
+            source.generation,
             [(unit.unit_id, unit.unit_revision_id) for unit in units],
         )
         for source, units in sources

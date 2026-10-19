@@ -77,7 +77,7 @@ class PublicationReceipt:
 
 
 def _manifest(entries):
-    return json.dumps(entries, ensure_ascii=False, separators=(",", ":")).encode()
+    return json.dumps(entries, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode()
 
 
 def _batches(entries):
@@ -312,6 +312,7 @@ class KnowledgeStore:
         changes: dict[str, bytes | None],
         *,
         page_inputs: dict[str, tuple[str, ...]] | None = None,
+        withdrawal=None,
     ) -> PreparedRevision:
         """Keep a fixed revision's inputs and reuse its verified immutable assets."""
         if base.root != self.root or base.identity != self.identity:
@@ -344,6 +345,7 @@ class KnowledgeStore:
             }
             | (page_inputs or {}),
             base=base,
+            withdrawal=withdrawal,
         )
 
     def _prepare_revision(
@@ -358,6 +360,7 @@ class KnowledgeStore:
         compile_outcome=None,
         page_inputs: dict[str, tuple[str, ...]] | None = None,
         base: BoundKnowledge | None = None,
+        withdrawal=None,
     ) -> PreparedRevision:
         from .knowledge_preparation import prepare_revision
 
@@ -372,6 +375,7 @@ class KnowledgeStore:
             compile_outcome=compile_outcome,
             page_inputs=page_inputs,
             base=base,
+            withdrawal=withdrawal,
         )
 
     def compilation_outcome(self, revision_id):
@@ -446,6 +450,9 @@ class KnowledgeStore:
             # The callback only checks an in-memory stop/deadline signal. Do not
             # accept late preparation after cancellation, or run I/O in this commit.
             check_cancelled()
+            from .source_withdrawal import finish_withdrawal
+
+            finish_withdrawal(connection, prepared.revision_id)
             activate_sync_plan(db, prepared.revision_id, prepared.sync_plan_id)
             connection.execute(
                 "INSERT INTO ukb_publications VALUES (?, ?, ?, ?)",

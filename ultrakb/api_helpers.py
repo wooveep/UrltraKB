@@ -525,6 +525,7 @@ async def _stream_remove(
             keep_empty=request.keep_empty,
             dry_run=request.dry_run,
             scope=await resolve_api_scope(kb_dir, request.view_id),
+            version=request.version,
         )
         status_value = result.get("status")
         if status_value == "not_found":

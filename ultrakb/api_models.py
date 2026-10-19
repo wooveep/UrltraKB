@@ -186,6 +186,7 @@ class LintRequest(ViewRequest):
 
 
 class DocumentItem(BaseModel):
+    removed: bool = False
     unit_count: int | None = None
     block_count: int | None = None
     tokens: int | None = None
@@ -242,6 +243,7 @@ class LintResponse(BaseModel):
 
 
 class RemoveRequest(ViewRequest):
+    version: str | None = Field(default=None, min_length=1, max_length=256)
     kb: str = Field(..., min_length=1)
     identifier: str = Field(..., min_length=1)
     keep_raw: bool = False
@@ -256,6 +258,9 @@ class RemoveActionItem(BaseModel):
 
 
 class RemoveResponse(BaseModel):
+    version: str | None = None
+    publication_id: str | None = None
+    projection_pending: bool = False
     retained: tuple[str, ...] = ()
     unfinished: tuple[str, ...] = ()
     status: str

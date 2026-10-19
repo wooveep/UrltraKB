@@ -35,7 +35,9 @@ SCHEMA = (
         """CREATE TABLE ukb_sources (
         source_id TEXT PRIMARY KEY,
         source_key TEXT NOT NULL UNIQUE,
-        label TEXT NOT NULL
+        label TEXT NOT NULL,
+        state TEXT NOT NULL DEFAULT 'active' CHECK (state IN ('active', 'withdrawn')),
+        generation INTEGER NOT NULL DEFAULT 0 CHECK (generation >= 0)
     )""",
         """CREATE TABLE ukb_source_revisions (
         revision_id TEXT PRIMARY KEY,

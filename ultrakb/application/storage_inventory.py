@@ -6,9 +6,9 @@ from ultrakb.storage.catalog_store import CatalogStore
 from ultrakb.storage.pending_store import PendingStore
 
 
-def catalog_sources(catalog):
+def catalog_sources(catalog, *, include_removed=False):
     after = ""
-    while sources := catalog.source_page(after=after):
+    while sources := catalog.source_page(after=after, include_removed=include_removed):
         yield from sources
         after = sources[-1].source_id
 
@@ -68,9 +68,12 @@ def source_inventory(scope):
     for unit in sorted(bound.input_units(), key=lambda item: item.unit_revision_id not in active):
         actuals.setdefault(unit.unit_id, unit)
     documents = []
-    for source in catalog_sources(catalog):
+    for source in catalog_sources(catalog, include_removed=True):
         targets = catalog.source_units(source.source_id)
         units = [_unit(catalog, unit, actuals.get(unit.unit_id), scope) for unit in targets]
+        if source.removed:
+            for unit in units:
+                unit["status"] = "retired"
         actual = next((actuals[unit.unit_id] for unit in targets if unit.unit_id in actuals), None)
         one = units[0] if len(units) == 1 else {}
         changed = (actual is not None and actual.source_revision_id != source.revision_id) or any(
@@ -82,6 +85,7 @@ def source_inventory(scope):
             {
                 "hash": source.source_id,
                 "source_id": source.source_id,
+                "source_generation": source.generation,
                 "legacy_hash": None,
                 "location": source.source_key,
                 "name": source.label,
@@ -94,8 +98,15 @@ def source_inventory(scope):
                 "doc_name": targets[0].doc_name if targets else source.label,
                 "unit_count": len(units),
                 "units": units,
-                "validity": "needs_refresh" if changed else "current",
-                "status": source_status([SimpleNamespace(status=unit["status"]) for unit in units]),
+                "removed": source.removed,
+                "validity": "withdrawn"
+                if source.removed
+                else "needs_refresh"
+                if changed
+                else "current",
+                "status": "removed"
+                if source.removed
+                else source_status([SimpleNamespace(status=unit["status"]) for unit in units]),
                 "length_class": one.get("length_class"),
                 "execution_mode": one.get("execution_mode"),
                 "processing": one.get("processing"),

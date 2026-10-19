@@ -1,6 +1,5 @@
 """Shared development use case for committing an import and projecting its Wiki."""
 
-import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -78,15 +77,18 @@ def publish_knowledge_changes(
     page_inputs: dict[str, tuple[str, ...]] | None = None,
     check_cancelled: Callable[[], None] = lambda: None,
     execution_id: str | None = None,
+    withdrawal=None,
 ) -> PublicationOutcome:
     """Commit an explicitly based manual edit before attempting worktree I/O."""
     knowledge = KnowledgeStore(base.root, base.identity)
-    prepared = knowledge.prepare_changes(base, changes, page_inputs=page_inputs)
+    prepared = knowledge.prepare_changes(
+        base, changes, page_inputs=page_inputs, withdrawal=withdrawal
+    )
     try:
         publication = knowledge.publish(
             prepared, check_cancelled=check_cancelled, execution_id=execution_id
         )
-    except (PublicationConflict, ProjectionConflict) as error:
+    except (PublicationConflict, ProjectionConflict, CatalogConflict) as error:
         return PublicationOutcome(
             "needs_review",
             None,
@@ -94,6 +96,8 @@ def publish_knowledge_changes(
             prepared.revision_id,
             "knowledge_changed"
             if isinstance(error, PublicationConflict)
+            else "source_changed"
+            if isinstance(error, CatalogConflict)
             else "worktree_baseline_changed",
         )
     except Exception:
@@ -112,6 +116,6 @@ def sync_publication(
         return ProjectionStore(root, identity, view_id=prepared.view_id).sync(
             plan_id=prepared.sync_plan_id
         )
-    except (OSError, sqlite3.Error) as error:
+    except Exception as error:
         # The master commit succeeded even if coordination or opening the projection failed.
         return ProjectionResult("pending", prepared.sync_plan_id, error_code=type(error).__name__)

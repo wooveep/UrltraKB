@@ -19,6 +19,19 @@ logger = logging.getLogger(__name__)
 
 
 @contextmanager
+def _running(context):
+    with context._event_guard:
+        if context._storage_running:
+            raise RuntimeError("An execution context cannot run in two operations at once")
+        context._storage_running = True
+    try:
+        yield
+    finally:
+        with context._event_guard:
+            context._storage_running = False
+
+
+@contextmanager
 def begin_storage_execution(root: Path, context: ExecutionContext) -> Iterator[LlmCredentialBundle]:
     root = root.resolve()
     identity = context.storage_identity
@@ -31,11 +44,7 @@ def begin_storage_execution(root: Path, context: ExecutionContext) -> Iterator[L
             assert context.snapshot is not None
             yield LlmCredentialBundle(**context.snapshot.values()["credentials"])
             return
-        with context._event_guard:
-            if context._storage_running:
-                raise RuntimeError("An execution context cannot run in two operations at once")
-            context._storage_running = True
-        try:
+        with _running(context):
             if context.resume_model_task_id is not None or context.model_task is not None:
                 raise ValueError("A new-store execution cannot resume a legacy model-task ledger")
             if context.snapshot is None:
@@ -120,6 +129,59 @@ def begin_storage_execution(root: Path, context: ExecutionContext) -> Iterator[L
                     if failure is None:
                         raise
                     logger.warning("Could not confirm execution cleanup", exc_info=True)
-        finally:
-            with context._event_guard:
-                context._storage_running = False
+
+
+@contextmanager
+def begin_storage_operation(root: Path, context: ExecutionContext, operation: str):
+    """Persist a non-model operation without requiring model settings or credentials."""
+    import hashlib
+
+    root = root.resolve()
+    identity = context.storage_identity
+    if identity is None:
+        raise ValueError("A storage operation requires an explicit database identity")
+    with read_lifecycle(
+        root, database_identity=identity, cancelled=context.cancelled, on_wait=context.waiting
+    ):
+        if current_execution() is context:
+            context.check_stop()
+            yield
+            return
+        with _running(context):
+            context.check_stop()
+            store = ExecutionStore(root, identity)
+            previous = context.storage_execution
+            resume = previous.execution_id if previous else context.resume_storage_execution_id
+            context.storage_execution = store.begin(
+                operation,
+                fingerprint=hashlib.sha256(
+                    ("storage-operation-v1:" + operation).encode()
+                ).hexdigest(),
+                max_calls=0,
+                resume=resume,
+            )
+            context._storage_result = "failed"
+            state, failure = "completed", None
+            try:
+                with _activate_context(context):
+                    yield
+            except BaseException as error:
+                from ultrakb.llm_usage_transport import _failure_state
+
+                state, failure = _failure_state(error), error
+                raise
+            finally:
+                try:
+                    store.finish(
+                        context.storage_execution.execution_id,
+                        state="completed"
+                        if context._storage_result == "completed"
+                        else context._storage_result
+                        if state == "completed"
+                        else state,
+                        work_settled=True,
+                    )
+                except Exception:
+                    if failure is None:
+                        raise
+                    logger.warning("Could not confirm operation cleanup", exc_info=True)

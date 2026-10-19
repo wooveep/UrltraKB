@@ -54,6 +54,8 @@ class SourceTarget:
     source_key: str
     label: str
     revision_id: str
+    generation: int = 0
+    removed: bool = False
 
 
 @dataclass(frozen=True)
@@ -126,9 +128,13 @@ class CatalogStore:
             inputs[logical_path] = (source, "sidecar")
         with storage_stage(self.root, self.identity) as db:
             source_row = db.connection.execute(
-                "SELECT source_id FROM ukb_sources WHERE source_key = ?", (source_key,)
+                "SELECT source_id, generation, state FROM ukb_sources WHERE source_key = ?",
+                (source_key,),
             ).fetchone()
             source_id = source_row[0] if source_row else uuid.uuid4().hex
+            source_generation = source_row[1] if source_row else 0
+            if source_row and source_row[2] != "active":
+                raise CatalogConflict("The source was withdrawn; its history remains available")
             previous = self._latest(db, source_id)
             captured = previous[0] if previous else None
             if expected is not None and captured != expected:
@@ -149,7 +155,8 @@ class CatalogStore:
             revision_id = uuid.uuid4().hex
             with db.transaction() as connection:
                 connection.execute(
-                    "INSERT INTO ukb_sources VALUES (?, ?, ?) ON CONFLICT(source_key) DO NOTHING",
+                    "INSERT INTO ukb_sources (source_id, source_key, label) VALUES (?, ?, ?) "
+                    "ON CONFLICT(source_key) DO NOTHING",
                     (source_id, source_key, path.name),
                 )
                 source_id = connection.execute(
@@ -198,6 +205,13 @@ class CatalogStore:
                 if (latest[0] if latest else None) != captured:
                     raise CatalogConflict("The source changed while its input was being retained")
                 changed = connection.execute(
+                    "UPDATE ukb_sources SET generation = generation + 1 "
+                    "WHERE source_id = ? AND state = 'active' AND generation = ?",
+                    (source_id, source_generation),
+                ).rowcount
+                if changed != 1:
+                    raise CatalogConflict("The source changed while its input was being retained")
+                changed = connection.execute(
                     "UPDATE ukb_source_revisions SET state = 'ready' WHERE revision_id = ? "
                     "AND state = 'sealed'",
                     (revision_id,),
@@ -222,28 +236,41 @@ class CatalogStore:
         TypeAdapter(RecordId).validate_python(source_id)
         with storage_stage(self.root, self.identity, read_only=True) as db:
             row = db.connection.execute(
-                "SELECT source_key, label FROM ukb_sources WHERE source_id = ?", (source_id,)
+                "SELECT source_key, label, generation, state FROM ukb_sources WHERE source_id = ?",
+                (source_id,),
             ).fetchone()
             revision = self._latest(db, source_id) if row else None
             if row is None or revision is None:
                 raise KeyError(source_id)
-            return SourceTarget(source_id, row[0], row[1], revision[0])
+            return SourceTarget(
+                source_id, row[0], row[1], revision[0], row[2], row[3] == "withdrawn"
+            )
 
-    def source_page(self, *, after: str = "", limit: int = 63) -> tuple[SourceTarget, ...]:
+    def source_page(
+        self, *, after: str = "", limit: int = 63, include_removed: bool = False
+    ) -> tuple[SourceTarget, ...]:
         """List admitted source identities without opening originals or processing bodies."""
-        if not isinstance(after, str) or type(limit) is not int or not 1 <= limit <= 128:
+        if (
+            not isinstance(after, str)
+            or type(limit) is not int
+            or not 1 <= limit <= 128
+            or type(include_removed) is not bool
+        ):
             raise ValueError("Source pages require a string cursor and a limit of 1..128")
         with storage_stage(self.root, self.identity, read_only=True) as db:
             rows = db.connection.execute(
                 "SELECT s.source_id, s.source_key, s.label, "
                 "(SELECT r.revision_id FROM ukb_source_revisions r "
                 "WHERE r.source_id = s.source_id AND r.state = 'ready' "
-                "ORDER BY r.ordinal DESC LIMIT 1) AS target "
+                "ORDER BY r.ordinal DESC LIMIT 1) AS target, s.generation, s.state = 'withdrawn' "
                 "FROM ukb_sources s WHERE s.source_id > ? AND target IS NOT NULL "
+                "AND (? OR s.state = 'active') "
                 "ORDER BY s.source_id LIMIT ?",
-                (after, limit),
+                (after, include_removed, limit),
             ).fetchall()
-            return tuple(SourceTarget(*row) for row in rows)
+            return tuple(
+                SourceTarget(row[0], row[1], row[2], row[3], row[4], bool(row[5])) for row in rows
+            )
 
     @staticmethod
     def _revision(db, revision_id):
@@ -532,6 +559,10 @@ class CatalogStore:
             latest = self._latest(db, processing[1])
             if not latest or latest[0] != processing[0]:
                 raise CatalogConflict("The source target changed before unit preparation")
+            if connection.execute(
+                "SELECT state FROM ukb_sources WHERE source_id = ?", (processing[1],)
+            ).fetchone() != ("active",):
+                raise CatalogConflict("The source was withdrawn before unit preparation")
             unit = connection.execute(
                 "SELECT unit_id, target_revision_id, generation, doc_name FROM ukb_import_units "
                 "WHERE source_id = ? AND unit_key = ?",
@@ -564,6 +595,10 @@ class CatalogStore:
                 "UPDATE ukb_import_units SET target_revision_id = ?, generation = ? "
                 "WHERE unit_id = ?",
                 (revision_id, generation, unit_id),
+            )
+            connection.execute(
+                "UPDATE ukb_sources SET generation = generation + 1 WHERE source_id = ?",
+                (processing[1],),
             )
             return UnitTarget(
                 unit_id,

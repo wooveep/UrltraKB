@@ -38,8 +38,37 @@ class BatchRemovalPreview:
     legacy_modified: tuple[str, ...] = ()
     legacy_retained: tuple[str, ...] = ()
     legacy_empty: tuple[str, ...] = ()
+    storage_kb_id: str | None = None
+    storage_generation: str | None = None
+    publication_id: str | None = None
+    source_versions: tuple[tuple[str, str, int], ...] = ()
 
     def __post_init__(self):
+        if any(
+            value is not None
+            for value in (self.storage_kb_id, self.storage_generation, self.publication_id)
+        ):
+            from pydantic import TypeAdapter
+
+            from ultrakb.source_records import RecordId
+            from ultrakb.storage.source_withdrawal import SourceWithdrawal
+
+            if any(item.kind != "source" for item in self.identities):
+                raise ValueError("Main-store removal requires retained source identities")
+            for value in (self.storage_kb_id, self.storage_generation, self.publication_id):
+                TypeAdapter(RecordId).validate_python(value)
+            for source_id, revision_id, generation in self.source_versions:
+                SourceWithdrawal(
+                    source_id=source_id,
+                    source_revision_id=revision_id,
+                    source_generation=generation,
+                )
+            if tuple(item[0] for item in self.source_versions) != tuple(
+                item.value for item in self.identities
+            ):
+                raise ValueError("Reviewed storage removal requires its exact source versions")
+        elif self.source_versions:
+            raise ValueError("Source versions require an explicit database identity")
         if not self.identities or len(self.identities) != len(self.names):
             raise ValueError("Invalid reviewed removal targets")
         if any(item.kind not in {"source", "legacy"} for item in self.identities):
@@ -68,6 +97,7 @@ class BatchRemovalPreview:
     def decode(cls, value):
         raw = json.loads(value)
         raw["identities"] = tuple(DocumentIdentity(**item) for item in raw["identities"])
+        raw["source_versions"] = tuple(tuple(item) for item in raw.get("source_versions", ()))
         for key in (
             "names",
             "affected_pages",
@@ -122,6 +152,7 @@ class BatchRemovalOutcome:
     items: tuple[BatchRemovalItem, ...]
     message: str | None = None
     needs_repair: bool = False
+    publication_id: str | None = None
 
 
 class BatchRemovalChanged(ValueError):
@@ -154,6 +185,11 @@ def preview_batch_removal(
         for identity in selected
     ):
         raise ValueError("批量移除需要明确的新旧资料身份。")
+    if scope is not None and scope.knowledge is not None:
+        from .storage_batch_removal import preview_stored_batch
+
+        view = resolve_scope(root, scope)
+        return preview_stored_batch(view, selected, keep_raw=keep_raw, keep_empty=keep_empty)
     view = resolve_scope(root, scope, writable=True)
     with kb_read_lock(root / ".ultrakb"):
         sources = [
@@ -272,6 +308,10 @@ def execute_batch_removal(
         )
     try:
         context.check_stop()
+        if preview.storage_kb_id is not None:
+            from .storage_batch_removal import execute_stored_batch
+
+            return execute_stored_batch(preview, context)
         return _execute_with_lease(preview, context=context)
     except LockCancelled:
         return BatchRemovalOutcome(

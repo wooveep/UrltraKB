@@ -57,6 +57,8 @@ def _preview(scope, source_id):
         raise ReprocessingConflict("Knowledge changed; refresh the reprocessing preview")
     catalog = CatalogStore(scope.kb_dir, base.identity)
     source = catalog.source(source_id)
+    if source.removed:
+        raise ReprocessingConflict("The source was withdrawn; historical evidence retained")
     revision = catalog.revision(source.revision_id)
     units = catalog.source_units(source_id)
     main = next(file for file in revision.files if file.kind == "main")
@@ -198,6 +200,8 @@ def reprocess_stored_source(scope, source_id, *, version, context=None, unit_id=
         raise ReprocessingConflict(str(error)) from error
     catalog = CatalogStore(root, identity)
     source = catalog.source(source_id)
+    if source.removed:
+        raise ReprocessingConflict("The source was withdrawn; historical evidence retained")
     if source.revision_id != plan.source_revision_id:
         raise ReprocessingConflict("Source changed; refresh the reprocessing preview")
     revision = catalog.revision(source.revision_id)

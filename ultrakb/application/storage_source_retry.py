@@ -45,6 +45,8 @@ def retry_stored_source(
     root, identity = scope.kb_dir, scope.knowledge.identity
     catalog = CatalogStore(root, identity)
     source = catalog.source(source_id)
+    if source.removed:
+        raise RetryTargetChanged("The source was withdrawn; historical evidence retained")
     if source_revision_id is not None and source_revision_id != source.revision_id:
         raise RetryTargetChanged("Source target changed; check the remaining work again")
     revision = catalog.revision(source.revision_id)

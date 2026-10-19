@@ -138,7 +138,11 @@ def _execute(
             removed.status,
             removal_items=removed.items,
             error=removed.message,
-            resources=tuple(sorted({path for item in removed.items for path in item.retained})),
+            resources=tuple(
+                str(root / path)
+                for path in sorted({path for item in removed.items for path in item.retained})
+            ),
+            revision=removed.publication_id,
             halt=removed.status in {"blocked", "partial"},
             unfinished=("knowledge_base_repair",)
             if removed.needs_repair
@@ -437,12 +441,16 @@ def _execute(
         return UnitResult(
             "completed"
             if removal.status == "removed"
+            else "stopped"
+            if removal.status == "stopped"
             else "blocked"
             if removal.status == "blocked"
             else "failed",
             resources=tuple(str(root / path) for path in removal.retained),
             error=None
             if removal.status == "removed"
+            else removal.message
+            if removal.message
             else (
                 f"Cleanup failed ({removal_result.error_type}); "
                 "see completed changes and unfinished stages"
@@ -450,6 +458,7 @@ def _execute(
                 else f"Document removal: {removal.status}"
             ),
             changes=tuple(removal_result.changes) if removal_result else (),
+            revision=removal.publication_id,
             unfinished=removal.unfinished,
             halt=removal.status == "blocked",
         )

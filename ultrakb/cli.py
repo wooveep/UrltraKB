@@ -727,7 +727,6 @@ from ultrakb.application.removal import (  # noqa: E402
 )
 @click.option("--yes", "-y", is_flag=True, default=False, help="Skip the confirmation prompt.")
 @click.pass_context
-@_with_kb_lock(exclusive=True)
 def remove(ctx, identifier, keep_raw, keep_empty, dry_run, yes):
     """Remove a document from the knowledge base.
 

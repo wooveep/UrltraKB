@@ -1438,3 +1438,30 @@ The related update/plan/compiler set passes 36 cases; shared-update and existing
 reconciliation recovery pass 28 cases. Full mypy passes 538 modules; Ruff and
 format checks pass. This closes this shared-page recovery gap, not the complete
 issue or the P8 gate.
+
+### Source withdrawal and confirmed batch recovery
+
+Development schema 21 records generation-bound source withdrawal in the sealed
+revision and commits the catalog transition with its publication receipt. Existing
+knowledge bytes, exact page evidence, originals and paid work remain retained.
+Source/unit changes and foreign publications invalidate confirmation; pending
+imports and following compiler/index requests stop before another model send.
+An already received response and its actual usage remain independently durable.
+
+Single and batch removal share this application operation across the development
+CLI, HTTP JSON/stream and native worker bindings. Confirmed tokens bind the original
+publication and source generation. A fresh invocation can recover that exact
+receipt after a lost response; batch recovery proves its contiguous committed
+prefix, resumes the remainder and rejects a foreign publication. Nonmodel source
+withdrawal needs no model configuration or credentials. Postcommit coordination
+and projection failures retain known business success with separate remaining
+work. A superseded synchronization plan is terminal, so replay never asks to
+permanently resynchronize an obsolete publication or rolls back a successor.
+
+The expanded storage/application/legacy compatibility set passes 239 cases (one
+live case deselected); the final withdrawal/batch/three-entrypoint set passes
+22 cases. Full mypy passes 541 modules; Ruff, formatting and diff checks pass.
+Both independent review axes verify the generation checks and receipt recovery;
+Spec independently confirms the obsolete-plan regression. Normal factories stay
+behind the P8 gate. Refresh/maintenance completion, remaining observation work
+and final entrypoint activation are still required; issue 164 remains open.
