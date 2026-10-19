@@ -93,6 +93,7 @@ class UsageAggregate(_UsageModel):
 class UsageReceipt(_UsageModel):
     execution_ids: list[Identity]
     source_ids: list[Identity]
+    unit_ids: list[Identity] = Field(default_factory=list)
     ledger: str
     current: UsageAggregate
     cumulative: UsageAggregate

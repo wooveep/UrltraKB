@@ -59,6 +59,11 @@ def test_partial_workbook_keeps_other_sheets_and_retry_uses_the_managed_inventor
         assert units["Beta"].status == "failed"
         assert units["Empty"].status == "empty"
         assert units["Beta"].target_revision_id != units["Alpha"].target_revision_id
+        assert units["Alpha"].model_usage["current"]["actual_sends"] == 2
+        assert units["Gamma"].model_usage["current"]["actual_sends"] == 2
+        assert units["Gamma"].model_usage["cumulative"]["actual_sends"] == 2
+        assert units["Empty"].model_usage["current"]["actual_sends"] == 0
+        assert units["Beta"].model_usage["current"]["actual_sends"] == 0
         public = storage_scope(root, identity)
         assert {unit.unit_id for unit in public.knowledge.input_units()} >= {
             units["Alpha"].unit_id,

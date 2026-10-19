@@ -450,6 +450,7 @@ async def test_published_compilation_survives_projection_coordination_failure(
     from ultrakb.storage.wiki_projection import ProjectionStore
 
     root, identity, unit = compile_input(tmp_path)
+    context = ExecutionContext()
     summary = json.dumps({"description": "Fixture", "content": "The value is 17."})
 
     def unavailable(*args, **kwargs):
@@ -464,11 +465,17 @@ async def test_published_compilation_survives_projection_coordination_failure(
             root,
             unit.source_id,
             unit_id=unit.unit_id,
+            context=context,
             scope=storage_scope(root, identity),
         )
     assert result.status == "compiled", result.message
     assert result.version == storage_scope(root, identity).publication_id
     assert result.unfinished
+    from ultrakb.application.knowledge_tasks import read_knowledge_execution
+
+    detail = read_knowledge_execution(root, context.storage_execution.execution_id)
+    assert detail.execution.state == "completed"
+    assert detail.publications[0].publication_id == result.version
     assert "17" in read_page(root, "summaries/fixture.md", scope=storage_scope(root, identity)).body
 
 

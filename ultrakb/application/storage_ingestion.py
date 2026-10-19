@@ -22,7 +22,6 @@ from ultrakb.locks import LockCancelled, atomic_write_json, atomic_write_text
 from ultrakb.processing_policy import classify_markdown_tokens
 from ultrakb.storage.catalog_store import CatalogStore
 from ultrakb.storage.compile_workspace import materialize_baseline
-from ultrakb.storage.usage_store import UsageStore
 from ultrakb.text_formats import normalize_text_document
 
 from .execution import ExecutionContext
@@ -124,17 +123,33 @@ def import_stored_document(
 
 def confirm_import_usage(result, context, root, identity):
     """Observation failure preserves all returned per-unit business outcomes."""
-    if context.storage_execution is not None:
-        try:
-            result = replace(
-                result,
-                model_usage=UsageStore(root, identity).receipt(
-                    execution_id=context.storage_execution.execution_id, source_id=result.source_id
-                ),
+    from .result_usage import confirm_result_usage
+
+    if result.source_id is not None:
+        units = tuple(
+            confirm_result_usage(
+                unit, context, root, identity, source_id=result.source_id, unit_id=unit.unit_id
             )
-        except Exception:
-            result = replace(result, unfinished=(*result.unfinished, "confirm usage"))
-    return result
+            for unit in result.units
+        )
+        result = replace(
+            result,
+            units=units,
+            unfinished=tuple(
+                dict.fromkeys(
+                    (
+                        *result.unfinished,
+                        *(
+                            reason
+                            for unit in units
+                            for reason in unit.unfinished
+                            if reason == "confirm usage"
+                        ),
+                    )
+                )
+            ),
+        )
+    return confirm_result_usage(result, context, root, identity, source_id=result.source_id)
 
 
 def _import_body(
@@ -379,6 +394,27 @@ def compile_stored_unit(scope, ready, context, catalog, revision, target, *, nam
         )
     )
     compiled = result.status == "compiled"
+    unit_outcome = (
+        replace(result.units[0], name=name or ready.source.name)
+        if len(result.units) == 1 and result.units[0].unit_id == target.unit_id
+        else ImportUnitOutcome(
+            target.unit_id,
+            "completed" if compiled else result.status,
+            target.unit_revision_id,
+            successful_revision_id=target.unit_revision_id if compiled else None,
+            successful_source_revision_id=revision.revision_id if compiled else None,
+            knowledge_revision_id=result.knowledge_revision_id if compiled else None,
+            view_id=scope.view_id,
+            doc_name=target.doc_name,
+            name=name or ready.source.name,
+            key=target.key,
+            length_class=decision.length_class,
+            execution_mode=decision.execution_mode,
+            processing=decision.model_dump(mode="json"),
+            unfinished=result.unfinished,
+            message=result.message,
+        )
+    )
     outcome = IngestResult(
         str(ready.identity),
         "skipped"
@@ -392,25 +428,7 @@ def compile_stored_unit(scope, ready, context, catalog, revision, target, *, nam
         source_id=revision.source_id,
         source_revision_id=revision.revision_id,
         input_version=ready.digest,
-        units=(
-            ImportUnitOutcome(
-                target.unit_id,
-                "completed" if compiled else result.status,
-                target.unit_revision_id,
-                successful_revision_id=target.unit_revision_id if compiled else None,
-                successful_source_revision_id=revision.revision_id if compiled else None,
-                knowledge_revision_id=result.knowledge_revision_id if compiled else None,
-                view_id=scope.view_id,
-                doc_name=target.doc_name,
-                name=name or ready.source.name,
-                key=target.key,
-                length_class=decision.length_class,
-                execution_mode=decision.execution_mode,
-                processing=decision.model_dump(mode="json"),
-                unfinished=result.unfinished,
-                message=result.message,
-            ),
-        ),
+        units=(unit_outcome,),
         unfinished=result.unfinished,
         message=result.message,
     )

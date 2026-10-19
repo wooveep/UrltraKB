@@ -45,10 +45,29 @@ async def recompile_stored(scope, source_id, *, unit_id, context, version, model
             message="Original retained; no reliable content to compile "
             f"({processing.content_state})",
         )
+    active = set(base.unit_revisions())
+    previous = next(
+        (
+            unit
+            for unit in sorted(
+                base.input_units(), key=lambda unit: unit.unit_revision_id not in active
+            )
+            if unit.unit_id == target.unit_id
+        ),
+        None,
+    )
+    previous = (
+        (
+            previous,
+            CatalogStore(scope.kb_dir, base.identity).processing(previous.processing_id).decision,
+        )
+        if previous
+        else None
+    )
     if context.storage_identity not in (None, base.identity):
         raise ValueError("The compilation context belongs to another database generation")
     context.storage_identity = base.identity
-    started, result = time.monotonic(), None
+    started, result, execution_began = time.monotonic(), None, False
 
     def worker(bundle):
         async def compile_owned():
@@ -59,6 +78,7 @@ async def recompile_stored(scope, source_id, *, unit_id, context, version, model
 
     try:
         with context.begin(scope.kb_dir) as bundle:
+            execution_began = True
             with usage_context(
                 source_id=target.source_id,
                 source_revision_id=target.source_revision_id,
@@ -67,18 +87,81 @@ async def recompile_stored(scope, source_id, *, unit_id, context, version, model
                 root_import_id=context.storage_execution.model_budget_id,
             ):
                 await run_blocking(lambda: worker(bundle))
-        return replace(result, elapsed=time.monotonic() - started)
     except (asyncio.CancelledError, Exception) as error:
         if result is not None and result.status == "compiled":
-            return replace(result, unfinished=(*result.unfinished, "confirm execution cleanup"))
-        return RecompileResult(
-            "stopped" if isinstance(error, (LockCancelled, asyncio.CancelledError)) else "blocked",
-            target.doc_name,
-            message=str(error),
-            error_type=type(error).__name__,
-            elapsed=time.monotonic() - started,
-            unfinished=("compilation",),
-        )
+            result = replace(result, unfinished=(*result.unfinished, "confirm execution cleanup"))
+        else:
+            result = RecompileResult(
+                "stopped"
+                if isinstance(error, (LockCancelled, asyncio.CancelledError))
+                else "blocked",
+                target.doc_name,
+                message=str(error),
+                error_type=type(error).__name__,
+                unfinished=("compilation",),
+            )
+    return _result_receipt(
+        scope,
+        target,
+        processing.decision,
+        previous,
+        result,
+        context if execution_began else None,
+        started,
+    )
+
+
+def _result_receipt(scope, target, decision, previous, result, context, started):
+    from ultrakb.ingest_result import ImportUnitOutcome
+
+    from .result_usage import confirm_result_usage
+
+    compiled = result.status == "compiled"
+    actual, actual_decision = (target, decision) if compiled else previous or (None, None)
+    unit = ImportUnitOutcome(
+        target.unit_id,
+        "completed" if compiled else result.status,
+        target.unit_revision_id,
+        successful_revision_id=actual.unit_revision_id if actual else None,
+        successful_source_revision_id=actual.source_revision_id if actual else None,
+        knowledge_revision_id=result.knowledge_revision_id
+        if compiled
+        else (scope.knowledge.publication.revision_id if actual else None),
+        view_id=scope.view_id,
+        key=target.key,
+        name=target.doc_name,
+        doc_name=target.doc_name,
+        length_class=decision.length_class,
+        execution_mode=decision.execution_mode,
+        processing=actual_decision.model_dump(mode="json") if actual_decision else None,
+        target_processing=decision.model_dump(mode="json"),
+        error_type=result.error_type,
+        message=result.message,
+        unfinished=result.unfinished,
+    )
+    unit = confirm_result_usage(
+        unit,
+        context,
+        scope.kb_dir,
+        scope.knowledge.identity,
+        source_id=target.source_id,
+        unit_id=target.unit_id,
+    )
+    result = replace(
+        result,
+        units=(unit,),
+        kind=decision.length_class,
+        execution_mode=decision.execution_mode,
+        elapsed=time.monotonic() - started,
+        unfinished=tuple(dict.fromkeys((*result.unfinished, *unit.unfinished))),
+    )
+    return confirm_result_usage(
+        result,
+        context,
+        scope.kb_dir,
+        scope.knowledge.identity,
+        source_id=target.source_id,
+    )
 
 
 async def _compile(scope, target, context, bundle, model, max_concurrency):
@@ -105,6 +188,11 @@ async def _compile(scope, target, context, bundle, model, max_concurrency):
     accepted = None
     try:
         if prepared is None:
+            current = store.bind(view_id=scope.view_id)
+            if current.publication_id != base.publication_id:
+                raise PublicationConflict(
+                    "Knowledge changed before compilation; review the current publication"
+                )
             processing = CatalogStore(base.root, base.identity).processing(target.processing_id)
             indexes = IndexStore(base.root, base.identity)
             index = next(
@@ -223,11 +311,18 @@ async def _compile(scope, target, context, bundle, model, max_concurrency):
             accepted, unfinished=() if projection.status == "synced" else ("synchronize wiki",)
         )
     except BaseException as error:
-        context._storage_result = "failed"
         if accepted is not None:
+            context._storage_result = "completed"
             return replace(accepted, message="Published; file synchronization needs confirmation")
+        context._storage_result = (
+            "cancelled" if isinstance(error, (LockCancelled, asyncio.CancelledError)) else "failed"
+        )
         try:
-            pending.finish(work, status="failed", error_code=type(error).__name__)
+            pending.finish(
+                work,
+                status="stopped" if context._storage_result == "cancelled" else "failed",
+                error_code=type(error).__name__,
+            )
         except Exception:
             logger.warning("Could not confirm compilation failure", exc_info=True)
         if isinstance(error, (CatalogConflict, PublicationConflict, ProjectionConflict)):

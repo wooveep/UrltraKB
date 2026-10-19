@@ -48,6 +48,7 @@ def _buckets(record, task_id):
         yield "execution_source", f"{record.execution_id}:{record.source_id}"
     if record.unit_id:
         yield "unit", record.unit_id
+        yield "execution_unit", f"{record.execution_id}:{record.unit_id}"
     if record.root_import_id:
         yield "import", record.root_import_id
 
@@ -164,18 +165,27 @@ class UsageStore:
     def __init__(self, root: Path, identity: DatabaseIdentity):
         self.root, self.identity = root.resolve(), identity
 
-    def receipt(self, *, execution_id: str, source_id: str | None = None) -> dict:
+    def receipt(
+        self, *, execution_id: str, source_id: str | None = None, unit_id: str | None = None
+    ) -> dict:
         from .database import database_path
 
-        total = self.summary(execution_id=execution_id, source_id=source_id)
-        cumulative = self.summary(source_id=source_id) if source_id is not None else total
+        total = self.summary(execution_id=execution_id, source_id=source_id, unit_id=unit_id)
+        cumulative = (
+            self.summary(source_id=source_id, unit_id=unit_id)
+            if (source_id is not None or unit_id is not None)
+            else total
+        )
         return UsageReceipt(
             execution_ids=[execution_id],
             source_ids=[source_id] if source_id is not None else [],
+            unit_ids=[unit_id] if unit_id is not None else [],
             ledger=str(database_path(self.root)),
             current=UsageAggregate.model_validate(total),
             cumulative=UsageAggregate.model_validate(cumulative),
-            history_status="recorded" if source_id is not None else "execution_only",
+            history_status="recorded"
+            if source_id is not None or unit_id is not None
+            else "execution_only",
         ).model_dump(mode="json")
 
     def begin(
@@ -377,17 +387,36 @@ class UsageStore:
             page[-1][0] if len(rows) > limit else None,
         )
 
-    def summary(self, *, execution_id: str | None = None, source_id: str | None = None) -> dict:
-        if execution_id is None and source_id is None:
-            raise ValueError("Select an execution or source summary")
+    def summary(
+        self,
+        *,
+        execution_id: str | None = None,
+        source_id: str | None = None,
+        unit_id: str | None = None,
+    ) -> dict:
+        if execution_id is None and source_id is None and unit_id is None:
+            raise ValueError("Select an execution, source or unit summary")
         bucket, identity = (
-            ("execution_source", f"{execution_id}:{source_id}")
+            ("execution_unit", f"{execution_id}:{unit_id}")
+            if execution_id and unit_id
+            else ("unit", unit_id)
+            if unit_id
+            else ("execution_source", f"{execution_id}:{source_id}")
             if execution_id and source_id
             else ("execution", execution_id)
             if execution_id
             else ("source", source_id)
         )
         with storage_stage(self.root, self.identity, read_only=True) as db:
+            if (
+                source_id is not None
+                and unit_id is not None
+                and db.connection.execute(
+                    "SELECT source_id FROM ukb_import_units WHERE unit_id = ?", (unit_id,)
+                ).fetchone()
+                != (source_id,)
+            ):
+                raise ValueError("The usage unit belongs to another source")
             rows = db.connection.execute(
                 f"SELECT stage_code, {', '.join(COUNTS)} FROM ukb_usage_counters "
                 "WHERE bucket = ? AND identity = ? ORDER BY stage_code",

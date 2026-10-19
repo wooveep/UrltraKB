@@ -1327,3 +1327,25 @@ offscreen Qt render confirms labels and six controls fit the dialog. Both review
 axes independently verify the final result-preservation and recovery fixes.
 These commands do not activate normal-format creation or complete the remaining
 compiler, observation, audit/archive and P8 acceptance work. Issue 164 is open.
+
+### Compiler outcomes and processing-unit cost attribution
+
+Development schema 18 retains the accepted publication result if subsequent
+projection coordination or execution cleanup fails. A stale foreign publication
+is rejected before new model sends; an already committed import still recovers
+its exact accepted result. Recompilation reports the selected unit, successful
+input revision and actual processing policy separately from the replacement
+target. Stopping before a new execution begins does not borrow a previous
+execution's current usage.
+
+Indexed execution/unit statistic buckets attribute each worksheet's actual sends
+and retained historical costs independently; root source totals remain separate.
+Missing usage confirmation preserves the compiled publication and adds an
+explicit confirmation diagnostic rather than inventing zero cost or failure.
+
+Twenty-eight compiler/outcome/workbook application regressions pass using the
+actual SDK and local provider. Fifty-six related execution/usage/reprocessing
+regressions also pass (19 live cases deselected). Full mypy passes 533 modules;
+Ruff and format checks pass. Both independent review axes find no remaining
+concrete defect in this batch, including early-stop and old/new policy cases.
+Normal entrypoint activation and the rest of issue 164 remain unfinished.
