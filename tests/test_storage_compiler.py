@@ -595,7 +595,8 @@ async def test_shared_page_update_keeps_old_original_distinct_from_new_target(
                     context=context,
                     scope=storage_scope(root, identity),
                 )
-            assert failed.status == "blocked"
+            assert failed.status == "failed", (failed.message, failed.quality, failed.unfinished)
+            assert "concept_generation_incomplete" in failed.quality
         result = await recompile_document(
             root,
             target.source_id,

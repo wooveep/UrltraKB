@@ -191,7 +191,9 @@ def materialize_inputs(base, baseline, target):
     )
 
 
-def prepare_compiled_revision(store, base, baseline, target, work, *, index_revisions=()):
+def prepare_compiled_revision(
+    store, base, baseline, target, work, *, index_revisions=(), compile_outcome=None
+):
     """Reuse unchanged immutable files and retain a unit's exact import claim."""
     changes = {}
     for path in baseline.directory.rglob("*"):
@@ -234,6 +236,7 @@ def prepare_compiled_revision(store, base, baseline, target, work, *, index_revi
         unit_revisions=unit_revisions,
         index_revisions=indexes,
         import_work=work,
+        compile_outcome=compile_outcome,
         page_inputs={
             path: revisions
             for path, revisions in basis.items()

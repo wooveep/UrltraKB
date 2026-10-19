@@ -212,6 +212,7 @@ class RecompileResult:
     unfinished: tuple[str, ...] = ()
     version: str | None = None
     quality: tuple[str, ...] = ()
+    quality_known: bool | None = None
     execution_mode: str | None = None
     units: tuple[ImportUnitOutcome, ...] = ()
     model_usage: dict | None = None

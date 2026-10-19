@@ -6,7 +6,7 @@ import time
 from contextlib import ExitStack
 from dataclasses import replace
 
-from ultrakb.compilation_report import compilation_attempt
+from ultrakb.compilation_report import CompilationIncomplete, compilation_attempt
 from ultrakb.context.workers import run_blocking
 from ultrakb.knowledge_scope import KnowledgeScope
 from ultrakb.llm_usage import usage_context
@@ -93,7 +93,7 @@ async def recompile_stored(scope, source_id, *, unit_id, context, version, model
             ):
                 await run_blocking(lambda: worker(bundle))
     except (asyncio.CancelledError, Exception) as error:
-        if result is not None and result.status == "compiled":
+        if result is not None:
             result = replace(result, unfinished=(*result.unfinished, "confirm execution cleanup"))
         else:
             result = RecompileResult(
@@ -142,6 +142,7 @@ def _result_receipt(scope, target, decision, previous, result, context, started)
         processing=actual_decision.model_dump(mode="json") if actual_decision else None,
         target_processing=decision.model_dump(mode="json"),
         error_type=result.error_type,
+        quality=result.quality,
         message=result.message,
         unfinished=result.unfinished,
     )
@@ -191,7 +192,7 @@ async def _compile(scope, target, context, bundle, model, max_concurrency):
     if work is None or work.status not in {"started", "completed"}:
         raise RecoveryRequired("The compilation claim is no longer available")
     prepared = store.committed_import(work, view_id=scope.view_id)
-    accepted = None
+    accepted, report, checkpoints = None, None, None
     try:
         if prepared is None:
             current = store.bind(view_id=scope.view_id)
@@ -292,6 +293,9 @@ async def _compile(scope, target, context, bundle, model, max_concurrency):
                         target,
                         work,
                         index_revisions=(index,) if index else (),
+                        compile_outcome=checkpoints.record_outcome(
+                            quality=report.quality, unfinished=report.unfinished
+                        ),
                     )
         with task_stage(context, "knowledge.publish.v1", unit_revision_id=target.unit_revision_id):
             try:
@@ -310,11 +314,27 @@ async def _compile(scope, target, context, bundle, model, max_concurrency):
                 version=publication.publication_id,
                 knowledge_revision_id=publication.revision_id,
                 unfinished=("synchronize wiki",),
+                quality_known=False,
+            )
+            context._storage_result = "completed"
+        try:
+            outcome = store.compilation_outcome(publication.revision_id)
+            accepted = replace(
+                accepted, quality=outcome.quality, quality_known=outcome.quality_known
+            )
+        except Exception:
+            accepted = replace(
+                accepted, unfinished=(*accepted.unfinished, "confirm compiler quality")
             )
         with task_stage(context, "wiki.sync.v1", unit_revision_id=target.unit_revision_id):
             projection = sync_publication(base.root, base.identity, prepared)
         return replace(
-            accepted, unfinished=() if projection.status == "synced" else ("synchronize wiki",)
+            accepted,
+            unfinished=tuple(
+                item
+                for item in accepted.unfinished
+                if item != "synchronize wiki" or projection.status != "synced"
+            ),
         )
     except BaseException as error:
         if accepted is not None:
@@ -333,4 +353,37 @@ async def _compile(scope, target, context, bundle, model, max_concurrency):
             logger.warning("Could not confirm compilation failure", exc_info=True)
         if isinstance(error, (CatalogConflict, PublicationConflict, ProjectionConflict)):
             return RecompileResult("conflict", target.doc_name, message=str(error))
-        raise
+        from ultrakb.agent.page_response import PageResponseError
+
+        quality = list(report.quality) if report else []
+        unfinished = list(report.unfinished) if report else []
+        if isinstance(error, CompilationIncomplete):
+            quality.extend(error.quality)
+            unfinished.extend(error.unfinished)
+        if isinstance(error, PageResponseError):
+            quality.append(error.code)
+        if not unfinished:
+            unfinished.append("compilation")
+        if checkpoints is not None:
+            try:
+                outcome = checkpoints.record_outcome(
+                    quality=quality, unfinished=unfinished, quality_known=report is not None
+                )
+                quality, unfinished = list(outcome.quality), list(outcome.unfinished)
+            except Exception:
+                unfinished.append("confirm compiler quality")
+        return RecompileResult(
+            "stopped"
+            if context._storage_result == "cancelled"
+            else "failed"
+            if isinstance(error, CompilationIncomplete)
+            or isinstance(error, PageResponseError)
+            and error.code == "compile_repair_exhausted"
+            else "blocked",
+            target.doc_name,
+            message=str(error),
+            error_type=type(error).__name__,
+            quality=tuple(dict.fromkeys(quality)),
+            quality_known=report is not None and "confirm compiler quality" not in unfinished,
+            unfinished=tuple(dict.fromkeys(unfinished)),
+        )

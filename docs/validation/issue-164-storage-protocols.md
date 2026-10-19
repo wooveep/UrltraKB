@@ -1385,3 +1385,38 @@ checks pass. Both review axes verify the concurrency/identity fixes and final
 result retention. Normal factories remain at the P8 gate; remaining compiler
 matrix, source maintenance, observation/archive/audit and final enablement are
 unfinished. Issue 164 remains open.
+
+### Durable compiler diagnostics and capacity recovery matrix
+
+Development schema 20 binds a validated, bounded compiler outcome to each import
+claim and sealed revision manifest. Failed work retains actual quality codes and
+unfinished stages; an exhausted repair does not become a generic empty failure
+on the next run. Completed outcomes survive idempotent publication recovery and
+report quality availability explicitly. Accepted repair facts are recovered only
+from this work's repair claims joined to accepted steps; resolved incomplete-work
+codes can clear without erasing a paid, successful repair.
+
+Candidate preparation is extracted from the formerly 797-line KnowledgeStore
+into its own module. Review compares the moved workflow structurally and finds
+no omitted capture/seal/verification behavior. Payload encoding and sealed-object
+validation remain outside SQL writer transactions. Compiler-incomplete results
+now report failed with their specific diagnostics, matching the existing shared
+compiler contract; raw storage interruption remains blocked and recoverable.
+
+Real SDK cases exercise a 48-page catalog under a 24,000-byte input guard,
+retained partition acknowledgement failure, exhaustive catalog identity scanning,
+large description fragments and persisted reasoning compaction. Restart resumes
+accepted work without repeating any already sent request or truncating the
+existing catalog. A repaired plan survives both accepted-step acknowledgement
+loss and final publication failure with three total sends. Execution-finish
+acknowledgement failure retains the already determined failure and appends only
+cleanup confirmation; publication success immediately fixes the business outcome.
+A later compiler-quality read failure preserves the successful publication with
+quality_known=false.
+
+Ninety related application/publication/maintenance/size/boundary regressions pass;
+the final diagnostics and cancellation set passes 13 cases. Full mypy passes 538
+modules; Ruff, formatting and diff checks pass. Both independent review axes
+verify accepted-repair recovery, bounded persistence and cleanup-result retention.
+This is further compiler migration coverage, not overall completion or P8
+activation. Issue 164 remains open.

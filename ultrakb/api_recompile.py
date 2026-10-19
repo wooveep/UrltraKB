@@ -83,7 +83,7 @@ async def iter_recompile(
     docs = []
     recompiled = skipped = blocked = partial = 0
     final_status = "done"
-    continuation_unfinished = ()
+    continuation_unfinished: tuple[str, ...] = ()
     for target in targets:
         result = await recompile_document(
             kb_dir,
@@ -107,6 +107,8 @@ async def iter_recompile(
             "message": result.message,
             "units": [asdict(unit) for unit in result.units],
             "model_usage": result.model_usage,
+            "quality": result.quality,
+            "quality_known": result.quality_known,
         }
         if result.error_type and not result.message:
             doc["message"] = f"Compilation failed ({result.error_type})"

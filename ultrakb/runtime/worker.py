@@ -418,6 +418,7 @@ def _execute(
             unfinished=recompiled.unfinished,
             revision=recompiled.version,
             quality=recompiled.quality,
+            quality_known=recompiled.quality_known,
             model_usage=getattr(recompiled, "model_usage", None),
         )
     if isinstance(request, RemoveDocument):

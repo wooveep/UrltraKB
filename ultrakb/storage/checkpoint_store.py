@@ -96,6 +96,34 @@ class CompileWork:
         ).fetchone() != (self.model_budget_id, self.identity.generation):
             raise ValueError("Compile callback belongs to another execution generation")
 
+    def record_outcome(self, *, quality, unfinished, quality_known=True):
+        from .compile_outcomes import CompileOutcome
+
+        signature = hashlib.sha256(b"compiler-outcome-v1").hexdigest()
+        with storage_stage(self.root, self.identity) as db:
+            previous, record = self._record_snapshot(db, "compile-outcome", signature)
+            old = CompileOutcome.model_validate(record)
+            repairs = db.connection.execute(
+                "SELECT DISTINCT CASE WHEN r.step_key = 'plan' THEN 'compile_plan_repaired' "
+                "WHEN r.step_key LIKE 'partition:%' THEN 'compile_partition_repaired' "
+                "ELSE 'page_response_repaired' END "
+                "FROM ukb_compile_records r JOIN ukb_compile_steps s "
+                "ON s.work_id = r.work_id AND s.step_key = r.step_key "
+                "WHERE r.work_id = ? AND json_extract(r.record_json, '$.repair_used') = 1",
+                (self.work_id,),
+            ).fetchall()
+            retained = old.quality if unfinished or not old.unfinished else ()
+            outcome = CompileOutcome(
+                quality=tuple(dict.fromkeys((*retained, *quality, *(row[0] for row in repairs)))),
+                unfinished=tuple(unfinished),
+                quality_known=quality_known,
+            )
+            encoded = _json(outcome.model_dump(mode="json"), bounded=True)
+            with db.transaction() as connection:
+                self._provenance(connection)
+                self._write_record(connection, "compile-outcome", signature, previous, encoded)
+        return outcome
+
     def _record_snapshot(self, db, key, signature):
         _label(key, limit=4096)
         TypeAdapter(Digest).validate_python(signature)

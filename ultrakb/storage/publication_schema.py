@@ -9,7 +9,9 @@ PUBLICATION_SCHEMA = (
         generation TEXT NOT NULL,
         source_revision_id TEXT NOT NULL REFERENCES ukb_source_revisions(revision_id),
         unit_revision_id TEXT NOT NULL REFERENCES ukb_unit_revisions(unit_revision_id),
-        root_import_id TEXT NOT NULL REFERENCES ukb_import_groups(root_import_id)
+        root_import_id TEXT NOT NULL REFERENCES ukb_import_groups(root_import_id),
+        outcome_json TEXT NOT NULL CHECK (
+            json_valid(outcome_json) AND json_type(outcome_json) = 'object')
     )""",
     "CREATE INDEX ukb_revision_import_attempt ON ukb_revision_import(attempt_id)",
     """CREATE TRIGGER ukb_revision_import_draft BEFORE INSERT ON ukb_revision_import
