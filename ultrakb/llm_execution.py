@@ -177,6 +177,9 @@ class RoleBindings:
             "model_table": values["model_table"],
             "role_generation": values["generation"],
             "timeout": values["credentials"]["timeout"],
+            "endpoint_fingerprint": hashlib.sha256(
+                json.dumps(values["credentials"]["base_url"], ensure_ascii=False).encode()
+            ).hexdigest(),
         }
 
 

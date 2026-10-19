@@ -273,8 +273,9 @@ async def test_restore_interrupts_running_work_without_resetting_its_paid_budget
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("changed_endpoint", [False, True])
 async def test_restored_compiler_resumes_accepted_results_with_a_new_execution_and_no_resend(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, changed_endpoint
 ):
     import asyncio
 
@@ -284,6 +285,7 @@ async def test_restored_compiler_resumes_accepted_results_with_a_new_execution_a
     from ultrakb.application.execution import ExecutionContext
     from ultrakb.application.recompilation import recompile_document
     from ultrakb.application.storage_maintenance import backup_knowledge, restore_knowledge
+    from ultrakb.config import LlmCredentialBundle
     from ultrakb.storage.execution_store import ExecutionStore
     from ultrakb.storage.knowledge_store import KnowledgeStore
 
@@ -301,10 +303,21 @@ async def test_restored_compiler_resumes_accepted_results_with_a_new_execution_a
     context = ExecutionContext(storage_identity=identity)
     summary = json.dumps({"description": "Guide", "content": "The value is 17."})
     plan = json.dumps({"concepts": [], "entities": []})
-    with StreamTransport([{"content": summary}, {"content": plan}]) as service:
-        (root / ".env").write_text(f"LLM_API_KEY=offline-test-key\nOPENAI_API_BASE={service.url}\n")
+    with (
+        StreamTransport([]) as configured,
+        StreamTransport([{"content": summary}, {"content": plan}]) as service,
+    ):
+        endpoint = configured.url if changed_endpoint else service.url
+        (root / ".env").write_text(f"LLM_API_KEY=offline-test-key\nOPENAI_API_BASE={endpoint}\n")
         imported = await asyncio.to_thread(
-            import_document, root, source, context=context, scope=storage_scope(root, identity)
+            import_document,
+            root,
+            source,
+            context=context,
+            scope=storage_scope(root, identity),
+            bundle=LlmCredentialBundle(api_key="offline-test-key", base_url=service.url)
+            if changed_endpoint
+            else None,
         )
         assert imported.status == "blocked"
         [unit] = imported.units
@@ -323,8 +336,18 @@ async def test_restored_compiler_resumes_accepted_results_with_a_new_execution_a
             context=continued,
             scope=storage_scope(destination, restored.identity),
         )
-        assert result.status == "compiled", result.message
+        assert result.status == ("blocked" if changed_endpoint else "compiled"), result.message
         assert len(service.requests) == 2
+        assert not configured.requests
+    if changed_endpoint:
+        assert continued.storage_execution is None
+        assert (
+            ExecutionStore(destination, restored.identity)
+            .budget(context.storage_execution.model_budget_id)
+            .used
+            == 2
+        )
+        return
     assert continued.storage_execution.execution_id != context.storage_execution.execution_id
     assert continued.storage_execution.model_budget_id == context.storage_execution.model_budget_id
     store = ExecutionStore(destination, restored.identity)

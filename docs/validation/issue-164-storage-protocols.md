@@ -1068,3 +1068,11 @@ Private restoration now changes request runtime state and counters independently
 of provider field versions, without inventing a later receipt or completion time.
 The accepted provider versions, spent calls and historical identity remain intact.
 Seventy related GC, backup, model, usage, compiler and tree cases pass.
+
+The restore review additionally reproduced a missing endpoint guard: an import
+using explicit provider B could resume B's budget/checkpoints after a restored
+configuration selected A. The public execution identity now includes a one-way
+endpoint fingerprint, retaining no credentials or endpoint text. A dual-provider
+public backup/recompile case now rejects the changed recipe before creating a new
+execution or sending, while the unchanged endpoint continues with zero resend.
+Thirty-eight relevant offline cases pass (48 live cases deselected).
