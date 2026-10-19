@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "measured_at": "2026-10-19T15:16:10.101006+00:00",
+  "environment": {
+    "python": "3.12.13",
+    "sqlite": "3.53.1",
+    "platform": "Linux-6.12.111+deb13-amd64-x86_64-with-glibc2.41"
+  },
+  "workload": {
+    "additional_revisions": 100,
+    "stable_markdown_pages": 64,
+    "stable_original_bytes": 4160020,
+    "stable_image_bytes": 3147775,
+    "unrelated_attachment_bytes": 16777216,
+    "actual_model_sends": 0,
+    "revision_seconds": 6.036253963946365
+  },
+  "before": {
+    "registered_blobs": 74,
+    "registered_payload_bytes": 28850269,
+    "blob_reference_rows": 143,
+    "knowledge_revisions": 1,
+    "stable_digest_rows": {
+      "424c85b91b4c6b259e826ae12342ed0334c53bc2db257a2cb7dac6d5ec823944": 1,
+      "6ef1ea8ace1122f3df4b7dc5151d00846d27260eeb87e9256f341e312e477749": 1,
+      "b2c4198fa0a8a431986106bedbdeddf32e6c74455b0dd1fe564e7aae7d8a216f": 1
+    },
+    "physical_cas_file_bytes": 28850269,
+    "physical_cas_allocated_bytes": 28897280,
+    "main_database_bytes": 1081344,
+    "wal_bytes": 1339032,
+    "sqlite_files": [
+      ".ultrakb/kb.sqlite"
+    ],
+    "unregistered_cas_files": 0,
+    "legacy_snapshot_directories": 0
+  },
+  "after": {
+    "registered_blobs": 474,
+    "registered_payload_bytes": 30326453,
+    "blob_reference_rows": 14243,
+    "knowledge_revisions": 101,
+    "stable_digest_rows": {
+      "424c85b91b4c6b259e826ae12342ed0334c53bc2db257a2cb7dac6d5ec823944": 1,
+      "6ef1ea8ace1122f3df4b7dc5151d00846d27260eeb87e9256f341e312e477749": 1,
+      "b2c4198fa0a8a431986106bedbdeddf32e6c74455b0dd1fe564e7aae7d8a216f": 1
+    },
+    "physical_cas_file_bytes": 30326453,
+    "physical_cas_allocated_bytes": 31354880,
+    "main_database_bytes": 12009472,
+    "wal_bytes": 4824552,
+    "sqlite_files": [
+      ".ultrakb/kb.sqlite"
+    ],
+    "unregistered_cas_files": 0,
+    "legacy_snapshot_directories": 0
+  },
+  "compiler_baseline": {
+    "preparation_seconds": 0.013811739976517856,
+    "markdown_files": 66,
+    "markdown_bytes": 4170396,
+    "required_attachment_bytes": 3147775,
+    "unrelated_attachment_bytes_copied": 0,
+    "index_database_bytes_copied": 0,
+    "baseline_fsync_calls": 0,
+    "total_bytes_copied": 7318171,
+    "manifest_logical_bytes": 24675387,
+    "all_markdown_and_required_bytes_equal": true,
+    "private_mutation_preserves_cas": true,
+    "reclamation_available_after_materialization": true
+  },
+  "old_publication_and_deleted_external_original_readable": true,
+  "interpretation": "One host; storage preparation only, not model throughput or a legacy speedup comparison.",
+  "operation_state": "completed"
+}
