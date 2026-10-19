@@ -31,7 +31,9 @@ _LATEST = (
     "JOIN ukb_model_budgets b ON b.model_budget_id = e.model_budget_id "
 )
 _EXECUTION = (
-    "sequence, execution_id, generation, state, started_at, ended_at, duration_seconds, fingerprint"
+    "sequence, execution_id, generation, state, started_at, ended_at, duration_seconds, "
+    "fingerprint, "
+    "application_task_id, application_unit_id, parent_application_task_id"
 )
 _EXECUTION_KEYS = (
     "execution_id",
@@ -41,6 +43,9 @@ _EXECUTION_KEYS = (
     "ended_at",
     "duration_seconds",
     "fingerprint",
+    "application_task_id",
+    "application_unit_id",
+    "parent_application_task_id",
 )
 _STAGE_KEYS = (
     "stage_attempt_id",

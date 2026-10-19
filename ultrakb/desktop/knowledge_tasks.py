@@ -76,6 +76,16 @@ def detail_text(detail):
         "",
         "当前阶段页（父子阶段耗时不可相加作为任务耗时）：",
     ]
+    if execution.application_task_id is not None:
+        lines[0:0] = [
+            f"应用任务：{execution.application_task_id}",
+            f"工作单元：{execution.application_unit_id or '未记录'}",
+            *(
+                [f"重试来源任务：{execution.parent_application_task_id}"]
+                if execution.parent_application_task_id is not None
+                else []
+            ),
+        ]
     for stage in detail.stages:
         elapsed = (
             f"{stage.duration_seconds:.3f} 秒" if stage.duration_seconds is not None else "未知"

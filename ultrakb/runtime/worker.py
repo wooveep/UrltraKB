@@ -107,6 +107,7 @@ def _execute(
 
     root = Path(identity.kb_dir)
     context.usage_task_id = getattr(identity, "task_id", None)
+    context.usage_unit_id = getattr(identity, "unit_id", None)
     scope = (
         view_scope(root, request.view_id)
         if isinstance(request, ViewSelection) and request.view_id is not None

@@ -49,6 +49,50 @@ def _label(value, *, limit=256):
         raise ValueError("Execution metadata must be nonempty and bounded")
 
 
+def _application_identity(task_id, unit_id=None, parent_task_id=None):
+    import re
+
+    for value in (task_id, parent_task_id):
+        if value is not None and (
+            not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{32}", value) is None
+        ):
+            raise ValueError("Application task identities must be 32 lowercase hex characters")
+    if unit_id is not None and (
+        not isinstance(unit_id, str) or re.fullmatch(r"[0-9]{1,5}", unit_id) is None
+    ):
+        raise ValueError("Application work-unit identities must be bounded numeric ordinals")
+    if task_id is None and (unit_id is not None or parent_task_id is not None):
+        raise ValueError("An application work unit or retry requires its task identity")
+
+
+def _application_budget(connection, task_id, unit_ordinal=""):
+    if task_id is None:
+        return None
+    return connection.execute(
+        "SELECT b.model_budget_id, b.deadline_at FROM ukb_application_budget_bindings a "
+        "JOIN ukb_model_budgets b ON b.model_budget_id = a.model_budget_id "
+        "WHERE a.application_task_id = ? AND a.unit_ordinal = ?",
+        (task_id, unit_ordinal),
+    ).fetchone()
+
+
+def _application_continuation(connection, task_id, unit_id, parent_task_id, resume):
+    unit = _application_budget(connection, task_id, unit_id or "")
+    if resume is not None:
+        return unit, False
+    batch = _application_budget(connection, task_id)
+    if unit is not None:
+        return unit, batch is not None and unit[0] == batch[0]
+    batch = batch or _application_budget(connection, parent_task_id)
+    if batch is None and parent_task_id is not None:
+        if connection.execute(
+            "SELECT 1 FROM ukb_application_budget_bindings WHERE application_task_id = ? LIMIT 1",
+            (parent_task_id,),
+        ).fetchone():
+            raise ValueError("Retrying mixed source budgets requires the original unit execution")
+    return batch, True
+
+
 @dataclass(frozen=True)
 class Execution:
     task_id: str
@@ -77,9 +121,13 @@ class ExecutionStore:
         deadline_at: float | None = None,
         resume: str | None = None,
         pending_attempt_id: str | None = None,
+        application_task_id: str | None = None,
+        application_unit_id: str | None = None,
+        parent_application_task_id: str | None = None,
     ) -> Execution:
         _label(operation)
         _label(fingerprint)
+        _application_identity(application_task_id, application_unit_id, parent_application_task_id)
         if max_calls is not None and (type(max_calls) is not int or not 0 <= max_calls < 2**63):
             raise ValueError("Model-call limits must be nonnegative integers")
         if deadline_at is not None and not math.isfinite(deadline_at):
@@ -87,6 +135,26 @@ class ExecutionStore:
         timestamp, monotonic, clock_id = now(), time.monotonic(), _clock_id()
         task_id, budget_id, execution_id = uuid4().hex, uuid4().hex, uuid4().hex
         with storage_stage(self.root, self.identity) as db, db.transaction() as connection:
+            binding, share_budget = (
+                _application_continuation(
+                    connection,
+                    application_task_id,
+                    application_unit_id,
+                    parent_application_task_id,
+                    resume,
+                )
+                if operation == "model_task"
+                else (None, False)
+            )
+            if binding is not None and resume is None:
+                resume = connection.execute(
+                    "SELECT execution_id FROM ukb_executions WHERE model_budget_id = ? "
+                    "ORDER BY sequence DESC LIMIT 1",
+                    (binding[0],),
+                ).fetchone()[0]
+                # Another process may have bound this task after the caller's read.
+                # The first execution's deadline remains authoritative.
+                deadline_at = binding[1]
             if pending_attempt_id is not None:
                 claim = connection.execute(
                     "SELECT i.status, i.attempt_id, a.status, g.generation, g.cancelled, "
@@ -122,6 +190,10 @@ class ExecutionStore:
                 ).fetchone()
                 if not previous:
                     raise KeyError(resume)
+                if binding is not None and previous[1] != binding[0]:
+                    raise ValueError(
+                        "An application work unit cannot replace its retained model budget"
+                    )
                 if previous[2:5] != (fingerprint, max_calls, deadline_at):
                     raise ValueError("Continuing an execution cannot reset policy or its budget")
                 latest = connection.execute(
@@ -145,10 +217,22 @@ class ExecutionStore:
                     "INSERT INTO ukb_model_budgets VALUES (?, ?, ?, ?, 0, ?)",
                     (budget_id, task_id, fingerprint, max_calls, deadline_at),
                 )
+            if operation == "model_task" and application_task_id is not None:
+                # Empty ordinal is the budget for new work in this batch. Explicit
+                # source retries keep their own budgets without retargeting it.
+                ordinals = {application_unit_id or ""} | ({""} if share_budget else set())
+                for ordinal in sorted(ordinals):
+                    connection.execute(
+                        "INSERT INTO ukb_application_budget_bindings VALUES (?, ?, ?) "
+                        "ON CONFLICT(application_task_id, unit_ordinal) DO NOTHING",
+                        (application_task_id, ordinal, budget_id),
+                    )
             connection.execute(
                 "INSERT INTO ukb_executions (execution_id, task_id, model_budget_id, generation, "
-                "fingerprint, pending_attempt_id, process_clock_id, started_at, "
-                "started_monotonic, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'started')",
+                "fingerprint, pending_attempt_id, application_task_id, application_unit_id, "
+                "parent_application_task_id, process_clock_id, started_at, "
+                "started_monotonic, state) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'started')",
                 (
                     execution_id,
                     task_id,
@@ -156,6 +240,9 @@ class ExecutionStore:
                     self.identity.generation,
                     fingerprint,
                     pending_attempt_id,
+                    application_task_id,
+                    application_unit_id,
+                    parent_application_task_id,
                     clock_id,
                     timestamp,
                     monotonic,
@@ -167,6 +254,22 @@ class ExecutionStore:
                     (execution_id, pending_attempt_id),
                 )
         return Execution(task_id, execution_id, budget_id)
+
+    def application_execution(
+        self, task_id: str, *, unit_ordinal: str | None = None
+    ) -> Execution | None:
+        """Resolve a batch or exact unit budget without scanning execution history."""
+        _application_identity(task_id, unit_ordinal)
+        with storage_stage(self.root, self.identity, read_only=True) as db:
+            binding = _application_budget(db.connection, task_id, unit_ordinal or "")
+            if binding is None:
+                return None
+            row = db.connection.execute(
+                "SELECT task_id, execution_id, model_budget_id FROM ukb_executions "
+                "WHERE model_budget_id = ? ORDER BY sequence DESC LIMIT 1",
+                (binding[0],),
+            ).fetchone()
+            return Execution(*row)
 
     def budget(self, model_budget_id: str) -> ModelBudget:
         with storage_stage(self.root, self.identity, read_only=True) as db:

@@ -1,6 +1,6 @@
 """Versioned task query payloads shared by CLI, HTTP and desktop presentation."""
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -43,6 +43,9 @@ class TaskExecution(TaskRecord):
     ended_at: str | None
     duration_seconds: float | None = Field(ge=0)
     fingerprint: str
+    application_task_id: RecordId | None = None
+    application_unit_id: Annotated[str, Field(pattern=r"^[0-9]{1,5}$")] | None = None
+    parent_application_task_id: RecordId | None = None
 
 
 class TaskStage(TaskRecord):

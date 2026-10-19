@@ -30,6 +30,12 @@ EXECUTION_SCHEMA = (
         used INTEGER NOT NULL CHECK (used >= 0),
         deadline_at REAL
     )""",
+    """CREATE TABLE ukb_application_budget_bindings (
+        application_task_id TEXT NOT NULL,
+        unit_ordinal TEXT NOT NULL,
+        model_budget_id TEXT NOT NULL REFERENCES ukb_model_budgets(model_budget_id),
+        PRIMARY KEY (application_task_id, unit_ordinal)
+    )""",
     """CREATE TABLE ukb_executions (
         sequence INTEGER PRIMARY KEY AUTOINCREMENT,
         execution_id TEXT NOT NULL UNIQUE,
@@ -38,15 +44,21 @@ EXECUTION_SCHEMA = (
         generation TEXT NOT NULL,
         fingerprint TEXT NOT NULL,
         pending_attempt_id TEXT REFERENCES ukb_pending_attempts(attempt_id),
+        application_task_id TEXT,
+        application_unit_id TEXT,
+        parent_application_task_id TEXT,
         process_clock_id TEXT NOT NULL,
         started_at TEXT NOT NULL,
         started_monotonic REAL NOT NULL,
         state TEXT NOT NULL CHECK (state IN
             ('started', 'stopping', 'completed', 'failed', 'cancelled', 'interrupted')),
         ended_at TEXT,
-        duration_seconds REAL CHECK (duration_seconds >= 0)
+        duration_seconds REAL CHECK (duration_seconds >= 0),
+        CHECK (application_task_id IS NOT NULL OR
+            (application_unit_id IS NULL AND parent_application_task_id IS NULL))
     )""",
     "CREATE INDEX ukb_executions_task ON ukb_executions(task_id, sequence)",
+    "CREATE INDEX ukb_executions_budget ON ukb_executions(model_budget_id, sequence)",
     "CREATE UNIQUE INDEX ukb_one_active_execution_per_task ON ukb_executions(task_id) "
     "WHERE state IN ('started', 'stopping')",
     """CREATE TABLE ukb_stage_attempts (

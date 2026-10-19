@@ -1966,3 +1966,31 @@ module-size and diff checks pass. Independent readonly reviews close the native
 usage, scope-error and validation-exit findings. Remaining P6 task association and
 drilldown, P7 archive/audit/retirement and the sole P8 activation are unfinished.
 Issue 164 remains open.
+
+### Native batch identity and durable budget continuation
+
+Schema 31 retains the application task, work-unit ordinal and retry parent on
+each execution. The ordinal is separate from a domain processing-unit identity.
+Task detail and JSON exports expose these associations through the existing
+shared query schema. Model-budget bindings and execution creation commit in the
+same transaction; their lookups use exact keys and a budget/execution index.
+Non-model operations record their association without claiming a model budget.
+
+New work in one native batch shares its retained budget across spawned workers.
+A retry parent preserves that budget and its original absolute deadline. Source
+retries bind their individual original budgets to the corresponding ordinal,
+so one selected batch can continue sources from different original tasks while
+new work shares a separate batch budget. An already bound ordinal cannot change
+its budget, and concurrent starts cannot allocate two budgets for the same batch.
+Budget exhaustion is reported as blocked without discarding accepted outputs.
+
+The real spawned-worker/SDK witness first reproduced four actual sends under a
+two-call batch limit, then passed with exactly two sends and zero sends in the
+next worker. Six focused cases cover same-task and parent-task continuation,
+concurrent starts, policy/budget replacement rejection, non-model association,
+mixed source budgets and preserved deadlines. The wider initial regression passes
+123 tests; the final continuation/usage/task/entrypoint/size matrix passes 44.
+Mypy passes 584 modules. Independent static reviews found and closed the mixed
+source retry issue. This completes this association batch; source/work-item
+drilldown, observation/archive/audit/retirement and P8 activation remain pending.
+Issue 164 remains open.

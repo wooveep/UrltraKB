@@ -89,6 +89,8 @@ def accept_generation(scope, plan, context):
                 if error is not None
                 else "completed"
                 if plan.details.generation_complete
+                else "blocked"
+                if plan.details.error_type == "ModelBudgetExceeded"
                 else "failed",
                 unfinished=("review_artifact",)
                 if conflict

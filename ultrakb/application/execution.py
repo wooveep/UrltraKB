@@ -32,6 +32,7 @@ class ExecutionContext:
     on_snapshot: Callable[[ConfigSnapshot], None] = field(default=lambda value: None, repr=False)
     install_process_settings: bool = False
     usage_task_id: str | None = None
+    usage_unit_id: str | None = None
     parent_usage_task_id: str | None = None
     require_verified_connection: bool = False
     executor: CompletionExecutor | None = field(default=None, repr=False)
