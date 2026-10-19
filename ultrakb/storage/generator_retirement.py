@@ -53,8 +53,8 @@ def select(db, max_items, max_bytes):
         spent += cost
         max_items -= max(1, len(selected))
         if len(selected) < len(rows):
-            return work, True
-    return work, len(work) < len(plans)
+            return work, True, spent
+    return work, len(work) < len(plans), spent
 
 
 def protected_count(db, *, blocked=False):

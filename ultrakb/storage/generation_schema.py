@@ -16,6 +16,8 @@ GENERATION_SCHEMA = (
         state TEXT NOT NULL CHECK (state IN ('building', 'ready', 'retiring'))
     )""",
     "CREATE INDEX ukb_generation_request ON ukb_generation_plans(model_budget_id, request_key)",
+    "CREATE INDEX ukb_generation_revision ON ukb_generation_plans(knowledge_revision_id) "
+    "WHERE knowledge_revision_id IS NOT NULL",
     """CREATE TABLE ukb_generation_files (
         plan_id TEXT NOT NULL REFERENCES ukb_generation_plans(plan_id),
         ordinal INTEGER NOT NULL CHECK (ordinal >= 0),

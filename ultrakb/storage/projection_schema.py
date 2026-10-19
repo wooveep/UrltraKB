@@ -18,6 +18,7 @@ PROJECTION_SCHEMA = (
         CHECK ((state = 'retired') = (manifest_digest IS NULL))
     )""",
     "CREATE INDEX ukb_sync_by_view ON ukb_sync_plans(view_id, state, base_generation, plan_id)",
+    "CREATE INDEX ukb_sync_revision ON ukb_sync_plans(revision_id, plan_id)",
     """CREATE TABLE ukb_projection_state (
         view_id TEXT PRIMARY KEY,
         active_plan_id TEXT REFERENCES ukb_sync_plans(plan_id),

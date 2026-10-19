@@ -2279,3 +2279,34 @@ The final generator/root/maintenance/orphan/boundary/size matrix passes 57 tests
 mypy passes 594 modules. Focused Ruff, formatting and diff checks and both static
 readonly review axes pass. Other obsolete knowledge/review candidates and the
 sole P8 activation remain unfinished.
+
+### Interrupted compiler revision preparation
+
+Development schema 38 adds bounded retirement for abandoned `draft` and
+`sealed` knowledge preparations. Complete `ready` candidates, publications,
+receipts, import/refresh/lint review owners, generator results and active
+projection plans remain protected. Actual preparation holds its storage-stage
+lease until the ready result is returned, so exclusive maintenance cannot
+retire an in-progress preparation.
+
+The operation shares object and encoded-parameter budgets with all other root
+types. It durably fences the revision as `retiring`, deletes page-input and
+other concrete relations in foreign-key order, retires dependent sync plans
+through their existing bounded protocol, then releases owned Blob/tree
+references. The final revision and manifest reference are deleted together.
+Every partial batch keeps foreign keys closed; physical collection between
+batches cannot remove still-referenced payloads. Interrupted deletion resumes
+without discarding accepted compiler work or provider accounting.
+
+Real SQLite faults at the first file insertion and final ready transition
+exercise both interruption points after two SDK loopback sends. Each bounded
+retirement batch passes a foreign-key check and actual GC while the original
+public version remains readable. Retrying compilation reuses all accepted
+steps with the same two sends. Additional cases cover insufficient byte
+budget, complete-candidate protection, interrupted child deletion and the CLI,
+authenticated generation-guarded HTTP and native Qt operations.
+
+The final preparation/generator/root/maintenance/diagnostic/database/boundary/
+size matrix passes 61 tests. Mypy passes 595 modules; focused Ruff, formatting,
+diff checks and both static readonly review axes pass. Complete obsolete review
+candidates and the sole P8 activation remain pending; issue 164 is still open.

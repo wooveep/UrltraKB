@@ -4,7 +4,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 
-from . import generator_retirement
+from . import generator_retirement, preparation_retirement
 from .coordination import storage_stage, try_reclamation
 from .maintenance import _limits
 from .receipt_store import pending_reclamation_barrier
@@ -21,7 +21,9 @@ _UNBOUND_CHECKPOINT = (
 )
 _RETIRABLE_PLAN = (
     "NOT EXISTS (SELECT 1 FROM ukb_projection_state w WHERE w.active_plan_id = p.plan_id) "
-    "AND (p.state = 'retiring' OR (p.state IN ('completed', 'superseded') "
+    "AND (p.state = 'retiring' OR EXISTS (SELECT 1 FROM ukb_knowledge_revisions r "
+    "WHERE r.revision_id = p.revision_id AND r.state = 'retiring') "
+    "OR (p.state IN ('completed', 'superseded') "
     "AND EXISTS (SELECT 1 FROM ukb_projection_state w JOIN ukb_sync_plans current "
     "ON current.plan_id = w.active_plan_id WHERE w.view_id = p.view_id "
     "AND w.paused = 0 AND current.state = 'completed'))) "
@@ -43,6 +45,8 @@ class RootRetirementPreview:
     candidate_generator_plans: int = 0
     protected_generator_plans: int = 0
     candidate_generator_files: int = 0
+    candidate_preparations: int = 0
+    protected_preparations: int = 0
 
 
 @dataclass(frozen=True)
@@ -57,6 +61,8 @@ class RootRetirementResult:
     retired_sync_items: int = 0
     retired_generator_plans: int = 0
     retired_generator_files: int = 0
+    retired_preparations: int = 0
+    retired_preparation_rows: int = 0
 
 
 @dataclass(frozen=True)
@@ -184,13 +190,25 @@ class RootRetirement:
             plans, plans_more, plan_spent = (
                 ([], False, 0) if reason else _plans(db, max_items - len(rows), max_bytes - spent)
             )
-            generators, generators_more = (
-                ([], False)
+            generators, generators_more, generator_spent = (
+                ([], False, 0)
                 if reason
                 else generator_retirement.select(
                     db,
                     max_items - len(rows) - sum(max(1, len(batch.items)) for batch in plans),
                     max_bytes - spent - plan_spent,
+                )
+            )
+            preparations, preparations_more = (
+                ([], False)
+                if reason
+                else preparation_retirement.select(
+                    db,
+                    max_items
+                    - len(rows)
+                    - sum(max(1, len(b.items)) for b in plans)
+                    - sum(max(1, len(b.files)) for b in generators),
+                    max_bytes - spent - plan_spent - generator_spent,
                 )
             )
             protected_plans = db.connection.execute(
@@ -207,8 +225,9 @@ class RootRetirement:
                 protected,
                 sum(row[2] for row in rows)
                 + plan_bytes
-                + generator_retirement.reference_bytes(generators),
-                more or plans_more or generators_more,
+                + generator_retirement.reference_bytes(generators)
+                + preparation_retirement.reference_bytes(preparations),
+                more or plans_more or generators_more or preparations_more,
                 reason,
                 len(plans),
                 protected_plans,
@@ -216,6 +235,8 @@ class RootRetirement:
                 len(generators),
                 generator_retirement.protected_count(db, blocked=bool(reason)),
                 sum(len(batch.files) for batch in generators),
+                len(preparations),
+                preparation_retirement.protected_count(db, blocked=bool(reason)),
             )
 
     def retire(self, *, max_items=128, max_bytes=256 * 1024):
@@ -227,10 +248,18 @@ class RootRetirement:
                 return RootRetirementResult("blocked", blocked_reason=reason)
             rows, more, spent = _checkpoints(db, max_items, max_bytes)
             plans, plans_more, plan_spent = _plans(db, max_items - len(rows), max_bytes - spent)
-            generators, generators_more = generator_retirement.select(
+            generators, generators_more, generator_spent = generator_retirement.select(
                 db,
                 max_items - len(rows) - sum(max(1, len(batch.items)) for batch in plans),
                 max_bytes - spent - plan_spent,
+            )
+            preparations, preparations_more = preparation_retirement.select(
+                db,
+                max_items
+                - len(rows)
+                - sum(max(1, len(b.items)) for b in plans)
+                - sum(max(1, len(b.files)) for b in generators),
+                max_bytes - spent - plan_spent - generator_spent,
             )
             retired = references = byte_count = 0
             for checkpoint_id, digest, size in rows:
@@ -265,14 +294,23 @@ class RootRetirement:
                 generator_files += count
                 references += refs
                 byte_count += size
+            retired_preparations = preparation_rows = 0
+            for batch in preparations:
+                done, count, refs, size = preparation_retirement.retire(db, batch)
+                retired_preparations += done
+                preparation_rows += count
+                references += refs
+                byte_count += size
             return RootRetirementResult(
                 "completed",
                 retired,
                 references,
                 byte_count,
-                more or plans_more or generators_more,
+                more or plans_more or generators_more or preparations_more,
                 retired_plans=retired_plans,
                 retired_sync_items=retired_items,
                 retired_generator_plans=retired_generators,
                 retired_generator_files=generator_files,
+                retired_preparations=retired_preparations,
+                retired_preparation_rows=preparation_rows,
             )
