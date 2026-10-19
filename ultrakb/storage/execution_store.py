@@ -161,6 +161,24 @@ class ExecutionStore:
                 raise KeyError(execution_id)
             return row[0]
 
+    def source_execution(self, source_revision_id: str) -> str | None:
+        """Explicit source retry reuses its latest observed task and paid budget."""
+        with storage_stage(self.root, self.identity, read_only=True) as db:
+            row = db.connection.execute(
+                "SELECT execution_id FROM ukb_stage_attempts WHERE source_revision_id = ? "
+                "ORDER BY sequence DESC LIMIT 1",
+                (source_revision_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            latest = db.connection.execute(
+                "SELECT execution_id FROM ukb_executions WHERE task_id = "
+                "(SELECT task_id FROM ukb_executions WHERE execution_id = ?) "
+                "ORDER BY sequence DESC LIMIT 1",
+                (row[0],),
+            ).fetchone()
+            return latest[0]
+
     def start_stage(
         self,
         execution_id: str,

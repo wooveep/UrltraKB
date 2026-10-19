@@ -68,6 +68,7 @@ EXECUTION_SCHEMA = (
     )""",
     "CREATE INDEX ukb_stage_execution ON ukb_stage_attempts(execution_id, sequence)",
     "CREATE INDEX ukb_stage_active ON ukb_stage_attempts(execution_id, state)",
+    "CREATE INDEX ukb_stage_source ON ukb_stage_attempts(source_revision_id, sequence DESC)",
     """CREATE TABLE ukb_usage_requests (
         sequence INTEGER PRIMARY KEY AUTOINCREMENT,
         request_id TEXT NOT NULL UNIQUE,

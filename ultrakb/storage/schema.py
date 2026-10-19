@@ -57,9 +57,18 @@ SCHEMA = (
         decision_json TEXT NOT NULL CHECK (json_valid(decision_json)),
         source_path TEXT NOT NULL,
         source_kind TEXT NOT NULL CHECK (source_kind IN ('markdown', 'text', 'pages')),
+        content_state TEXT NOT NULL CHECK (content_state IN
+            ('content', 'empty', 'objects_only', 'parse_failed', 'unreadable')),
         state TEXT NOT NULL CHECK (state IN ('draft', 'sealed', 'ready'))
     )""",
         "CREATE INDEX ukb_processing_source ON ukb_processing_versions(source_revision_id, state)",
+        """CREATE TABLE ukb_workbook_inventories (
+        source_revision_id TEXT PRIMARY KEY REFERENCES ukb_source_revisions(revision_id),
+        complete INTEGER NOT NULL CHECK (complete IN (0, 1)),
+        payload_digest TEXT NOT NULL REFERENCES ukb_blobs(digest)
+    )""",
+        """CREATE TRIGGER ukb_workbook_inventory_immutable BEFORE UPDATE ON ukb_workbook_inventories
+        BEGIN SELECT RAISE(ABORT, 'Worksheet inventory is immutable'); END""",
         """CREATE TABLE ukb_import_units (
         unit_id TEXT PRIMARY KEY,
         source_id TEXT NOT NULL REFERENCES ukb_sources(source_id),

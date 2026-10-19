@@ -121,7 +121,7 @@ def _freeze_inline_assets(db, baseline):
 def materialize_inputs(base, baseline, target):
     """Keep old page inputs distinct when a document's current target advances."""
     identities, paths, assets = {}, {}, {}
-    current = {unit.unit_revision_id for unit in base.input_units()}
+    current = set(base.unit_revisions())
     basis = base.page_input_revisions()
     units = current | {target.unit_revision_id} | {u for values in basis.values() for u in values}
     native = {}
@@ -203,8 +203,13 @@ def prepare_compiled_revision(store, base, baseline, target, work, *, index_revi
     for path in baseline.files:
         if path.endswith(".md") and not (baseline.directory / path).exists():
             changes[path] = None
-    active = tuple(u for u in base.input_units() if u.unit_id != target.unit_id)
-    unit_revisions = tuple(u.unit_revision_id for u in active) + (target.unit_revision_id,)
+    with storage_stage(base.root, base.identity, read_only=True) as db:
+        active = tuple(
+            revision
+            for revision in base.unit_revisions()
+            if CatalogStore._unit_revision(db, revision).unit_id != target.unit_id
+        )
+    unit_revisions = (*active, target.unit_revision_id)
     from .index_store import IndexStore
 
     indexes = tuple(

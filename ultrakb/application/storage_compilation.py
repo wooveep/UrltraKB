@@ -37,6 +37,14 @@ async def recompile_stored(scope, source_id, *, unit_id, context, version, model
     target = CatalogStore(scope.kb_dir, base.identity).unit(unit_id)
     if target.source_id != source_id:
         raise ValueError("The compilation unit belongs to another source")
+    processing = CatalogStore(scope.kb_dir, base.identity).processing(target.processing_id)
+    if processing.content_state != "content":
+        return RecompileResult(
+            "blocked",
+            target.doc_name,
+            message="Original retained; no reliable content to compile "
+            f"({processing.content_state})",
+        )
     if context.storage_identity not in (None, base.identity):
         raise ValueError("The compilation context belongs to another database generation")
     context.storage_identity = base.identity

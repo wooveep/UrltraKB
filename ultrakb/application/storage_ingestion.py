@@ -89,7 +89,7 @@ def import_stored_document(
             )
     except (Exception, asyncio.CancelledError) as error:
         context._storage_result = "failed"
-        if result is not None and result.status == "added":
+        if result is not None:
             result = replace(result, unfinished=(*result.unfinished, "confirm execution cleanup"))
         else:
             result = IngestResult(
@@ -101,12 +101,17 @@ def import_stored_document(
                 unfinished=("import",),
                 message=str(error),
             )
+    return confirm_import_usage(result, context, root, identity)
+
+
+def confirm_import_usage(result, context, root, identity):
+    """Observation failure preserves all returned per-unit business outcomes."""
     if context.storage_execution is not None:
         try:
             result = replace(
                 result,
                 model_usage=UsageStore(root, identity).receipt(
-                    execution_id=context.storage_execution.execution_id
+                    execution_id=context.storage_execution.execution_id, source_id=result.source_id
                 ),
             )
         except Exception:
@@ -129,7 +134,7 @@ def _import_body(scope, ready, context, bundle, origin_url, download_remote_asse
                     if image.path is not None
                 },
             )
-        return _process_admitted(
+        return process_admitted(
             scope, ready, context, bundle, download_remote_assets, catalog, revision
         )
     except (Exception, asyncio.CancelledError) as error:
@@ -147,7 +152,13 @@ def _import_body(scope, ready, context, bundle, origin_url, download_remote_asse
         )
 
 
-def _process_admitted(scope, ready, context, bundle, download_remote_assets, catalog, revision):
+def process_admitted(
+    scope, ready, context, bundle, download_remote_assets, catalog, revision, *, unit_id=None
+):
+    if ready.source.suffix.lower() in {".xlsx", ".xls"}:
+        from .storage_workbooks import import_workbook
+
+        return import_workbook(scope, ready, context, bundle, catalog, revision, unit_id=unit_id)
     root = scope.kb_dir
     target = catalog.unit_for_source(revision.source_id, key="body")
     if target is None or target.source_revision_id != revision.revision_id:
@@ -220,9 +231,14 @@ def _process_admitted(scope, ready, context, bundle, download_remote_assets, cat
                     decision=decision,
                 )
                 target = catalog.plan_unit(processing.processing_id, key="body", doc_name=doc_name)
-    reused = target.unit_revision_id in {
-        unit.unit_revision_id for unit in scope.knowledge.input_units()
-    }
+    if unit_id is not None and target.unit_id != unit_id:
+        raise ValueError("Processing unit does not belong to this source")
+    return compile_stored_unit(scope, ready, context, catalog, revision, target)[0]
+
+
+def compile_stored_unit(scope, ready, context, catalog, revision, target, *, name=None):
+    root = scope.kb_dir
+    reused = target.unit_revision_id in scope.knowledge.unit_revisions()
     decision = catalog.processing(target.processing_id).decision
     result = (
         RecompileResult(
@@ -239,7 +255,7 @@ def _process_admitted(scope, ready, context, bundle, download_remote_assets, cat
         )
     )
     compiled = result.status == "compiled"
-    return IngestResult(
+    outcome = IngestResult(
         str(ready.identity),
         "skipped"
         if reused
@@ -262,7 +278,8 @@ def _process_admitted(scope, ready, context, bundle, download_remote_assets, cat
                 knowledge_revision_id=result.knowledge_revision_id if compiled else None,
                 view_id=scope.view_id,
                 doc_name=target.doc_name,
-                name=ready.source.name,
+                name=name or ready.source.name,
+                key=target.key,
                 length_class=decision.length_class,
                 execution_mode=decision.execution_mode,
                 processing=decision.model_dump(mode="json"),
@@ -273,6 +290,7 @@ def _process_admitted(scope, ready, context, bundle, download_remote_assets, cat
         unfinished=result.unfinished,
         message=result.message,
     )
+    return outcome, result.version
 
 
 def json_native(path):

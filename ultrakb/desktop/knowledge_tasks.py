@@ -32,10 +32,13 @@ _STATES = {
     "failed": "失败",
     "cancelled": "已取消",
     "interrupted": "已中断",
+    "reused": "已复用",
 }
 _STAGES = {
     "import.admit.v1": "接纳原件",
     "import.process.v1": "转换与解析",
+    "workbook.inventory.v1": "读取工作表清单",
+    "worksheet.normalize.v1": "整理工作表原文",
     "compile.inputs.v1": "准备编译输入",
     "compile.generate.v1": "生成知识",
     "compile.validate.v1": "校验知识",

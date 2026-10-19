@@ -45,6 +45,7 @@ def _buckets(record, task_id):
     yield "task", task_id
     if record.source_id:
         yield "source", record.source_id
+        yield "execution_source", f"{record.execution_id}:{record.source_id}"
     if record.unit_id:
         yield "unit", record.unit_id
     if record.root_import_id:
@@ -163,17 +164,18 @@ class UsageStore:
     def __init__(self, root: Path, identity: DatabaseIdentity):
         self.root, self.identity = root.resolve(), identity
 
-    def receipt(self, *, execution_id: str) -> dict:
+    def receipt(self, *, execution_id: str, source_id: str | None = None) -> dict:
         from .database import database_path
 
-        total = self.summary(execution_id=execution_id)
+        total = self.summary(execution_id=execution_id, source_id=source_id)
+        cumulative = self.summary(source_id=source_id) if source_id is not None else total
         return UsageReceipt(
             execution_ids=[execution_id],
-            source_ids=[],
+            source_ids=[source_id] if source_id is not None else [],
             ledger=str(database_path(self.root)),
             current=UsageAggregate.model_validate(total),
-            cumulative=UsageAggregate.model_validate(total),
-            history_status="execution_only",
+            cumulative=UsageAggregate.model_validate(cumulative),
+            history_status="recorded" if source_id is not None else "execution_only",
         ).model_dump(mode="json")
 
     def begin(
@@ -376,9 +378,15 @@ class UsageStore:
         )
 
     def summary(self, *, execution_id: str | None = None, source_id: str | None = None) -> dict:
-        if (execution_id is None) == (source_id is None):
-            raise ValueError("Select exactly one execution or source summary")
-        bucket, identity = ("execution", execution_id) if execution_id else ("source", source_id)
+        if execution_id is None and source_id is None:
+            raise ValueError("Select an execution or source summary")
+        bucket, identity = (
+            ("execution_source", f"{execution_id}:{source_id}")
+            if execution_id and source_id
+            else ("execution", execution_id)
+            if execution_id
+            else ("source", source_id)
+        )
         with storage_stage(self.root, self.identity, read_only=True) as db:
             rows = db.connection.execute(
                 f"SELECT stage_code, {', '.join(COUNTS)} FROM ukb_usage_counters "

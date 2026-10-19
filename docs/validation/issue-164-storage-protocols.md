@@ -1176,3 +1176,42 @@ so it rejects a nested old-format KB instead of silently reading its v2 parent.
 Qt exports the last displayed page's task, execution and cursors, independently
 of an in-flight selection. Twelve task/query regressions pass; independent
 standards review passes all four focused SQLite/Qt boundary reproductions.
+
+### Independent workbook units and managed source retries
+
+Development schema 15 retains complete sparse worksheet inventories as immutable
+CAS-backed records, independently of processing/publication. Processing records
+distinguish actual content, empty input and unreadable/failed extraction; only
+content can enter compilation/public knowledge. The existing pinned XLS/XLSX
+readers and worksheet reconciliation/normalization algorithms are reused. Every
+sheet target is retained before model work; a damaged sheet does not roll back
+other successful sheets. Whole-inventory failure preserves the last complete
+identity basis rather than manufacturing new units after a repaired upload.
+
+The shared source retry now materializes managed originals/sidecars, checks exact
+source/unit targets, and resumes the original execution's task and paid budget.
+It never needs the external original. Per-source incremental counters distinguish
+this execution from source history without scanning request records. Successful
+units are skipped without sending. XLS inventory and target identities survive a
+full online backup/new-generation restore, with zero-send resumed import.
+
+A real reordered/revised workbook exposed a pre-existing compiler-selection
+mistake: historical page dependencies were being promoted into active inputs.
+Materialization, reuse and publication now use the explicit active revision set;
+historical dependencies retain separate native aliases and exact old bytes.
+New worksheet work binds each accepted publication before continuing, and keeps
+accepted unit outcomes if a later binding fails.
+
+Both review axes reproduced partial-result loss during execution cleanup and
+successful retry-result loss during final usage reads. Import and source retry
+now share final usage confirmation and preserve all returned unit outcomes;
+unknown confirmations are unfinished work, not replacement business failures.
+Stopping a retry records cancelled rather than failed. Nine workbook application
+cases cover malformed/empty sheets, XLS/XLSX, independent publications, managed
+retry, reordered cells/history, bad-inventory continuity, backup/restore, cleanup,
+usage-confirmation and cancellation faults against real SQLite and loopback SDK
+requests. Fifty related compiler/reading/task cases and 46 maintenance/usage/
+entrypoint/boundary cases pass; the earlier 74 legacy workbook/database/compiler/
+backup regressions also pass. Full mypy passes 522 modules, with lint and format
+checks passing. P8 remains disabled and the full issue remains open; retained
+non-text inputs, remaining compiler/writer paths and P6/P7/P8 acceptance continue.

@@ -11,7 +11,8 @@ from ultrakb.text_source import FrozenText, TextOrigin
 from ultrakb.workbooks.records import WORKBOOK_POLICY, XLS_POLICY
 
 
-def convert_sheet(prepared, sheet, doc_name, directory):
+def freeze_sheet(prepared, sheet):
+    """Normalize already-retained cell evidence without copying the workbook."""
     if sheet.error:
         raise ValueError(f"Worksheet {sheet.name}: {sheet.error}")
     if sheet.content_state == "objects_only":
@@ -51,7 +52,7 @@ def convert_sheet(prepared, sheet, doc_name, directory):
     diagnostics = list(sheet.diagnostics)
     if any(cell.cache_status == "missing" for cell in sheet.cells):
         diagnostics.append("Formula cache missing; formulas were not calculated.")
-    frozen = FrozenText(
+    return FrozenText(
         text=text,
         original_characters=0,
         original_digest=prepared.digest,
@@ -64,10 +65,14 @@ def convert_sheet(prepared, sheet, doc_name, directory):
         diagnostics=tuple(diagnostics),
         sheet=sheet.model_copy(update={"cells": ()}),
     )
+
+
+def convert_sheet(prepared, sheet, doc_name, directory):
+    frozen = freeze_sheet(prepared, sheet)
     raw = directory / "raw" / f"{doc_name}{prepared.source.suffix.lower()}"
     _copy_file_atomic(prepared.path, raw)
     source = directory / "wiki/sources" / f"{doc_name}.md"
-    atomic_write_text(source, text)
+    atomic_write_text(source, frozen.text)
     atomic_write_json(source.with_suffix(".content.json"), frozen.model_dump(mode="json"))
     processing = classify_markdown_tokens(frozen.tokens)
     return ConvertResult(

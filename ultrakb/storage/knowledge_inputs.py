@@ -27,6 +27,8 @@ PAGE_INPUT_SCHEMA = (
 
 
 def source_paths(unit, processing, *, retained=False):
+    if processing.content_state != "content":
+        raise ValueError("This processing unit has no publishable native content")
     prefix = f"sources/retained/{unit.unit_revision_id}" if retained else "sources"
     suffix = {"markdown": ".md", "text": ".content.json", "pages": ".json"}[processing.source_kind]
     native = (f"{prefix}/{unit.doc_name}{suffix}", processing.source_path)

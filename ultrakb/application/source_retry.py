@@ -35,6 +35,17 @@ def retry_source(
     from ultrakb.application.ingestion import import_prepared_source
 
     root = kb_dir.resolve()
+    if scope is not None and resolve_scope(root, scope).knowledge is not None:
+        from .storage_source_retry import retry_stored_source
+
+        return retry_stored_source(
+            scope,
+            source_id,
+            unit_id=unit_id,
+            context=context,
+            source_revision_id=source_revision_id,
+            unit_revision_id=unit_revision_id,
+        )
     context = context or ExecutionContext()
     with kb_ingest_lock(root / ".ultrakb", cancelled=context.cancelled, on_wait=context.waiting):
         source = read_source(root, source_id)

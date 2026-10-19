@@ -8,7 +8,7 @@ from pathlib import Path, PurePosixPath
 from pydantic import TypeAdapter
 
 from ultrakb.processing_policy import ProcessingDecision
-from ultrakb.source_records import DocName
+from ultrakb.source_records import DocName, RecordId
 from ultrakb.storage.blobs import Blob, put_blob, read_bytes, retain_blob
 from ultrakb.storage.coordination import storage_stage
 from ultrakb.storage.database import DatabaseIdentity
@@ -49,6 +49,14 @@ class SourceRevision:
 
 
 @dataclass(frozen=True)
+class SourceTarget:
+    source_id: str
+    source_key: str
+    label: str
+    revision_id: str
+
+
+@dataclass(frozen=True)
 class ProcessingVersion:
     processing_id: str
     source_revision_id: str
@@ -58,6 +66,7 @@ class ProcessingVersion:
     decision: ProcessingDecision
     source_path: str
     source_kind: str
+    content_state: str = "content"
 
 
 @dataclass(frozen=True)
@@ -208,6 +217,17 @@ class CatalogStore:
         with storage_stage(self.root, self.identity, read_only=True) as db:
             return self._revision(db, revision_id)
 
+    def source(self, source_id: str) -> SourceTarget:
+        TypeAdapter(RecordId).validate_python(source_id)
+        with storage_stage(self.root, self.identity, read_only=True) as db:
+            row = db.connection.execute(
+                "SELECT source_key, label FROM ukb_sources WHERE source_id = ?", (source_id,)
+            ).fetchone()
+            revision = self._latest(db, source_id) if row else None
+            if row is None or revision is None:
+                raise KeyError(source_id)
+            return SourceTarget(source_id, row[0], row[1], revision[0])
+
     @staticmethod
     def _revision(db, revision_id):
         row = db.connection.execute(
@@ -250,6 +270,7 @@ class CatalogStore:
         fingerprint: str,
         operation_id: str,
         decision: ProcessingDecision,
+        content_state: str = "content",
     ) -> ProcessingVersion:
         if (
             body_path not in files
@@ -258,6 +279,8 @@ class CatalogStore:
             or not isinstance(operation_id, str)
             or not operation_id
             or not isinstance(decision, ProcessingDecision)
+            or content_state
+            not in {"content", "empty", "objects_only", "parse_failed", "unreadable"}
         ):
             raise ValueError("Processing requires a complete body, policy and operation identity")
         for path in files:
@@ -282,6 +305,7 @@ class CatalogStore:
                         decision_json,
                         source_path,
                         source_kind,
+                        content_state,
                     ),
                     ensure_ascii=False,
                 ).encode()
@@ -316,16 +340,18 @@ class CatalogStore:
                 decision_json,
                 source_path,
                 source_kind,
+                content_state,
             )
             with db.transaction() as connection:
                 existing = connection.execute(
                     "SELECT processing_id, source_revision_id, fingerprint, body_path, "
-                    "manifest_digest, decision_json, source_path, source_kind, state "
+                    "manifest_digest, decision_json, source_path, source_kind, content_state, "
+                    "state "
                     "FROM ukb_processing_versions "
                     "WHERE operation_id = ?",
                     (operation_id,),
                 ).fetchone()
-                if existing and existing[1:8] != expected:
+                if existing and existing[1:9] != expected:
                     raise CatalogConflict(
                         "The processing operation already accepted different inputs"
                     )
@@ -333,7 +359,7 @@ class CatalogStore:
                 if not existing:
                     connection.execute(
                         "INSERT INTO ukb_processing_versions "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')",
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')",
                         (
                             processing_id,
                             revision_id,
@@ -344,14 +370,15 @@ class CatalogStore:
                             decision_json,
                             source_path,
                             source_kind,
+                            content_state,
                         ),
                     )
                     retain_blob(
                         connection, "processing-version", processing_id, "manifest", manifest
                     )
-            if existing and existing[8] == "ready":
+            if existing and existing[9] == "ready":
                 return self._processing(db, processing_id)
-            if not existing or existing[8] == "draft":
+            if not existing or existing[9] == "draft":
                 for batch in file_batches(captured):
                     with db.transaction() as connection:
                         state = connection.execute(
@@ -399,7 +426,7 @@ class CatalogStore:
     def _processing(db, processing_id):
         row = db.connection.execute(
             "SELECT source_revision_id, fingerprint, body_path, manifest_digest, decision_json, "
-            "source_path, source_kind "
+            "source_path, source_kind, content_state "
             "FROM ukb_processing_versions WHERE processing_id = ? AND state = 'ready'",
             (processing_id,),
         ).fetchone()
@@ -422,6 +449,7 @@ class CatalogStore:
             ProcessingDecision.model_validate_json(row[4]),
             row[5],
             row[6],
+            row[7],
         )
 
     def processing(self, processing_id: str) -> ProcessingVersion:
@@ -544,3 +572,12 @@ class CatalogStore:
                 (source_id, key),
             ).fetchone()
             return self._unit_revision(db, row[0]) if row and row[0] else None
+
+    def source_units(self, source_id: str) -> tuple[UnitTarget, ...]:
+        with storage_stage(self.root, self.identity, read_only=True) as db:
+            revisions = db.connection.execute(
+                "SELECT target_revision_id FROM ukb_import_units WHERE source_id = ? "
+                "AND target_revision_id IS NOT NULL ORDER BY unit_key",
+                (source_id,),
+            ).fetchall()
+            return tuple(self._unit_revision(db, row[0]) for row in revisions)
