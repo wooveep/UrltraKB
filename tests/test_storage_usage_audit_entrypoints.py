@@ -121,19 +121,30 @@ def test_native_audit_and_explicit_repair_match_the_shared_result(imported_task)
 
 
 @pytest.mark.asyncio
-async def test_http_audit_cancellation_joins_the_real_storage_reader(imported_task, monkeypatch):
+@pytest.mark.parametrize(
+    ("route", "stage_module", "method"),
+    [
+        ("usage-audit", "ultrakb.storage.usage_audit", "GET"),
+        ("preview", "ultrakb.storage.root_retirement", "GET"),
+        ("archive-observations", "ultrakb.storage.observation_retention", "POST"),
+    ],
+)
+async def test_http_cancellation_joins_the_real_storage_reader(
+    imported_task, monkeypatch, route, stage_module, method
+):
     import asyncio
+    import importlib
     from contextlib import contextmanager
     from threading import Event
 
     import httpx
 
-    import ultrakb.storage.usage_audit as audit_module
     from ultrakb.api import create_app
     from ultrakb.config import register_kb_alias
     from ultrakb.storage.coordination import try_reclamation
 
     root, _, _ = imported_task
+    audit_module = importlib.import_module(stage_module)
     identity = capture_task_identity(root)
     entered, finished = Event(), Event()
     actual_stage = audit_module.storage_stage
@@ -155,11 +166,23 @@ async def test_http_audit_cancellation_joins_the_real_storage_reader(imported_ta
     ) as client:
         with try_reclamation(root, identity) as exclusive:
             assert exclusive is not None
+            options = (
+                {"params": {"kb": "audit-test"}}
+                if method == "GET"
+                else {
+                    "json": {
+                        "kb": "audit-test",
+                        "kb_id": identity.kb_id,
+                        "generation": identity.generation,
+                    }
+                }
+            )
             request = asyncio.create_task(
-                client.get(
-                    "/api/v1/storage/usage-audit",
-                    params={"kb": "audit-test"},
+                client.request(
+                    method,
+                    "/api/v1/storage/" + route,
                     headers={"Authorization": "Bearer audit-test-token"},
+                    **options,
                 )
             )
             assert await asyncio.to_thread(entered.wait, 2)

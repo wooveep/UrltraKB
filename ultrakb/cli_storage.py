@@ -7,6 +7,7 @@ from pathlib import Path
 import click
 
 from ultrakb.application.storage_maintenance import (
+    archive_task_observations,
     audit_knowledge_usage,
     backup_knowledge,
     collect_garbage,
@@ -123,3 +124,12 @@ def restore(backup, output):
     except (ValueError, OSError, KeyError) as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo(json.dumps(asdict(result), ensure_ascii=False, indent=2))
+
+
+@storage.command("archive-observations")
+@_limits(default_bytes=256 * 1024)
+@_identity
+@click.pass_context
+def archive_observations(ctx, **options):
+    """Archive one expired optional-detail batch, retaining core task records."""
+    _run(ctx, archive_task_observations, **options)

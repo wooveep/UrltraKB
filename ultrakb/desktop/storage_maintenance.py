@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 
 from ultrakb.application.storage_maintenance import (
     MaintenanceOverview,
+    archive_task_observations,
     audit_knowledge_usage,
     backup_knowledge,
     collect_garbage,
@@ -48,6 +49,8 @@ def _result_text(result):
         "mismatched_counters": "发现差异",
         "repaired_counters": "已重建统计桶",
         "invalid_request_count": "无法核验的请求",
+        "archived_count": "已归档阶段观测",
+        "archived_bytes": "已归档观测载荷字节（不是磁盘回收量）",
         "path": "保存目录",
     }
     if "repaired_counters" in values:
@@ -107,6 +110,7 @@ class StorageMaintenanceDialog(QDialog):
                 ("修复待确认回执", self.repair_receipts),
                 ("核对用量统计", self.audit_usage),
                 ("重建用量统计", self.repair_usage),
+                ("归档过期观测", self.archive_observations),
                 ("备份到新目录…", self.choose_backup),
                 ("从备份恢复到新目录…", self.choose_restore),
             )
@@ -158,6 +162,7 @@ class StorageMaintenanceDialog(QDialog):
         lines = []
         if overview is not None:
             roots, garbage = overview.roots, overview.garbage
+            observations = overview.observations
             reason = roots.blocked_reason or garbage.blocked_reason
             self.status.setText(
                 "存在归属尚未确认的回执，暂不能清理。"
@@ -173,6 +178,10 @@ class StorageMaintenanceDialog(QDialog):
                 f"可回收孤立内容：{garbage.candidate_count} 项，{garbage.candidate_bytes} 字节；"
                 f"检索树 {garbage.candidate_trees}。",
                 f"受保护内容：{garbage.protected_count} 项，{garbage.protected_bytes} 字节。",
+                f"完成任务观测保留 {observations.retention_days} 天；仅手动归档过期详情。",
+                f"过期观测候选：{observations.candidate_count} 项，"
+                f"{observations.candidate_bytes} 字节；受保护观测："
+                f"{observations.protected_count} 项，{observations.protected_bytes} 字节。",
                 "预览和执行均有批次上限；可继续刷新并处理下一批。",
                 f"统计时间：{overview.statistics_at}",
             ]
@@ -231,6 +240,9 @@ class StorageMaintenanceDialog(QDialog):
 
     def repair_usage(self):
         self._maintain(repair_knowledge_usage)
+
+    def archive_observations(self):
+        self._maintain(archive_task_observations)
 
     def choose_backup(self):
         destination, _ = QFileDialog.getSaveFileName(self, "选择新备份目录", "ultrakb-backup")

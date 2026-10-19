@@ -13,7 +13,12 @@ pytestmark = pytest.mark.integration
 
 
 def _snapshot(payload):
-    return {key: value for key, value in payload.items() if key != "statistics_at"}
+    payload = {key: value for key, value in payload.items() if key != "statistics_at"}
+    if "observations" in payload:
+        payload["observations"] = {
+            key: value for key, value in payload["observations"].items() if key != "cutoff_at"
+        }
+    return payload
 
 
 def test_cli_and_http_maintenance_share_preview_and_guarded_retirement(tmp_path, monkeypatch):

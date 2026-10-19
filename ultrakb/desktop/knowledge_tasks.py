@@ -123,6 +123,8 @@ def detail_text(detail):
             f"统计时点：{detail.statistics_at} · 导出版本：{detail.schema_version}",
         ]
     )
+    if detail.coverage.get("storage_costs_retired"):
+        lines.append("部分详细观测已归档；核心阶段、用量和成果仍保留。")
     return "\n".join(lines)
 
 
@@ -170,6 +172,8 @@ def stage_text(detail):
         ]
         if costs.blob_read_errors or costs.blob_write_errors:
             lines.append("出错的 Blob 操作可能包含尚无法确认的部分字节。")
+    elif stage.observation_coverage == "retired":
+        lines.append("此阶段详细观测已归档；核心阶段和用量仍保留。")
     else:
         lines.append("此阶段尚无独立的存储成本记录。")
     scope = "处理单元" if detail.usage_scope == "unit" else "资料"

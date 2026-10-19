@@ -7,6 +7,7 @@ from ultrakb.knowledge_scope import resolve_scope
 from ultrakb.storage.database import DatabaseIdentity, open_database
 from ultrakb.storage.execution_store import now
 from ultrakb.storage.maintenance import CollectionPreview, Maintenance
+from ultrakb.storage.observation_retention import ObservationRetention, ObservationRetentionPreview
 from ultrakb.storage.receipt_store import ReceiptStore
 from ultrakb.storage.root_retirement import RootRetirement, RootRetirementPreview
 
@@ -27,6 +28,7 @@ class MaintenanceOverview:
     generation: str
     roots: RootRetirementPreview
     garbage: CollectionPreview
+    observations: ObservationRetentionPreview
 
 
 def backup_knowledge(kb_dir: Path, destination: Path, *, scope=None, identity=None) -> BackupResult:
@@ -109,8 +111,27 @@ def preview_storage_maintenance(
         max_items=max_items, max_bytes=min(max_bytes, 256 * 1024), cancelled=cancelled
     )
     garbage = maintenance.preview(max_items=max_items, max_bytes=max_bytes, cancelled=cancelled)
+    observations = ObservationRetention(maintenance.root, maintenance.identity).preview(
+        max_items=max_items, max_bytes=max_bytes, cancelled=cancelled
+    )
     return MaintenanceOverview(
-        1, now(), maintenance.identity.kb_id, maintenance.identity.generation, roots, garbage
+        1,
+        now(),
+        maintenance.identity.kb_id,
+        maintenance.identity.generation,
+        roots,
+        garbage,
+        observations,
+    )
+
+
+def archive_task_observations(
+    kb_dir: Path, *, scope=None, identity=None, max_items=128, max_bytes=256 * 1024, cancelled=None
+):
+    """Archive only expired optional stage details, preserving all core task facts."""
+    maintenance = _maintenance(kb_dir, scope, identity)
+    return ObservationRetention(maintenance.root, maintenance.identity).archive(
+        max_items=max_items, max_bytes=max_bytes, cancelled=cancelled
     )
 
 

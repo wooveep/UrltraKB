@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ultrakb.api_helpers import require_bearer_token
 from ultrakb.application.storage_maintenance import (
+    archive_task_observations,
     audit_knowledge_usage,
     backup_knowledge,
     collect_garbage,
@@ -42,7 +43,7 @@ class RootRetirementRequest(MaintenanceRequest):
     max_bytes: int = Field(default=256 * 1024, ge=1)
 
 
-class UsageAuditRequest(RootRetirementRequest):
+class BoundedMaintenanceRequest(RootRetirementRequest):
     max_items: int = Field(default=128, ge=1, le=128)
     max_bytes: int = Field(default=256 * 1024, ge=1, le=256 * 1024)
 
@@ -68,10 +69,8 @@ async def _call(operation, *args, on_cancel=None, **options):
 async def preview(
     kb: str, max_items: int = Query(128, ge=1, le=1000), max_bytes: int = Query(64 * 1024**2, ge=1)
 ):
-    return await _call(
-        lambda: preview_storage_maintenance(
-            resolve_kb_alias(kb), max_items=max_items, max_bytes=max_bytes
-        )
+    return await _cancellable(
+        preview_storage_maintenance, kb, max_items=max_items, max_bytes=max_bytes
     )
 
 
@@ -101,7 +100,7 @@ async def repair(request: MaintenanceRequest):
     return await _maintain(repair_knowledge_receipts, request)
 
 
-async def _audit(operation, kb, **options):
+async def _cancellable(operation, kb, **options):
     cancelled = Event()
     return await _call(
         lambda: operation(resolve_kb_alias(kb), cancelled=cancelled.is_set, **options),
@@ -115,13 +114,24 @@ async def usage_audit(
     max_items: int = Query(128, ge=1, le=128),
     max_bytes: int = Query(256 * 1024, ge=1, le=256 * 1024),
 ):
-    return await _audit(audit_knowledge_usage, kb, max_items=max_items, max_bytes=max_bytes)
+    return await _cancellable(audit_knowledge_usage, kb, max_items=max_items, max_bytes=max_bytes)
 
 
 @storage_router.post("/repair-usage")
-async def repair_usage(request: UsageAuditRequest):
-    return await _audit(
+async def repair_usage(request: BoundedMaintenanceRequest):
+    return await _cancellable(
         repair_knowledge_usage,
+        request.kb,
+        identity=DatabaseIdentity(request.kb_id, request.generation),
+        max_items=request.max_items,
+        max_bytes=request.max_bytes,
+    )
+
+
+@storage_router.post("/archive-observations")
+async def archive_observations(request: BoundedMaintenanceRequest):
+    return await _cancellable(
+        archive_task_observations,
         request.kb,
         identity=DatabaseIdentity(request.kb_id, request.generation),
         max_items=request.max_items,

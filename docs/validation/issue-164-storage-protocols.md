@@ -2161,3 +2161,33 @@ active-task rejection. The final visibility/adapter/native-budget/database/usage
 boundary/size matrix passes 42 tests; mypy passes 590 modules. Focused Ruff,
 formatting and diff checks and both static readonly review axes pass. Remaining
 observation retention, obsolete-root and final activation work continues.
+
+### Manual 90-day observation detail archive
+
+The shared maintenance preview now reports optional stage-observation candidate
+and protected counts/UTF-8 payload bytes, the 90-day cutoff and the bounded next
+batch. Only a task whose latest execution completed before that cutoff, with no
+active execution, qualifies. Recent, failed, cancelled and interrupted tasks
+retain their optional detail. Nothing expires automatically.
+
+Explicit archive streams candidate selection outside the writer, bounds each
+batch to 128 rows / 256 KiB including parameters, and compares the original
+observation while rechecking current task eligibility inside one short writer
+transaction. It clears only optional JSON and marks coverage retired. Core stage
+identity/state/timing, source associations, model requests, budgets, responses,
+accepted results and publication records remain intact. Reported bytes are
+retired inline payload, not physically reclaimed database space.
+
+CLI, authenticated generation-guarded HTTP and native Qt invoke the same use
+case. Task and stage views explain archived detail and retain core usage; the
+JSON schema reports retired coverage and its reason. HTTP preview and archive
+now propagate cancellation to actual storage waits and join the reader worker.
+
+Real two-request import fixtures cover bounded batches, protected unfinished
+tasks, unchanged paid records, a real continuation before the archive writer,
+and a second-row SQL failure that rolls back the entire batch. Three actual
+ASGI cancellation cases confirm cleanup during an exclusive reclamation lease.
+The final archive/maintenance/audit/visibility/root/boundary/size matrix passes
+47 tests; mypy passes 591 modules. Ruff, format and diff checks and both static
+readonly review axes pass. The 30-day/512 MiB optional diagnostic policy,
+remaining obsolete roots and sole P8 activation are still unfinished.

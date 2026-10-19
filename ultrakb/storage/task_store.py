@@ -70,6 +70,8 @@ _STAGE_KEYS = (
 
 def _stage(values):
     record = dict(zip(_STAGE_KEYS, values, strict=True))
+    if record["observation_coverage"] == "retired":
+        record["observation_unavailable_reason"] = "retention_archived"
     if record["observation"] is not None:
         try:
             record["observation"] = StageObservation.model_validate_json(record["observation"])
@@ -385,6 +387,9 @@ class TaskStore:
                     if any(item.observation_coverage != "not_recorded" for item in stage_page)
                     else "not_recorded",
                     "resource_samples": "not_recorded",
+                    "storage_costs_retired": any(
+                        item.observation_coverage == "retired" for item in stage_page
+                    ),
                     "pricing": "not_recorded",
                     "projection_details": "retired"
                     if any(row[8] in {"retiring", "retired"} for row in publications[:limit])
