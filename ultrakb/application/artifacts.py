@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, BinaryIO
 
 from ultrakb.application.execution import ExecutionContext
 from ultrakb.application.file_state import contained_paths
-from ultrakb.config import _is_kb_dir
 from ultrakb.knowledge_scope import KnowledgeScope, reading_scope, resolve_scope
 from ultrakb.locks import atomic_write_text, kb_ingest_lock, kb_read_lock
 from ultrakb.mutation import mutation_scope
@@ -186,23 +185,10 @@ def export_artifact(
     epoch: int | None = None,
 ) -> Path:
     """Copy a file or a complete directory ZIP under a new, collision-free name."""
-    kb_dir, destination = kb_dir.resolve(), destination.resolve()
-    if destination.is_relative_to(kb_dir) or any(
-        _is_kb_dir(parent)
-        or any(
-            (parent / ".ultrakb" / marker).exists()
-            for marker in (
-                "kb.sqlite",
-                "config.yaml",
-                "hashes.json",
-                "needs-repair.json",
-                "initializing.json",
-                "journal",
-            )
-        )
-        for parent in (destination, *destination.parents)
-    ):
-        raise ValueError("Choose an export directory outside every knowledge base")
+    from ultrakb.export_paths import require_external_export
+
+    kb_dir = kb_dir.resolve()
+    destination = require_external_export(kb_dir, destination)
     if not destination.is_dir():
         raise NotADirectoryError(destination)
     if scope is not None and scope.knowledge is not None:

@@ -1102,3 +1102,25 @@ adapters remain the next integration work.
 Seventy-eight related regressions, including file-size/boundary checks, pass;
 full mypy passes 515 source modules and lint/format checks pass. Issue 164 remains
 open and P8 remains the sole normal-format activation point.
+
+### Committed publication facts and task-query boundary repairs
+
+The development schema is now 14: a publication receipt optionally records its
+actual execution in the same guarded publication transaction, with an indexed
+query. No old-store migration or normal-format activation is introduced. Task
+details page those committed publications separately, including exact source/unit
+revision identities and the corresponding projection state. A public fault case
+fails publication-stage confirmation after commit: import remains added, the
+task's business result remains completed, and its pending Wiki publication is
+still visible. A failed observation does not turn committed knowledge into a
+failed business result.
+
+Review reproduced two adjacent defects. A progress subscription failing while
+entering cleanup could still skip the controller; the required cleanup body now
+runs even through that entrance failure before surfacing the diagnostic. Task
+export also now shares generated-artifact export's every-KB marker check, so an
+export cannot overwrite another KB database or worktree. Actual SDK/controller
+and double-KB regressions went from failing to passing. The four task application
+cases and related publication, database, backup, compiler and size checks pass
+73 tests; 34 related export/model cases pass separately. Full mypy passes 516
+source modules. Three-adapter presentation and remaining P6/P7 acceptance remain.

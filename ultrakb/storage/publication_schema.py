@@ -29,8 +29,10 @@ PUBLICATION_SCHEMA = (
         revision_id TEXT NOT NULL UNIQUE REFERENCES ukb_knowledge_revisions(revision_id),
         generation TEXT NOT NULL,
         attempt_id TEXT UNIQUE REFERENCES ukb_pending_attempts(attempt_id),
-        published_at TEXT NOT NULL
+        published_at TEXT NOT NULL,
+        execution_id TEXT REFERENCES ukb_executions(execution_id)
     )""",
+    "CREATE INDEX ukb_publication_execution ON ukb_publication_receipts(execution_id)",
     """CREATE TRIGGER ukb_publication_receipt_owner BEFORE INSERT ON ukb_publication_receipts
         WHEN NOT EXISTS (SELECT 1 FROM ukb_publications WHERE publication_id = NEW.publication_id
                          AND revision_id = NEW.revision_id AND generation = NEW.generation)

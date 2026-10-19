@@ -34,13 +34,20 @@ def task_stage(context, code, *, ensure_work=False, allow_stopping=False, **iden
         raise
     failure = None
     try:
-        with (
-            bind_stage(root, context.storage_identity, execution.execution_id, stage_id),
-            context.activity(code) as progress,
-        ):
-            progress["stage_attempt_id"] = stage_id
-            progress["execution_id"] = execution.execution_id
-            yield progress
+        with bind_stage(root, context.storage_identity, execution.execution_id, stage_id):
+            entered = False
+            try:
+                with context.activity(code) as progress:
+                    entered = True
+                    progress["stage_attempt_id"] = stage_id
+                    progress["execution_id"] = execution.execution_id
+                    yield progress
+            except BaseException:
+                if not ensure_work or entered:
+                    raise
+                # A subscriber can fail while entering, before the body is reached.
+                yield {"stage_attempt_id": stage_id, "execution_id": execution.execution_id}
+                raise
     except BaseException as error:
         failure = error
         raise

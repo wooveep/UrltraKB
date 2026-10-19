@@ -11,6 +11,7 @@ from ultrakb.task_records import (
     TaskExecution,
     TaskList,
     TaskOverview,
+    TaskPublication,
     TaskStage,
 )
 
@@ -102,6 +103,34 @@ def _overview(db, row):
     )
 
 
+def _publication(row):
+    status = (
+        "not_recorded"
+        if row[9] is None
+        else "paused"
+        if row[12] and row[13] == row[9]
+        else "conflict"
+        if row[11]
+        else "superseded"
+        if row[8] == "superseded"
+        else "pending"
+        if row[10]
+        else "synced"
+    )
+    return TaskPublication(
+        publication_id=row[1],
+        knowledge_revision_id=row[2],
+        execution_id=row[3],
+        generation=row[4],
+        attempt_id=row[5],
+        published_at=row[6],
+        view_id=row[7],
+        source_revision_id=row[14],
+        unit_revision_id=row[15],
+        projection_status=status,
+    )
+
+
 class TaskStore:
     def __init__(self, root, identity):
         self.root, self.identity = root.resolve(), identity
@@ -133,11 +162,12 @@ class TaskStore:
         executions_after=0,
         stages_after=0,
         requests_after=0,
+        publications_after=0,
     ):
         TypeAdapter(RecordId).validate_python(task_id)
         if execution_id is not None:
             TypeAdapter(RecordId).validate_python(execution_id)
-        for after in (executions_after, stages_after, requests_after):
+        for after in (executions_after, stages_after, requests_after, publications_after):
             _page(after, limit)
         with storage_stage(self.root, self.identity, read_only=True) as db:
             db.connection.execute("BEGIN")
@@ -168,7 +198,22 @@ class TaskStore:
                 "AND sequence > ? ORDER BY sequence LIMIT ?",
                 (execution_id, requests_after, limit + 1),
             ).fetchall()
-            cursors = [_cursor(rows, limit) for rows in (executions, stages, requests)]
+            publications = db.connection.execute(
+                "SELECT r.rowid, r.publication_id, r.revision_id, r.execution_id, r.generation, "
+                "r.attempt_id, r.published_at, p.view_id, s.state, s.plan_id, "
+                "s.remaining_count, s.conflict_count, w.paused, w.active_plan_id, "
+                "i.source_revision_id, i.unit_revision_id "
+                "FROM ukb_publication_receipts r JOIN ukb_publications p USING(publication_id) "
+                "LEFT JOIN ukb_revision_sync b ON b.revision_id = r.revision_id "
+                "LEFT JOIN ukb_sync_plans s ON s.plan_id = b.plan_id "
+                "LEFT JOIN ukb_projection_state w ON w.view_id = p.view_id "
+                "LEFT JOIN ukb_revision_import i ON i.revision_id = r.revision_id "
+                "WHERE r.execution_id = ? AND r.rowid > ? ORDER BY r.rowid LIMIT ?",
+                (execution_id, publications_after, limit + 1),
+            ).fetchall()
+            cursors = [
+                _cursor(rows, limit) for rows in (executions, stages, requests, publications)
+            ]
             return TaskDetail(
                 statistics_at=now(),
                 kb_id=self.identity.kb_id,
@@ -188,8 +233,10 @@ class TaskStore:
                     UsageRequest.model_validate_json(row[1]) for row in requests[:limit]
                 ),
                 executions_after=cursors[0],
+                publications=tuple(_publication(row) for row in publications[:limit]),
                 stages_after=cursors[1],
                 requests_after=cursors[2],
+                publications_after=cursors[3],
                 coverage={
                     "page_complete": all(cursor is None for cursor in cursors),
                     "model_usage": "recorded" if task.usage is not None else "not_recorded",

@@ -85,6 +85,15 @@ def test_public_task_pages_and_export_follow_actual_import_attempts_without_priv
     assert "The value is 17." not in export.read_text()
     assert saved["coverage"]["page_complete"] is False
     assert tasks.next_cursor is None
+    from ultrakb.storage.database import create_database, database_path
+
+    other_root = tmp_path / "other-kb"
+    create_database(other_root)
+    target = database_path(other_root)
+    header = target.read_bytes()[:16]
+    with pytest.raises(ValueError, match="knowledge base"):
+        export_knowledge_task(root, task_id, target, scope=scope)
+    assert target.read_bytes()[:16] == header == b"SQLite format 3\x00"
 
     first_execution_id = context.storage_execution.execution_id
     repeated = import_document(root, source, context=context, scope=storage_scope(root, identity))
@@ -122,3 +131,68 @@ def test_task_queries_reject_unbounded_pages_and_unknown_identities(tmp_path):
             list_knowledge_tasks(root, scope=scope, limit=limit)
     with pytest.raises(KeyError):
         read_knowledge_task(root, "0" * 32, scope=scope)
+
+
+def test_task_keeps_the_committed_publication_visible_after_stage_confirmation_failure(tmp_path):
+    from ultrakb.application.knowledge_tasks import read_knowledge_task
+    from ultrakb.application.pages import read_page
+    from ultrakb.storage.coordination import storage_stage
+
+    root, identity, _ = question_knowledge(tmp_path)
+    with storage_stage(root, identity) as db, db.transaction() as connection:
+        connection.execute(
+            "CREATE TRIGGER fail_publication_observation BEFORE UPDATE ON ukb_stage_attempts "
+            "WHEN OLD.stage_code = 'knowledge.publish.v1' "
+            "BEGIN SELECT RAISE(ABORT, 'publication observation interrupted'); END"
+        )
+    source = tmp_path / "guide.md"
+    source.write_text("The value is 17.")
+    context = ExecutionContext(storage_identity=identity)
+    summary = json.dumps({"description": "Guide", "content": "The value is 17."})
+    plan = json.dumps({"concepts": [], "entities": []})
+    with StreamTransport([{"content": summary}, {"content": plan}]) as service:
+        (root / ".env").write_text(f"LLM_API_KEY=offline-test-key\nOPENAI_API_BASE={service.url}\n")
+        result = import_document(root, source, context=context, scope=storage_scope(root, identity))
+        assert result.status == "added", result.message
+    [unit] = result.units
+    assert unit.status == "completed"
+    assert read_page(
+        root, f"summaries/{unit.doc_name}.md", scope=storage_scope(root, identity)
+    ).body
+    detail = read_knowledge_task(
+        root, context.storage_execution.task_id, scope=storage_scope(root, identity)
+    )
+    assert detail.task.state == "completed"
+    [published] = detail.publications
+    assert published.knowledge_revision_id == unit.knowledge_revision_id
+    assert published.execution_id == context.storage_execution.execution_id
+    assert published.projection_status == "pending"
+    assert detail.publications_after is None
+
+
+def test_failed_cleanup_progress_subscription_still_closes_the_actual_controller(tmp_path):
+    from ultrakb.llm_usage import active_scope
+
+    root, identity, _ = question_knowledge(tmp_path)
+    source = tmp_path / "guide.md"
+    source.write_text("The value is 17.")
+    controllers = []
+
+    def observe(event):
+        active = active_scope()
+        if active is not None and active.storage is not None:
+            controllers.append(active.storage)
+        data = event.get("data", {})
+        if data.get("stage") == "execution.cleanup.v1" and data.get("status") == "started":
+            raise OSError("The progress subscriber has gone away")
+
+    summary = json.dumps({"description": "Guide", "content": "The value is 17."})
+    plan = json.dumps({"concepts": [], "entities": []})
+    context = ExecutionContext(storage_identity=identity, on_event=observe)
+    with StreamTransport([{"content": summary}, {"content": plan}]) as service:
+        (root / ".env").write_text(f"LLM_API_KEY=offline-test-key\nOPENAI_API_BASE={service.url}\n")
+        result = import_document(root, source, context=context, scope=storage_scope(root, identity))
+        assert result.status == "added", result.message
+        assert "confirm execution cleanup" in result.unfinished
+        assert len(service.requests) == 2
+    assert controllers and all(controller._closed for controller in controllers)

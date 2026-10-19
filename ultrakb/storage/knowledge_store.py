@@ -85,6 +85,7 @@ class PublicationReceipt:
     generation: str
     attempt_id: str | None
     published_at: str
+    execution_id: str | None
 
 
 def _manifest(entries):
@@ -650,12 +651,13 @@ class KnowledgeStore:
             )
             connection.execute(
                 "INSERT INTO ukb_publication_receipts VALUES (?, ?, ?, ?, "
-                "strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+                "strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?)",
                 (
                     prepared.publication_id,
                     prepared.revision_id,
                     self.identity.generation,
                     prepared.import_attempt_id,
+                    execution_id,
                 ),
             )
             finish_import_claim(connection, prepared.revision_id, prepared.publication_id)
@@ -718,7 +720,8 @@ class KnowledgeStore:
     def receipt(self, publication_id: str) -> PublicationReceipt:
         with storage_stage(self.root, self.identity, read_only=True) as db:
             row = db.connection.execute(
-                "SELECT publication_id, revision_id, generation, attempt_id, published_at "
+                "SELECT publication_id, revision_id, generation, attempt_id, published_at, "
+                "execution_id "
                 "FROM ukb_publication_receipts WHERE publication_id = ?",
                 (publication_id,),
             ).fetchone()

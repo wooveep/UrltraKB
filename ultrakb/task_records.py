@@ -69,6 +69,21 @@ class TaskList(TaskRecord):
     next_cursor: int | None
 
 
+class TaskPublication(TaskRecord):
+    publication_id: RecordId
+    knowledge_revision_id: RecordId
+    execution_id: RecordId
+    generation: str
+    attempt_id: RecordId | None
+    published_at: str
+    view_id: str
+    source_revision_id: RecordId | None
+    unit_revision_id: RecordId | None
+    projection_status: Literal[
+        "pending", "paused", "conflict", "synced", "superseded", "not_recorded"
+    ]
+
+
 class TaskDetail(TaskRecord):
     schema_version: Literal[1] = 1
     statistics_at: str
@@ -80,7 +95,9 @@ class TaskDetail(TaskRecord):
     executions: tuple[TaskExecution, ...]
     stages: tuple[TaskStage, ...]
     requests: tuple[UsageRequest, ...]
+    publications: tuple[TaskPublication, ...]
     executions_after: int | None
     stages_after: int | None
     requests_after: int | None
+    publications_after: int | None
     coverage: dict[str, str | bool]
