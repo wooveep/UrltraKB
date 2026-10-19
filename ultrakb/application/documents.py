@@ -474,6 +474,7 @@ def import_document(
         return import_stored_document(
             scope,
             source,
+            bundle=bundle,
             context=context,
             prepared=prepared,
             origin_url=origin_url,

@@ -200,6 +200,7 @@ class RecompileResult:
     execution_mode: str | None = None
     units: tuple[ImportUnitOutcome, ...] = ()
     model_usage: dict | None = None
+    knowledge_revision_id: str | None = None
 
 
 @track_import_usage

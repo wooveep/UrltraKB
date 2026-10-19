@@ -2,7 +2,7 @@
 
 import asyncio
 from contextlib import ExitStack
-from dataclasses import replace
+from dataclasses import asdict, replace
 from urllib.parse import quote
 
 from ultrakb.compile_checkpoints import digest
@@ -21,7 +21,6 @@ from ultrakb.locks import LockCancelled, atomic_write_json, atomic_write_text
 from ultrakb.processing_policy import classify_markdown_tokens
 from ultrakb.storage.catalog_store import CatalogStore
 from ultrakb.storage.compile_workspace import materialize_baseline
-from ultrakb.storage.knowledge_store import KnowledgeStore
 from ultrakb.storage.usage_store import UsageStore
 from ultrakb.text_formats import normalize_text_document
 
@@ -30,13 +29,32 @@ from .recompilation import RecompileResult, recompile_document
 
 
 def import_stored_document(
-    scope, source, *, context, prepared, origin_url, source_root, on_event, download_remote_assets
+    scope,
+    source,
+    *,
+    bundle,
+    context,
+    prepared,
+    origin_url,
+    source_root,
+    on_event,
+    download_remote_assets,
 ):
     root, identity = scope.kb_dir, scope.knowledge.identity
     context = context or ExecutionContext(on_event=on_event or (lambda event: None))
     if context.storage_identity not in (None, identity):
         raise ValueError("Import belongs to another database generation")
     context.storage_identity = identity
+    if bundle is not None:
+        from ultrakb.config import LlmCredentialBundle
+
+        if context.snapshot is not None and context.snapshot.values()["credentials"] != asdict(
+            bundle
+        ):
+            raise ValueError("Import credentials differ from the captured execution")
+        if context.executor is not None and context.executor.bindings.credentials() != bundle:
+            raise ValueError("Import credentials differ from the active executor")
+        context.credential_bundle = LlmCredentialBundle(**asdict(bundle))
     source = source.expanduser().absolute()
     validate_source_root(source, source_root)
     result = None
@@ -125,7 +143,7 @@ def _import_body(scope, ready, context, bundle, origin_url, download_remote_asse
 
 
 def _process_admitted(scope, ready, context, bundle, download_remote_assets, catalog, revision):
-    root, identity = scope.kb_dir, scope.knowledge.identity
+    root = scope.kb_dir
     target = catalog.unit_for_source(revision.source_id, key="body")
     if target is None or target.source_revision_id != revision.revision_id:
         doc_name = (
@@ -197,8 +215,14 @@ def _process_admitted(scope, ready, context, bundle, download_remote_assets, cat
     reused = target.unit_revision_id in {
         unit.unit_revision_id for unit in scope.knowledge.input_units()
     }
+    decision = catalog.processing(target.processing_id).decision
     result = (
-        RecompileResult("compiled", target.doc_name, version=scope.publication_id)
+        RecompileResult(
+            "compiled",
+            target.doc_name,
+            version=scope.publication_id,
+            knowledge_revision_id=scope.knowledge.publication.revision_id,
+        )
         if reused
         else asyncio.run(
             recompile_document(
@@ -207,7 +231,6 @@ def _process_admitted(scope, ready, context, bundle, download_remote_assets, cat
         )
     )
     compiled = result.status == "compiled"
-    decision = catalog.processing(target.processing_id).decision
     return IngestResult(
         str(ready.identity),
         "skipped"
@@ -228,11 +251,7 @@ def _process_admitted(scope, ready, context, bundle, download_remote_assets, cat
                 target.unit_revision_id,
                 successful_revision_id=target.unit_revision_id if compiled else None,
                 successful_source_revision_id=revision.revision_id if compiled else None,
-                knowledge_revision_id=KnowledgeStore(root, identity)
-                .bind(result.version)
-                .publication.revision_id
-                if compiled
-                else None,
+                knowledge_revision_id=result.knowledge_revision_id if compiled else None,
                 view_id=scope.view_id,
                 doc_name=target.doc_name,
                 name=ready.source.name,

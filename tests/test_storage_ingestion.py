@@ -16,6 +16,82 @@ from ultrakb.application.views import storage_scope
 pytestmark = pytest.mark.integration
 
 
+@pytest.mark.parametrize("confirmation", ["processing", "publication"])
+def test_published_import_keeps_its_result_when_followup_reads_fail(
+    tmp_path, monkeypatch, confirmation
+):
+    from ultrakb.storage.catalog_store import CatalogStore
+    from ultrakb.storage.knowledge_store import KnowledgeStore
+
+    root, identity, _ = question_knowledge(tmp_path)
+    source = tmp_path / "guide.md"
+    source.write_text("The value is 17.")
+    published = False
+    publish = KnowledgeStore.publish
+    processing, bind = CatalogStore.processing, KnowledgeStore.bind
+
+    def publish_then_lose_reads(*args, **options):
+        nonlocal published
+        result = publish(*args, **options)
+        published = True
+        return result
+
+    def read_processing(*args, **options):
+        if published and confirmation == "processing":
+            raise OSError("Processing confirmation unavailable after publication")
+        return processing(*args, **options)
+
+    def read_publication(*args, **options):
+        if published and confirmation == "publication":
+            raise OSError("Publication confirmation unavailable after publication")
+        return bind(*args, **options)
+
+    monkeypatch.setattr(KnowledgeStore, "publish", publish_then_lose_reads)
+    monkeypatch.setattr(CatalogStore, "processing", read_processing)
+    monkeypatch.setattr(KnowledgeStore, "bind", read_publication)
+    summary = json.dumps({"description": "Guide", "content": "The value is 17."})
+    plan = json.dumps({"concepts": [], "entities": []})
+    with StreamTransport([{"content": summary}, {"content": plan}]) as service:
+        (root / ".env").write_text(f"LLM_API_KEY=offline-test-key\nOPENAI_API_BASE={service.url}\n")
+        result = import_document(root, source, scope=storage_scope(root, identity))
+        assert published
+        assert result.status == "added", result.message
+        [unit] = result.units
+        assert unit.status == "completed"
+        assert unit.knowledge_revision_id is not None
+        assert len(service.requests) == 2
+    monkeypatch.undo()
+    current = storage_scope(root, identity)
+    assert current.knowledge.publication.revision_id == unit.knowledge_revision_id
+    assert "17" in read_page(root, f"summaries/{unit.doc_name}.md", scope=current).body
+
+
+def test_explicit_import_credentials_are_frozen_and_used_for_the_actual_sends(tmp_path):
+    from ultrakb.application.execution import ExecutionContext
+    from ultrakb.config import LlmCredentialBundle
+
+    root, identity, _ = question_knowledge(tmp_path)
+    source = tmp_path / "guide.md"
+    source.write_text("The value is 17.")
+    summary = json.dumps({"description": "Guide", "content": "The value is 17."})
+    plan = json.dumps({"concepts": [], "entities": []})
+    responses = [{"content": summary}, {"content": plan}]
+    context = ExecutionContext()
+    with StreamTransport(responses) as configured, StreamTransport(responses) as explicit:
+        (root / ".env").write_text(
+            f"LLM_API_KEY=configured-key\nOPENAI_API_BASE={configured.url}\n"
+        )
+        bundle = LlmCredentialBundle(api_key="explicit-key", base_url=explicit.url)
+        result = import_document(
+            root, source, bundle=bundle, context=context, scope=storage_scope(root, identity)
+        )
+        assert result.status == "added", result.message
+        assert configured.requests == []
+        assert len(explicit.requests) == 2
+        assert context.snapshot.values()["credentials"]["base_url"] == explicit.url
+        assert context.executor.bindings.credentials() == bundle
+
+
 def test_public_import_retains_markdown_sidecars_and_recompiles_without_external_files(tmp_path):
     root, identity, _ = question_knowledge(tmp_path)
     external = tmp_path / "external"

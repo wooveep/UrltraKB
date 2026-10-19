@@ -17,7 +17,9 @@ def initialize_sdk_environment() -> None:
     import_module("pageindex")
 
 
-def read_snapshot(kb_dir: Path, **wait_options) -> ConfigSnapshot:
+def read_snapshot(
+    kb_dir: Path, *, bundle: config.LlmCredentialBundle | None = None, **wait_options
+) -> ConfigSnapshot:
     # PageIndex initializes dotenv on import. Freeze the actual SDK environment,
     # including lazy/fresh worker entry, before resolving any credentials.
     initialize_sdk_environment()
@@ -45,21 +47,28 @@ def read_snapshot(kb_dir: Path, **wait_options) -> ConfigSnapshot:
             for key, value in dotenv_values(paths[1]).items():
                 if value:
                     environment[key] = value
-            bundle = config.resolve_credential_bundle(kb_dir)
+            selected_bundle = (
+                bundle if bundle is not None else config.resolve_credential_bundle(kb_dir)
+            )
             _, credential_sources = config.resolve_connection_credentials(
                 kb_dir, model=effective["model"]
             )
+            if bundle is not None:
+                credential_sources = {key: "explicit" for key in asdict(bundle)}
             from ultrakb.model_tokenizer import tokenizer_asset
 
             asset = tokenizer_asset(effective)
             if read_versions() != before:
                 continue
-            if bundle.api_key:
+            if selected_bundle.api_key or bundle is not None:
                 provider = str(effective["model"]).split("/")[0].upper()
                 if "/" not in str(effective["model"]):
                     provider = "OPENAI"
-                environment[f"{provider}_API_KEY"] = bundle.api_key
-                environment.setdefault("OPENAI_API_KEY", bundle.api_key)
+                for key in {f"{provider}_API_KEY", "OPENAI_API_KEY"}:
+                    if selected_bundle.api_key:
+                        environment[key] = selected_bundle.api_key
+                    else:
+                        environment.pop(key, None)
             from litellm.litellm_core_utils.get_model_cost_map import get_model_cost_map_source_info
 
             model_table = get_model_cost_map_source_info()
@@ -74,7 +83,7 @@ def read_snapshot(kb_dir: Path, **wait_options) -> ConfigSnapshot:
                         "effective": effective,
                         "sources": sources,
                         "raw": raw,
-                        "credentials": asdict(bundle),
+                        "credentials": asdict(selected_bundle),
                         "credential_sources": credential_sources,
                         "global_config_dir": str(config.GLOBAL_CONFIG_DIR),
                         "environment": environment,

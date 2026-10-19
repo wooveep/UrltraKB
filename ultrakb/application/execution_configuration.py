@@ -28,7 +28,11 @@ def _require_prepared(root: Path):
 
 
 def capture_storage_config(
-    kb_dir: Path, identity: DatabaseIdentity, **wait_options
+    kb_dir: Path,
+    identity: DatabaseIdentity,
+    *,
+    bundle: config.LlmCredentialBundle | None = None,
+    **wait_options,
 ) -> ConfigSnapshot:
     root = kb_dir.resolve()
     with (
@@ -40,7 +44,7 @@ def capture_storage_config(
         _require_prepared(config.GLOBAL_CONFIG_DIR)
         if not (root / ".ultrakb/config.yaml").is_file():
             raise FileNotFoundError("Prepare execution configuration before starting work")
-        return read_snapshot(root, **wait_options)
+        return read_snapshot(root, bundle=bundle, **wait_options)
 
 
 def _validate_settings_journals(root: Path):

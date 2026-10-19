@@ -41,7 +41,11 @@ def begin_storage_execution(root: Path, context: ExecutionContext) -> Iterator[L
             if context.snapshot is None:
                 with context.activity("preparing"):
                     context.snapshot = capture_storage_config(
-                        root, identity, cancelled=context.cancelled, on_wait=context.waiting
+                        root,
+                        identity,
+                        bundle=context.credential_bundle,
+                        cancelled=context.cancelled,
+                        on_wait=context.waiting,
                     )
                 context.on_snapshot(context.snapshot)
             if context.snapshot.kb_dir != str(root):

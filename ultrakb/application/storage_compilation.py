@@ -177,6 +177,7 @@ async def _compile(scope, target, context, bundle, model, max_concurrency):
             "compiled",
             target.doc_name,
             version=publication.publication_id,
+            knowledge_revision_id=publication.revision_id,
             unfinished=("synchronize wiki",),
         )
         projection = sync_publication(base.root, base.identity, prepared)

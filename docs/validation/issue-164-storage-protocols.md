@@ -992,3 +992,12 @@ Workbook units and discovery, retain-without-knowledge handling, complete explic
 processing-policy/recovery paths, task observations and maintenance, remaining
 writers and all three adapters still need joint acceptance. The normal factory
 continues to use the prior format until P8. No live model was called.
+
+Review found two public admission defects. Failing-first cases now inject failed
+processing/publication reads after the actual publication commit, and route an
+explicit credential bundle between two controlled HTTP providers. Import carries
+the committed knowledge revision directly in its compiler outcome and reads its
+processing decision before compilation. Explicit credentials enter the frozen
+recipe before executor creation; a mismatched already captured recipe is rejected
+before sending. All 35 targeted admission, indexing, configuration and compiler
+cases pass, and full mypy still passes 504 source modules.
