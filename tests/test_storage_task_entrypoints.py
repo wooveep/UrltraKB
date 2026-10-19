@@ -138,6 +138,19 @@ def test_qt_task_details_and_export_read_off_thread_with_the_same_schema(
         assert snapshot(json.loads(output.read_text())) == snapshot(
             expected.model_dump(mode="json")
         )
+        from ultrakb.application.knowledge_tasks import capture_task_identity
+        from ultrakb.storage.coordination import try_reclamation
+
+        dialog.subscription.setChecked(True)
+        paged_export = tmp_path / "qt-displayed-page.json"
+        with try_reclamation(root, capture_task_identity(root)) as lease:
+            assert lease is not None
+            dialog.next_page("stages")
+            dialog.export_to(paged_export)
+        until(paged_export.exists)
+        assert snapshot(json.loads(paged_export.read_text())) == snapshot(
+            expected.model_dump(mode="json")
+        )
     finally:
         dialog.close()
         until(dialog.io.stopped)
@@ -206,6 +219,13 @@ def test_task_adapters_read_an_unpublished_main_store_without_config_or_worktree
         )
         assert response.status_code == 200, response.text
         assert response.json()["execution_id"] == execution.execution_id
+    nested = root / "legacy"
+    (nested / ".ultrakb").mkdir(parents=True)
+    (nested / "wiki").mkdir()
+    (nested / ".ultrakb/config.yaml").write_text("model: test\n")
+    monkeypatch.chdir(nested)
+    command = CliRunner().invoke(cli, ["tasks", "list"])
+    assert command.exit_code != 0, "Task discovery must not skip this KB and read its parent"
 
 
 def test_qt_preserves_a_selected_execution_outside_the_page_and_exports_the_displayed_one(

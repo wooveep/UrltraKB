@@ -1169,3 +1169,10 @@ the selected execution, anchors export to the displayed execution, and leaves
 an unlinked queued task unselected with an explicit message. Real SQLite/Qt
 regressions cover each boundary; all 27 related task, UI and size cases pass,
 as does targeted mypy.
+
+Follow-up review also checked nearest-KB discovery and an export while the next
+page is still waiting on reclamation. CLI now stops at the nearest metadata root,
+so it rejects a nested old-format KB instead of silently reading its v2 parent.
+Qt exports the last displayed page's task, execution and cursors, independently
+of an in-flight selection. Twelve task/query regressions pass; independent
+standards review passes all four focused SQLite/Qt boundary reproductions.

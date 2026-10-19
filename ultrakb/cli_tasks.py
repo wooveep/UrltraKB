@@ -35,7 +35,7 @@ def _run(ctx, operation, *args, **options):
                 (
                     path
                     for path in (Path.cwd(), *Path.cwd().parents)
-                    if (path / ".ultrakb/kb.sqlite").is_file()
+                    if (path / ".ultrakb").exists()
                 ),
                 None,
             )

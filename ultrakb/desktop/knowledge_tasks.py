@@ -218,6 +218,11 @@ class KnowledgeTasksDialog(QDialog):
 
         def loaded(value):
             self.identity, self.detail = value
+            self._shown_options = {
+                **options,
+                "identity": self.identity,
+                "execution_id": self.detail.execution_id,
+            }
             self.task_id = self.detail.task.task_id
             self.body.setPlainText(detail_text(self.detail))
             self.status.setText("任务记录 · 分页读取权威数据；暂停刷新不会停止记录。")
@@ -299,8 +304,7 @@ class KnowledgeTasksDialog(QDialog):
     def export_to(self, destination):
         if self.detail is None:
             return
-        options, task_id = self.options(), self.task_id
-        options["execution_id"] = self.detail.execution_id
+        options, task_id = dict(self._shown_options), self.detail.task.task_id
         self.submit(
             lambda: export_knowledge_task(self.root, task_id, Path(destination), **options),
             lambda result: self.status.setText("已导出当前分页范围的任务记录。"),
