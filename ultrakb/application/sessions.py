@@ -8,7 +8,7 @@ import re
 from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from ultrakb.agent.chat_session import ChatSession, _session_path, deletion_marker, load_session
 from ultrakb.application.execution import ExecutionContext
@@ -17,12 +17,20 @@ from ultrakb.knowledge_scope import KnowledgeScope, resolve_scope
 from ultrakb.locks import atomic_write_text, kb_ingest_lock, kb_read_lock, session_lock
 from ultrakb.mutation import mutation_scope
 
+if TYPE_CHECKING:
+    from ultrakb.storage.wiki_projection import ProjectionResult
+
 
 @dataclass(frozen=True)
 class SessionResult:
     status: Literal["deleted", "exported", "missing", "conflict"]
     resources: tuple[str, ...] = ()
     changes: tuple[str, ...] = ()
+    publication_id: str | None = None
+    projection: ProjectionResult | None = None
+    candidate_revision_id: str | None = None
+    reason_code: str | None = None
+    unfinished: tuple[str, ...] = ()
 
 
 def list_conversations(
@@ -159,6 +167,11 @@ def export_conversation(
     A persisted conversation is reloaded under both leases. The CLI can also
     export a newly created in-memory session which has never been persisted.
     """
+    scope = resolve_scope(kb_dir, scope)
+    if scope.knowledge is not None:
+        from .storage_session_export import export_stored_conversation
+
+        return export_stored_conversation(scope, session, name, unique=unique, context=context)
     scope = resolve_scope(kb_dir, scope, writable=True)
     root = kb_dir.resolve()
     identity = session if isinstance(session, str) else session.id

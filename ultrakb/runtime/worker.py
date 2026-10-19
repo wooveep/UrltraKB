@@ -337,7 +337,21 @@ def _execute(
             resources=session_result.resources,
             changes=session_result.changes,
             session_id=request.session_id,
-            error="Conversation changed; review its latest completed history"
+            revision=session_result.publication_id,
+            unfinished=session_result.unfinished,
+            context={
+                "publication_id": session_result.publication_id,
+                "projection": asdict(session_result.projection)
+                if session_result.projection is not None
+                else None,
+                "candidate_revision_id": session_result.candidate_revision_id,
+                "reason_code": session_result.reason_code,
+            }
+            if session_result.publication_id or session_result.candidate_revision_id
+            else None,
+            error="Knowledge changed; review the retained transcript"
+            if session_result.status == "conflict" and session_result.candidate_revision_id
+            else "Conversation changed; review its latest completed history"
             if session_result.status == "conflict"
             else "Conversation no longer exists; no change was made"
             if session_result.status == "missing"

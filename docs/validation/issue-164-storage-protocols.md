@@ -2310,3 +2310,30 @@ The final preparation/generator/root/maintenance/diagnostic/database/boundary/
 size matrix passes 61 tests. Mypy passes 595 modules; focused Ruff, formatting,
 diff checks and both static readonly review axes pass. Complete obsolete review
 candidates and the sole P8 activation remain pending; issue 164 is still open.
+
+### Explicit transcripts from retained conversation originals
+
+The shared export use case now accepts a development main-store scope and a
+retained conversation identity. It takes the real session lock, reads bounded
+original/pending pages from the authoritative store and publishes the complete
+transcript through the knowledge protocol without resolving model credentials
+or sending a request. Original histories, their versions and core costs remain
+unchanged. Existing ghost-link, unique-name and name/title/first-user-question
+fallback policies are preserved, including originals with a leading system
+message. Deleted conversations cannot be revived by export.
+
+Master publication success and worktree synchronization remain distinct. A
+paused worktree still permits immediate master reads; stale publication scopes
+retain a conflict candidate without claiming an exported file. The native
+worker now carries the publication, pending synchronization and candidate facts
+through its result. No public factory is activated by this batch.
+
+The initial application test reproduces the unsupported export; an actual
+worker test reproduces dropped publication/synchronization state. A 129-turn,
+130-pending-question case verifies complete ordered output, exact multiplicity
+and the first-user filename fallback. A leading system message first reproduced
+the role-selection regression and verifies its repair. The final shared/native
+session, worker, boundary and module-size matrix passes 63 tests. Mypy passes
+596 modules; focused Ruff, formatting and diff checks and both static readonly
+review axes pass after the naming fixes. Remaining lifecycle/performance and P8
+gates still prevent overall issue closure.
