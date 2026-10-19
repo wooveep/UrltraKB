@@ -305,12 +305,13 @@ class ExecutionStore:
             return row[0]
 
     def source_execution(self, source_revision_id: str) -> str | None:
-        """Explicit source retry reuses its latest observed task and paid budget."""
+        """Resume processing ownership; admission-only observations do not replace it."""
         with storage_stage(self.root, self.identity, read_only=True) as db:
             row = db.connection.execute(
                 "SELECT s.execution_id FROM ukb_stage_attempts s JOIN ukb_executions e "
                 "ON e.execution_id = s.execution_id JOIN ukb_tasks t ON t.task_id = e.task_id "
                 "WHERE s.source_revision_id = ? AND t.operation = 'model_task' "
+                "AND s.stage_code != 'import.admit.v1' "
                 "ORDER BY s.sequence DESC LIMIT 1",
                 (source_revision_id,),
             ).fetchone()

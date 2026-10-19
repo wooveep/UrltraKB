@@ -231,6 +231,22 @@ def test_invalid_optional_observations_do_not_hide_core_task_facts_or_usage(impo
     assert read_knowledge_task(root, task_id).execution.state == "completed"
 
 
+def test_admission_links_the_temporary_input_to_its_managed_original(imported_task):
+    root, task_id, _ = imported_task
+    detail = read_knowledge_task(root, task_id, limit=128)
+    admission = next(stage for stage in detail.stages if stage.stage_code == "import.admit.v1")
+    assert admission.source_revision_id is not None
+    assert admission.input is not None
+    observed = admission.observation.input
+    assert observed.temporary_input_id
+    assert observed.input_digest == admission.input.original_digest
+    assert observed.input_bytes == admission.input.original_bytes
+    assert observed.input_name == admission.input.name
+    assert {stage.input.source_id for stage in detail.stages if stage.input} == {
+        admission.input.source_id
+    }
+
+
 def test_interrupted_observation_preserves_known_input_and_unknown_final_cost(tmp_path):
     from ultrakb.application.knowledge_tasks import read_knowledge_stage
     from ultrakb.stage_observations import InputObservation, StageObservation

@@ -2076,3 +2076,29 @@ close their concrete findings; focused Ruff, formatting and diff checks pass.
 Remaining P6 identity/phase coverage,
 observation retention, aggregate audit, obsolete-root retirement and the sole P8
 activation remain unfinished. Issue 164 remains open.
+
+### Atomic admission-stage input association
+
+The source admission use case now passes its actual durable stage identity to
+the catalog. A new original becomes ready and binds that stage to its source
+revision in the same existing transaction. Reusing identical content binds its
+existing ready revision in a short conditional transaction. The boundary rejects
+inactive stages, another generation and conflicting input associations.
+
+The optional temporary-input descriptor and the retained original can therefore
+be traced through the same stage. A real transaction-boundary failure after
+commit demonstrates that a lost admission acknowledgement cannot hide the
+original from task details, including after the external file is deleted.
+Repeated unchanged inputs keep one source revision and distinct admission stages
+and temporary identities, with no extra SDK sends.
+
+An admission-only association does not replace the source's processing/budget
+recovery owner. The real two-request fixture first reproduces selection of a new
+admission-only task after a duplicate-input acknowledgement loss, then verifies
+that source retry still selects the original processing owner and paid budget.
+Actual new processing tasks retain their existing selection behavior.
+
+The final identity/task/catalog/retry/maintenance/boundary/size matrix passes 49
+tests; mypy passes 589 modules. Both static readonly review axes pass. Focused
+Ruff, formatting and diff checks pass. Broader P6 phase coverage, P7 maintenance
+completion and the sole P8 activation are still pending; issue 164 remains open.

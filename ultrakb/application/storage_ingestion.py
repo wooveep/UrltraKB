@@ -181,7 +181,7 @@ def _import_body(
             "import.admit.v1",
             work_key=ready.digest,
             observation_input=_input_observation(ready),
-        ):
+        ) as progress:
             revision = catalog.admit(
                 ready.path,
                 source_key=origin_url or str(ready.identity),
@@ -190,6 +190,7 @@ def _import_body(
                     for reference, image in ready.images.items()
                     if image.path is not None
                 },
+                stage_attempt_id=progress["stage_attempt_id"],
             )
         from ultrakb.storage.discovery_store import DiscoveryStore
 

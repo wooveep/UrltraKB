@@ -118,6 +118,7 @@ class CatalogStore:
         sidecars: dict[str, Path] | None = None,
         expected: str | None = None,
         label: str | None = None,
+        stage_attempt_id: str | None = None,
     ) -> SourceRevision:
         if not source_key or not isinstance(source_key, str):
             raise ValueError("Source identity must be explicit")
@@ -126,6 +127,8 @@ class CatalogStore:
             raise ValueError("A source label must be nonempty text")
         if len(source_key.encode()) + len(path.name.encode()) + len(label.encode()) > 64 * 1024:
             raise ValueError("Source metadata exceeds the storage item limit")
+        if stage_attempt_id is not None:
+            TypeAdapter(RecordId).validate_python(stage_attempt_id)
         inputs = {path.name: (path, "main")}
         for logical_path, source in (sidecars or {}).items():
             InputFile(logical_path, "0" * 64, 0, "sidecar")
@@ -157,6 +160,9 @@ class CatalogStore:
                 ).encode(),
             )
             if previous and previous[1] == manifest.digest:
+                if stage_attempt_id is not None:
+                    with db.transaction() as connection:
+                        self._bind_admission(connection, db.identity, stage_attempt_id, previous[0])
                 return self._revision(db, previous[0])
             revision_id = uuid.uuid4().hex
             with db.transaction() as connection:
@@ -224,7 +230,23 @@ class CatalogStore:
                 ).rowcount
                 if changed != 1:
                     raise ValueError("The sealed input changed during admission")
+                if stage_attempt_id is not None:
+                    self._bind_admission(connection, db.identity, stage_attempt_id, revision_id)
             return SourceRevision(source_id, revision_id, ordinal, tuple(files))
+
+    @staticmethod
+    def _bind_admission(connection, identity, stage_attempt_id, revision_id):
+        changed = connection.execute(
+            "UPDATE ukb_stage_attempts SET source_revision_id = ? "
+            "WHERE stage_attempt_id = ? AND state = 'started' AND unit_revision_id IS NULL "
+            "AND (source_revision_id IS NULL OR source_revision_id = ?) "
+            "AND EXISTS (SELECT 1 FROM ukb_executions e "
+            "WHERE e.execution_id = ukb_stage_attempts.execution_id "
+            "AND e.generation = ? AND e.state IN ('started', 'stopping'))",
+            (revision_id, stage_attempt_id, revision_id, identity.generation),
+        ).rowcount
+        if changed != 1:
+            raise ValueError("Admission requires this generation's active input stage")
 
     @staticmethod
     def _latest(db, source_id):
