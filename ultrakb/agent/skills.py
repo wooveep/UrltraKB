@@ -167,6 +167,15 @@ def prepare_skill(
     output = None
     if template and slug:
         relative = template.format(slug=slug)
+        if scope.knowledge is not None:
+            from ultrakb.storage.wiki_paths import wiki_path
+
+            wiki_path(relative)
+            if not relative.startswith(("output/", "wiki/explorations/")):
+                raise ValueError(
+                    "Skill output path must be a file in output/ or wiki/explorations/"
+                )
+            return PreparedSkill(name, body, metadata, scope.kb_dir / relative)
         relative_path = Path(relative)
         output = (
             scope.wiki_dir / relative_path.relative_to("wiki")

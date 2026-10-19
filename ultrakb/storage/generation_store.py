@@ -15,7 +15,8 @@ from .artifact_store import ArtifactRevision, ArtifactStore, artifact_path
 from .blobs import put_blob, read_bytes, retain_blob
 from .coordination import storage_stage
 from .execution_store import require_active_execution
-from .knowledge_store import _manifest
+from .knowledge_store import KnowledgeStore, PreparedRevision, _manifest
+from .wiki_paths import wiki_path
 
 
 class GenerationDetails(BaseModel):
@@ -32,6 +33,7 @@ class GenerationDetails(BaseModel):
     unfinished: tuple[str, ...] = ()
     archive_path: RelativePath | None = None
     quality: tuple[str, ...] = ()
+    knowledge_changes: tuple[tuple[RelativePath, Literal["write", "delete"]], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -41,6 +43,7 @@ class GenerationPlan:
     publication_id: str
     expected_epoch: int
     details: GenerationDetails
+    prepared: PreparedRevision | None = None
 
 
 @dataclass(frozen=True)
@@ -74,25 +77,90 @@ class GenerationStore:
     def find(self, model_budget_id, request_key):
         with storage_stage(self.root, self.identity, read_only=True) as db:
             row = db.connection.execute(
-                "SELECT plan_id, model_budget_id, publication_id, expected_epoch, detail_digest "
+                "SELECT plan_id, model_budget_id, publication_id, expected_epoch, detail_digest, "
+                "knowledge_revision_id "
                 "FROM ukb_generation_plans WHERE model_budget_id = ? AND request_key = ? "
                 "AND state = 'ready' ORDER BY rowid DESC LIMIT 1",
                 (model_budget_id, request_key),
             ).fetchone()
             if row is None:
                 return None
+            prepared = None
+            if row[5] is not None:
+                revision = db.connection.execute(
+                    "SELECT r.revision_id, r.publication_id, r.view_id, r.expected_publication, "
+                    "r.manifest_digest, r.navigation_fingerprint, s.plan_id "
+                    "FROM ukb_knowledge_revisions r JOIN ukb_revision_sync s "
+                    "ON s.revision_id = r.revision_id WHERE r.revision_id = ? "
+                    "AND r.state IN ('ready', 'published')",
+                    (row[5],),
+                ).fetchone()
+                if revision is None:
+                    raise RecoveryRequired("The generator knowledge candidate is unavailable")
+                prepared = PreparedRevision(*revision)
             return GenerationPlan(
-                *row[:4], GenerationDetails.model_validate_json(read_bytes(db, row[4]))
+                *row[:4], GenerationDetails.model_validate_json(read_bytes(db, row[4])), prepared
             )
 
-    def prepare(self, work, request_key, publication_id, epoch, details, files):
+    def prepare(
+        self,
+        work,
+        request_key,
+        publication_id,
+        epoch,
+        details,
+        files,
+        *,
+        knowledge_base=None,
+        knowledge_inputs=None,
+    ):
         if (work.root, work.identity) != (self.root, self.identity):
             raise ValueError("Generator work belongs to another database")
         details = GenerationDetails.model_validate(details)
+        knowledge_files = {}
+        for path, payload in files.items():
+            wiki_path(path)
+            if payload is not None and not isinstance(payload, bytes):
+                raise ValueError("Generator outputs require immutable bytes")
+            if path.startswith("wiki/"):
+                if not path.startswith("wiki/explorations/"):
+                    raise ValueError("Generated knowledge requires exploration files")
+                knowledge_files[path.removeprefix("wiki/")] = payload
+        details = details.model_copy(
+            update={
+                "knowledge_changes": tuple(
+                    (path, "delete" if payload is None else "write")
+                    for path, payload in sorted(knowledge_files.items())
+                )
+            }
+        )
+        prepared = None
+        if knowledge_files:
+            knowledge = KnowledgeStore(self.root, self.identity)
+            base = knowledge.bind(knowledge_base or publication_id)
+            units = tuple(unit.unit_revision_id for unit in base.input_units())
+            basis = {}
+            for path, payload in knowledge_files.items():
+                if payload is None or not path.endswith(".md"):
+                    continue
+                try:
+                    unchanged = base.file_digest(path) == hashlib.sha256(payload).hexdigest()
+                except FileNotFoundError:
+                    unchanged = False
+                basis[path] = (
+                    tuple(unit.unit_revision_id for unit in base.input_units(page=path))
+                    if unchanged
+                    else units
+                )
+            prepared = knowledge.prepare_changes(
+                base,
+                knowledge_files,
+                page_inputs=basis | (knowledge_inputs or {}),
+            )
         plan_id = uuid4().hex
         entries = []
         ordered = sorted(
-            files.items(),
+            ((path, payload) for path, payload in files.items() if not path.startswith("wiki/")),
             key=lambda item: (
                 item[1] is None,
                 item[0] == ".claude-plugin/marketplace.json",
@@ -123,7 +191,7 @@ class GenerationStore:
                 work._active(connection)
                 connection.execute(
                     "INSERT INTO ukb_generation_plans VALUES "
-                    "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'building')",
+                    "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'building')",
                     (
                         plan_id,
                         work.work_id,
@@ -135,6 +203,7 @@ class GenerationStore:
                         blob.digest,
                         len(entries),
                         manifest,
+                        prepared.revision_id if prepared is not None else None,
                     ),
                 )
                 retain_blob(connection, "generator-plan", plan_id, "details", blob)
@@ -235,6 +304,12 @@ class GenerationStore:
         return GenerationAcceptance(tuple(accepted))
 
     def has_pending(self, plan):
+        if (
+            plan.prepared is not None
+            and KnowledgeStore(self.root, self.identity).committed_publication(plan.prepared)
+            is None
+        ):
+            return True
         with storage_stage(self.root, self.identity, read_only=True) as db:
             return (
                 db.connection.execute(

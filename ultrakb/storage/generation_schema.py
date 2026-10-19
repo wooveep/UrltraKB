@@ -12,6 +12,7 @@ GENERATION_SCHEMA = (
         detail_digest TEXT NOT NULL REFERENCES ukb_blobs(digest),
         file_count INTEGER NOT NULL CHECK (file_count >= 0),
         manifest_digest TEXT NOT NULL,
+        knowledge_revision_id TEXT REFERENCES ukb_knowledge_revisions(revision_id),
         state TEXT NOT NULL CHECK (state IN ('building', 'ready', 'retiring'))
     )""",
     "CREATE INDEX ukb_generation_request ON ukb_generation_plans(model_budget_id, request_key)",
@@ -43,6 +44,7 @@ GENERATION_SCHEMA = (
             AND NEW.execution_id = OLD.execution_id AND NEW.publication_id = OLD.publication_id
             AND NEW.expected_epoch = OLD.expected_epoch AND NEW.detail_digest = OLD.detail_digest
             AND NEW.file_count = OLD.file_count AND NEW.manifest_digest = OLD.manifest_digest
+            AND NEW.knowledge_revision_id IS OLD.knowledge_revision_id
             AND ((OLD.state = 'building' AND NEW.state = 'ready')
                  OR (OLD.state IN ('building', 'ready') AND NEW.state = 'retiring'))
         )

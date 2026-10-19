@@ -25,29 +25,20 @@ from ultrakb.storage.compile_workspace import materialize_baseline
 from ultrakb.storage.generation_store import GenerationDetails, GenerationStore, generation_request
 
 from .generation_acceptance import accept_generation
-from .generators import GenerationPreview, GenerationResult, _prepare, preflight_generation
+from .generators import GenerationPreview, GenerationResult, _paths, _prepare, preflight_generation
 from .query_views import resolve_query_views
 from .task_stages import task_stage
 
 
 def _selection(scope, target_type, name, *, skill_name=None):
     prepared = _prepare(scope.kb_dir, target_type, name, skill_name, scope=scope)
-    path = f"output/{'skills' if target_type == 'skill' else 'decks'}/{name}"
-    if prepared is not None and prepared.output_path is not None:
-        path = prepared.output_path.relative_to(scope.kb_dir).as_posix()
+    target, _ = _paths(scope.kb_dir, target_type, name, prepared, scope=scope)
+    path = target.relative_to(scope.kb_dir).as_posix()
     store = ArtifactStore(scope.kb_dir, scope.knowledge.identity)
     epoch = store.epoch()
-    try:
-        store.entry(path, epoch=epoch)
-        exists = True
-    except FileNotFoundError:
-        after = None
-        while True:
-            page = store.files(prefix=path + "/", epoch=epoch, after=after, limit=1)
-            exists = bool(page.files)
-            if exists or page.next_after is None:
-                break
-            after = page.next_after
+    from .storage_generation_replacement import generation_paths
+
+    exists = next(generation_paths(scope, path, epoch), None) is not None
     version = digest(
         {
             "operation": "generate-v1",
@@ -58,11 +49,11 @@ def _selection(scope, target_type, name, *, skill_name=None):
             "definition": [prepared.name, prepared.body, prepared.metadata] if prepared else None,
         }
     )
-    return GenerationPreview(scope.kb_dir / path, exists, version), epoch
+    return GenerationPreview(scope.kb_dir / path, exists, version), epoch, prepared
 
 
 def preview_stored_generation(scope, target_type, name, *, skill_name=None):
-    preview, _ = _selection(scope, target_type, name, skill_name=skill_name)
+    preview, _, _ = _selection(scope, target_type, name, skill_name=skill_name)
     return preview
 
 
@@ -117,8 +108,6 @@ async def generate_stored_artifact(scope, options, context, *, bundle=None, mode
     error = preflight_generation(root, options.name, scope=scope)
     if error:
         return GenerationResult("invalid", message=error)
-    if options.target_type != "skill":
-        return GenerationResult("blocked", unfinished=("deck_generation",))
     result, archived = None, None
 
     async def execute(credentials):
@@ -133,7 +122,7 @@ async def generate_stored_artifact(scope, options, context, *, bundle=None, mode
         work = CompileCheckpointStore(root, base.identity).for_work(
             execution.model_budget_id,
             object_id={
-                "operation": "generate-skill",
+                "operation": f"generate-{options.target_type}",
                 "request": request_key,
             },
             conditions={"generator": 1},
@@ -142,7 +131,7 @@ async def generate_stored_artifact(scope, options, context, *, bundle=None, mode
         selection_key = digest({"protocol": "generator-selection-v1", "request": request_key})
         selection = work.load("generator-selection", selection_key)
         if selection is None:
-            preview, initial_epoch = _selection(
+            preview, initial_epoch, prepared = _selection(
                 scope, options.target_type, options.name, skill_name=options.skill_name
             )
             selection = {
@@ -152,6 +141,11 @@ async def generate_stored_artifact(scope, options, context, *, bundle=None, mode
                 "epoch": initial_epoch,
                 "fingerprint": context.executor.fingerprint,
             }
+            if prepared is not None:
+                from .storage_deck_generation import capture_critic, freeze_skill
+
+                selection["prepared"] = freeze_skill(root, prepared)
+                selection["critic"] = capture_critic(scope) if options.critique else None
             work.save("generator-selection", selection_key, selection)
         if selection["fingerprint"] != context.executor.fingerprint:
             raise RecoveryRequired("Generation requires its original captured model configuration")
@@ -169,12 +163,16 @@ async def generate_stored_artifact(scope, options, context, *, bundle=None, mode
                 "conflict", message="Artifact already exists; review replacement"
             )
             return
-        if preview.exists:
-            try:
-                ArtifactStore(root, base.identity).entry(selection["path"], epoch=initial_epoch)
-            except FileNotFoundError:
-                pass
-            else:
+        if preview.exists and (
+            options.target_type == "skill"
+            or selection["prepared"]["output_path"] != selection["path"]
+        ):
+            from .storage_generation_replacement import generation_paths
+
+            if (
+                next(generation_paths(scope, selection["path"], initial_epoch), None)
+                == selection["path"]
+            ):
                 result = GenerationResult(
                     "conflict", message="A skill directory cannot replace a regular file"
                 )
@@ -183,12 +181,35 @@ async def generate_stored_artifact(scope, options, context, *, bundle=None, mode
             from .storage_generation_replacement import archive_generation
 
             archived = archive_generation(
-                scope, work, request_key, selection["path"], initial_epoch, context
+                scope,
+                work,
+                request_key,
+                selection["path"],
+                initial_epoch,
+                context,
+                target_type=options.target_type,
             )
             if archived.status != "completed":
                 result = archived
                 return
             initial_epoch = archived.artifact_epoch
+            selection = selection | {"knowledge_base": archived.publication_id}
+        if options.target_type == "deck":
+            from .storage_deck_generation import prepare_deck_generation
+
+            plan = await prepare_deck_generation(
+                scope,
+                options,
+                context,
+                credentials,
+                work,
+                request_key,
+                selection,
+                initial_epoch,
+                archived,
+            )
+            result = accept_generation(scope, plan, context)
+            return
         with materialize_baseline(base, ()) as baseline:
             output = baseline.directory / ".generated" / options.name
             if preview.exists and options.overwrite == "overlay":

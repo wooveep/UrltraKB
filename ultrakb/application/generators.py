@@ -96,7 +96,8 @@ def _paths(
     )
     if scope.read_only:
         roots = [path for path in roots if not path.is_relative_to(scope.wiki_dir)]
-    contained_paths(kb_dir, [target, *roots])
+    if scope.knowledge is None:
+        contained_paths(kb_dir, [target, *roots])
     return target, roots
 
 
@@ -178,6 +179,8 @@ class GenerationResult:
     generation_id: str | None = None
     artifact_epoch: int | None = None
     projection_pending: bool = False
+    publication_id: str | None = None
+    candidate_revision_id: str | None = None
 
 
 def _archive(kb_dir: Path, target: Path) -> Path:

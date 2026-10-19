@@ -16,6 +16,10 @@ from .task_stages import task_stage
 
 def _result(root, plan, accepted, *, status, unfinished=(), error_type=None):
     details = plan.details
+    if details.target_type == "deck":
+        from ultrakb.deck.validator import ValidationResult as ArtifactValidationResult
+    else:
+        ArtifactValidationResult = ValidationResult
     archive_saved = details.archive_path is not None and (
         details.output_dir != details.archive_path
         or any(
@@ -28,7 +32,7 @@ def _result(root, plan, accepted, *, status, unfinished=(), error_type=None):
         output_dir=root / details.output_dir,
         artifact_path=root / details.artifact_path,
         archive_path=root / details.archive_path if archive_saved else None,
-        validation=ValidationResult(
+        validation=ArtifactValidationResult(
             errors=list(details.validation_errors), warnings=list(details.validation_warnings)
         )
         if details.validation_known
@@ -101,7 +105,12 @@ def accept_generation(scope, plan, context):
         if result is None:
             raise
         result = replace(result, unfinished=(*result.unfinished, "confirm acceptance observation"))
-    pending = False
+    if plan.prepared is not None and outcome.conflict is None and outcome.error is None:
+        from .generation_knowledge import accept_generation_knowledge
+
+        result = accept_generation_knowledge(scope, plan, result, context, observed=observed)
+        context._storage_result = "completed" if result.status == "completed" else "failed"
+    pending = bool(result.publication_id and result.projection_pending)
     try:
         with task_stage(context, "generator.sync.v1", root=root) if observed else nullcontext():
             if plan.details.archive_path and plan.details.output_dir != plan.details.archive_path:

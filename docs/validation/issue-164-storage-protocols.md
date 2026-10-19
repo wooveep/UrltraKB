@@ -1847,3 +1847,35 @@ module-size and diff checks pass. Independent readonly
 reviews reproduce and close the paging, durability and execution-state findings.
 Deck/custom-skill generation and remaining management, observation/archive/audit
 work and the sole P8 activation are still unfinished. Issue 164 remains open.
+
+### Retained Deck producer, critic and exploration publications
+
+Schema 30 binds a generated-output plan to an optional exact knowledge candidate.
+Deck production and optional critique use the real SDK with separate retained
+compile work, one original execution budget and fixed knowledge readers. Producer
+and critic definitions are frozen before use. Received responses reconstruct the
+private files on retry; a critic checkpoint interruption reuses the paid response
+and continues the same cumulative budget even if the local Skill file disappears.
+
+Custom templates retain the existing file/directory selection rules and allowed
+output zones. The main-store path validates logical names without resolving the
+mutable Wiki or output projection. Unknown symlinks can leave projection pending,
+but cannot redirect accepted content or prevent its main-store acceptance. Other
+existing artifacts and archive versions remain protected from generator tools.
+The private writer revokes tool access before its temporary materialization exits.
+
+Output artifacts commit separately from exploration publication. A failed note
+publication retains accepted artifacts and its exact candidate; retry publishes
+that candidate without another SDK send. Publication and synchronization receipts
+remain distinct, including replay without model settings after a projection
+failure. Generated exploration pages and ordinary output files support explicit
+archive and overlay. Archives retain the original Markdown's exact input revision
+basis, and unchanged overlay pages preserve that basis as well as their bytes.
+
+The expanded generator/artifact/Skill/Deck matrix passes 105 tests with two live
+cases deselected. Two focused final witnesses also pass for retained cumulative
+budget and protection of existing artifacts. Mypy passes 580 modules; focused
+Ruff, formatting, module-size and diff checks pass. Independent readonly reviews
+close the logical-path, archive-basis and late-tool findings. Remaining management
+connections, observation/archive/audit work and the sole P8 activation remain
+unfinished. Issue 164 remains open.
