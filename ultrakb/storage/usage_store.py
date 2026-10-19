@@ -92,6 +92,7 @@ def require_request_generation(db, request_id):
 
 
 def _apply_delta(connection, record, stage_code, before):
+    connection.execute("UPDATE ukb_usage_state SET revision = revision + 1 WHERE singleton = 1")
     after = _counts(record)
     delta = tuple(after[key] - before[key] for key in COUNTS)
     columns = ", ".join(COUNTS)

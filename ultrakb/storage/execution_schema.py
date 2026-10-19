@@ -143,4 +143,7 @@ EXECUTION_SCHEMA = (
     "stage_code TEXT NOT NULL, "
     + ", ".join(f"{key} INTEGER NOT NULL CHECK ({key} >= 0)" for key in COUNTS)
     + ", PRIMARY KEY(bucket, identity, stage_code))",
+    "CREATE TABLE ukb_usage_state (singleton INTEGER PRIMARY KEY CHECK (singleton = 1), "
+    "revision INTEGER NOT NULL CHECK (revision >= 0))",
+    "INSERT INTO ukb_usage_state VALUES (1, 0)",
 )

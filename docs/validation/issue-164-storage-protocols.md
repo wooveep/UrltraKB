@@ -2102,3 +2102,41 @@ The final identity/task/catalog/retry/maintenance/boundary/size matrix passes 49
 tests; mypy passes 589 modules. Both static readonly review axes pass. Focused
 Ruff, formatting and diff checks pass. Broader P6 phase coverage, P7 maintenance
 completion and the sole P8 activation are still pending; issue 164 remains open.
+
+### Explicit usage audit, guarded rebuild and callback WAL reuse
+
+Development schema 35 adds one usage projection revision. Actual request changes
+advance it in the same existing short transaction as their counter deltas. The
+explicit audit reads one SQLite snapshot, validates core request identities and
+payloads, and reconstructs every aggregate/stage bucket outside the writer.
+Ordinary callbacks and task summaries retain their scoped incremental queries.
+
+Repair prepares at most 128 differences / 256 KiB before its writer transaction,
+rechecks the projection revision and advances it with the repaired counters.
+A late actual receipt or another repair rejects a stale snapshot. Malformed core
+records and totals outside SQLite's integer range report unavailable and do not
+change requests, provider field versions, accepted responses or model budgets.
+Audit and repair return the statistics snapshot version; a successful repair also
+returns its applied version. CLI, authenticated HTTP and native Qt call the same
+application operations. HTTP cancellation joins its actual storage worker.
+
+The callback calibration exposed a connection-lifetime problem: retaining WAL
+files while closing every SQLite connection between short callbacks caused WAL
+growth and repeated open/validation cost. In a same-host, unprofiled differential
+probe of 200 known-unsent request pairs, a local idle connection reduced elapsed
+time from 4.578 to 1.950 seconds and WAL bytes from 14,127,512 to 4,152,992. This is
+a storage-boundary observation, not an SDK or network throughput measurement.
+
+Both existing application execution scopes now keep a local read-only connection
+until operation cleanup completes. It holds no SQL transaction or reclamation
+lease, stays in its creating thread and is closed inside the lifecycle lease.
+There is no connection pool, cross-process connection or weaker durability rule.
+The real application regression first fails at 20,970,832 / 12,516,592 WAL bytes
+for model / non-model scopes, then passes default checkpoint reuse after the fix.
+Actual SDK model-wait retirement and fixed-publication question regressions pass.
+
+The final focused audit/adapter/lifetime/question/maintenance/boundary/size matrix
+passes 48 tests; mypy passes 590 modules. Both static readonly review axes close
+their findings; focused Ruff, formatting and diff checks pass. Scaled request
+calibration is recorded separately. Observation retention, remaining obsolete
+roots and the sole P8 activation remain open gates; issue 164 is not complete.

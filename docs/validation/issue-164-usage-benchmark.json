@@ -1,0 +1,156 @@
+{
+  "schema_version": 1,
+  "storage_schema": 35,
+  "measured_at": "2026-10-19T14:23:44.977568+00:00",
+  "environment": {
+    "python": "3.12.13",
+    "sqlite": "3.53.1",
+    "platform": "Linux-6.12.111+deb13-amd64-x86_64-with-glibc2.41"
+  },
+  "workload": "Synthetic known-unsent requests in an actual shared application execution",
+  "sources_and_units": 10,
+  "stage_codes": 4,
+  "excluded_warmup_pairs": 50,
+  "network_model_calls": 0,
+  "interpretation": "One host, storage boundary only; no SDK/network throughput claim.",
+  "results": [
+    {
+      "requests": 1000,
+      "actual_network_sends": 0,
+      "callbacks": {
+        "samples": 1900,
+        "median_seconds": 0.004989795968867838,
+        "p95_seconds": 0.00582753901835531,
+        "maximum_seconds": 0.10360092099290341
+      },
+      "writer_wait": {
+        "samples": 1900,
+        "median_seconds": 2.142973244190216e-06,
+        "p95_seconds": 2.674991264939308e-06,
+        "maximum_seconds": 8.053961209952831e-06
+      },
+      "writer_hold": {
+        "samples": 1900,
+        "median_seconds": 0.0007232310017570853,
+        "p95_seconds": 0.0008938880637288094,
+        "maximum_seconds": 0.09908902202732861
+      },
+      "queries": {
+        "task_list": {
+          "samples": 7,
+          "median_seconds": 0.005760436994023621,
+          "p95_seconds": 0.006028590025380254,
+          "maximum_seconds": 0.006028590025380254
+        },
+        "source_summary": {
+          "samples": 7,
+          "median_seconds": 0.004222969990223646,
+          "p95_seconds": 0.004267351934686303,
+          "maximum_seconds": 0.004267351934686303
+        },
+        "full_audit": {
+          "samples": 7,
+          "median_seconds": 0.016840345109812915,
+          "p95_seconds": 0.01708602497819811,
+          "maximum_seconds": 0.01708602497819811
+        }
+      },
+      "wal_bytes": 4181832,
+      "database_bytes": 2682880,
+      "counter_rows": 130,
+      "budget_used_after_known_unsent": 0
+    },
+    {
+      "requests": 5000,
+      "actual_network_sends": 0,
+      "callbacks": {
+        "samples": 9900,
+        "median_seconds": 0.0048798100324347615,
+        "p95_seconds": 0.005370968021452427,
+        "maximum_seconds": 0.10360092099290341
+      },
+      "writer_wait": {
+        "samples": 9900,
+        "median_seconds": 2.0740553736686707e-06,
+        "p95_seconds": 2.3649772629141808e-06,
+        "maximum_seconds": 2.1687010303139687e-05
+      },
+      "writer_hold": {
+        "samples": 9900,
+        "median_seconds": 0.0007062649819999933,
+        "p95_seconds": 0.0008081110427156091,
+        "maximum_seconds": 0.09908902202732861
+      },
+      "queries": {
+        "task_list": {
+          "samples": 7,
+          "median_seconds": 0.005865266895852983,
+          "p95_seconds": 0.005981724942103028,
+          "maximum_seconds": 0.005981724942103028
+        },
+        "source_summary": {
+          "samples": 7,
+          "median_seconds": 0.004186726990155876,
+          "p95_seconds": 0.004314629943110049,
+          "maximum_seconds": 0.004314629943110049
+        },
+        "full_audit": {
+          "samples": 7,
+          "median_seconds": 0.06499141396488994,
+          "p95_seconds": 0.06710338790435344,
+          "maximum_seconds": 0.06710338790435344
+        }
+      },
+      "wal_bytes": 4206552,
+      "database_bytes": 9203712,
+      "counter_rows": 130,
+      "budget_used_after_known_unsent": 0
+    },
+    {
+      "requests": 20000,
+      "actual_network_sends": 0,
+      "callbacks": {
+        "samples": 39900,
+        "median_seconds": 0.005020934040658176,
+        "p95_seconds": 0.008044144022278488,
+        "maximum_seconds": 0.10360092099290341
+      },
+      "writer_wait": {
+        "samples": 39900,
+        "median_seconds": 2.074986696243286e-06,
+        "p95_seconds": 2.3850006982684135e-06,
+        "maximum_seconds": 2.1687010303139687e-05
+      },
+      "writer_hold": {
+        "samples": 39900,
+        "median_seconds": 0.0007557515637017787,
+        "p95_seconds": 0.003622179036028683,
+        "maximum_seconds": 0.09908902202732861
+      },
+      "queries": {
+        "task_list": {
+          "samples": 7,
+          "median_seconds": 0.00595524103846401,
+          "p95_seconds": 0.0060649620136246085,
+          "maximum_seconds": 0.0060649620136246085
+        },
+        "source_summary": {
+          "samples": 7,
+          "median_seconds": 0.00418378203175962,
+          "p95_seconds": 0.004281487897969782,
+          "maximum_seconds": 0.004281487897969782
+        },
+        "full_audit": {
+          "samples": 7,
+          "median_seconds": 0.2452781159663573,
+          "p95_seconds": 0.2455445691011846,
+          "maximum_seconds": 0.2455445691011846
+        }
+      },
+      "wal_bytes": 4206552,
+      "database_bytes": 33722368,
+      "counter_rows": 130,
+      "budget_used_after_known_unsent": 0
+    }
+  ]
+}

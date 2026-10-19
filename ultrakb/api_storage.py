@@ -2,21 +2,24 @@
 
 from dataclasses import asdict
 from pathlib import Path
+from threading import Event
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
-from starlette.concurrency import run_in_threadpool
 
 from ultrakb.api_helpers import require_bearer_token
 from ultrakb.application.storage_maintenance import (
+    audit_knowledge_usage,
     backup_knowledge,
     collect_garbage,
     preview_storage_maintenance,
     repair_knowledge_receipts,
+    repair_knowledge_usage,
     restore_knowledge,
     retire_unused_roots,
 )
 from ultrakb.config import resolve_kb_alias
+from ultrakb.context.workers import run_blocking
 from ultrakb.storage.database import DatabaseIdentity, StorageFormatError
 
 storage_router = APIRouter(prefix="/api/v1/storage", dependencies=[Depends(require_bearer_token)])
@@ -39,15 +42,20 @@ class RootRetirementRequest(MaintenanceRequest):
     max_bytes: int = Field(default=256 * 1024, ge=1)
 
 
+class UsageAuditRequest(RootRetirementRequest):
+    max_items: int = Field(default=128, ge=1, le=128)
+    max_bytes: int = Field(default=256 * 1024, ge=1, le=256 * 1024)
+
+
 class RestoreRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     backup: str = Field(min_length=1)
     destination: str = Field(min_length=1)
 
 
-async def _call(operation, *args, **options):
+async def _call(operation, *args, on_cancel=None, **options):
     try:
-        return asdict(await run_in_threadpool(operation, *args, **options))
+        return asdict(await run_blocking(lambda: operation(*args, **options), on_cancel=on_cancel))
     except StorageFormatError as exc:
         raise HTTPException(409, str(exc)) from exc
     except KeyError as exc:
@@ -91,6 +99,34 @@ async def collect(request: MaintenanceRequest):
 @storage_router.post("/repair-receipts")
 async def repair(request: MaintenanceRequest):
     return await _maintain(repair_knowledge_receipts, request)
+
+
+async def _audit(operation, kb, **options):
+    cancelled = Event()
+    return await _call(
+        lambda: operation(resolve_kb_alias(kb), cancelled=cancelled.is_set, **options),
+        on_cancel=cancelled.set,
+    )
+
+
+@storage_router.get("/usage-audit")
+async def usage_audit(
+    kb: str,
+    max_items: int = Query(128, ge=1, le=128),
+    max_bytes: int = Query(256 * 1024, ge=1, le=256 * 1024),
+):
+    return await _audit(audit_knowledge_usage, kb, max_items=max_items, max_bytes=max_bytes)
+
+
+@storage_router.post("/repair-usage")
+async def repair_usage(request: UsageAuditRequest):
+    return await _audit(
+        repair_knowledge_usage,
+        request.kb,
+        identity=DatabaseIdentity(request.kb_id, request.generation),
+        max_items=request.max_items,
+        max_bytes=request.max_bytes,
+    )
 
 
 @storage_router.post("/backup")

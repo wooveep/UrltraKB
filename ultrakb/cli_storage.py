@@ -7,10 +7,12 @@ from pathlib import Path
 import click
 
 from ultrakb.application.storage_maintenance import (
+    audit_knowledge_usage,
     backup_knowledge,
     collect_garbage,
     preview_storage_maintenance,
     repair_knowledge_receipts,
+    repair_knowledge_usage,
     restore_knowledge,
     retire_unused_roots,
 )
@@ -91,6 +93,24 @@ def repair(ctx, **options):
 def backup(ctx, output, **options):
     """Write a verified backup package to a new external directory."""
     _run(ctx, backup_knowledge, output, **options)
+
+
+@storage.command("audit-usage")
+@_limits(default_bytes=256 * 1024)
+@_identity
+@click.pass_context
+def audit_usage(ctx, **options):
+    """Compare cached usage counters with an explicit full scan of request records."""
+    _run(ctx, audit_knowledge_usage, **options)
+
+
+@storage.command("repair-usage")
+@_limits(default_bytes=256 * 1024)
+@_identity
+@click.pass_context
+def repair_usage(ctx, **options):
+    """Rebuild one bounded counter batch without modifying requests or budgets."""
+    _run(ctx, repair_knowledge_usage, **options)
 
 
 @storage.command("restore")

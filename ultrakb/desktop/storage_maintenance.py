@@ -16,10 +16,12 @@ from PySide6.QtWidgets import (
 
 from ultrakb.application.storage_maintenance import (
     MaintenanceOverview,
+    audit_knowledge_usage,
     backup_knowledge,
     collect_garbage,
     preview_storage_maintenance,
     repair_knowledge_receipts,
+    repair_knowledge_usage,
     restore_knowledge,
     retire_unused_roots,
 )
@@ -41,9 +43,20 @@ def _result_text(result):
         "repaired": "已修复回执",
         "invalid": "仍需检查的回执",
         "remaining": "剩余回执",
+        "request_count": "已核对请求",
+        "counter_count": "已核对统计桶",
+        "mismatched_counters": "发现差异",
+        "repaired_counters": "已重建统计桶",
+        "invalid_request_count": "无法核验的请求",
         "path": "保存目录",
     }
-    lines = [f"{label}：{values[key]}" for key, label in labels.items() if key in values]
+    if "repaired_counters" in values:
+        labels["remaining"] = "剩余统计桶"
+    lines = [
+        f"{label}：{values[key] if values[key] is not None else '未知'}"
+        for key, label in labels.items()
+        if key in values
+    ]
     if values.get("has_more"):
         lines.append("仍有候选，可继续执行下一批。")
     if "coverage" in values:
@@ -92,6 +105,8 @@ class StorageMaintenanceDialog(QDialog):
                 ("释放无引用恢复材料", self.retire_roots),
                 ("清理孤立内容", self.collect),
                 ("修复待确认回执", self.repair_receipts),
+                ("核对用量统计", self.audit_usage),
+                ("重建用量统计", self.repair_usage),
                 ("备份到新目录…", self.choose_backup),
                 ("从备份恢复到新目录…", self.choose_restore),
             )
@@ -167,6 +182,11 @@ class StorageMaintenanceDialog(QDialog):
                 "completed": "已完成本批",
                 "busy": "存储正在使用中，本批未清理",
                 "blocked": "本批受阻",
+                "consistent": "用量统计与请求记录一致",
+                "differences": "用量统计存在差异，可显式重建",
+                "repaired": "已重建本批用量统计",
+                "conflict": "用量记录已更新，请重新核对",
+                "unavailable": "统计暂无法重建，请求和既有记录已保留",
             }
             lines.extend(["", states.get(state, state), _result_text(self.last_result)])
         if preview_error is not None:
@@ -199,6 +219,18 @@ class StorageMaintenanceDialog(QDialog):
 
     def repair_receipts(self):
         self._maintain(repair_knowledge_receipts)
+
+    def audit_usage(self):
+        if self.identity is None:
+            return
+        self._submit(
+            lambda: audit_knowledge_usage(
+                self.root, identity=self.identity, cancelled=lambda: self._closed
+            )
+        )
+
+    def repair_usage(self):
+        self._maintain(repair_knowledge_usage)
 
     def choose_backup(self):
         destination, _ = QFileDialog.getSaveFileName(self, "选择新备份目录", "ultrakb-backup")

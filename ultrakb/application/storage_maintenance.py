@@ -126,3 +126,37 @@ def repair_knowledge_receipts(
     return ReceiptStore(maintenance.root, maintenance.identity).repair(
         limit=max_items, byte_limit=max_bytes
     )
+
+
+def audit_knowledge_usage(
+    kb_dir: Path,
+    *,
+    scope=None,
+    identity=None,
+    max_items=128,
+    max_bytes=256 * 1024,
+    cancelled=None,
+):
+    from ultrakb.storage.usage_audit import UsageAudit
+
+    maintenance = _maintenance(kb_dir, scope, identity)
+    return UsageAudit(maintenance.root, maintenance.identity).run(
+        max_items=max_items, max_bytes=max_bytes, cancelled=cancelled
+    )
+
+
+def repair_knowledge_usage(
+    kb_dir: Path,
+    *,
+    scope=None,
+    identity=None,
+    max_items=128,
+    max_bytes=256 * 1024,
+    cancelled=None,
+):
+    from ultrakb.storage.usage_audit import UsageAudit
+
+    maintenance = _maintenance(kb_dir, scope, identity)
+    return UsageAudit(maintenance.root, maintenance.identity).run(
+        repair=True, max_items=max_items, max_bytes=max_bytes, cancelled=cancelled
+    )

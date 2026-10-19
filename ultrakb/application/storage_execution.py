@@ -9,6 +9,7 @@ from typing import Iterator
 from ultrakb.config import LlmCredentialBundle
 from ultrakb.lifecycle import read_lifecycle
 from ultrakb.llm_execution import executor_from_snapshot
+from ultrakb.storage.database import open_database
 from ultrakb.storage.execution_store import ExecutionStore
 from ultrakb.storage.model_usage import StoredModelUsage
 
@@ -44,7 +45,9 @@ def begin_storage_execution(root: Path, context: ExecutionContext) -> Iterator[L
             assert context.snapshot is not None
             yield LlmCredentialBundle(**context.snapshot.values()["credentials"])
             return
-        with _running(context):
+        # An idle connection preserves WAL coordination across short callbacks.
+        # It holds neither a SQL snapshot nor a reclamation lease during model waits.
+        with _running(context), open_database(root, expected=identity, read_only=True):
             if context.resume_model_task_id is not None or context.model_task is not None:
                 raise ValueError("A new-store execution cannot resume a legacy model-task ledger")
             if context.snapshot is None:
@@ -151,7 +154,7 @@ def begin_storage_operation(root: Path, context: ExecutionContext, operation: st
             context.check_stop()
             yield
             return
-        with _running(context):
+        with _running(context), open_database(root, expected=identity, read_only=True):
             context.check_stop()
             store = ExecutionStore(root, identity)
             previous = context.storage_execution
