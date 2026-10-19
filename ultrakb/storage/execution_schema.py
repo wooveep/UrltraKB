@@ -102,6 +102,7 @@ EXECUTION_SCHEMA = (
         payload_json TEXT NOT NULL CHECK (json_valid(payload_json))
     )""",
     "CREATE INDEX ukb_usage_execution ON ukb_usage_requests(execution_id, sequence)",
+    "CREATE INDEX ukb_usage_stage ON ukb_usage_requests(stage_attempt_id, sequence)",
     "CREATE INDEX ukb_usage_source ON ukb_usage_requests(source_id, sequence)",
     "CREATE INDEX ukb_usage_unit ON ukb_usage_requests(unit_id, sequence)",
     "CREATE INDEX ukb_usage_logical ON ukb_usage_requests(logical_call_id, sequence)",

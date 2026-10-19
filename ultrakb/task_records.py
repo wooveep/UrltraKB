@@ -48,6 +48,20 @@ class TaskExecution(TaskRecord):
     parent_application_task_id: RecordId | None = None
 
 
+class TaskInput(TaskRecord):
+    source_id: RecordId
+    source_revision_id: RecordId
+    source_ordinal: int = Field(ge=0)
+    name: str
+    original_digest: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+    original_bytes: int = Field(ge=0)
+    unit_revision_id: RecordId | None = None
+    unit_id: RecordId | None = None
+    unit_key: str | None = None
+    document_name: str | None = None
+    processing_fingerprint: str | None = None
+
+
 class TaskStage(TaskRecord):
     stage_attempt_id: RecordId
     parent_stage_id: RecordId | None
@@ -61,6 +75,8 @@ class TaskStage(TaskRecord):
     ended_at: str | None
     duration_seconds: float | None = Field(ge=0)
     error_code: str | None
+    input: TaskInput | None = None
+    input_unavailable_reason: str | None = None
 
 
 class TaskList(TaskRecord):
@@ -105,4 +121,20 @@ class TaskDetail(TaskRecord):
     stages_after: int | None
     requests_after: int | None
     publications_after: int | None
+    coverage: dict[str, str | bool]
+
+
+class TaskStageDetail(TaskRecord):
+    schema_version: Literal[1] = 1
+    statistics_at: str
+    kb_id: str
+    generation: str
+    task_id: RecordId
+    execution_id: RecordId
+    stage: TaskStage
+    usage_scope: Literal["source", "unit"] | None
+    current_usage: UsageAggregate | None
+    cumulative_usage: UsageAggregate | None
+    requests: tuple[UsageRequest, ...]
+    requests_after: int | None
     coverage: dict[str, str | bool]

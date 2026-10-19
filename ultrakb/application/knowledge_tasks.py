@@ -7,7 +7,7 @@ from ultrakb.knowledge_scope import resolve_scope
 from ultrakb.locks import atomic_write_text
 from ultrakb.storage.database import open_database
 from ultrakb.storage.task_store import TaskStore
-from ultrakb.task_records import TaskDetail, TaskList
+from ultrakb.task_records import TaskDetail, TaskList, TaskStageDetail
 
 
 def capture_task_identity(kb_dir: Path):
@@ -66,8 +66,23 @@ def read_knowledge_execution(kb_dir: Path, execution_id: str, **options) -> Task
     return store.for_execution(execution_id, **options)
 
 
+def read_knowledge_stage(kb_dir: Path, task_id: str, stage_id: str, **options) -> TaskStageDetail:
+    """Read one exact stage and bounded requests, including retained input context."""
+    store = _store(kb_dir, options.pop("scope", None), options.pop("identity", None))
+    return store.stage(task_id, stage_id, **options)
+
+
 def export_knowledge_task(kb_dir: Path, task_id: str, destination: Path, **options) -> TaskDetail:
     destination = require_external_export(kb_dir, destination.expanduser())
     result = read_knowledge_task(kb_dir, task_id, **options)
+    atomic_write_text(destination, result.model_dump_json(indent=2))
+    return result
+
+
+def export_knowledge_stage(
+    kb_dir: Path, task_id: str, stage_id: str, destination: Path, **options
+) -> TaskStageDetail:
+    destination = require_external_export(kb_dir, destination.expanduser())
+    result = read_knowledge_stage(kb_dir, task_id, stage_id, **options)
     atomic_write_text(destination, result.model_dump_json(indent=2))
     return result

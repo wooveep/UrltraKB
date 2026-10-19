@@ -5,8 +5,10 @@ from pathlib import Path
 import click
 
 from ultrakb.application.knowledge_tasks import (
+    export_knowledge_stage,
     export_knowledge_task,
     list_knowledge_tasks,
+    read_knowledge_stage,
     read_knowledge_task,
 )
 
@@ -61,3 +63,18 @@ def show_task(ctx, task_id, **options):
 def export_task(ctx, task_id, output, **options):
     """Write the same bounded detail schema to an external JSON file."""
     _run(ctx, export_knowledge_task, task_id, output, **options)
+
+
+@tasks.command("stage")
+@click.argument("task_id")
+@click.argument("stage_id")
+@click.option("--requests-after", type=click.IntRange(0, 2**63 - 1), default=0)
+@click.option("--limit", type=click.IntRange(1, 128), default=63)
+@click.option("--output", type=click.Path(path_type=Path))
+@click.pass_context
+def stage_task(ctx, task_id, stage_id, output, **options):
+    """Read a stage, retained input and exact request page, or export its JSON."""
+    if output is None:
+        _run(ctx, read_knowledge_stage, task_id, stage_id, **options)
+    else:
+        _run(ctx, export_knowledge_stage, task_id, stage_id, output, **options)

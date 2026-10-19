@@ -13,11 +13,13 @@ from ultrakb.task_records import (
     TaskOverview,
     TaskPublication,
     TaskStage,
+    TaskStageDetail,
 )
 
 from .coordination import storage_stage
 from .execution_schema import COUNTS
 from .execution_store import now
+from .task_inputs import describe_stage_input, describe_stage_inputs
 from .usage_store import summarize_counters
 
 _OVERVIEW = (
@@ -169,6 +171,71 @@ class TaskStore:
                 raise KeyError(execution_id)
         return self.read(row[0], execution_id=execution_id, cancelled=cancelled, **options)
 
+    def stage(self, task_id, stage_id, *, requests_after=0, limit=63, cancelled=None):
+        TypeAdapter(RecordId).validate_python(task_id)
+        TypeAdapter(RecordId).validate_python(stage_id)
+        _page(requests_after, limit)
+        with storage_stage(self.root, self.identity, read_only=True, cancelled=cancelled) as db:
+            db.connection.execute("BEGIN")
+            row = db.connection.execute(
+                f"SELECT s.execution_id, {', '.join('s.' + key for key in _STAGE_KEYS)} "
+                "FROM ukb_stage_attempts s JOIN ukb_executions e USING(execution_id) "
+                "WHERE s.stage_attempt_id = ? AND e.task_id = ?",
+                (stage_id, task_id),
+            ).fetchone()
+            if row is None:
+                raise KeyError(stage_id)
+            stage = describe_stage_input(
+                db, TaskStage.model_validate(dict(zip(_STAGE_KEYS, row[1:], strict=True)))
+            )
+            requests = db.connection.execute(
+                "SELECT sequence, payload_json FROM ukb_usage_requests "
+                "WHERE stage_attempt_id = ? AND sequence > ? ORDER BY sequence LIMIT ?",
+                (stage_id, requests_after, limit + 1),
+            ).fetchall()
+            source_id, unit_id = db.connection.execute(
+                "SELECT COALESCE(s.source_id, u.source_id), r.unit_id FROM (SELECT 1) "
+                "LEFT JOIN ukb_source_revisions s ON s.revision_id = ? "
+                "LEFT JOIN ukb_unit_revisions r ON r.unit_revision_id = ? "
+                "LEFT JOIN ukb_import_units u ON u.unit_id = r.unit_id",
+                (stage.source_revision_id, stage.unit_revision_id),
+            ).fetchone()
+            scope, selected = (
+                ("unit", unit_id)
+                if unit_id is not None
+                else ("source", source_id)
+                if source_id is not None
+                else (None, None)
+            )
+            current = _usage(db, f"execution_{scope}", f"{row[0]}:{selected}") if scope else None
+            cumulative = _usage(db, scope, selected) if scope else None
+            cursor = _cursor(requests, limit)
+            return TaskStageDetail(
+                statistics_at=now(),
+                kb_id=self.identity.kb_id,
+                generation=self.identity.generation,
+                task_id=task_id,
+                execution_id=row[0],
+                stage=stage,
+                usage_scope=scope,
+                current_usage=current,
+                cumulative_usage=cumulative,
+                requests=tuple(
+                    UsageRequest.model_validate_json(item[1]) for item in requests[:limit]
+                ),
+                requests_after=cursor,
+                coverage={
+                    "page_complete": cursor is None,
+                    "request_scope": "exact_stage_attempt",
+                    "input_usage": "recorded" if current or cumulative else "not_recorded",
+                    "input_description": "unavailable"
+                    if stage.input_unavailable_reason
+                    else "recorded"
+                    if stage.input is not None
+                    else "not_bound",
+                },
+            )
+
     def read(
         self,
         task_id,
@@ -249,9 +316,12 @@ class TaskStore:
                     TaskExecution.model_validate(dict(zip(_EXECUTION_KEYS, row[1:], strict=True)))
                     for row in executions[:limit]
                 ),
-                stages=tuple(
-                    TaskStage.model_validate(dict(zip(_STAGE_KEYS, row[1:], strict=True)))
-                    for row in stages[:limit]
+                stages=describe_stage_inputs(
+                    db,
+                    (
+                        TaskStage.model_validate(dict(zip(_STAGE_KEYS, row[1:], strict=True)))
+                        for row in stages[:limit]
+                    ),
                 ),
                 requests=tuple(
                     UsageRequest.model_validate_json(row[1]) for row in requests[:limit]

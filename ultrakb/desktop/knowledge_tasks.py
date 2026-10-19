@@ -13,14 +13,18 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QPlainTextEdit,
     QPushButton,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
 )
 
 from ultrakb.application.knowledge_tasks import (
     capture_task_identity,
+    export_knowledge_stage,
     export_knowledge_task,
     list_knowledge_tasks,
     read_knowledge_execution,
+    read_knowledge_stage,
     read_knowledge_task,
 )
 from ultrakb.desktop.io import LocalIO
@@ -120,6 +124,94 @@ def detail_text(detail):
     return "\n".join(lines)
 
 
+def stage_text(detail):
+    stage, original = detail.stage, detail.stage.input
+    lines = [
+        f"阶段：{_STAGES.get(stage.stage_code, stage.stage_code)}",
+        f"状态：{_STATES.get(stage.state, stage.state)}",
+        f"工作项序号：{stage.ordinal if stage.ordinal is not None else '未记录'}",
+        f"开始：{stage.started_at} · 结束：{stage.ended_at or '未记录'}",
+        f"失败原因代码：{stage.error_code or '无记录'}",
+    ]
+    if original is not None:
+        lines += [
+            f"资料：{original.name} · 原件大小：{original.original_bytes} 字节",
+            f"资料修订序号：{original.source_ordinal}",
+            f"处理单元：{original.document_name or '尚未关联'}",
+        ]
+    else:
+        lines.append(
+            "保留输入描述暂不可用。" if stage.input_unavailable_reason else "尚未关联资料。"
+        )
+    scope = "处理单元" if detail.usage_scope == "unit" else "资料"
+    lines += [
+        "",
+        f"以下用量范围：该{scope}。",
+        *_usage("本次执行", detail.current_usage),
+        *_usage("历史累计", detail.cumulative_usage),
+        "",
+        f"此阶段直接关联的请求页：{len(detail.requests)} 条。",
+    ]
+    for request in detail.requests:
+        lines.append(
+            f"{request.model} · {_STATES.get(request.state, request.state)} · "
+            f"发送：{request.send_status} · "
+            f"输入：{request.input_total if request.input_total is not None else '未知'} · "
+            f"输出：{request.output_total if request.output_total is not None else '未知'}"
+        )
+    lines += [
+        "还有后续请求。" if detail.requests_after is not None else "此阶段请求已到末页。",
+        f"统计时点：{detail.statistics_at} · 导出版本：{detail.schema_version}",
+    ]
+    return "\n".join(lines)
+
+
+def fill_stage_tree(tree, stages):
+    tree.blockSignals(True)
+    tree.clear()
+    sources, units, parents = {}, {}, {}
+    for stage in stages:
+        original = stage.input
+        source_key = original.source_revision_id if original else stage.source_revision_id
+        if source_key not in sources:
+            sources[source_key] = QTreeWidgetItem(
+                [original.name if original else "未关联或描述不可用的资料"]
+            )
+            tree.addTopLevelItem(sources[source_key])
+        parent = sources[source_key]
+        subject = (source_key, stage.unit_revision_id)
+        if original is not None and original.unit_revision_id is not None:
+            key = (source_key, original.unit_revision_id)
+            if key not in units:
+                units[key] = QTreeWidgetItem([f"处理单元：{original.document_name}"])
+                parent.addChild(units[key])
+            parent = units[key]
+        if stage.parent_stage_id in parents:
+            parent_subject, parent_item = parents[stage.parent_stage_id]
+            if parent_subject == subject:
+                parent = parent_item
+        item = QTreeWidgetItem(
+            [
+                f"{_STAGES.get(stage.stage_code, stage.stage_code)} · "
+                f"{_STATES.get(stage.state, stage.state)}"
+            ]
+        )
+        item.setData(0, Qt.ItemDataRole.UserRole, stage.stage_attempt_id)
+        parent.addChild(item)
+        if stage.work_key is not None:
+            work = QTreeWidgetItem(
+                [f"工作项序号：{stage.ordinal}" if stage.ordinal is not None else "查看此工作项"]
+            )
+            work.setData(0, Qt.ItemDataRole.UserRole, stage.stage_attempt_id)
+            work.setToolTip(0, stage.work_key)
+            item.addChild(work)
+            parents[stage.stage_attempt_id] = (subject, work)
+        else:
+            parents[stage.stage_attempt_id] = (subject, item)
+    tree.expandAll()
+    tree.blockSignals(False)
+
+
 class KnowledgeTasksDialog(QDialog):
     def __init__(
         self, kb_dir, parent=None, *, task_id=None, execution_id=None, limit=63, select_first=True
@@ -129,6 +221,7 @@ class KnowledgeTasksDialog(QDialog):
         self.task_id, self.execution_id = task_id, execution_id
         self.select_first = select_first
         self.identity, self.detail, self.list_cursor = None, None, None
+        self.stage_id, self.stage_detail, self.stage_cursor = None, None, 0
         self.cursors = {name + "_after": 0 for name in _PAGES}
         self._closed, self._busy, self._sequence = False, False, 0
         self.io = LocalIO(self)
@@ -148,6 +241,12 @@ class KnowledgeTasksDialog(QDialog):
         self.executions.setAccessibleName("选择执行")
         self.executions.currentIndexChanged.connect(self.select_execution)
         layout.addWidget(self.executions)
+        self.work = QTreeWidget()
+        self.work.setHeaderLabel("当前阶段页：资料 → 处理单元 → 阶段 → 工作项")
+        self.work.setMaximumHeight(200)
+        self.work.setAccessibleName("任务资料与工作项")
+        self.work.currentItemChanged.connect(self.select_stage)
+        layout.addWidget(self.work)
         self.body = QPlainTextEdit()
         self.body.setReadOnly(True)
         if not select_first:
@@ -161,12 +260,17 @@ class KnowledgeTasksDialog(QDialog):
             navigation.addWidget(button)
             self.next_buttons[name] = button
         layout.addLayout(navigation)
+        self.next_stage = QPushButton("下一页阶段请求")
+        self.next_stage.setEnabled(False)
+        self.next_stage.clicked.connect(self.next_stage_page)
+        navigation.addWidget(self.next_stage)
         controls = QHBoxLayout()
         for label, action in (
             ("任务列表", lambda: self.load_list()),
             ("下一页任务", lambda: self.load_list(self.list_cursor or 0)),
             ("刷新本页", self.refresh),
             ("从首页查看", self.reset_pages),
+            ("任务概况", self.show_task),
             ("导出本页 JSON", self.choose_export),
         ):
             button = QPushButton(label)
@@ -217,6 +321,9 @@ class KnowledgeTasksDialog(QDialog):
         )
 
     def refresh(self):
+        if self.stage_id is not None:
+            self.refresh_stage()
+            return
         options = self.options()
         task_id, execution_id = self.task_id, self.execution_id
         if task_id is None and execution_id is None:
@@ -242,6 +349,7 @@ class KnowledgeTasksDialog(QDialog):
             }
             self.task_id = self.detail.task.task_id
             self.body.setPlainText(detail_text(self.detail))
+            fill_stage_tree(self.work, self.detail.stages)
             self.status.setText("任务记录 · 分页读取权威数据；暂停刷新不会停止记录。")
             self.executions.blockSignals(True)
             self.executions.clear()
@@ -260,6 +368,49 @@ class KnowledgeTasksDialog(QDialog):
                 button.setEnabled(getattr(self.detail, name + "_after") is not None)
 
         self.submit(read, loaded)
+
+    def select_stage(self, item, previous=None):
+        stage_id = item.data(0, Qt.ItemDataRole.UserRole) if item is not None else None
+        self.stage_id, self.stage_detail, self.stage_cursor = stage_id, None, 0
+        if stage_id is None:
+            self._sequence += 1
+            self._busy = False
+            self.next_stage.setEnabled(False)
+            if self.detail is not None:
+                self.body.setPlainText(detail_text(self.detail))
+                for name, button in self.next_buttons.items():
+                    button.setEnabled(getattr(self.detail, name + "_after") is not None)
+            return
+        self.refresh_stage()
+
+    def refresh_stage(self):
+        stage_id, task_id = self.stage_id, self.task_id
+        options = dict(
+            identity=self.identity,
+            limit=self.limit,
+            requests_after=self.stage_cursor,
+            cancelled=lambda: self._closed,
+        )
+
+        def loaded(value):
+            self.stage_detail, self._shown_stage_options = value, options
+            self.body.setPlainText(stage_text(value))
+            self.status.setText("阶段详情 · 请求按当前阶段分页；用量区分本次执行和输入历史。")
+            self.next_stage.setEnabled(value.requests_after is not None)
+            for button in self.next_buttons.values():
+                button.setEnabled(False)
+
+        self.submit(lambda: read_knowledge_stage(self.root, task_id, stage_id, **options), loaded)
+
+    def next_stage_page(self):
+        if self.stage_detail is not None and self.stage_detail.requests_after is not None:
+            self.stage_cursor = self.stage_detail.requests_after
+            self.refresh_stage()
+
+    def show_task(self):
+        self.stage_id, self.stage_detail, self.stage_cursor = None, None, 0
+        self.next_stage.setEnabled(False)
+        self.refresh()
 
     def load_list(self, after=0):
         identity = self.identity
@@ -306,6 +457,8 @@ class KnowledgeTasksDialog(QDialog):
             self.refresh()
 
     def reset_pages(self):
+        self.stage_id, self.stage_detail, self.stage_cursor = None, None, 0
+        self.next_stage.setEnabled(False)
         self.cursors = {name + "_after": 0 for name in _PAGES}
         self.refresh()
 
@@ -319,6 +472,21 @@ class KnowledgeTasksDialog(QDialog):
             self.export_to(Path(path))
 
     def export_to(self, destination):
+        if self.stage_id is not None:
+            if self.stage_detail is None:
+                return
+            options, task_id, stage_id = (
+                dict(self._shown_stage_options),
+                self.stage_detail.task_id,
+                self.stage_detail.stage.stage_attempt_id,
+            )
+            self.submit(
+                lambda: export_knowledge_stage(
+                    self.root, task_id, stage_id, Path(destination), **options
+                ),
+                lambda result: self.status.setText("已导出当前分页范围的阶段详情。"),
+            )
+            return
         if self.detail is None:
             return
         options, task_id = dict(self._shown_options), self.detail.task.task_id

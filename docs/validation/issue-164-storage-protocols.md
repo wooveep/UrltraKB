@@ -1994,3 +1994,32 @@ Mypy passes 584 modules. Independent static reviews found and closed the mixed
 source retry issue. This completes this association batch; source/work-item
 drilldown, observation/archive/audit/retirement and P8 activation remain pending.
 Issue 164 remains open.
+
+### Retained task inputs and exact stage drilldown
+
+Schema 32 adds an index for exact stage/request cursor queries. Task stage pages
+describe the bound retained original and processing unit, including original
+name, digest and byte count, source ordinal and processing fingerprint. They read
+the retained manifest rather than current files or original bodies, and reuse
+descriptions within each bounded page. Unavailable descriptions remain explicit
+without hiding the underlying stage or independently known costs.
+
+The shared stage-detail use case returns one exact stage, its directly associated
+request page and separately scoped input usage for this execution and history.
+Those input totals are labelled as source or processing-unit costs. Requests are
+not aggregated into a misleading single-stage total. CLI `tasks stage`, HTTP
+stage/detail export and the Qt task browser use the same schema and cursors.
+The desktop groups the current stage page by input and processing unit, preserves
+available parent-stage/work-item relationships and exports the selected detail.
+
+Task HTTP reads signal cancellation and join the actual blocking reader. A real
+reclamation lock witnesses both task-page and stage-page cancellation. Another
+real lock reproduces and verifies the fix for a late Qt stage result after the
+user returns to an input group: obsolete callbacks cannot replace the overview
+or make its export disagree with the display.
+
+The final task/native/compilation/workbook/boundary/size matrix passes 47 tests.
+Mypy passes 585 modules; focused Ruff, formatting and diff checks pass. Both
+readonly review axes close the selection-race finding. Remaining non-model
+observation coverage, worksheet-specific failure descriptions, archive/audit/root
+retirement and the sole P8 activation are unfinished. Issue 164 remains open.

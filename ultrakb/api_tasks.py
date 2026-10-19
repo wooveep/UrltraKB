@@ -1,13 +1,19 @@
 """Authenticated task query adapters; all storage work runs off the event loop."""
 
+from threading import Event
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
-from starlette.concurrency import run_in_threadpool
 
 from ultrakb.api_helpers import require_bearer_token
-from ultrakb.application.knowledge_tasks import list_knowledge_tasks, read_knowledge_task
+from ultrakb.application.knowledge_tasks import (
+    list_knowledge_tasks,
+    read_knowledge_stage,
+    read_knowledge_task,
+)
 from ultrakb.config import resolve_kb_alias
-from ultrakb.task_records import TaskDetail, TaskList
+from ultrakb.context.workers import run_blocking
+from ultrakb.task_records import TaskDetail, TaskList, TaskStageDetail
 
 tasks_router = APIRouter(prefix="/api/v1/tasks", dependencies=[Depends(require_bearer_token)])
 
@@ -31,11 +37,13 @@ def detail_options(
 
 
 async def _query(operation, kb, *args, **options):
+    cancelled = Event()
+
     def read():
-        return operation(resolve_kb_alias(kb), *args, **options)
+        return operation(resolve_kb_alias(kb), *args, cancelled=cancelled.is_set, **options)
 
     try:
-        return await run_in_threadpool(read)
+        return await run_blocking(read, on_cancel=cancelled.set)
     except KeyError as exc:
         raise HTTPException(404, "Task or execution was not found") from exc
     except (ValueError, OSError) as exc:
@@ -63,4 +71,28 @@ async def export_task(task_id: str, kb: str, options: dict = Depends(detail_opti
         result.model_dump_json(indent=2),
         media_type="application/json",
         headers={"Content-Disposition": f'attachment; filename="task-{result.task.task_id}.json"'},
+    )
+
+
+def stage_options(
+    limit: int = Query(63, ge=1, le=128),
+    requests_after: int = Query(0, ge=0, lt=2**63),
+):
+    return dict(limit=limit, requests_after=requests_after)
+
+
+@tasks_router.get("/{task_id}/stages/{stage_id}", response_model=TaskStageDetail)
+async def read_stage(task_id: str, stage_id: str, kb: str, options: dict = Depends(stage_options)):
+    return await _query(read_knowledge_stage, kb, task_id, stage_id, **options)
+
+
+@tasks_router.get("/{task_id}/stages/{stage_id}/export")
+async def export_stage(
+    task_id: str, stage_id: str, kb: str, options: dict = Depends(stage_options)
+):
+    result = await _query(read_knowledge_stage, kb, task_id, stage_id, **options)
+    return Response(
+        result.model_dump_json(indent=2),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="stage-{stage_id}.json"'},
     )
