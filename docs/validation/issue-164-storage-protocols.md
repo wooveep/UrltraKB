@@ -1900,3 +1900,35 @@ endpoint, all three focused review cases pass. Mypy passes 580 modules; focused
 Ruff, formatting, module-size and diff checks pass. Remaining artifact management,
 observation/archive/audit work and the sole P8 activation remain unfinished.
 Issue 164 remains open.
+
+### Retained desktop artifact browsing and browser dependencies
+
+The artifact workbench captures the main-store read scope and pages over a fixed
+output epoch and knowledge publication. Selected files, Markdown images and
+complete exports use those retained originals even after newer output is
+accepted. Unknown physical images cannot fall back to Qt's file reader, including
+Markdown files with uppercase extensions. Directory selection captures the
+artifact and version before entering a modal event loop, so a concurrent refresh
+cannot destroy or change the export selection.
+
+Browser previews use a short-lived loopback read service bound to the same
+publication and output epoch. Relative dependencies, including another retained
+package or a sibling of a single HTML file, are read on demand through actual
+storage stages. Idle previews hold no reclamation lease. File-URL dependencies
+are refused before opening the browser; unknown local paths never read the
+working copy. No temporary artifact directory is created or cleaned up.
+
+The I/O owner accepts each preview before queued UI delivery. Obsolete results,
+selection changes and application shutdown stop the appropriate services.
+Joining actual readers happens off Qt and remains included in the application's
+I/O shutdown wait. Blob reads check cancellation between 1 MiB chunks without
+changing complete integrity validation for normal exports. A real blocked CAS
+write proves GC remains busy, the GUI stop returns before that I/O completes,
+and shutdown remains pending until the actual reader exits.
+
+The expanded artifact/desktop/boundary matrix passes 29 tests. Six focused final
+cases also pass for retained HTTP dependencies, refused file references and the
+real Qt paging/image/export/cancellation matrix. Mypy passes 581 modules; focused
+Ruff, formatting, module-size and diff checks pass. Generation adapter receipts,
+remaining observation/archive/audit work and the sole P8 activation are still
+unfinished. Issue 164 remains open.

@@ -86,7 +86,7 @@ def read_bytes(db: Database, digest: str, *, registered: bool = True) -> bytes:
     return payload
 
 
-def copy_blob(db: Database, digest: str, output: BinaryIO) -> None:
+def copy_blob(db: Database, digest: str, output: BinaryIO, *, cancelled=None) -> None:
     """Stream one accepted original under its caller's read/reclaim stage."""
     require_stage(db)
     if db.connection.in_transaction:
@@ -98,7 +98,12 @@ def copy_blob(db: Database, digest: str, output: BinaryIO) -> None:
         raise ValueError("Blob is missing or unavailable")
     path, hasher, size = blob_path(db.root, digest), hashlib.sha256(), 0
     with path.open("rb") as reader:
-        while chunk := reader.read(1024 * 1024):
+        while True:
+            if cancelled is not None and cancelled():
+                raise InterruptedError("Blob read cancelled")
+            chunk = reader.read(1024 * 1024)
+            if not chunk:
+                break
             size += len(chunk)
             if size > row[0]:
                 raise ValueError("Blob failed integrity validation")

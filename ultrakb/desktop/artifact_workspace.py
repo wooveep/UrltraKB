@@ -113,6 +113,10 @@ def build_workspace(panel):
     panel.items.setMinimumWidth(160)
     panel.items.currentItemChanged.connect(panel.select)
     left.addWidget(panel.items, 1)
+    panel.more_button = QPushButton("加载更多成果")
+    panel.more_button.setEnabled(False)
+    panel.more_button.clicked.connect(panel.load_more)
+    left.addWidget(panel.more_button)
     panel.empty_hint = label("还没有成果。点击「新建创作」开始。")
     left.addWidget(panel.empty_hint)
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import ExitStack
 from pathlib import Path
 
@@ -32,6 +32,8 @@ class LocalIO(QObject):
         self._operations = {}
         self._waiters = {}
         self._futures = []
+        self._resources = []
+        self._resource_guard = threading.Lock()
         self.completed.connect(self._deliver)
 
     def submit(
@@ -186,10 +188,46 @@ class LocalIO(QObject):
 
     def stop(self):
         self._stop.set()
+        with self._resource_guard:
+            resources = tuple(self._resources)
+        for resource in resources:
+            self.close_resource(resource)
         self._callbacks.clear()
         self._operations.clear()
         self._waiters.clear()
         self._pool.shutdown(wait=False, cancel_futures=True)
 
+    def own_resource(self, resource):
+        """A worker transfers a closeable resource before its queued UI delivery."""
+        with self._resource_guard:
+            if not self._stop.is_set():
+                self._resources.append(resource)
+                return True
+        resource.close()  # Still in the original worker, covered by its Future.
+        return False
+
+    def close_resource(self, resource):
+        """Stop now and join resource I/O off Qt, including during app shutdown."""
+        with self._resource_guard:
+            if resource not in self._resources:
+                return
+            self._resources.remove(resource)
+        resource.request_stop()
+        future = Future()
+        self._futures.append(future)
+
+        def close():
+            try:
+                resource.close()
+            except BaseException as error:
+                future.set_exception(error)
+            else:
+                future.set_result(None)
+
+        threading.Thread(target=close, name="ultrakb-resource-close", daemon=True).start()
+
     def stopped(self):
         return all(future.done() for future in self._futures)
+
+    def stopping(self):
+        return self._stop.is_set()

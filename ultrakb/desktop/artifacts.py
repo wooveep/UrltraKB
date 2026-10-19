@@ -1,6 +1,7 @@
 """Native artifact generation, reading, complete export, and explicit HTML preview."""
 
 from pathlib import Path
+from threading import RLock
 
 from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices
@@ -27,13 +28,24 @@ class ArtifactsDialog(ManagementPanel):
     def __init__(self, window, kb):
         super().__init__(window)
         self.window, self.kb = window, kb
-        self.scope = getattr(window, "scope", None)
+        captured = getattr(window, "read_scope", None)
+        self.scope = (
+            captured
+            if captured is not None and captured.knowledge is not None
+            else getattr(window, "scope", None)
+        )
         self.view_id = self.scope.view_id if self.scope else None
         self._closed = False
         self._preparing = False
         self._tasks = set()
         self._selection = 0
         self._refresh_id = 0
+        self._epoch = None
+        self._after = None
+        self._page_loading = False
+        self._previews = []
+        self._pending_previews = []
+        self._preview_lock = RLock()
         self.setWindowTitle(f"生成与产物 · {kb.name}")
         self.resize(1080, 800)
         from ultrakb.desktop.artifact_workspace import build_workspace
@@ -109,10 +121,9 @@ class ArtifactsDialog(ManagementPanel):
                 on_submitted=submitted,
             )
 
-        self.window.io.submit(
+        self._read(
             lambda: preview_generation(self.kb, kind, name, scope=self.scope),
             loaded,
-            kb=self.kb,
             obsolete=lambda: self._closed,
         )
 
@@ -160,25 +171,38 @@ class ArtifactsDialog(ManagementPanel):
 
     def refresh(self):
         self._refresh_id += 1
+        self._selection += 1
         request_id = self._refresh_id
+        self._page_loading = True
+        self.more_button.setEnabled(False)
+        selected_scope = self.scope
 
-        def loaded(items, error):
+        def read():
+            scope = selected_scope
+            if scope is not None and scope.knowledge is not None:
+                from ultrakb.application.views import storage_scope
+
+                scope = storage_scope(self.kb, scope.knowledge.identity, view_id=scope.view_id)
+            return scope, list_artifacts(self.kb, scope=scope)
+
+        def loaded(value, error):
+            self._page_loading = False
             if error:
                 self.status.setText(f"无法读取产物（{type(error).__name__}）")
                 return
+            self.scope, page = value
+            self._epoch = getattr(page, "output_epoch", None)
             selected = self.items.currentItem()
             selected_path = self._preferred_path or (
                 selected.data(Qt.ItemDataRole.UserRole) if selected else None
             )
             blocked = self.items.blockSignals(True)
             self.items.clear()
-            for artifact in items:
-                title = "知识关联图谱" if artifact.kind == "知识图谱" else Path(artifact.path).stem
-                item = QListWidgetItem(f"{title}\n{artifact.kind}", self.items)
-                item.setData(Qt.ItemDataRole.UserRole, artifact.path)
-                item.setData(Qt.ItemDataRole.UserRole + 1, artifact.kind)
-                item.setToolTip(artifact.path)
-                if artifact.path == selected_path:
+            self.append_artifacts(page)
+            for index in range(self.items.count()):
+                item = self.items.item(index)
+                artifact_path = item.data(Qt.ItemDataRole.UserRole)
+                if artifact_path == selected_path:
                     self.items.setCurrentItem(item)
                     self._preferred_path = None
             if self.items.currentItem() is None and self.items.count():
@@ -187,15 +211,70 @@ class ArtifactsDialog(ManagementPanel):
             self.items.blockSignals(blocked)
             self.select(self.items.currentItem())
 
-        self.window.io.submit(
-            lambda: list_artifacts(self.kb),
+        self._read(
+            read,
             loaded,
-            kb=self.kb,
+            obsolete=lambda: self._closed or request_id != self._refresh_id,
+        )
+
+    def _read(self, operation, callback, *, obsolete):
+        scope = self.scope
+        if scope is None or scope.knowledge is None:
+            self.window.io.submit(operation, callback, kb=self.kb, obsolete=obsolete)
+            return
+        from ultrakb.storage.coordination import storage_stage
+
+        def read():
+            with storage_stage(
+                self.kb,
+                scope.knowledge.identity,
+                read_only=True,
+                cancelled=lambda: obsolete() or self.window.io.stopping(),
+            ):
+                return operation()
+
+        self.window.io.submit(read, callback, obsolete=obsolete)
+
+    def append_artifacts(self, page):
+        for artifact in page:
+            title = "知识关联图谱" if artifact.kind == "知识图谱" else Path(artifact.path).stem
+            item = QListWidgetItem(f"{title}\n{artifact.kind}", self.items)
+            item.setData(Qt.ItemDataRole.UserRole, artifact.path)
+            item.setData(Qt.ItemDataRole.UserRole + 1, artifact.kind)
+            item.setToolTip(artifact.path)
+        self._after = getattr(page, "next_after", None)
+        self.more_button.setEnabled(self._after is not None)
+
+    def load_more(self):
+        if self._page_loading or self._after is None:
+            return
+        request_id, after, scope, epoch = (
+            self._refresh_id,
+            self._after,
+            self.scope,
+            self._epoch,
+        )
+        self._page_loading = True
+        self.more_button.setEnabled(False)
+
+        def loaded(page, error):
+            self._page_loading = False
+            if error:
+                self.status.setText(f"无法读取更多产物（{type(error).__name__}）")
+                self.more_button.setEnabled(True)
+                return
+            self.append_artifacts(page)
+            self.filter_items()
+
+        self._read(
+            lambda: list_artifacts(self.kb, scope=scope, after=after, epoch=epoch),
+            loaded,
             obsolete=lambda: self._closed or request_id != self._refresh_id,
         )
 
     def select(self, item, previous=None):
         self._selection += 1
+        self.close_previews(pending_only=True)
         selection = self._selection
         self.files.clear()
         self.export_button.setEnabled(bool(item))
@@ -208,6 +287,7 @@ class ArtifactsDialog(ManagementPanel):
             self.artifact_hint.setText("从左侧选择成果进行预览，或新建一次创作。")
             return
         path = item.data(Qt.ItemDataRole.UserRole)
+        scope, epoch = self.scope, self._epoch
         self.artifact_title.setText(item.text().splitlines()[0])
         kind = item.data(Qt.ItemDataRole.UserRole + 1)
         self.artifact_hint.setText(
@@ -239,15 +319,15 @@ class ArtifactsDialog(ManagementPanel):
             self.files.setVisible(len(files) > 1)
             self.read()
 
-        self.window.io.submit(
-            lambda: artifact_files(self.kb, path),
+        self._read(
+            lambda: artifact_files(self.kb, path, scope=scope, epoch=epoch),
             loaded,
-            kb=self.kb,
             obsolete=lambda: self._closed or selection != self._selection,
         )
 
     def read(self):
         relative = self.files.currentText()
+        scope, epoch, selection = self.scope, self._epoch, self._selection
         html = Path(relative).suffix.lower() in {".html", ".htm"}
         self.preview_button.setEnabled(bool(relative) and html)
         if not relative:
@@ -255,13 +335,32 @@ class ArtifactsDialog(ManagementPanel):
             self.reader.show_temporary("选择产物及其文件以查看。")
             return
 
-        def loaded(text, error):
+        def read():
+            text = read_artifact(
+                self.kb,
+                relative,
+                scope=scope,
+                epoch=epoch if relative.startswith("output/") else None,
+            )
+            base = (self.kb / relative).parent
+            if (
+                scope is not None
+                and scope.knowledge is not None
+                and Path(relative).suffix.lower() == ".md"
+            ):
+                from ultrakb.application.artifact_previews import capture_artifact_assets
+
+                base = capture_artifact_assets(self.kb, relative, text, scope=scope, epoch=epoch)
+            return text, base
+
+        def loaded(value, error):
             if error:
                 self.source.setPlainText(
                     f"此文件无法作为 UTF-8 文本读取（{type(error).__name__}）。可导出完整产物。"
                 )
                 self.reader.show_temporary("请导出后使用对应文件程序打开。")
                 return
+            text, base = value
             self.source.setPlainText(text)
             if Path(relative).suffix.lower() == ".md":
                 parts = frontmatter.split(text) if frontmatter.parse(text) else None
@@ -269,7 +368,7 @@ class ArtifactsDialog(ManagementPanel):
                     lines = parts[0].splitlines()
                     if lines[0] != "---" or lines[-1] != "---":
                         parts = None
-                self.reader.show_markdown(parts[1] if parts else text, (self.kb / relative).parent)
+                self.reader.show_markdown(parts[1] if parts else text, base)
                 self.tabs.setCurrentIndex(0)
             else:
                 self.reader.show_temporary(
@@ -279,34 +378,77 @@ class ArtifactsDialog(ManagementPanel):
                 )
                 self.tabs.setCurrentIndex(0)
 
-        self.window.io.submit(
-            lambda: read_artifact(self.kb, relative),
+        self._read(
+            read,
             loaded,
-            kb=self.kb,
-            obsolete=lambda: self._closed or self.files.currentText() != relative,
+            obsolete=lambda: self._closed
+            or selection != self._selection
+            or self.files.currentText() != relative,
         )
 
     def export(self):
         item = self.items.currentItem()
         if not item:
             return
+        path = item.data(Qt.ItemDataRole.UserRole)
+        scope, epoch = self.scope, self._epoch
         destination = QFileDialog.getExistingDirectory(self, "选择知识库以外的导出目录")
         if not destination:
             return
-        path = item.data(Qt.ItemDataRole.UserRole)
-        self.window.io.submit(
-            lambda: export_artifact(self.kb, path, Path(destination)),
+        self._read(
+            lambda: export_artifact(self.kb, path, Path(destination), scope=scope, epoch=epoch),
             lambda output, error: self.status.setText(
                 f"导出未完成（{type(error).__name__}）" if error else f"已导出新副本：{output}"
             ),
-            kb=self.kb,
             obsolete=lambda: self._closed,
         )
 
     def preview(self):
         relative = self.files.currentText()
-        if Path(relative).suffix.lower() in {".html", ".htm"}:
+        if Path(relative).suffix.lower() not in {".html", ".htm"}:
+            return
+        scope, epoch, selection = self.scope, self._epoch, self._selection
+        if scope is None or scope.knowledge is None:
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.kb / relative)))
+            return
+        item = self.items.currentItem()
+        if item is None:
+            return
+        path = item.data(Qt.ItemDataRole.UserRole)
+        from ultrakb.application.artifact_previews import prepare_artifact_preview
+
+        def obsolete():
+            return self._closed or selection != self._selection or self.window.io.stopping()
+
+        def loaded(preview, error):
+            if error:
+                self.status.setText(f"无法准备预览（{type(error).__name__}）")
+                return
+            with self._preview_lock:
+                self._pending_previews.remove(preview)
+            QDesktopServices.openUrl(QUrl(preview.url))
+
+        def prepare():
+            preview = prepare_artifact_preview(
+                self.kb, path, relative, scope=scope, epoch=epoch, cancelled=obsolete
+            )
+            with self._preview_lock:
+                if obsolete():
+                    preview.close()
+                    return None
+                if not self.window.io.own_resource(preview):
+                    return None
+                # Ownership transfers before the queued UI callback. Closing the
+                # panel can therefore dispose even an undelivered result.
+                self._previews.append(preview)
+                self._pending_previews.append(preview)
+            return preview
+
+        self._read(
+            prepare,
+            loaded,
+            obsolete=obsolete,
+        )
 
     def poll(self):
         completed = [
@@ -345,4 +487,20 @@ class ArtifactsDialog(ManagementPanel):
         self._closed = True
         self.timer.stop()
         self.reader.stop_rendering()
+        self.close_previews()
         super().done(result)
+
+    def close_previews(self, *, pending_only=False):
+        with self._preview_lock:
+            previews = self._pending_previews[:] if pending_only else self._previews[:]
+            for preview in previews:
+                self.window.io.close_resource(preview)
+                self._previews.remove(preview)
+            self._pending_previews.clear()
+
+    def closeEvent(self, event):
+        self._closed = True
+        self.timer.stop()
+        self.reader.stop_rendering()
+        self.close_previews()
+        super().closeEvent(event)
