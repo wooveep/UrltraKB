@@ -1,0 +1,126 @@
+{
+  "recorded_at": "2026-10-19T16:24:10.760306+00:00",
+  "python": "3.12.13 (main, Jun 23 2026, 15:18:55) [Clang 22.1.3 ]",
+  "sqlite": "3.53.1",
+  "nodes": 5000,
+  "batch_limits": {
+    "max_items": 1,
+    "max_bytes": 67108864
+  },
+  "busy_witnesses": [
+    {
+      "phase": "gc_during_read",
+      "status": "busy",
+      "deleted": 0
+    },
+    {
+      "phase": "gc_during_backup",
+      "status": "busy",
+      "deleted": 0
+    }
+  ],
+  "model_wait": {
+    "active_question_reclaim_leases": 0,
+    "sends": 1
+  },
+  "lease_intervals": {
+    "backup_gated": {
+      "shared": {
+        "samples": 1,
+        "median_ms": 89.15640600025654,
+        "p95_ms": 89.15640600025654,
+        "max_ms": 89.15640600025654
+      },
+      "exclusive": {
+        "samples": 0
+      }
+    },
+    "fixed_read_gated": {
+      "shared": {
+        "samples": 1,
+        "median_ms": 11.108443955890834,
+        "p95_ms": 11.108443955890834,
+        "max_ms": 11.108443955890834
+      },
+      "exclusive": {
+        "samples": 0
+      }
+    },
+    "gc_bounded": {
+      "shared": {
+        "samples": 0
+      },
+      "exclusive": {
+        "samples": 169,
+        "median_ms": 9.707625024020672,
+        "p95_ms": 15.583285945467651,
+        "max_ms": 69.85331396572292
+      }
+    },
+    "gc_during_model_wait": {
+      "shared": {
+        "samples": 0
+      },
+      "exclusive": {
+        "samples": 1,
+        "median_ms": 12.139633996412158,
+        "p95_ms": 12.139633996412158,
+        "max_ms": 12.139633996412158
+      }
+    },
+    "other": {
+      "shared": {
+        "samples": 174,
+        "median_ms": 2.078056975733489,
+        "p95_ms": 2.410546992905438,
+        "max_ms": 127.0989659242332
+      },
+      "exclusive": {
+        "samples": 0
+      }
+    },
+    "question": {
+      "shared": {
+        "samples": 28,
+        "median_ms": 4.88262897124514,
+        "p95_ms": 49.48151600547135,
+        "max_ms": 116.83734506368637
+      },
+      "exclusive": {
+        "samples": 0
+      }
+    },
+    "tree_build": {
+      "shared": {
+        "samples": 1,
+        "median_ms": 904.2420529294759,
+        "p95_ms": 904.2420529294759,
+        "max_ms": 904.2420529294759
+      },
+      "exclusive": {
+        "samples": 0
+      }
+    }
+  },
+  "gc": {
+    "batches": 169,
+    "batch_wall": {
+      "samples": 169,
+      "median_ms": 21.631059935316443,
+      "p95_ms": 28.8242680253461,
+      "max_ms": 81.46645699162036
+    },
+    "busy": 0,
+    "blobs_deleted": 10,
+    "bytes_deleted": 12999242,
+    "trees_deleted": 1,
+    "max_tree_rows_per_batch": 87,
+    "remaining_candidates": 0
+  },
+  "wal_bytes": 4239512,
+  "integrity": "ok",
+  "foreign_keys": "ok",
+  "fixed_original_read": "unchanged",
+  "backup_restored_original": "unchanged",
+  "failures": []
+}

@@ -32,6 +32,8 @@
 !validation/issue-164-conversations-benchmark.json
 !validation/issue-164-conversations-reference.py
 !validation/issue-164-conversations-reference.json
+!validation/issue-164-maintenance-benchmark.md
+!validation/issue-164-maintenance-benchmark.json
 !desktop-evidence/
 !desktop-evidence/dev-1.2.0/
 !desktop-evidence/dev-1.2.0/verification.json
