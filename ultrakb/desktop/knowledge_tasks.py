@@ -26,6 +26,7 @@ from ultrakb.application.knowledge_tasks import (
     read_knowledge_execution,
     read_knowledge_stage,
     read_knowledge_task,
+    set_knowledge_task_visibility,
 )
 from ultrakb.desktop.io import LocalIO
 
@@ -303,6 +304,16 @@ class KnowledgeTasksDialog(QDialog):
         self.next_stage.setEnabled(False)
         self.next_stage.clicked.connect(self.next_stage_page)
         navigation.addWidget(self.next_stage)
+        visibility = QHBoxLayout()
+        self.show_hidden = QPushButton("包含隐藏任务")
+        self.show_hidden.setCheckable(True)
+        self.show_hidden.toggled.connect(lambda checked: self.load_list())
+        visibility.addWidget(self.show_hidden)
+        self.visibility = QPushButton("隐藏任务")
+        self.visibility.setEnabled(False)
+        self.visibility.clicked.connect(self.change_visibility)
+        visibility.addWidget(self.visibility)
+        layout.addLayout(visibility)
         controls = QHBoxLayout()
         for label, action in (
             ("任务列表", lambda: self.load_list()),
@@ -387,6 +398,8 @@ class KnowledgeTasksDialog(QDialog):
                 "execution_id": self.detail.execution_id,
             }
             self.task_id = self.detail.task.task_id
+            self.visibility.setText("恢复显示" if self.detail.task.hidden else "隐藏任务")
+            self.visibility.setEnabled(self.detail.task.state not in {"started", "stopping"})
             self.body.setPlainText(detail_text(self.detail))
             fill_stage_tree(self.work, self.detail.stages)
             self.status.setText("任务记录 · 分页读取权威数据；暂停刷新不会停止记录。")
@@ -453,6 +466,7 @@ class KnowledgeTasksDialog(QDialog):
 
     def load_list(self, after=0):
         identity = self.identity
+        include_hidden = self.show_hidden.isChecked()
 
         def read():
             bound = identity or capture_task_identity(self.root)
@@ -461,6 +475,7 @@ class KnowledgeTasksDialog(QDialog):
                 identity=bound,
                 after=after,
                 limit=self.limit,
+                include_hidden=include_hidden,
                 cancelled=lambda: self._closed,
             )
 
@@ -470,7 +485,10 @@ class KnowledgeTasksDialog(QDialog):
             self.tasks.blockSignals(True)
             self.tasks.clear()
             for task in page.tasks:
-                item = QListWidgetItem(f"{task.created_at} · {_STATES[task.state]}")
+                item = QListWidgetItem(
+                    f"{task.created_at} · {_STATES[task.state]}"
+                    + (" · 已隐藏" if task.hidden else "")
+                )
                 item.setData(Qt.ItemDataRole.UserRole, task.task_id)
                 self.tasks.addItem(item)
             self.tasks.blockSignals(False)
@@ -479,6 +497,28 @@ class KnowledgeTasksDialog(QDialog):
                 self.tasks.setCurrentRow(0)
 
         self.submit(read, loaded)
+
+    def change_visibility(self):
+        if self.detail is None:
+            return
+        task, identity = self.detail.task, self.identity
+
+        def loaded(result):
+            self.detail = self.detail.model_copy(update={"task": result})
+            self.visibility.setText("恢复显示" if result.hidden else "隐藏任务")
+            self.body.setPlainText(detail_text(self.detail))
+            self.load_list()
+
+        self.submit(
+            lambda: set_knowledge_task_visibility(
+                self.root,
+                task.task_id,
+                identity=identity,
+                hidden=not task.hidden,
+                cancelled=lambda: self._closed,
+            ),
+            loaded,
+        )
 
     def select_task(self, item, previous=None):
         if item is not None:

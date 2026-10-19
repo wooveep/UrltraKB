@@ -10,7 +10,9 @@ from ultrakb.application.knowledge_tasks import (
     list_knowledge_tasks,
     read_knowledge_stage,
     read_knowledge_task,
+    set_knowledge_task_visibility,
 )
+from ultrakb.storage.database import DatabaseIdentity
 
 
 @click.group()
@@ -40,6 +42,7 @@ def _run(ctx, operation, *args, **options):
 @tasks.command("list")
 @click.option("--after", type=click.IntRange(0, 2**63 - 1), default=0)
 @click.option("--limit", type=click.IntRange(1, 128), default=63)
+@click.option("--include-hidden", is_flag=True)
 @click.pass_context
 def list_tasks(ctx, **options):
     """List task summaries, using next_cursor for the next page."""
@@ -78,3 +81,32 @@ def stage_task(ctx, task_id, stage_id, output, **options):
         _run(ctx, read_knowledge_stage, task_id, stage_id, **options)
     else:
         _run(ctx, export_knowledge_stage, task_id, stage_id, output, **options)
+
+
+def _visibility_options(command):
+    command = click.argument("task_id")(command)
+    command = click.option("--kb-id")(command)
+    return click.option("--generation")(command)
+
+
+def _visibility(ctx, task_id, *, hidden, kb_id, generation):
+    if (kb_id is None) != (generation is None):
+        raise click.ClickException("Supply both --kb-id and --generation")
+    identity = DatabaseIdentity(kb_id, generation) if kb_id is not None else None
+    _run(ctx, set_knowledge_task_visibility, task_id, hidden=hidden, identity=identity)
+
+
+@tasks.command("hide")
+@_visibility_options
+@click.pass_context
+def hide_task(ctx, task_id, **options):
+    """Hide a finished task from the list, retaining costs and recovery data."""
+    _visibility(ctx, task_id, hidden=True, **options)
+
+
+@tasks.command("restore")
+@_visibility_options
+@click.pass_context
+def restore_task(ctx, task_id, **options):
+    """Show a previously hidden task in the list again."""
+    _visibility(ctx, task_id, hidden=False, **options)

@@ -29,9 +29,25 @@ def _store(kb_dir, scope, identity=None):
 
 
 def list_knowledge_tasks(
-    kb_dir: Path, *, scope=None, identity=None, after=0, limit=63, cancelled=None
+    kb_dir: Path,
+    *,
+    scope=None,
+    identity=None,
+    after=0,
+    limit=63,
+    include_hidden=False,
+    cancelled=None,
 ) -> TaskList:
-    return _store(kb_dir, scope, identity).list(after=after, limit=limit, cancelled=cancelled)
+    return _store(kb_dir, scope, identity).list(
+        after=after, limit=limit, include_hidden=include_hidden, cancelled=cancelled
+    )
+
+
+def set_knowledge_task_visibility(
+    kb_dir: Path, task_id: str, *, hidden: bool, scope=None, identity=None, cancelled=None
+):
+    """Change list visibility while retaining all costs, results and recovery records."""
+    return _store(kb_dir, scope, identity).set_hidden(task_id, hidden=hidden, cancelled=cancelled)
 
 
 def read_knowledge_task(

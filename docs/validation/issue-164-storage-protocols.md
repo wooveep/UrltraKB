@@ -2140,3 +2140,24 @@ passes 48 tests; mypy passes 590 modules. Both static readonly review axes close
 their findings; focused Ruff, formatting and diff checks pass. Scaled request
 calibration is recorded separately. Observation retention, remaining obsolete
 roots and the sole P8 activation remain open gates; issue 164 is not complete.
+
+### Reversible task-list cleanup without erasing costs
+
+Development schema 36 adds a partial visible-task index to the existing hidden
+summary flag. The shared visibility operation rejects active executions and
+updates only that flag. The normal bounded list omits hidden tasks; explicit
+inclusion, direct detail, requests, publications, budgets and recovery remain
+available. Continuing the actual original execution/budget restores visibility
+in the same transaction that creates its new execution.
+
+CLI hide/restore and optional generation guards, authenticated HTTP with strict
+boolean and required generation, and native Qt background actions use the same
+operation. Qt can include hidden tasks and restore them without reloading the
+whole ledger. A stale generation cannot change the old task.
+
+The actual two-request import fixture verifies unchanged paid usage, budget,
+responses and publications through hiding/restoration, plus continuation and
+active-task rejection. The final visibility/adapter/native-budget/database/usage/
+boundary/size matrix passes 42 tests; mypy passes 590 modules. Focused Ruff,
+formatting and diff checks and both static readonly review axes pass. Remaining
+observation retention, obsolete-root and final activation work continues.

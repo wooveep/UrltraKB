@@ -34,6 +34,7 @@ class TaskOverview(TaskRecord):
     fingerprint: str
     budget: TaskBudget
     usage: UsageAggregate | None
+    hidden: bool = False
 
 
 class TaskExecution(TaskRecord):

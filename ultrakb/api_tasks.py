@@ -10,10 +10,13 @@ from ultrakb.application.knowledge_tasks import (
     list_knowledge_tasks,
     read_knowledge_stage,
     read_knowledge_task,
+    set_knowledge_task_visibility,
 )
 from ultrakb.config import resolve_kb_alias
 from ultrakb.context.workers import run_blocking
-from ultrakb.task_records import TaskDetail, TaskList, TaskStageDetail
+from ultrakb.source_records import RecordId
+from ultrakb.storage.database import DatabaseIdentity, StorageFormatError
+from ultrakb.task_records import TaskDetail, TaskList, TaskOverview, TaskRecord, TaskStageDetail
 
 tasks_router = APIRouter(prefix="/api/v1/tasks", dependencies=[Depends(require_bearer_token)])
 
@@ -46,6 +49,8 @@ async def _query(operation, kb, *args, **options):
         return await run_blocking(read, on_cancel=cancelled.set)
     except KeyError as exc:
         raise HTTPException(404, "Task or execution was not found") from exc
+    except StorageFormatError as exc:
+        raise HTTPException(409, str(exc)) from exc
     except (ValueError, OSError) as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -55,8 +60,28 @@ async def list_tasks(
     kb: str,
     after: int = Query(0, ge=0, lt=2**63),
     limit: int = Query(63, ge=1, le=128),
+    include_hidden: bool = False,
 ):
-    return await _query(list_knowledge_tasks, kb, after=after, limit=limit)
+    return await _query(
+        list_knowledge_tasks, kb, after=after, limit=limit, include_hidden=include_hidden
+    )
+
+
+class TaskVisibilityRequest(TaskRecord):
+    kb_id: RecordId
+    generation: RecordId
+    hidden: bool
+
+
+@tasks_router.post("/{task_id}/visibility", response_model=TaskOverview)
+async def set_visibility(task_id: str, kb: str, request: TaskVisibilityRequest):
+    return await _query(
+        set_knowledge_task_visibility,
+        kb,
+        task_id,
+        hidden=request.hidden,
+        identity=DatabaseIdentity(request.kb_id, request.generation),
+    )
 
 
 @tasks_router.get("/{task_id}", response_model=TaskDetail)

@@ -22,6 +22,7 @@ EXECUTION_SCHEMA = (
         created_at TEXT NOT NULL,
         hidden INTEGER NOT NULL DEFAULT 0 CHECK (hidden IN (0, 1))
     )""",
+    "CREATE INDEX ukb_visible_tasks ON ukb_tasks(sequence) WHERE hidden = 0",
     """CREATE TABLE ukb_model_budgets (
         model_budget_id TEXT PRIMARY KEY,
         task_id TEXT NOT NULL REFERENCES ukb_tasks(task_id),

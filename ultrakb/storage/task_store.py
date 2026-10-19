@@ -26,7 +26,7 @@ from .usage_store import summarize_counters
 _OVERVIEW = (
     "t.sequence, t.task_id, t.operation, t.created_at, e.execution_id, e.state, "
     "e.started_at, e.ended_at, e.duration_seconds, e.fingerprint, e.model_budget_id, "
-    "b.used, b.max_calls, b.deadline_at"
+    "b.used, b.max_calls, b.deadline_at, t.hidden"
 )
 _LATEST = (
     "FROM ukb_tasks t JOIN ukb_executions e ON e.sequence = "
@@ -124,6 +124,7 @@ def _overview(db, row):
             deadline_at=row[13],
         ),
         usage=_usage(db, "task", row[1]),
+        hidden=bool(row[14]),
     )
 
 
@@ -160,12 +161,15 @@ class TaskStore:
     def __init__(self, root, identity):
         self.root, self.identity = root.resolve(), identity
 
-    def list(self, *, after=0, limit=63, cancelled=None):
+    def list(self, *, after=0, limit=63, include_hidden=False, cancelled=None):
         _page(after, limit)
+        if type(include_hidden) is not bool:
+            raise ValueError("Hidden task inclusion must be explicit")
+        visibility = "" if include_hidden else "t.hidden = 0 AND "
         with storage_stage(self.root, self.identity, read_only=True, cancelled=cancelled) as db:
             db.connection.execute("BEGIN")
             rows = db.connection.execute(
-                f"SELECT {_OVERVIEW} {_LATEST}WHERE t.hidden = 0 AND t.sequence > ? "
+                f"SELECT {_OVERVIEW} {_LATEST}WHERE {visibility}t.sequence > ? "
                 "ORDER BY t.sequence LIMIT ?",
                 (after, limit + 1),
             ).fetchall()
@@ -177,6 +181,33 @@ class TaskStore:
                 tasks=tasks,
                 next_cursor=_cursor(rows, limit),
             )
+
+    def set_hidden(self, task_id, *, hidden, cancelled=None):
+        TypeAdapter(RecordId).validate_python(task_id)
+        if type(hidden) is not bool:
+            raise ValueError("Task visibility requires an explicit boolean")
+        with storage_stage(self.root, self.identity, cancelled=cancelled) as db:
+            with db.transaction() as connection:
+                if (
+                    connection.execute(
+                        "SELECT 1 FROM ukb_tasks WHERE task_id = ?", (task_id,)
+                    ).fetchone()
+                    is None
+                ):
+                    raise KeyError(task_id)
+                if (
+                    hidden
+                    and connection.execute(
+                        "SELECT 1 FROM ukb_executions WHERE task_id = ? "
+                        "AND state IN ('started', 'stopping') LIMIT 1",
+                        (task_id,),
+                    ).fetchone()
+                ):
+                    raise ValueError("An active task cannot be hidden")
+                connection.execute(
+                    "UPDATE ukb_tasks SET hidden = ? WHERE task_id = ?", (hidden, task_id)
+                )
+        return self.read(task_id, limit=1, cancelled=cancelled).task
 
     def for_execution(self, execution_id, *, cancelled=None, **options):
         TypeAdapter(RecordId).validate_python(execution_id)

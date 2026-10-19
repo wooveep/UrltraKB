@@ -209,6 +209,10 @@ class ExecutionStore:
                 ):
                     raise ValueError("Finish or recover the original execution before continuing")
                 task_id, budget_id = previous[:2]
+                connection.execute(
+                    "UPDATE ukb_tasks SET hidden = 0 WHERE task_id = ? AND hidden = 1",
+                    (task_id,),
+                )
             else:
                 connection.execute(
                     "INSERT INTO ukb_tasks(task_id, operation, created_at) VALUES (?, ?, ?)",
