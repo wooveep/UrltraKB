@@ -78,10 +78,59 @@ space. This calibration previews retirement without deleting retained history.
 
 Continuous processing still serializes/restores growing SDK state, validates
 prefixes and builds full projections. The measurements show explicit batch
-projection reduction, not linear long-session complexity. Complete backlog
-model-send equality is not established; this evidence alone cannot declare the
-entire issue or public P8 activation complete.
+projection reduction, not linear long-session complexity. These initial cases
+alone did not establish legacy model-send parity; the follow-up below compares
+the same invocation schedules. Neither measurement completes the entire issue
+or public P8 activation.
 
 The focused memory/session/root-retirement/conversation/write/boundary/size
 regression matrix passes 62 tests. Ruff, formatting and diff checks and both
 static readonly review axes pass.
+
+## Follow-up: equivalent legacy invocation schedules
+
+Measured 2026-10-19T16:05:58Z using the actual pre-activation legacy
+`context.conversation.ConversationMemory` at `a56b0f59`, real `ChatSession`
+original records, configuration capture, executor, SDK, ConDB and local HTTP
+provider. The main-store reference is the JSON above from `9520f731`.
+The same 100 fixed turn identities, original text, deterministic response rules
+and six-send per-invocation allowance are used. Inputs are constructed as real
+domain records and committed through each actual store; no memory/SDK/model
+method is replaced. Pre-existing compiler/config-capture fixes were present in
+the working tree; the compared memory and SDK implementations match their refs.
+
+| Invocation schedule | Legacy sends | Main-store sends | Accepted prefixes and sends per call |
+| --- | ---: | ---: | --- |
+| Full backlog with bounded continuations | 133 | 133 | Identical |
+| Continuous one-turn additions | 132 | 132 | Identical |
+| Accepted 97-turn prefix plus final three | 132 | 132 | Identical |
+
+All three legacy final SDK snapshots and user-only retrieval exports match the
+main-store digests exactly. The archived runner's turn-identity normalization
+is an identity operation for these fixed fixture IDs. It changes no SDK field
+or content. Complete-prefix retries send nothing in either path. The 133 versus
+132 difference therefore comes from different invocation schedules at the
+existing stage limit; it is not an increase caused by the persistence change.
+This establishes parity for this deterministic fixture, not every possible
+model response or semantic retrieval workload. Legacy wall times were captured
+only as run context and are not compared as a speedup: runs/profiling differ.
+
+The successful reference run used isolated settings. The initial exploratory
+runner registered disposable libraries in real settings; those three exact
+entries and its temporary default were removed. Prior default restoration is
+not claimed. Offline process isolation and its regression are documented in
+the storage protocol record.
+
+The frozen [reference runner](issue-164-conversations-reference.py) requires a
+source checkout of `a56b0f59` and an existing private output directory:
+
+```bash
+python /absolute/current/docs/validation/issue-164-conversations-reference.py \
+  /absolute/reference-checkout /absolute/owned/output-directory
+```
+
+It is historical validation source, not a legacy runtime or migration entry
+point. [Reference results](issue-164-conversations-reference.json) retain every
+invocation's accepted count and sends; the final assertions require parity for
+all schedules, SDK state and retrieval state. This resolves the identified
+conversation parity gap while the other P7/P8 gates remain outstanding.

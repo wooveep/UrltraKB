@@ -1,0 +1,1435 @@
+{
+  "schema_version": 1,
+  "measured_at": "2026-10-19T16:05:58.179902+00:00",
+  "legacy_reference_commit": "a56b0f59",
+  "main_store_reference_commit": "9520f731",
+  "environment": {
+    "python": "3.12.13",
+    "sqlite": "3.53.1"
+  },
+  "cases": [
+    {
+      "mode": "batch_backlog",
+      "turns": 100,
+      "wall_seconds": 40.81645167700481,
+      "actual_loopback_model_sends": 133,
+      "catch_up_calls": 23,
+      "calls": [
+        {
+          "computed_turns": 5,
+          "indexed_turns": 5,
+          "sends": 6,
+          "diagnostics": [
+            "index_lag: StageBudgetExceeded"
+          ]
+        },
+        {
+          "computed_turns": 9,
+          "indexed_turns": 9,
+          "sends": 6,
+          "diagnostics": [
+            "index_lag: StageBudgetExceeded"
+          ]
+        },
+        {
+          "computed_turns": 14,
+          "indexed_turns": 14,
+          "sends": 6,
+          "diagnostics": [
+            "index_lag: StageBudgetExceeded"
+          ]
+        },
+        {
+          "computed_turns": 18,
+          "indexed_turns": 18,
+          "sends": 6,
+          "diagnostics": [
+            "index_lag: StageBudgetExceeded"
+          ]
+        },
+        {
+          "computed_turns": 23,
+          "indexed_turns": 23,
+          "sends": 6,
+          "diagnostics": [
+            "index_lag: StageBudgetExceeded"
+          ]
+        },
+        {
+          "computed_turns": 27,
+          "indexed_turns": 27,
+          "sends": 6,
+          "diagnostics": [
+            "index_lag: StageBudgetExceeded"
+          ]
+        },
+        {
+          "computed_turns": 32,
+          "indexed_turns": 32,
+          "sends": 6,
+          "diagnostics": [
+            "index_lag: StageBudgetExceeded"
+          ]
+        },
+        {
+          "computed_turns": 36,
+          "indexed_turns": 36,
+          "sends": 6,
+          "diagnostics": [
+            "index_lag: StageBudgetExceeded"
+          ]
+        },
+        {
+          "computed_turns": 41,
+          "indexed_turns": 41,
+          "sends": 6,
+          "diagnostics": [
+            "index_lag: StageBudgetExceeded"
+          ]
+        },
+        {
+          "computed_turns": 45,
+          "indexed_turns": 45,
+          "sends": 6,
+          "diagnostics": [
+            "index_lag: StageBudgetExceeded"
+          ]
+        },
+        {
+          "computed_turns": 50,
+          "indexed_turns": 50,
+          "sends": 6,
+          "diagnostics": [
+            "index_lag: StageBudgetExceeded"
+          ]
+        },
+        {
+          "computed_turns": 54,
+          "indexed_turns": 54,
+          "sends": 6,
+          "diagnostics": [
+            "index_lag: StageBudgetExceeded"
+          ]
+        },
+        {
+          "computed_turns": 59,
+          "indexed_turns": 59,
+          "sends": 6,
+          "diagnostics": [
+            "index_lag: StageBudgetExceeded"
+          ]
+        },
+        {
+          "computed_turns": 63,
+          "indexed_turns": 63,
+          "sends": 6,
+          "diagnostics": [
+            "index_lag: StageBudgetExceeded"
+          ]
+        },
+        {
+          "computed_turns": 68,
+          "indexed_turns": 68,
+          "sends": 6,
+          "diagnostics": [
+            "index_lag: StageBudgetExceeded"
+          ]
+        },
+        {
+          "computed_turns": 72,
+          "indexed_turns": 72,
+          "sends": 6,
+          "diagnostics": [
+            "index_lag: StageBudgetExceeded"
+          ]
+        },
+        {
+          "computed_turns": 77,
+          "indexed_turns": 77,
+          "sends": 6,
+          "diagnostics": [
+            "index_lag: StageBudgetExceeded"
+          ]
+        },
+        {
+          "computed_turns": 81,
+          "indexed_turns": 81,
+          "sends": 6,
+          "diagnostics": [
+            "index_lag: StageBudgetExceeded"
+          ]
+        },
+        {
+          "computed_turns": 86,
+          "indexed_turns": 86,
+          "sends": 6,
+          "diagnostics": [
+            "index_lag: StageBudgetExceeded"
+          ]
+        },
+        {
+          "computed_turns": 90,
+          "indexed_turns": 90,
+          "sends": 6,
+          "diagnostics": [
+            "index_lag: StageBudgetExceeded"
+          ]
+        },
+        {
+          "computed_turns": 95,
+          "indexed_turns": 95,
+          "sends": 6,
+          "diagnostics": [
+            "index_lag: StageBudgetExceeded"
+          ]
+        },
+        {
+          "computed_turns": 99,
+          "indexed_turns": 99,
+          "sends": 6,
+          "diagnostics": [
+            "index_lag: StageBudgetExceeded"
+          ]
+        },
+        {
+          "computed_turns": 100,
+          "indexed_turns": 100,
+          "sends": 1,
+          "diagnostics": []
+        }
+      ],
+      "normalized_full_snapshot_sha256": "cb5d67d1b0209dad52b8011e531337fb9e73e6305bd57d5dde989b75f2dd57b4",
+      "normalized_retrieval_sha256": "a2492f8024f5e3d18b58b2dce348f06ced859773b7817fab41396773b3ff3e5a",
+      "identity_normalization": "Only complete original turn-id string values map to turn-ordinal; all other SDK fields and content remain unchanged.",
+      "main_store_model_sends": 133,
+      "same_model_sends": true,
+      "same_accepted_prefixes_and_sends_per_call": true,
+      "same_full_sdk_state_after_turn_identity_normalization": true,
+      "same_retrieval_after_turn_identity_normalization": true
+    },
+    {
+      "mode": "continuous",
+      "turns": 100,
+      "wall_seconds": 40.47046911902726,
+      "actual_loopback_model_sends": 132,
+      "catch_up_calls": 100,
+      "calls": [
+        {
+          "computed_turns": 1,
+          "indexed_turns": 1,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 2,
+          "indexed_turns": 2,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 3,
+          "indexed_turns": 3,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 4,
+          "indexed_turns": 4,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 5,
+          "indexed_turns": 5,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 6,
+          "indexed_turns": 6,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 7,
+          "indexed_turns": 7,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 8,
+          "indexed_turns": 8,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 9,
+          "indexed_turns": 9,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 10,
+          "indexed_turns": 10,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 11,
+          "indexed_turns": 11,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 12,
+          "indexed_turns": 12,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 13,
+          "indexed_turns": 13,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 14,
+          "indexed_turns": 14,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 15,
+          "indexed_turns": 15,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 16,
+          "indexed_turns": 16,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 17,
+          "indexed_turns": 17,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 18,
+          "indexed_turns": 18,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 19,
+          "indexed_turns": 19,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 20,
+          "indexed_turns": 20,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 21,
+          "indexed_turns": 21,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 22,
+          "indexed_turns": 22,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 23,
+          "indexed_turns": 23,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 24,
+          "indexed_turns": 24,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 25,
+          "indexed_turns": 25,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 26,
+          "indexed_turns": 26,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 27,
+          "indexed_turns": 27,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 28,
+          "indexed_turns": 28,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 29,
+          "indexed_turns": 29,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 30,
+          "indexed_turns": 30,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 31,
+          "indexed_turns": 31,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 32,
+          "indexed_turns": 32,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 33,
+          "indexed_turns": 33,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 34,
+          "indexed_turns": 34,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 35,
+          "indexed_turns": 35,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 36,
+          "indexed_turns": 36,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 37,
+          "indexed_turns": 37,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 38,
+          "indexed_turns": 38,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 39,
+          "indexed_turns": 39,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 40,
+          "indexed_turns": 40,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 41,
+          "indexed_turns": 41,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 42,
+          "indexed_turns": 42,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 43,
+          "indexed_turns": 43,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 44,
+          "indexed_turns": 44,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 45,
+          "indexed_turns": 45,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 46,
+          "indexed_turns": 46,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 47,
+          "indexed_turns": 47,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 48,
+          "indexed_turns": 48,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 49,
+          "indexed_turns": 49,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 50,
+          "indexed_turns": 50,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 51,
+          "indexed_turns": 51,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 52,
+          "indexed_turns": 52,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 53,
+          "indexed_turns": 53,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 54,
+          "indexed_turns": 54,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 55,
+          "indexed_turns": 55,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 56,
+          "indexed_turns": 56,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 57,
+          "indexed_turns": 57,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 58,
+          "indexed_turns": 58,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 59,
+          "indexed_turns": 59,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 60,
+          "indexed_turns": 60,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 61,
+          "indexed_turns": 61,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 62,
+          "indexed_turns": 62,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 63,
+          "indexed_turns": 63,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 64,
+          "indexed_turns": 64,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 65,
+          "indexed_turns": 65,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 66,
+          "indexed_turns": 66,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 67,
+          "indexed_turns": 67,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 68,
+          "indexed_turns": 68,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 69,
+          "indexed_turns": 69,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 70,
+          "indexed_turns": 70,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 71,
+          "indexed_turns": 71,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 72,
+          "indexed_turns": 72,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 73,
+          "indexed_turns": 73,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 74,
+          "indexed_turns": 74,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 75,
+          "indexed_turns": 75,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 76,
+          "indexed_turns": 76,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 77,
+          "indexed_turns": 77,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 78,
+          "indexed_turns": 78,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 79,
+          "indexed_turns": 79,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 80,
+          "indexed_turns": 80,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 81,
+          "indexed_turns": 81,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 82,
+          "indexed_turns": 82,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 83,
+          "indexed_turns": 83,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 84,
+          "indexed_turns": 84,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 85,
+          "indexed_turns": 85,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 86,
+          "indexed_turns": 86,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 87,
+          "indexed_turns": 87,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 88,
+          "indexed_turns": 88,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 89,
+          "indexed_turns": 89,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 90,
+          "indexed_turns": 90,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 91,
+          "indexed_turns": 91,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 92,
+          "indexed_turns": 92,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 93,
+          "indexed_turns": 93,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 94,
+          "indexed_turns": 94,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 95,
+          "indexed_turns": 95,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 96,
+          "indexed_turns": 96,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 97,
+          "indexed_turns": 97,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 98,
+          "indexed_turns": 98,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 99,
+          "indexed_turns": 99,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 100,
+          "indexed_turns": 100,
+          "sends": 1,
+          "diagnostics": []
+        }
+      ],
+      "normalized_full_snapshot_sha256": "cb5d67d1b0209dad52b8011e531337fb9e73e6305bd57d5dde989b75f2dd57b4",
+      "normalized_retrieval_sha256": "a2492f8024f5e3d18b58b2dce348f06ced859773b7817fab41396773b3ff3e5a",
+      "identity_normalization": "Only complete original turn-id string values map to turn-ordinal; all other SDK fields and content remain unchanged.",
+      "main_store_model_sends": 132,
+      "same_model_sends": true,
+      "same_accepted_prefixes_and_sends_per_call": true,
+      "same_full_sdk_state_after_turn_identity_normalization": true,
+      "same_retrieval_after_turn_identity_normalization": true
+    },
+    {
+      "mode": "single_tail_batch",
+      "turns": 100,
+      "wall_seconds": 40.472161468933336,
+      "actual_loopback_model_sends": 132,
+      "catch_up_calls": 98,
+      "calls": [
+        {
+          "computed_turns": 1,
+          "indexed_turns": 1,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 2,
+          "indexed_turns": 2,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 3,
+          "indexed_turns": 3,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 4,
+          "indexed_turns": 4,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 5,
+          "indexed_turns": 5,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 6,
+          "indexed_turns": 6,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 7,
+          "indexed_turns": 7,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 8,
+          "indexed_turns": 8,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 9,
+          "indexed_turns": 9,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 10,
+          "indexed_turns": 10,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 11,
+          "indexed_turns": 11,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 12,
+          "indexed_turns": 12,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 13,
+          "indexed_turns": 13,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 14,
+          "indexed_turns": 14,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 15,
+          "indexed_turns": 15,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 16,
+          "indexed_turns": 16,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 17,
+          "indexed_turns": 17,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 18,
+          "indexed_turns": 18,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 19,
+          "indexed_turns": 19,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 20,
+          "indexed_turns": 20,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 21,
+          "indexed_turns": 21,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 22,
+          "indexed_turns": 22,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 23,
+          "indexed_turns": 23,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 24,
+          "indexed_turns": 24,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 25,
+          "indexed_turns": 25,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 26,
+          "indexed_turns": 26,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 27,
+          "indexed_turns": 27,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 28,
+          "indexed_turns": 28,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 29,
+          "indexed_turns": 29,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 30,
+          "indexed_turns": 30,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 31,
+          "indexed_turns": 31,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 32,
+          "indexed_turns": 32,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 33,
+          "indexed_turns": 33,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 34,
+          "indexed_turns": 34,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 35,
+          "indexed_turns": 35,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 36,
+          "indexed_turns": 36,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 37,
+          "indexed_turns": 37,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 38,
+          "indexed_turns": 38,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 39,
+          "indexed_turns": 39,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 40,
+          "indexed_turns": 40,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 41,
+          "indexed_turns": 41,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 42,
+          "indexed_turns": 42,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 43,
+          "indexed_turns": 43,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 44,
+          "indexed_turns": 44,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 45,
+          "indexed_turns": 45,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 46,
+          "indexed_turns": 46,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 47,
+          "indexed_turns": 47,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 48,
+          "indexed_turns": 48,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 49,
+          "indexed_turns": 49,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 50,
+          "indexed_turns": 50,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 51,
+          "indexed_turns": 51,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 52,
+          "indexed_turns": 52,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 53,
+          "indexed_turns": 53,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 54,
+          "indexed_turns": 54,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 55,
+          "indexed_turns": 55,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 56,
+          "indexed_turns": 56,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 57,
+          "indexed_turns": 57,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 58,
+          "indexed_turns": 58,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 59,
+          "indexed_turns": 59,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 60,
+          "indexed_turns": 60,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 61,
+          "indexed_turns": 61,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 62,
+          "indexed_turns": 62,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 63,
+          "indexed_turns": 63,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 64,
+          "indexed_turns": 64,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 65,
+          "indexed_turns": 65,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 66,
+          "indexed_turns": 66,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 67,
+          "indexed_turns": 67,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 68,
+          "indexed_turns": 68,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 69,
+          "indexed_turns": 69,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 70,
+          "indexed_turns": 70,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 71,
+          "indexed_turns": 71,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 72,
+          "indexed_turns": 72,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 73,
+          "indexed_turns": 73,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 74,
+          "indexed_turns": 74,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 75,
+          "indexed_turns": 75,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 76,
+          "indexed_turns": 76,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 77,
+          "indexed_turns": 77,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 78,
+          "indexed_turns": 78,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 79,
+          "indexed_turns": 79,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 80,
+          "indexed_turns": 80,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 81,
+          "indexed_turns": 81,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 82,
+          "indexed_turns": 82,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 83,
+          "indexed_turns": 83,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 84,
+          "indexed_turns": 84,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 85,
+          "indexed_turns": 85,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 86,
+          "indexed_turns": 86,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 87,
+          "indexed_turns": 87,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 88,
+          "indexed_turns": 88,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 89,
+          "indexed_turns": 89,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 90,
+          "indexed_turns": 90,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 91,
+          "indexed_turns": 91,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 92,
+          "indexed_turns": 92,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 93,
+          "indexed_turns": 93,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 94,
+          "indexed_turns": 94,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 95,
+          "indexed_turns": 95,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 96,
+          "indexed_turns": 96,
+          "sends": 2,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 97,
+          "indexed_turns": 97,
+          "sends": 1,
+          "diagnostics": []
+        },
+        {
+          "computed_turns": 100,
+          "indexed_turns": 100,
+          "sends": 4,
+          "diagnostics": []
+        }
+      ],
+      "normalized_full_snapshot_sha256": "cb5d67d1b0209dad52b8011e531337fb9e73e6305bd57d5dde989b75f2dd57b4",
+      "normalized_retrieval_sha256": "a2492f8024f5e3d18b58b2dce348f06ced859773b7817fab41396773b3ff3e5a",
+      "identity_normalization": "Only complete original turn-id string values map to turn-ordinal; all other SDK fields and content remain unchanged.",
+      "main_store_model_sends": 132,
+      "same_model_sends": true,
+      "same_accepted_prefixes_and_sends_per_call": true,
+      "same_full_sdk_state_after_turn_identity_normalization": true,
+      "same_retrieval_after_turn_identity_normalization": true
+    }
+  ],
+  "comparison_scope": "Identical fixture turn IDs, text, SDK, response rules and per-invocation stage allowance; normalization is identity for these fixed IDs.",
+  "working_tree_note": "Pre-existing compiler/config-capture fixes were present; legacy memory and SDK implementations matched the stated reference commit."
+}
