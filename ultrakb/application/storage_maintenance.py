@@ -75,6 +75,28 @@ def collect_garbage(
     return _maintenance(kb_dir, scope, identity).collect(max_items=max_items, max_bytes=max_bytes)
 
 
+def list_storage_candidates(
+    kb_dir, *, scope=None, identity=None, after=None, limit=63, cancelled=None
+):
+    from ultrakb.storage.candidate_discard import CandidateDiscard
+
+    maintenance = _maintenance(kb_dir, scope, identity)
+    return CandidateDiscard(maintenance.root, maintenance.identity).list(
+        after=after, limit=limit, cancelled=cancelled
+    )
+
+
+def discard_storage_candidate(
+    kb_dir, candidate_id, *, version, kind="knowledge", scope=None, identity=None
+):
+    from ultrakb.storage.candidate_discard import CandidateDiscard
+
+    maintenance = _maintenance(kb_dir, scope, identity)
+    return CandidateDiscard(maintenance.root, maintenance.identity).discard(
+        candidate_id, version, kind=kind
+    )
+
+
 def preview_root_retirement(
     kb_dir: Path,
     *,

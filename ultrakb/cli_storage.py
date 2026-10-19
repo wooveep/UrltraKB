@@ -12,6 +12,8 @@ from ultrakb.application.storage_maintenance import (
     audit_knowledge_usage,
     backup_knowledge,
     collect_garbage,
+    discard_storage_candidate,
+    list_storage_candidates,
     preview_storage_maintenance,
     repair_knowledge_receipts,
     repair_knowledge_usage,
@@ -59,6 +61,27 @@ def _run(ctx, operation, *args, kb_id=None, generation=None, **options):
 def preview(ctx, **options):
     """Show current protected and reclaimable content; preview authorizes no deletion."""
     _run(ctx, preview_storage_maintenance, **options)
+
+
+@storage.command("candidates")
+@click.option("--after")
+@click.option("--limit", type=click.IntRange(1, 128), default=63)
+@_identity
+@click.pass_context
+def candidates(ctx, **options):
+    """List complete unpublished candidates; each retains its content until discarded."""
+    _run(ctx, list_storage_candidates, **options)
+
+
+@storage.command("discard-candidate")
+@click.argument("candidate_id")
+@click.option("--version", required=True)
+@click.option("--kind", type=click.Choice(["knowledge", "generator-plan"]), default="knowledge")
+@_identity
+@click.pass_context
+def discard_candidate(ctx, candidate_id, **options):
+    """Explicitly discard a reviewed candidate; then retire roots and collect content."""
+    _run(ctx, discard_storage_candidate, candidate_id, **options)
 
 
 @storage.command("retire-roots")

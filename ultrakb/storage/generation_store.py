@@ -265,6 +265,11 @@ class GenerationStore:
                 ).fetchone() != (plan.model_budget_id,):
                     raise ValueError("Generator plan belongs to another model budget")
         with storage_stage(self.root, self.identity, read_only=True) as db:
+            if db.connection.execute(
+                "SELECT state FROM ukb_generation_plans WHERE plan_id = ?",
+                (plan.plan_id,),
+            ).fetchone() != ("ready",):
+                raise RecoveryRequired("The generator plan is no longer available for acceptance")
             rows = db.connection.execute(
                 "SELECT ordinal, path, revision_id, digest, operation FROM ukb_generation_files "
                 "WHERE plan_id = ? ORDER BY ordinal",

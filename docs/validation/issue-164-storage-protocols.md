@@ -2386,3 +2386,33 @@ The same config/task/native/session/boundary/size matrix then passes 102 tests
 (1 live test deselected); the separate native Workbench/configuration matrix
 passes 4 tests. Mypy passes 596 modules. Focused Ruff, formatting, diff checks
 and both static readonly review axes pass. Public activation is still pending.
+
+### Explicit disposal of complete candidates
+
+Schema 39 adds a small retained import-group disposal decision. Import
+`original_id` is a validated opaque group identity rather than a foreign key
+to a content-bearing candidate: deleting obsolete copies must not require
+retaining an entire original knowledge revision. Published members remain
+readable and replay their original success receipt; unpublished members of an
+explicitly discarded group cannot reappear in review or become published.
+
+The shared maintenance catalog lists complete knowledge and artifact-only
+generator candidates in bounded pages. Disposal checks the selected manifest
+version and database identity under nonblocking exclusive reclamation, including
+the pending-receipt barrier. It refuses published history, current projection
+ownership, accepted/conflict artifacts, and any running/stopping execution.
+This last conservative restriction applies only to explicit candidate disposal;
+ordinary orphan GC remains available during pure model waits.
+
+Disposal fences the selected revision and removes its review roots atomically.
+Other discarded import-group members and generator files/plans retire through
+the existing bounded maintenance protocol before Blob/tree collection. Core
+budgets, request receipts, originals, and accepted compiler/generator steps are
+retained. CLI, authenticated HTTP, and Qt invoke the same shared operation.
+
+Actual SDK/loopback scenarios verify import, refresh, lint and generator retry
+after disposal without new sends, including changed projection plans and old
+review copies. Active execution, busy reader, wrong generation, and published
+history are protected. The final regression matrix passes 73 tests, Mypy passes
+598 modules, focused Ruff/format/diff checks pass, and both static readonly
+review axes report zero findings. Public factories are still unchanged.

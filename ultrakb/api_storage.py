@@ -3,6 +3,7 @@
 from dataclasses import asdict
 from pathlib import Path
 from threading import Event
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
@@ -14,6 +15,8 @@ from ultrakb.application.storage_maintenance import (
     audit_knowledge_usage,
     backup_knowledge,
     collect_garbage,
+    discard_storage_candidate,
+    list_storage_candidates,
     preview_storage_maintenance,
     repair_knowledge_receipts,
     repair_knowledge_usage,
@@ -55,6 +58,18 @@ class RestoreRequest(BaseModel):
     destination: str = Field(min_length=1)
 
 
+class CandidateDiscardRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    kb: str = Field(min_length=1)
+    kb_id: str = Field(min_length=1, max_length=256)
+    generation: str = Field(min_length=1, max_length=256)
+    candidate_id: str = Field(pattern="^[a-f0-9]{32}$")
+    version: str = Field(pattern="^[a-f0-9]{64}$")
+    kind: Literal["knowledge", "import", "refresh", "lint", "generator", "generator-plan"] = (
+        "knowledge"
+    )
+
+
 async def _call(operation, *args, on_cancel=None, **options):
     try:
         return asdict(await run_blocking(lambda: operation(*args, **options), on_cancel=on_cancel))
@@ -72,6 +87,24 @@ async def preview(
 ):
     return await _cancellable(
         preview_storage_maintenance, kb, max_items=max_items, max_bytes=max_bytes
+    )
+
+
+@storage_router.get("/candidates")
+async def candidates(kb: str, after: str | None = None, limit: int = Query(63, ge=1, le=128)):
+    return await _cancellable(list_storage_candidates, kb, after=after, limit=limit)
+
+
+@storage_router.post("/discard-candidate")
+async def discard_candidate(request: CandidateDiscardRequest):
+    return await _call(
+        lambda: discard_storage_candidate(
+            resolve_kb_alias(request.kb),
+            request.candidate_id,
+            version=request.version,
+            kind=request.kind,
+            identity=DatabaseIdentity(request.kb_id, request.generation),
+        )
     )
 
 

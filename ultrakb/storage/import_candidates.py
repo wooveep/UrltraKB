@@ -22,9 +22,12 @@ class ImportReview(BaseModel):
 
 def require_import_review(connection, revision_id, version):
     row = connection.execute(
-        "SELECT version, conflict_count FROM ukb_import_candidates WHERE proposal_id = ?",
+        "SELECT c.version, c.conflict_count, EXISTS (SELECT 1 FROM ukb_discarded_import_groups d "
+        "WHERE d.original_id = c.original_id) FROM ukb_import_candidates c WHERE c.proposal_id = ?",
         (revision_id,),
     ).fetchone()
+    if row is not None and row[2]:
+        raise PublicationConflict("This import review group was explicitly discarded")
     if row is not None and row[1] and version != row[0]:
         raise PublicationConflict("This import requires its exact reviewed candidate version")
 
@@ -103,6 +106,8 @@ class ImportCandidates:
                 "JOIN ukb_import_candidates c ON c.proposal_id = i.revision_id "
                 "JOIN ukb_knowledge_revisions r ON r.revision_id = i.revision_id "
                 "WHERE i.attempt_id = ? AND i.intent_id = ? AND r.view_id = ? "
+                "AND (r.state = 'published' OR NOT EXISTS (SELECT 1 "
+                "FROM ukb_discarded_import_groups d WHERE d.original_id = c.original_id)) "
                 "ORDER BY c.rowid DESC LIMIT 1",
                 (work.attempt_id, work.intent_id, view_id),
             ).fetchone()
@@ -123,7 +128,9 @@ class ImportCandidates:
                 "JOIN ukb_revision_import i ON i.revision_id = r.revision_id "
                 "JOIN ukb_unit_revisions v ON v.unit_revision_id = i.unit_revision_id "
                 "JOIN ukb_import_units u ON u.unit_id = v.unit_id "
-                "WHERE c.proposal_id = ? AND r.state IN ('ready', 'published')",
+                "WHERE c.proposal_id = ? AND r.state IN ('ready', 'published') "
+                "AND (r.state = 'published' OR NOT EXISTS (SELECT 1 "
+                "FROM ukb_discarded_import_groups d WHERE d.original_id = c.original_id))",
                 (proposal_id,),
             ).fetchone()
             if row is None:
@@ -206,6 +213,8 @@ class ImportCandidates:
                 "JOIN ukb_import_units u ON u.unit_id = v.unit_id "
                 "JOIN ukb_heads h ON h.view_id = r.view_id "
                 "WHERE r.view_id = ? AND r.state = 'ready' AND c.conflict_count > 0 "
+                "AND NOT EXISTS (SELECT 1 FROM ukb_discarded_import_groups d "
+                "WHERE d.original_id = c.original_id) "
                 "AND c.rowid < ? "
                 "AND NOT EXISTS (SELECT 1 FROM ukb_import_candidates newer "
                 "WHERE newer.original_id = c.original_id AND newer.rowid > c.rowid) "

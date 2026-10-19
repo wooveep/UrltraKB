@@ -120,6 +120,7 @@ class StorageMaintenanceDialog(QDialog):
                 ("重建用量统计", self.repair_usage),
                 ("归档过期观测", self.archive_observations),
                 ("归档重复诊断", self.archive_diagnostics),
+                ("检查未发布候选…", self.inspect_candidates),
                 ("备份到新目录…", self.choose_backup),
                 ("从备份恢复到新目录…", self.choose_restore),
             )
@@ -268,6 +269,14 @@ class StorageMaintenanceDialog(QDialog):
 
     def archive_diagnostics(self):
         self._maintain(archive_compiler_diagnostics)
+
+    def inspect_candidates(self):
+        if self.identity is None or self.busy or self._closed:
+            return
+        from .storage_candidates import StorageCandidatesDialog
+
+        StorageCandidatesDialog(self.root, self.identity, self).exec()
+        self.refresh()
 
     def choose_backup(self):
         destination, _ = QFileDialog.getSaveFileName(self, "选择新备份目录", "ultrakb-backup")

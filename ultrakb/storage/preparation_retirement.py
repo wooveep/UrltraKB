@@ -4,12 +4,16 @@ import json
 from dataclasses import dataclass
 
 ELIGIBLE = (
-    "r.state IN ('draft', 'sealed', 'retiring') "
+    "(r.state IN ('draft', 'sealed', 'retiring') OR (r.state = 'ready' "
+    "AND EXISTS (SELECT 1 FROM ukb_import_candidates c JOIN ukb_discarded_import_groups d "
+    "ON d.original_id = c.original_id WHERE c.proposal_id = r.revision_id))) "
     "AND NOT EXISTS (SELECT 1 FROM ukb_publications p WHERE p.revision_id = r.revision_id) "
     "AND NOT EXISTS (SELECT 1 FROM ukb_publication_receipts p WHERE p.revision_id = r.revision_id) "
     "AND NOT EXISTS (SELECT 1 FROM ukb_generation_plans g "
     "WHERE g.knowledge_revision_id = r.revision_id) "
-    "AND NOT EXISTS (SELECT 1 FROM ukb_import_candidates c WHERE c.proposal_id = r.revision_id) "
+    "AND NOT EXISTS (SELECT 1 FROM ukb_import_candidates c WHERE c.proposal_id = r.revision_id "
+    "AND NOT EXISTS (SELECT 1 FROM ukb_discarded_import_groups d "
+    "WHERE d.original_id = c.original_id)) "
     "AND NOT EXISTS (SELECT 1 FROM ukb_refresh_proposals c WHERE c.proposal_id = r.revision_id) "
     "AND NOT EXISTS (SELECT 1 FROM ukb_lint_candidates c WHERE c.revision_id = r.revision_id) "
     "AND NOT EXISTS (SELECT 1 FROM ukb_sync_plans s JOIN ukb_projection_state p "
@@ -38,6 +42,7 @@ class _Deletion:
     reference_bytes: int = 0
     reference: bool = False
     final: bool = False
+    cleanup_reference: tuple | None = None
 
 
 @dataclass(frozen=True)
@@ -66,7 +71,14 @@ def select(db, max_items, max_bytes):
 
         def append(operation):
             nonlocal spent, max_items
-            cost = len(json.dumps((operation.sql, operation.parameters)).encode()) + 256
+            cost = (
+                len(
+                    json.dumps(
+                        (operation.sql, operation.parameters, operation.cleanup_reference)
+                    ).encode()
+                )
+                + 256
+            )
             if max_items < 1 or spent + cost > max_bytes:
                 return False
             selected.append(operation)
@@ -74,7 +86,21 @@ def select(db, max_items, max_bytes):
             max_items -= 1
             return True
 
-        for table in _RELATIONS:
+        review = db.connection.execute(
+            "SELECT c.detail_digest, b.byte_count FROM ukb_import_candidates c "
+            "JOIN ukb_blobs b ON b.digest = c.detail_digest WHERE c.proposal_id = ?",
+            (revision_id,),
+        ).fetchone()
+        if review is not None and not append(
+            _Deletion(
+                "DELETE FROM ukb_import_candidates WHERE proposal_id = ?",
+                (revision_id,),
+                review[1],
+                cleanup_reference=("import-candidate", revision_id, "review", review[0]),
+            )
+        ):
+            complete = False
+        for table in _RELATIONS if complete else ():
             records = db.connection.execute(
                 f"SELECT rowid FROM {table} WHERE revision_id = ? ORDER BY rowid LIMIT ?",
                 (revision_id, max_items + 1),
@@ -183,7 +209,7 @@ def retire(db, batch):
     with db.transaction() as connection:
         connection.execute(
             "UPDATE ukb_knowledge_revisions AS r SET state = 'retiring' "
-            f"WHERE r.revision_id = ? AND r.state IN ('draft', 'sealed') AND {ELIGIBLE}",
+            f"WHERE r.revision_id = ? AND r.state IN ('draft', 'sealed', 'ready') AND {ELIGIBLE}",
             (revision_id,),
         )
         if not connection.execute(
@@ -200,6 +226,14 @@ def retire(db, batch):
     for operation in batch.operations:
         with db.transaction() as connection:
             changed = connection.execute(operation.sql, operation.parameters).rowcount
+            if changed and operation.cleanup_reference is not None:
+                released = connection.execute(
+                    "DELETE FROM ukb_blob_refs WHERE owner_kind = ? AND owner_id = ? "
+                    "AND slot = ? AND digest = ?",
+                    operation.cleanup_reference,
+                ).rowcount
+                refs += released
+                size += operation.reference_bytes if released else 0
             if operation.final and changed:
                 retired += 1
                 changed = connection.execute(

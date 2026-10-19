@@ -1,13 +1,18 @@
 """Immutable compiled import candidates with independently owned review metadata."""
 
 IMPORT_CANDIDATE_SCHEMA = (
+    """CREATE TABLE ukb_discarded_import_groups (
+        original_id TEXT PRIMARY KEY CHECK (length(original_id) = 32),
+        reviewed_candidate TEXT NOT NULL CHECK (length(reviewed_candidate) = 32),
+        reviewed_manifest TEXT NOT NULL CHECK (length(reviewed_manifest) = 64)
+    )""",
     """CREATE TABLE ukb_import_candidates (
         proposal_id TEXT PRIMARY KEY REFERENCES ukb_knowledge_revisions(revision_id),
         detail_digest TEXT NOT NULL REFERENCES ukb_blobs(digest),
         execution_id TEXT NOT NULL REFERENCES ukb_executions(execution_id),
         version TEXT NOT NULL CHECK (length(version) = 64),
         conflict_count INTEGER NOT NULL CHECK (conflict_count >= 0),
-        original_id TEXT NOT NULL REFERENCES ukb_import_candidates(proposal_id)
+        original_id TEXT NOT NULL CHECK (length(original_id) = 32)
     )""",
     "CREATE INDEX ukb_import_candidate_execution ON ukb_import_candidates(execution_id)",
     "CREATE INDEX ukb_import_candidate_original ON ukb_import_candidates(original_id)",
