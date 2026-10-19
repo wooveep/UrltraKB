@@ -1558,3 +1558,28 @@ passes 549 modules, and Ruff, formatting and diff checks pass. Normal factories
 remain behind P8. Selected refresh, remaining maintenance writers, observation
 and archive/audit completion, and final activation remain unfinished; issue 164
 is still open.
+
+### Bounded knowledge history and fixed historical assets
+
+Main-store history lists bounded committed receipt metadata in publication order,
+with a fixed publication upper bound and explicit cursors. Revision reads accept
+only committed publications in the same view that do not exceed that bound;
+ready unpublished candidates are not history. Pages load separately in bounded
+batches, and explicit history reads capture the page and image bytes from one
+immutable publication. Worktree drafts and newer images cannot replace them.
+
+CLI and HTTP expose the same list, cursor and fixed-publication selection. Unknown
+revisions/cursors and invalid page cursors return explicit 404/400 responses.
+The desktop loads revisions and pages on demand and follows links in the selected
+revision. Its main-store I/O bypasses legacy directory binding; fixed storage
+identity and a cancellable actual-read lease protect the shared reader. Closing
+or changing the selection cancels a wait for the reclaim lease. Legacy explicit
+historical/public selections retain their requested history starting point.
+
+Five history cases pass, including a real Qt/LocalIO test that displays a retained
+page and cancels a blocked read before an exclusive GC lease is released. Both
+independent reviews verify the HTTP and desktop findings are closed. The expanded
+reading/history/publication set passes 60 cases and the final updated set passes
+55; full mypy passes 551 modules, with Ruff, formatting and diff checks passing.
+Selected refresh and the remaining writer/observation/maintenance/P8 work are
+still pending, and normal creation remains behind the sole activation gate.

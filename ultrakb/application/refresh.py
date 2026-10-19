@@ -49,14 +49,54 @@ def read_source_contribution_target(kb_dir, source_id, *, scope=None):
         )
 
 
-def list_knowledge_history(kb_dir: Path, *, scope: KnowledgeScope) -> tuple[dict, ...]:
+def list_knowledge_history(
+    kb_dir: Path,
+    *,
+    scope: KnowledgeScope,
+    after=None,
+    limit=63,
+    publication_id=None,
+    cancelled=None,
+) -> tuple[dict, ...]:
     from ultrakb.application.views import view_scope
     from ultrakb.ingest_records import KnowledgeRevision
     from ultrakb.unit_publication import wiki_versions
 
     scope = resolve_scope(kb_dir, scope)
+    from ultrakb.storage.knowledge_history import require_limit
+
+    require_limit(limit)
+    if publication_id is not None and publication_id != scope.publication_id:
+        if scope.knowledge is not None:
+            from .views import storage_scope
+
+            scope = storage_scope(
+                scope.kb_dir,
+                scope.knowledge.identity,
+                publication_id=publication_id,
+                view_id=scope.view_id,
+            )
+        else:
+            from .views import published_scope
+
+            scope = published_scope(scope.kb_dir, scope.view_id, publication_id=publication_id)
+    if scope.knowledge is not None:
+        from ultrakb.storage.knowledge_history import KnowledgeHistory
+
+        from .knowledge_history import history_reading
+
+        with history_reading(scope, cancelled):
+            return KnowledgeHistory(scope.knowledge).list(after=after, limit=limit)
     with kb_read_lock(scope.kb_dir / ".ultrakb"):
-        identity = read_head(scope.kb_dir, scope.view_id).knowledge_revision_id
+        identity = (
+            scope.publication.knowledge_revision_id
+            if scope.publication is not None
+            else KnowledgeRevision.model_validate_json(
+                (scope.wiki_dir.parent / "manifest.json").read_text()
+            ).knowledge_revision_id
+            if scope.historical
+            else read_head(scope.kb_dir, scope.view_id).knowledge_revision_id
+        )
         seen: set[str] = set()
         history = []
         while identity:
@@ -82,7 +122,14 @@ def list_knowledge_history(kb_dir: Path, *, scope: KnowledgeScope) -> tuple[dict
                 }
             )
             identity = manifest.base_revision_id
-        return tuple(history)
+        if after is not None:
+            positions = [
+                i for i, value in enumerate(history) if value["knowledge_revision_id"] == after
+            ]
+            if not positions:
+                raise ValueError("History cursor is unavailable")
+            history = history[positions[0] + 1 :]
+        return tuple(history[:limit])
 
 
 def cleanup_unreferenced_artifacts(kb_dir: Path, candidates: list[str]) -> dict:

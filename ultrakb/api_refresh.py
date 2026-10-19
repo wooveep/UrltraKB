@@ -3,7 +3,7 @@
 import asyncio
 from dataclasses import asdict
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from ultrakb.api_helpers import _resolve_kb, require_bearer_token
@@ -37,6 +37,15 @@ async def _selected(kb, view_id):
     return root, await resolve_api_scope(root, view_id)
 
 
+async def _history_read(operation, *args, **kwargs):
+    try:
+        return await asyncio.to_thread(operation, *args, **kwargs)
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
 @refresh_router.get("/api/v1/refresh/status")
 async def status(kb: str, view_id: ViewId = "legacy"):
     root, scope = await _selected(kb, view_id)
@@ -44,9 +53,49 @@ async def status(kb: str, view_id: ViewId = "legacy"):
 
 
 @refresh_router.get("/api/v1/refresh/history")
-async def history(kb: str, view_id: ViewId = "legacy"):
+async def history(
+    kb: str,
+    view_id: ViewId = "legacy",
+    after: RecordId | None = None,
+    limit: int = Query(default=63, ge=1, le=128),
+    publication_id: RecordId | None = None,
+):
     root, scope = await _selected(kb, view_id)
-    return await asyncio.to_thread(application.list_knowledge_history, root, scope=scope)
+    return await _history_read(
+        application.list_knowledge_history,
+        root,
+        scope=scope,
+        after=after,
+        limit=limit,
+        publication_id=publication_id,
+    )
+
+
+@refresh_router.get("/api/v1/refresh/history/pages")
+async def history_pages(
+    kb: str,
+    knowledge_revision_id: RecordId,
+    view_id: ViewId = "legacy",
+    after: str | None = None,
+    limit: int = Query(default=63, ge=1, le=128),
+):
+    from ultrakb.application.knowledge_history import history_pages
+
+    root, scope = await _selected(kb, view_id)
+    return await _history_read(
+        history_pages, root, knowledge_revision_id, scope=scope, after=after, limit=limit
+    )
+
+
+@refresh_router.get("/api/v1/refresh/history/page")
+async def history_page(
+    kb: str, knowledge_revision_id: RecordId, path: str, view_id: ViewId = "legacy"
+):
+    from ultrakb.application.knowledge_history import read_history_page
+
+    root, scope = await _selected(kb, view_id)
+    page, _ = await _history_read(read_history_page, root, knowledge_revision_id, path, scope=scope)
+    return asdict(page)
 
 
 @refresh_router.get("/api/v1/refresh/references")

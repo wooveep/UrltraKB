@@ -90,12 +90,22 @@ def accept(ctx, proposal_id, version):
 
 
 @refresh.command("history")
+@click.option("--after", default=None)
+@click.option("--limit", type=click.IntRange(1, 128), default=63)
+@click.option("--publication-id", default=None)
 @click.pass_context
-def history(ctx):
+def history(ctx, after, limit, publication_id):
     from ultrakb.application.refresh import list_knowledge_history
 
     root, scope = _selection(ctx)
-    click.echo(json.dumps(list_knowledge_history(root, scope=scope), ensure_ascii=False))
+    click.echo(
+        json.dumps(
+            list_knowledge_history(
+                root, scope=scope, after=after, limit=limit, publication_id=publication_id
+            ),
+            ensure_ascii=False,
+        )
+    )
 
 
 @refresh.command("read-history")
@@ -103,12 +113,11 @@ def history(ctx):
 @click.argument("page")
 @click.pass_context
 def read_history(ctx, knowledge_revision_id, page):
-    from ultrakb.application.pages import read_page
-    from ultrakb.application.views import view_scope
+    from ultrakb.application.knowledge_history import read_history_page
 
     root, scope = _selection(ctx)
-    selected = view_scope(root, scope.view_id, historical_revision=knowledge_revision_id)
-    click.echo(json.dumps(asdict(read_page(root, page, scope=selected)), ensure_ascii=False))
+    value, _ = read_history_page(root, knowledge_revision_id, page, scope=scope)
+    click.echo(json.dumps(asdict(value), ensure_ascii=False))
 
 
 @refresh.command("references")
