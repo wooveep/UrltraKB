@@ -135,14 +135,17 @@ class PendingStore:
             ).fetchone()
             return PendingWork(*row)
 
-    def claim(self) -> PendingWork | None:
+    def claim(self, *, intent_id: str | None = None) -> PendingWork | None:
+        if intent_id is not None:
+            TypeAdapter(RecordId).validate_python(intent_id)
         with storage_stage(self.root, self.identity) as db, db.transaction() as connection:
             row = connection.execute(
                 f"SELECT {_WORK_COLUMNS} FROM ukb_import_intents i "
                 "JOIN ukb_import_groups g ON g.root_import_id = i.root_import_id "
                 "WHERE i.status = 'pending' AND g.cancelled = 0 AND g.generation = ? "
+                "AND (? IS NULL OR i.intent_id = ?) "
                 "ORDER BY i.sequence LIMIT 1",
-                (self.identity.generation,),
+                (self.identity.generation, intent_id, intent_id),
             ).fetchone()
             if row is None:
                 return None

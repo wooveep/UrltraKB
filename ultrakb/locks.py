@@ -519,7 +519,12 @@ class PrivateMaterialization:
     def directory(self) -> Path:
         return Path(self._temporary.name)
 
-    def copy(self, source: Path, relative: str, *, digest: str, byte_count: int) -> None:
+    def permits_scope(self, directory: Path) -> bool:
+        return self._active and self._owner[0] == _owner()[0] and directory == self.directory
+
+    def copy(
+        self, source: Path, relative: str, *, digest: str, byte_count: int, replace: bool = False
+    ) -> None:
         if not self._active or self._owner != _owner():
             raise RuntimeError("Private materialization is closed or owned by another execution")
         if (
@@ -532,6 +537,8 @@ class PrivateMaterialization:
         ):
             raise ValueError("Private materialization requires a logical relative path")
         target = self.directory.joinpath(*relative.split("/"))
+        if target.is_symlink():
+            raise ValueError("Private materialization cannot follow target symlinks")
         for parent in (self.directory, *target.parents):
             if parent == self.directory.parent:
                 break
@@ -540,7 +547,7 @@ class PrivateMaterialization:
         target.parent.mkdir(parents=True, exist_ok=True)
         hasher, size, created = hashlib.sha256(), 0, False
         try:
-            with source.open("rb") as reader, target.open("xb") as writer:
+            with source.open("rb") as reader, target.open("wb" if replace else "xb") as writer:
                 created = True
                 while chunk := reader.read(1024 * 1024):
                     writer.write(chunk)

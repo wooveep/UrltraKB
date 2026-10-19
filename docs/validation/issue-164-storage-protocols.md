@@ -846,3 +846,44 @@ store before enabling the actual compiler path. Managed admission/indexing,
 remaining generators, full task observations, maintenance/restore roots and the
 three entrypoint adapters still require joint integration and final acceptance.
 Issue 164 remains open.
+
+### Actual retained-unit compiler path (development scope)
+
+The public `recompile_document` use case now accepts an explicit main-store
+scope and processing unit. Its worker owns a complete private Markdown baseline,
+loads retained normalization and native inputs, and runs the existing short or
+long compiler. Long compilation consumes the fixed publication's accepted
+shared document tree; it neither copies nor opens an old private index database.
+An existing page's old original uses a revision-qualified alias when the current
+target advances. Publication retains unchanged page bases and the exact pending
+unit claim, including its dispatch, attempt, source target and generation checks.
+
+Main-store executions now require an explicitly bound compiler checkpoint owner.
+Accepted results, page bases, raw deliveries and repair/conflict flags remain
+independent of publication. The real gateway associates compile invocations with
+actual request stages; a received summary or plan can be recovered from that
+exact provider receipt if compiler acceptance/delivery was interrupted. Plans
+are revalidated before reuse. Complete checkpoint metadata uses CAS roots while
+its SQL row stays bounded. Publication success survives a later projection
+coordination failure and reports synchronization work still outstanding.
+
+New application cases use the actual compiler and SDK against a controlled local
+HTTP provider. They cover removed external originals, short and multi-window long
+compilation, page creation with complete published Markdown visibility, exclusion
+of live drafts, old/new source separation during shared-page updates, one response
+repair, raw summary/plan delivery recovery, accepted-step reuse after publication
+failure and projection failure after a successful publication. No real model
+service was called. The development schema is now version 13; no migration or
+compatibility path was introduced.
+
+This is a compiler integration batch, not the full migration or activation gate.
+Related offline regression passes 435 tests (75 live cases deselected); full
+repository lint/format and mypy for 500 modules also pass. The run includes the
+pre-existing uncommitted compiler/config changes, whose edit bodies remain
+outside this batch's commit.
+
+Managed admission and index construction, complete identity/partition/recovery
+fault coverage, necessary historical figure attachments, full task observation
+and maintenance/restore workflows, remaining generators and all three adapters
+still require joint acceptance. The public factory stays unchanged and issue
+164 remains open.

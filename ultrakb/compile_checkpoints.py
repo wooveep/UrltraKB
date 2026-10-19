@@ -547,7 +547,20 @@ def document_checkpoints(kb_dir: Path | None, view_id: str, doc_name: str):
     from ultrakb.application.execution import current_execution
 
     context = current_execution()
-    if kb_dir is None or context is None or context.model_task is None:
+    if kb_dir is None or context is None:
+        return None
+    if context.storage_identity is not None:
+        from ultrakb.storage.compile_binding import bound_checkpoints
+
+        checkpoints = bound_checkpoints(kb_dir, view_id, doc_name)
+        if checkpoints is None:
+            from ultrakb.mutation import RecoveryRequired
+
+            raise RecoveryRequired(
+                "Main-store compilation requires its fixed inputs and checkpoints"
+            )
+        return checkpoints
+    if context.model_task is None:
         return None
     journal = context.model_task
     if journal.root.resolve() != kb_dir.resolve():

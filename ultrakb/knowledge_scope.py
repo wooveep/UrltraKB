@@ -11,6 +11,7 @@ from pydantic import TypeAdapter
 from ultrakb.source_records import ViewId
 
 if TYPE_CHECKING:
+    from ultrakb.locks import PrivateMaterialization
     from ultrakb.published_knowledge import PublishedKnowledge
     from ultrakb.storage.knowledge_store import BoundKnowledge
 
@@ -22,9 +23,23 @@ class KnowledgeScope:
     view_id: str = "legacy"
     publication: "PublishedKnowledge | None" = field(default=None, repr=False)
     knowledge: "BoundKnowledge | None" = field(default=None, repr=False)
+    private_workspace: "PrivateMaterialization | None" = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         root = self.kb_dir.expanduser().resolve()
+        if self.private_workspace is not None:
+            from ultrakb.locks import PrivateMaterialization
+
+            if (
+                type(self.private_workspace) is not PrivateMaterialization
+                or self.publication is not None
+                or self.knowledge is not None
+                or not self.private_workspace.permits_scope(self.wiki_dir)
+            ):
+                raise ValueError("Compiler view requires its active private materialization")
+            TypeAdapter(ViewId).validate_python(self.view_id)
+            object.__setattr__(self, "kb_dir", root)
+            return
         if self.knowledge is not None:
             TypeAdapter(ViewId).validate_python(self.view_id)
             if (
@@ -82,6 +97,8 @@ class KnowledgeScope:
 
     @property
     def read_only(self) -> bool:
+        if self.private_workspace is not None:
+            return False
         if self.knowledge is not None:
             return True
         relative = self.wiki_dir.relative_to(self.kb_dir).parts
@@ -107,6 +124,10 @@ def resolve_scope(
     selected = scope if scope is not None else legacy_scope(kb_dir)
     if selected.kb_dir != kb_dir.expanduser().resolve():
         raise ValueError("Knowledge scope belongs to a different knowledge base")
+    if selected.private_workspace is not None and not selected.private_workspace.permits_scope(
+        selected.wiki_dir
+    ):
+        raise ValueError("Compiler private materialization has finished")
     if writable and selected.read_only:
         raise ValueError("Knowledge revisions and proposals are read-only")
     return selected

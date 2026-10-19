@@ -96,14 +96,14 @@ class FrozenLinkRegistry:
             return
         from ultrakb.compile_checkpoints import digest
 
-        owner = str(checkpoints.path)
+        owner = getattr(checkpoints, "work_id", None) or str(checkpoints.path)
         if owner in self._persisted:
             return
         records = [
             {
                 "id": target.identity,
                 "path": target.path,
-                "names": target.names,
+                "names": list(target.names),
                 "type": target.entity_type,
                 "description": target.description,
             }

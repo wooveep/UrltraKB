@@ -221,6 +221,18 @@ async def recompile_document(
     """
     requested_scope = scope
     context = context or ExecutionContext()
+    if scope is not None and scope.knowledge is not None:
+        from .storage_compilation import recompile_stored
+
+        return await recompile_stored(
+            resolve_scope(kb_dir, scope),
+            file_hash,
+            unit_id=unit_id,
+            context=context,
+            version=version,
+            model=model,
+            max_concurrency=max_concurrency,
+        )
     scope = resolve_scope(kb_dir, scope, writable=True)
     kb_dir = kb_dir.resolve()
     async with async_kb_lock(

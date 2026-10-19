@@ -212,10 +212,34 @@ def request_compile_plan(
                 checkpoints.record_failure("plan", request_digest, error.code)
                 report_compile_issue(error.code, "concepts", "entities")
                 raise
-        checkpoints.require_generation("plan", request_digest)
-    for attempt in range(2):
+        reader = getattr(checkpoints, "retained_response", None)
+        retained = (
+            reader(
+                "plan",
+                request_digest,
+                protocol="compile-plan-json",
+                sections=(),
+                stage="compile.concepts-plan",
+            )
+            if reader
+            else None
+        )
+        if retained is not None:
+            raw, origin = retained
+            try:
+                plan = parse_compile_plan(raw, parse, validate_updates=validate_updates, **options)
+            except CompilePlanError as error:
+                correction = plan_repair_message(error, raw)
+            else:
+                checkpoints.save("plan", request_digest, raw, reused_response=origin)
+                return plan
+        if correction is None:
+            checkpoints.require_generation("plan", request_digest)
+    for attempt in range(1 if correction else 0, 2):
         if attempt and checkpoints:
             checkpoints.claim_repair("plan", request_digest)
+        elif checkpoints:
+            checkpoints.claim_generation("plan", request_digest, stage="compile.concepts-plan")
         raw = request(correction)
         if checkpoints:
             checkpoints.record_received_response(

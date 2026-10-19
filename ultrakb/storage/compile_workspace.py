@@ -21,6 +21,7 @@ class CompileBaseline:
     publication: "Publication"
     files: dict[str, str]
     bytes_copied: int
+    private: PrivateMaterialization
 
 
 @contextmanager
@@ -58,4 +59,5 @@ def materialize_baseline(bound, required_attachments):
             bound.publication,
             {path: blob.digest for path, blob in manifest.items()},
             private.bytes_copied,
+            private,
         )

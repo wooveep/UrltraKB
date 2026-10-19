@@ -96,10 +96,15 @@ class StoredModelUsage:
                 raise self.failure
             if self._closed:
                 raise RuntimeError("The model execution has finished")
+            from .compile_binding import model_work_key
+
+            compile_key = model_work_key(
+                self.root, self.identity, self.execution.execution_id, request.stage
+            )
             stage = self.executions.start_stage(
                 self.execution.execution_id,
                 "model_request",
-                work_key=request.logical_call_id or request.request_attempt_id,
+                work_key=compile_key or request.logical_call_id or request.request_attempt_id,
                 source_revision_id=request.source_revision_id,
                 unit_revision_id=request.unit_revision_id,
             )

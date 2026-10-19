@@ -18,9 +18,17 @@ def test_partial_late_usage_survives_publication_failure_and_restart(tmp_path):
     execution = ExecutionStore(root, identity).begin("import", fingerprint="a" * 64, max_calls=2)
     store = UsageStore(root, identity)
     checkpoints = CompileCheckpointStore(root, identity).for_work(
-        execution.model_budget_id, object_id={"unit": "worksheet"}, conditions={"policy": "v1"}
+        execution.model_budget_id,
+        object_id={"unit": "worksheet"},
+        conditions={"policy": "v1"},
+        execution_id=execution.execution_id,
     )
-    checkpoints.save("summary:0", "b" * 64, {"summary": "already accepted"})
+    checkpoints.save(
+        "summary:0",
+        "b" * 64,
+        {"summary": "already accepted"},
+        metadata={"source_window": "retained native context " * 4000},
+    )
     request = UsageRequest(
         request_attempt_id=uuid4().hex,
         logical_call_id=uuid4().hex,
@@ -59,7 +67,10 @@ def test_partial_late_usage_survives_publication_failure_and_restart(tmp_path):
     assert receipt["usage_complete"]
     assert ExecutionStore(root, identity).budget(execution.model_budget_id).used == 1
     recovered = CompileCheckpointStore(root, identity).for_work(
-        execution.model_budget_id, object_id={"unit": "worksheet"}, conditions={"policy": "v1"}
+        execution.model_budget_id,
+        object_id={"unit": "worksheet"},
+        conditions={"policy": "v1"},
+        execution_id=execution.execution_id,
     )
     assert recovered.load("summary:0", "b" * 64) == {"summary": "already accepted"}
     assert knowledge.bind(other.publication_id).read("index.md") == b"other"

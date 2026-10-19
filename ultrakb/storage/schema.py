@@ -3,6 +3,7 @@
 from contextdb.core.schema import SCHEMA as CONDB_SCHEMA
 
 from .artifact_schema import ARTIFACT_SCHEMA
+from .compile_schema import COMPILE_SCHEMA
 from .conversation_schema import CONVERSATION_SCHEMA
 from .execution_schema import EXECUTION_SCHEMA
 from .knowledge_inputs import PAGE_INPUT_SCHEMA
@@ -211,4 +212,5 @@ SCHEMA = (
     + PAGE_INPUT_SCHEMA
     + CONVERSATION_SCHEMA
     + ARTIFACT_SCHEMA
+    + COMPILE_SCHEMA
 )

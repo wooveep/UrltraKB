@@ -126,7 +126,9 @@ def retain_blob(connection, owner_kind: str, owner_id: str, slot: str, blob: Blo
             raise ValueError("A retained reference slot cannot change its accepted content")
 
 
-def materialize_private(db: Database, blob: Blob, workspace: PrivateMaterialization, path: str):
+def materialize_private(
+    db: Database, blob: Blob, workspace: PrivateMaterialization, path: str, *, replace: bool = False
+):
     """Stream and validate once into a fresh private input, without durable copying."""
     require_stage(db)
     if db.connection.in_transaction:
@@ -138,5 +140,9 @@ def materialize_private(db: Database, blob: Blob, workspace: PrivateMaterializat
     if row != (blob.byte_count, "live"):
         raise ValueError("The exact retained Blob is unavailable for materialization")
     workspace.copy(
-        blob_path(db.root, blob.digest), path, digest=blob.digest, byte_count=blob.byte_count
+        blob_path(db.root, blob.digest),
+        path,
+        digest=blob.digest,
+        byte_count=blob.byte_count,
+        replace=replace,
     )
