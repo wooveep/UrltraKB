@@ -57,6 +57,15 @@ def retry_stored_source(
         len(units) != 1 or units[0].unit_revision_id != unit_revision_id
     ):
         raise RetryTargetChanged("Processing target changed; check the remaining work again")
+    from ultrakb.storage.reprocessing_store import ReprocessingStore
+
+    if request := ReprocessingStore(root, identity).latest(revision.revision_id):
+        from .storage_reprocessing import reprocess_stored_source, request_complete
+
+        if not request_complete(scope, catalog, request, units=units):
+            return reprocess_stored_source(
+                scope, source_id, version=request.request_id, context=context, unit_id=unit_id
+            )
     context = context or ExecutionContext()
     if context.storage_identity not in (None, identity):
         raise ValueError("Source retry belongs to another database generation")

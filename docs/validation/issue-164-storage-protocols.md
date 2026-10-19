@@ -1239,3 +1239,33 @@ compiler, workbook and ingestion checks pass 39 cases; source reading/ingestion
 checks pass 34 cases. Targeted mypy and Ruff checks pass. These are development
 main-store paths; explicit reprocessing, remaining writers, maintenance and P8
 activation are still being completed. Issue 164 remains open.
+
+### Explicit managed reprocessing and request-owned recovery
+
+Development schema 16 records immutable processing requests separately from the
+source revision. A preview fixes the managed original/sidecars, policy, baseline
+unit revisions and publication before execution; a changed recipe or competing
+request invalidates that token before model work. Explicit unchanged-policy
+processing creates a new target, while resuming an incomplete request reuses its
+task, cumulative budget and accepted results. Processing and workbook inventories
+record their request identity. Failed inventory attempts remain diagnostic;
+retry reparses the managed original instead of treating the failure as final.
+
+Partial workbook publications can advance only along that request's own accepted
+chain. Foreign publications and target changes reject stale recovery, including
+generic source retry. A reviewed preview after a competing formerly-absent target
+captures a new baseline rather than repeatedly returning an unusable old token.
+The final unit/publication transactions recheck request ownership and exact
+presence/generation. Concurrent resumes also check the latest task execution in
+the write transaction; a partial unique index independently prevents two active
+executions for one task.
+
+Thirteen real application/SQLite/loopback-SDK cases cover unchanged and changed
+recipes, source deletion, failed publication and parsing, native-only retention,
+workbook partial chains, competing targets/requests, concurrent resumes and a
+new-generation backup restore. Related regressions passed 127 tests before the
+last two boundary repairs; the final focused run passes 35 tests. Independent
+standards review passes 27 related cases and the spec axis verifies both final
+boundaries. Full mypy passes 527 source modules; Ruff checks pass. This batch does
+not activate the normal factory or complete the remaining compiler, maintenance,
+observation and three-entrypoint work. Issue 164 remains open.

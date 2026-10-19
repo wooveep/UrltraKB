@@ -8,7 +8,7 @@ from pathlib import Path, PurePosixPath
 from pydantic import TypeAdapter
 
 from ultrakb.processing_policy import ProcessingDecision
-from ultrakb.source_records import DocName, RecordId
+from ultrakb.source_records import Digest, DocName, RecordId
 from ultrakb.storage.blobs import Blob, put_blob, read_bytes, retain_blob
 from ultrakb.storage.coordination import storage_stage
 from ultrakb.storage.database import DatabaseIdentity
@@ -67,6 +67,7 @@ class ProcessingVersion:
     source_path: str
     source_kind: str
     content_state: str = "content"
+    reprocessing_request_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -271,7 +272,10 @@ class CatalogStore:
         operation_id: str,
         decision: ProcessingDecision,
         content_state: str = "content",
+        reprocessing_request_id: str | None = None,
     ) -> ProcessingVersion:
+        if reprocessing_request_id is not None:
+            TypeAdapter(Digest).validate_python(reprocessing_request_id)
         if (
             body_path not in files
             or not isinstance(fingerprint, str)
@@ -315,6 +319,13 @@ class CatalogStore:
             raise ValueError("Processing metadata exceeds the storage item limit")
         with storage_stage(self.root, self.identity) as db:
             self._revision(db, revision_id)
+            if reprocessing_request_id is not None:
+                request = db.connection.execute(
+                    "SELECT source_revision_id FROM ukb_reprocessing_requests WHERE request_id = ?",
+                    (reprocessing_request_id,),
+                ).fetchone()
+                if request != (revision_id,):
+                    raise CatalogConflict("Processing requires its exact reprocessing request")
             captured = []
             for path, source in sorted(files.items()):
                 content = put_blob(db, source.read_bytes())
@@ -341,17 +352,19 @@ class CatalogStore:
                 source_path,
                 source_kind,
                 content_state,
+                reprocessing_request_id,
             )
             with db.transaction() as connection:
                 existing = connection.execute(
                     "SELECT processing_id, source_revision_id, fingerprint, body_path, "
                     "manifest_digest, decision_json, source_path, source_kind, content_state, "
+                    "reprocessing_request_id, "
                     "state "
                     "FROM ukb_processing_versions "
                     "WHERE operation_id = ?",
                     (operation_id,),
                 ).fetchone()
-                if existing and existing[1:9] != expected:
+                if existing and existing[1:10] != expected:
                     raise CatalogConflict(
                         "The processing operation already accepted different inputs"
                     )
@@ -359,7 +372,7 @@ class CatalogStore:
                 if not existing:
                     connection.execute(
                         "INSERT INTO ukb_processing_versions "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')",
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')",
                         (
                             processing_id,
                             revision_id,
@@ -371,14 +384,15 @@ class CatalogStore:
                             source_path,
                             source_kind,
                             content_state,
+                            reprocessing_request_id,
                         ),
                     )
                     retain_blob(
                         connection, "processing-version", processing_id, "manifest", manifest
                     )
-            if existing and existing[9] == "ready":
+            if existing and existing[10] == "ready":
                 return self._processing(db, processing_id)
-            if not existing or existing[9] == "draft":
+            if not existing or existing[10] == "draft":
                 for batch in file_batches(captured):
                     with db.transaction() as connection:
                         state = connection.execute(
@@ -426,7 +440,7 @@ class CatalogStore:
     def _processing(db, processing_id):
         row = db.connection.execute(
             "SELECT source_revision_id, fingerprint, body_path, manifest_digest, decision_json, "
-            "source_path, source_kind, content_state "
+            "source_path, source_kind, content_state, reprocessing_request_id "
             "FROM ukb_processing_versions WHERE processing_id = ? AND state = 'ready'",
             (processing_id,),
         ).fetchone()
@@ -450,6 +464,7 @@ class CatalogStore:
             row[5],
             row[6],
             row[7],
+            row[8],
         )
 
     def processing(self, processing_id: str) -> ProcessingVersion:
@@ -480,18 +495,24 @@ class CatalogStore:
         ):
             raise ValueError("A processing unit requires a bounded stable key and document name")
         if expected_generation is not None and (
-            type(expected_generation) is not int or expected_generation < 1
+            type(expected_generation) is not int or expected_generation < 0
         ):
-            raise ValueError("A processing-unit generation must be a positive integer")
+            raise ValueError(
+                "A processing-unit generation must be nonnegative; zero requires absence"
+            )
         with storage_stage(self.root, self.identity) as db, db.transaction() as connection:
             processing = connection.execute(
-                "SELECT p.source_revision_id, s.source_id FROM ukb_processing_versions p "
+                "SELECT p.source_revision_id, s.source_id, p.reprocessing_request_id "
+                "FROM ukb_processing_versions p "
                 "JOIN ukb_source_revisions s ON s.revision_id = p.source_revision_id "
                 "WHERE p.processing_id = ? AND p.state = 'ready' AND s.state = 'ready'",
                 (processing_id,),
             ).fetchone()
             if not processing:
                 raise KeyError(processing_id)
+            from .reprocessing_store import require_current_reprocessing
+
+            require_current_reprocessing(connection, processing[0], processing[2])
             latest = self._latest(db, processing[1])
             if not latest or latest[0] != processing[0]:
                 raise CatalogConflict("The source target changed before unit preparation")
@@ -500,7 +521,10 @@ class CatalogStore:
                 "WHERE source_id = ? AND unit_key = ?",
                 (processing[1], key),
             ).fetchone()
-            if expected_generation is not None and (not unit or unit[2] != expected_generation):
+            if expected_generation is not None and (
+                (expected_generation == 0 and unit is not None)
+                or (expected_generation > 0 and (not unit or unit[2] != expected_generation))
+            ):
                 raise CatalogConflict("The processing unit changed before the expected update")
             if unit:
                 if unit[3] != doc_name:

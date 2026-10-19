@@ -41,6 +41,37 @@ def normalization_fingerprint(
     doc_name=None,
     resource_policy=None,
 ) -> str:
+    text_input = source_revision and f".{source_revision.source_format}" in TEXT_SOURCE_EXTENSIONS
+    return normalization_policy(
+        kb_dir,
+        scope=scope,
+        bundle=bundle,
+        source_format=source_revision.source_format if source_revision else None,
+        input_digest=source_revision.digest if text_input else None,
+        asset_digests={asset.original_reference: asset.digest for asset in source_revision.assets}
+        if text_input
+        else {},
+        text_decoding=source_revision.text_decoding.model_dump(mode="json")
+        if text_input and source_revision.text_decoding
+        else None,
+        doc_name=doc_name,
+        resource_policy=resource_policy,
+    )
+
+
+def normalization_policy(
+    kb_dir: Path,
+    *,
+    scope=None,
+    bundle=None,
+    source_format=None,
+    input_digest=None,
+    asset_digests=None,
+    text_decoding=None,
+    doc_name=None,
+    resource_policy=None,
+) -> str:
+    """One content recipe for file and managed inputs, independent of their record layout."""
     from importlib.metadata import version
 
     from ultrakb.agent.compiler import get_agents_md, short_document_messages
@@ -50,33 +81,33 @@ def normalization_fingerprint(
 
     config = resolve_effective_config(kb_dir)[0]
     credentials = bundle if bundle is not None else resolve_credential_bundle(kb_dir)
-    request_basis = short_document_messages(
-        "", "", get_agents_md(resolve_scope(kb_dir, scope).wiki_dir), config.get("language", "en")
-    )
+    selected = resolve_scope(kb_dir, scope)
+    if selected.knowledge is None:
+        agents = get_agents_md(selected.wiki_dir)
+    else:
+        try:
+            agents = selected.knowledge.read("AGENTS.md").decode("utf-8")
+        except FileNotFoundError:
+            agents = ""
+    request_basis = short_document_messages("", "", agents, config.get("language", "en"))
     text_policy = {}
-    if source_revision and f".{source_revision.source_format}" in TEXT_SOURCE_EXTENSIONS:
+    if source_format and f".{source_format}" in TEXT_SOURCE_EXTENSIONS:
         from ultrakb.content_blocks import BLOCK_POLICY
         from ultrakb.text_formats import text_normalization_policy
         from ultrakb.text_measurement import MEASUREMENT_FINGERPRINT
 
         text_policy = {
-            "pipeline": text_normalization_policy(source_revision.source_format),
+            "pipeline": text_normalization_policy(source_format),
             "block_policy": BLOCK_POLICY,
             "classification": {"short_max_tokens": 5000, "measurement": MEASUREMENT_FINGERPRINT},
             "input": {
-                "body": source_revision.digest,
-                **(
-                    {"decoding": source_revision.text_decoding.model_dump(mode="json")}
-                    if source_revision.text_decoding
-                    else {}
-                ),
+                "body": input_digest,
+                **({"decoding": text_decoding} if text_decoding else {}),
                 "doc_name": doc_name,
-                "assets": {
-                    asset.original_reference: asset.digest for asset in source_revision.assets
-                },
+                "assets": asset_digests or {},
             },
         }
-        if source_revision.source_format in {"html", "htm"}:
+        if source_format in {"html", "htm"}:
             from ultrakb.remote_assets import REMOTE_POLICY, resolve_resource_policy
 
             selected = resource_policy or resolve_resource_policy(kb_dir)
@@ -84,7 +115,7 @@ def normalization_fingerprint(
     from ultrakb.inputs import CNKI_SOURCE_EXTENSIONS, OFFICE_SOURCE_EXTENSIONS
 
     pdf_policy = {}
-    if source_revision is None or f".{source_revision.source_format}" in {
+    if source_format is None or f".{source_format}" in {
         ".pdf",
         *OFFICE_SOURCE_EXTENSIONS,
         *CNKI_SOURCE_EXTENSIONS,
@@ -98,7 +129,7 @@ def normalization_fingerprint(
         pdf_policy["native_page_policy"] = NATIVE_PAGE_POLICY
 
     office_policy: dict = {}
-    if source_revision and source_revision.source_format in {
+    if source_format in {
         *(extension[1:] for extension in TEXT_SOURCE_EXTENSIONS),
         "xlsx",
         "xls",
@@ -106,24 +137,22 @@ def normalization_fingerprint(
         from pageindex.index.block_policy import BLOCK_INDEX_POLICY
 
         office_policy["block_index_policy"] = BLOCK_INDEX_POLICY
-    if source_revision and source_revision.source_format in {"xlsx", "xls"}:
+    if source_format in {"xlsx", "xls"}:
         from ultrakb.workbooks.records import WORKBOOK_POLICY, XLS_POLICY
 
-        office_policy["workbook_policy"] = (
-            XLS_POLICY if source_revision.source_format == "xls" else WORKBOOK_POLICY
-        )
-    if source_revision and f".{source_revision.source_format}" in OFFICE_SOURCE_EXTENSIONS:
+        office_policy["workbook_policy"] = XLS_POLICY if source_format == "xls" else WORKBOOK_POLICY
+    if source_format and f".{source_format}" in OFFICE_SOURCE_EXTENSIONS:
         from ultrakb.office.runtime import processing_identity
 
         office_policy = {"office": processing_identity(kb_dir)}
-        if source_revision.source_format in {"pptx", "ppt"}:
+        if source_format in {"pptx", "ppt"}:
             from pageindex.index.page_parts_policy import PAGE_PARTS_INDEX_POLICY
 
             from ultrakb.office.slide_content import NOTES_POLICY
 
             office_policy["notes_policy"] = NOTES_POLICY
             office_policy["page_parts_index_policy"] = PAGE_PARTS_INDEX_POLICY
-    if source_revision and source_revision.source_format in {"caj", "kdh"}:
+    if source_format in {"caj", "kdh"}:
         from ultrakb.cnki.runtime import processing_identity as cnki_processing_identity
 
         office_policy["cnki"] = cnki_processing_identity()

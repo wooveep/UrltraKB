@@ -59,16 +59,36 @@ SCHEMA = (
         source_kind TEXT NOT NULL CHECK (source_kind IN ('markdown', 'text', 'pages')),
         content_state TEXT NOT NULL CHECK (content_state IN
             ('content', 'empty', 'objects_only', 'parse_failed', 'unreadable')),
+        reprocessing_request_id TEXT REFERENCES ukb_reprocessing_requests(request_id),
         state TEXT NOT NULL CHECK (state IN ('draft', 'sealed', 'ready'))
     )""",
         "CREATE INDEX ukb_processing_source ON ukb_processing_versions(source_revision_id, state)",
         """CREATE TABLE ukb_workbook_inventories (
-        source_revision_id TEXT PRIMARY KEY REFERENCES ukb_source_revisions(revision_id),
+        sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+        inventory_id TEXT NOT NULL UNIQUE,
+        source_revision_id TEXT NOT NULL REFERENCES ukb_source_revisions(revision_id),
+        processing_key TEXT NOT NULL,
         complete INTEGER NOT NULL CHECK (complete IN (0, 1)),
         payload_digest TEXT NOT NULL REFERENCES ukb_blobs(digest)
     )""",
+        "CREATE INDEX ukb_workbook_attempts "
+        "ON ukb_workbook_inventories(source_revision_id, processing_key, complete, sequence)",
         """CREATE TRIGGER ukb_workbook_inventory_immutable BEFORE UPDATE ON ukb_workbook_inventories
         BEGIN SELECT RAISE(ABORT, 'Worksheet inventory is immutable'); END""",
+        """CREATE TABLE ukb_reprocessing_requests (
+        sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+        request_id TEXT NOT NULL UNIQUE,
+        source_id TEXT NOT NULL REFERENCES ukb_sources(source_id),
+        source_revision_id TEXT NOT NULL REFERENCES ukb_source_revisions(revision_id),
+        payload_digest TEXT NOT NULL REFERENCES ukb_blobs(digest),
+        execution_id TEXT REFERENCES ukb_executions(execution_id)
+    )""",
+        "CREATE INDEX ukb_reprocessing_source "
+        "ON ukb_reprocessing_requests(source_revision_id, sequence DESC)",
+        """CREATE TRIGGER ukb_reprocessing_immutable BEFORE UPDATE OF
+        sequence, request_id, source_id, source_revision_id, payload_digest
+        ON ukb_reprocessing_requests
+        BEGIN SELECT RAISE(ABORT, 'Reprocessing plans are immutable'); END""",
         """CREATE TABLE ukb_import_units (
         unit_id TEXT PRIMARY KEY,
         source_id TEXT NOT NULL REFERENCES ukb_sources(source_id),

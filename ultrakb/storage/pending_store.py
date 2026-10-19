@@ -70,7 +70,8 @@ def _current(connection, source_revision_id, unit_revision_id):
         raise CatalogConflict("The source target changed before pending work could start")
     if unit_revision_id is not None:
         unit = connection.execute(
-            "SELECT u.target_revision_id, p.source_revision_id FROM ukb_unit_revisions r "
+            "SELECT u.target_revision_id, p.source_revision_id, p.reprocessing_request_id "
+            "FROM ukb_unit_revisions r "
             "JOIN ukb_import_units u ON u.unit_id = r.unit_id "
             "JOIN ukb_processing_versions p ON p.processing_id = r.processing_id "
             "WHERE r.unit_revision_id = ?",
@@ -78,8 +79,11 @@ def _current(connection, source_revision_id, unit_revision_id):
         ).fetchone()
         if not unit:
             raise KeyError(unit_revision_id)
-        if unit != (unit_revision_id, source_revision_id):
+        if unit[:2] != (unit_revision_id, source_revision_id):
             raise CatalogConflict("The processing-unit target changed before pending work")
+        from .reprocessing_store import require_current_reprocessing
+
+        require_current_reprocessing(connection, source_revision_id, unit[2])
 
 
 class PendingStore:

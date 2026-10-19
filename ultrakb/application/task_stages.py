@@ -33,6 +33,7 @@ def task_stage(context, code, *, ensure_work=False, allow_stopping=False, **iden
         yield {}
         raise
     failure = None
+    progress = {}
     try:
         with bind_stage(root, context.storage_identity, execution.execution_id, stage_id):
             entered = False
@@ -52,17 +53,24 @@ def task_stage(context, code, *, ensure_work=False, allow_stopping=False, **iden
         failure = error
         raise
     finally:
-        state = (
-            "completed"
-            if failure is None
-            else "cancelled"
-            if isinstance(failure, (LockCancelled, GeneratorExit))
-            or type(failure).__name__ == "CancelledError"
-            else "failed"
-        )
+        if failure is None:
+            state = (
+                progress["status"]
+                if progress.get("status") in {"failed", "cancelled", "interrupted", "reused"}
+                else "completed"
+            )
+        else:
+            state = (
+                "cancelled"
+                if isinstance(failure, (LockCancelled, GeneratorExit))
+                or type(failure).__name__ == "CancelledError"
+                else "failed"
+            )
         try:
             store.finish_stage(
-                stage_id, state=state, error_code=type(failure).__name__ if failure else None
+                stage_id,
+                state=state,
+                error_code=type(failure).__name__ if failure else progress.get("reason_code"),
             )
         except Exception:
             if failure is None:

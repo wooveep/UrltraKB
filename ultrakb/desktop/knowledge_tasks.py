@@ -37,6 +37,7 @@ _STATES = {
 _STAGES = {
     "import.admit.v1": "接纳原件",
     "import.process.v1": "转换与解析",
+    "import.reprocess.v1": "重新处理保留原件",
     "workbook.inventory.v1": "读取工作表清单",
     "worksheet.normalize.v1": "整理工作表原文",
     "import.retain_original.v1": "保留原件和原图",

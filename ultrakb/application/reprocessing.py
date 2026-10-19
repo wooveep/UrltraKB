@@ -66,6 +66,10 @@ def preview_reprocessing(
 ) -> dict:
     """Read availability and policy without conversion, worksheet parsing or model calls."""
     root = kb_dir.resolve()
+    if scope is not None and resolve_scope(root, scope).knowledge is not None:
+        from .storage_reprocessing import preview_stored_reprocessing
+
+        return preview_stored_reprocessing(scope, source_id)
     with kb_read_lock(root / ".ultrakb"):
         source = next(
             (
@@ -223,6 +227,10 @@ def reprocess_source(
 ):
     """CAS a new request or resume only the current request identified by the same token."""
     root = kb_dir.resolve()
+    if scope is not None and resolve_scope(root, scope).knowledge is not None:
+        from .storage_reprocessing import reprocess_stored_source
+
+        return reprocess_stored_source(scope, source_id, version=version, context=context)
     context = context or ExecutionContext()
     from ultrakb.compilation_report import collect_compile_report, merge_compile_report
 

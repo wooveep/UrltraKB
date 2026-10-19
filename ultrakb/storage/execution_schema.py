@@ -47,6 +47,8 @@ EXECUTION_SCHEMA = (
         duration_seconds REAL CHECK (duration_seconds >= 0)
     )""",
     "CREATE INDEX ukb_executions_task ON ukb_executions(task_id, sequence)",
+    "CREATE UNIQUE INDEX ukb_one_active_execution_per_task ON ukb_executions(task_id) "
+    "WHERE state IN ('started', 'stopping')",
     """CREATE TABLE ukb_stage_attempts (
         sequence INTEGER PRIMARY KEY AUTOINCREMENT,
         stage_attempt_id TEXT NOT NULL UNIQUE,

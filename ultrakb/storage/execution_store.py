@@ -99,7 +99,16 @@ class ExecutionStore:
                     raise KeyError(resume)
                 if previous[2:5] != (fingerprint, max_calls, deadline_at):
                     raise ValueError("Continuing an execution cannot reset policy or its budget")
-                if previous[5] in {"started", "stopping"} or previous[6] != operation:
+                latest = connection.execute(
+                    "SELECT state FROM ukb_executions WHERE task_id = ? "
+                    "ORDER BY sequence DESC LIMIT 1",
+                    (previous[0],),
+                ).fetchone()
+                if (
+                    previous[5] in {"started", "stopping"}
+                    or latest[0] in {"started", "stopping"}
+                    or previous[6] != operation
+                ):
                     raise ValueError("Finish or recover the original execution before continuing")
                 task_id, budget_id = previous[:2]
             else:

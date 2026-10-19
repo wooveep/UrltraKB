@@ -14,14 +14,21 @@ from ultrakb.storage.workbook_store import WorkbookStore
 from ultrakb.workbooks.normalization import freeze_sheet
 
 from .storage_ingestion import compile_stored_unit
+from .storage_processing_policy import (
+    POLICY_PATH,
+    ProcessingPolicy,
+    current_processing_policy,
+    needs_reprocessing,
+)
 from .task_stages import task_stage
 from .views import storage_scope
 from .workbook_ingestion import aggregate_units
 
 
-def _plan(scope, ready, context, bundle, catalog, revision, sheet, policy):
+def _plan(scope, ready, context, bundle, catalog, revision, sheet, policy, reprocessing):
     target = catalog.unit_for_source(revision.source_id, key=sheet.key)
-    if target is not None and target.source_revision_id == revision.revision_id:
+    forced = reprocessing is not None and needs_reprocessing(catalog, target, reprocessing)
+    if target is not None and target.source_revision_id == revision.revision_id and not forced:
         return target
     from ultrakb.converter import _sanitize_stem
 
@@ -63,12 +70,25 @@ def _plan(scope, ready, context, bundle, catalog, revision, sheet, policy):
                     frozen = freeze_content_blocks(frozen.model_dump(mode="json"))
             raw = frozen.model_dump(mode="json") if frozen else sheet.model_dump(mode="json")
             atomic_write_json(native, raw)
+            recipe = ProcessingPolicy(
+                values=reprocessing.policy
+                if reprocessing
+                else current_processing_policy(scope, catalog, revision, doc_name, bundle=bundle),
+                request_id=reprocessing.request_id if reprocessing else None,
+            )
+            policy_path = baseline.directory / POLICY_PATH
+            atomic_write_json(policy_path, recipe.model_dump(mode="json"))
             fingerprint = digest(
-                {"native": raw, "policy": policy, "decision": decision.model_dump(mode="json")}
+                {
+                    "native": raw,
+                    "policy": policy,
+                    "decision": decision.model_dump(mode="json"),
+                    "recipe": recipe.model_dump(mode="json"),
+                }
             )
             processing = catalog.retain_processing(
                 revision.revision_id,
-                {body.name: body, native.name: native},
+                {body.name: body, native.name: native, POLICY_PATH: policy_path},
                 body_path=body.name,
                 source_path=native.name,
                 source_kind="text",
@@ -76,8 +96,15 @@ def _plan(scope, ready, context, bundle, catalog, revision, sheet, policy):
                 operation_id=digest([revision.revision_id, sheet.key, fingerprint]),
                 decision=decision,
                 content_state=sheet.content_state,
+                reprocessing_request_id=reprocessing.request_id if reprocessing else None,
             )
-            return catalog.plan_unit(processing.processing_id, key=sheet.key, doc_name=doc_name)
+            context.check_stop()
+            return catalog.plan_unit(
+                processing.processing_id,
+                key=sheet.key,
+                doc_name=doc_name,
+                expected_generation=(target.generation if target else 0) if reprocessing else None,
+            )
 
 
 def _uncompiled(scope, ready, revision, target, sheet, *, error=None, status=None):
@@ -114,9 +141,17 @@ def _uncompiled(scope, ready, revision, target, sheet, *, error=None, status=Non
     )
 
 
-def import_workbook(scope, ready, context, bundle, catalog, revision, *, unit_id=None):
-    with task_stage(context, "workbook.inventory.v1", source_revision_id=revision.revision_id):
-        workbook = WorkbookStore(scope.kb_dir, scope.knowledge.identity).retain(revision, ready)
+def import_workbook(
+    scope, ready, context, bundle, catalog, revision, *, unit_id=None, reprocessing=None
+):
+    with task_stage(
+        context, "workbook.inventory.v1", source_revision_id=revision.revision_id
+    ) as progress:
+        workbook = WorkbookStore(scope.kb_dir, scope.knowledge.identity).retain(
+            revision, ready, processing_key=reprocessing.request_id if reprocessing else ""
+        )
+        if workbook.error:
+            progress.update(status="failed", reason_code="WorkbookInventoryFailed")
     if workbook.error:
         return IngestResult(
             str(ready.identity),
@@ -130,7 +165,20 @@ def import_workbook(scope, ready, context, bundle, catalog, revision, *, unit_id
     # Retention and target planning finish before the first model call, so a
     # failed/cancelled first worksheet cannot hide the remaining inventory.
     targets = [
-        (_plan(scope, ready, context, bundle, catalog, revision, sheet, workbook.policy), sheet)
+        (
+            _plan(
+                scope,
+                ready,
+                context,
+                bundle,
+                catalog,
+                revision,
+                sheet,
+                workbook.policy,
+                reprocessing,
+            ),
+            sheet,
+        )
         for sheet in workbook.sheets
     ]
     if unit_id is not None and not any(target.unit_id == unit_id for target, _ in targets):

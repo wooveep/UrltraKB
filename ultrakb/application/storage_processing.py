@@ -7,7 +7,9 @@ from ultrakb.locks import atomic_write_json, atomic_write_text
 from ultrakb.source_pages import read_page_selection
 
 
-def convert_native_input(scope, ready, baseline, private, doc_name, context, bundle):
+def convert_native_input(
+    scope, ready, baseline, private, doc_name, context, bundle, *, policy=None
+):
     converted = convert_document(
         ready.source,
         scope.kb_dir,
@@ -16,6 +18,8 @@ def convert_native_input(scope, ready, baseline, private, doc_name, context, bun
         prepared=ready,
         doc_name=doc_name,
         check_stop=context.check_stop,
+        office_identity=(policy or {}).get("office"),
+        cnki_identity=(policy or {}).get("cnki"),
     )
     wiki = baseline.directory / "wiki"
     body = wiki / f"sources/{doc_name}.md"

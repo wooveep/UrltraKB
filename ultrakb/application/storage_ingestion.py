@@ -190,11 +190,26 @@ def process_admitted(
     *,
     unit_id=None,
     text_assessment=None,
+    reprocessing=None,
 ):
+    from .storage_processing_policy import (
+        POLICY_PATH,
+        ProcessingPolicy,
+        current_processing_policy,
+        needs_reprocessing,
+    )
+
     workbook = ready.source.suffix.lower() in {".xlsx", ".xls"}
     target = None if workbook else catalog.unit_for_source(revision.source_id, key="body")
-    if text_assessment is not None or (
-        not workbook and (target is None or target.source_revision_id != revision.revision_id)
+    forced = bool(
+        reprocessing is not None
+        and not workbook
+        and needs_reprocessing(catalog, target, reprocessing)
+    )
+    if (
+        text_assessment is not None
+        or (not workbook and (target is None or target.source_revision_id != revision.revision_id))
+        or forced
     ):
         assessment = text_assessment or preflight_import_text(
             scope.kb_dir, ready, check_stop=context.check_stop
@@ -213,6 +228,7 @@ def process_admitted(
                     revision,
                     error.assessment,
                     download_remote_assets,
+                    reprocessing=reprocessing,
                 )
             return replace(
                 rejection_result(ready, error),
@@ -222,14 +238,41 @@ def process_admitted(
     if workbook:
         from .storage_workbooks import import_workbook
 
-        return import_workbook(scope, ready, context, bundle, catalog, revision, unit_id=unit_id)
+        return import_workbook(
+            scope,
+            ready,
+            context,
+            bundle,
+            catalog,
+            revision,
+            unit_id=unit_id,
+            reprocessing=reprocessing,
+        )
     root = scope.kb_dir
-    if target is None or target.source_revision_id != revision.revision_id:
+    if target is None or target.source_revision_id != revision.revision_id or forced:
         with task_stage(context, "import.process.v1", source_revision_id=revision.revision_id):
             doc_name = (
                 target.doc_name
                 if target
                 else f"{_sanitize_stem(ready.source.stem)}-{revision.source_id[:8]}"
+            )
+            resource_policy = None
+            if ready.source.suffix.lower() in {".html", ".htm"}:
+                from ultrakb.remote_assets import resolve_resource_policy
+
+                resource_policy = resolve_resource_policy(root, download_remote_assets)
+            policy = ProcessingPolicy(
+                values=reprocessing.policy
+                if reprocessing
+                else current_processing_policy(
+                    scope,
+                    catalog,
+                    revision,
+                    doc_name,
+                    bundle=bundle,
+                    resource_policy=resource_policy,
+                ),
+                request_id=reprocessing.request_id if reprocessing else None,
             )
             with materialize_baseline(scope.knowledge, ()) as baseline:
                 private = KnowledgeScope(
@@ -239,11 +282,6 @@ def process_admitted(
                     private_workspace=baseline.private,
                 )
                 if ready.source.suffix.lower() in TEXT_SOURCE_EXTENSIONS:
-                    resource_policy = None
-                    if ready.source.suffix.lower() in {".html", ".htm"}:
-                        from ultrakb.remote_assets import resolve_resource_policy
-
-                        resource_policy = resolve_resource_policy(root, download_remote_assets)
                     frozen = normalize_text_document(
                         ready, doc_name, baseline.directory, resource_policy=resource_policy
                     )
@@ -270,21 +308,35 @@ def process_admitted(
                     from .storage_processing import convert_native_input
 
                     decision, body, native, files = convert_native_input(
-                        scope, ready, baseline, private, doc_name, context, bundle
+                        scope,
+                        ready,
+                        baseline,
+                        private,
+                        doc_name,
+                        context,
+                        bundle,
+                        policy=policy.values,
                     )
                     files = {
                         name: path for name, path in files.items() if path not in {body, native}
                     }
                     source_kind = "pages"
                 fingerprint = digest(
-                    {"native": json_native(native), "decision": decision.model_dump(mode="json")}
+                    {
+                        "native": json_native(native),
+                        "decision": decision.model_dump(mode="json"),
+                        "policy": policy.model_dump(mode="json"),
+                    }
                 )
+                policy_path = baseline.directory / POLICY_PATH
+                atomic_write_json(policy_path, policy.model_dump(mode="json"))
                 processing = catalog.retain_processing(
                     revision.revision_id,
                     {
                         body.name: body,
                         native.name: native,
                         **files,
+                        POLICY_PATH: policy_path,
                     },
                     body_path=body.name,
                     source_path=native.name,
@@ -292,8 +344,17 @@ def process_admitted(
                     fingerprint=fingerprint,
                     operation_id=digest([revision.revision_id, fingerprint]),
                     decision=decision,
+                    reprocessing_request_id=reprocessing.request_id if reprocessing else None,
                 )
-                target = catalog.plan_unit(processing.processing_id, key="body", doc_name=doc_name)
+                context.check_stop()
+                target = catalog.plan_unit(
+                    processing.processing_id,
+                    key="body",
+                    doc_name=doc_name,
+                    expected_generation=(target.generation if target else 0)
+                    if reprocessing
+                    else None,
+                )
     if unit_id is not None and target.unit_id != unit_id:
         raise ValueError("Processing unit does not belong to this source")
     return compile_stored_unit(scope, ready, context, catalog, revision, target)[0]

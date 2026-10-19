@@ -36,13 +36,23 @@ def describe_preview(preview):
             else "整份资料正文"
         )
     )
-    lines.append("重新处理会保留来源记录；人工修改仍通过待接受差异确认。")
+    lines.append(
+        "继续未完成的处理，复用已接纳成果及原任务预算。"
+        if preview.get("resume")
+        else "重新处理会保留来源记录；人工修改仍通过待接受差异确认。"
+    )
     if preview["publication_impact"].get("superseded_proposals"):
         lines.append("所选资料尚有待接受差异；新处理将使这些旧建议过期，人工正文仍保留。")
     for unit in preview["units"]:
         lines.append(
             f"\n{unit['name']}："
-            + ("策略已变化" if unit["policy_changed"] else "策略相同，重新处理仍会创建新修订")
+            + (
+                "策略已变化"
+                if unit["policy_changed"]
+                else "策略相同，继续未完成处理"
+                if preview.get("resume")
+                else "策略相同，重新处理仍会创建新修订"
+            )
         )
         before, after = unit["previous_policy"], unit["next_policy"]
         for key, label in (
