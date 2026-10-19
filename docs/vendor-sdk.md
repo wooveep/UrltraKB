@@ -41,7 +41,9 @@ ChatIndex `.3` 与 ConDB `.4` 仅同步 LiteLLM 精确依赖。打包版本不�
 
 ## 安装
 
-Python 范围统一为 `>=3.10,<3.14`。OpenAI `2.44.0`、Agents SDK `0.17.3`、
+UltraKB 应用的 Python 范围为 `>=3.12,<3.14`，对应主库所需的 SQLite 连接配置 API。
+独立 SDK 保留各自支持范围，实际 SQLite 构建另由运行时门槛验证。
+OpenAI `2.44.0`、Agents SDK `0.17.3`、
 tiktoken `0.13.0`、Jinja2 `3.1.6`、PyYAML `6.0.3` 和 dotenv `1.2.2` 保持固定。
 前三包使用 `poetry-core==2.4.1`，LiteLLM 使用 `uv_build==0.11.8`。
 

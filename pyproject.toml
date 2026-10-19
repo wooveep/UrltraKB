@@ -7,7 +7,7 @@ name = "ultrakb"
 dynamic = ["version"]
 description = "UltraKB: Open LLM Knowledge Base, powered by PageIndex"
 readme = "README.md"
-requires-python = ">=3.10,<3.14"
+requires-python = ">=3.12,<3.14"
 license = {text = "Apache-2.0"}
 authors = [
     {name = "Kylin", email = "quanqi@pageindex.ai"},
@@ -18,8 +18,6 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
@@ -159,7 +157,7 @@ exclude = ["/ultrakb/web", "/frontend"]
 "skills/ultrakb-html-critic" = "ultrakb/_skills/ultrakb-html-critic"
 
 [tool.ruff]
-target-version = "py310"
+target-version = "py312"
 line-length = 100
 # Audited upstream snapshots keep their original style; UltraKB additions stay checked.
 extend-exclude = ["vendor/PageIndex", "vendor/ChatIndex", "vendor/ConDB", "vendor/LiteLLM", "ultrakb/office/assets/runtime"]
@@ -193,7 +191,7 @@ select = ["E", "F", "I"]
 "tests/test_remove.py" = ["E501"]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.12"
 files = ["ultrakb"]
 # Private pinned Office distributions contain their own Python standard library.
 exclude = ["ultrakb/office/assets/runtime"]

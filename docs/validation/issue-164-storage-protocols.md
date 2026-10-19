@@ -2416,3 +2416,22 @@ review copies. Active execution, busy reader, wrong generation, and published
 history are protected. The final regression matrix passes 73 tests, Mypy passes
 598 modules, focused Ruff/format/diff checks pass, and both static readonly
 review axes report zero findings. Public factories are still unchanged.
+
+### Runtime support and missing active coordination
+
+The application now declares Python 3.12–3.13, matching the SQLite connection
+configuration API required to preserve active WAL files after connection close.
+The existing gate still checks the actual linked SQLite build before writes.
+The lockfile drops alternatives used only by unsupported Python versions;
+retained dependency versions remain pinned and unchanged.
+
+Missing active WAL/SHM files are rejected before opening SQLite. Diagnostics
+and user documentation direct recovery through an already verified backup into
+a new directory, with a new runtime generation. There is no automatic sidecar
+reconstruction or private WAL parser. Parameterized regressions remove each
+sidecar from an owned fixture and verify all remaining database bytes are
+unchanged, restored original content is identical, and old callbacks fail.
+
+The final database/candidate/maintenance/backup/package/boundary/size matrix
+passes 60 tests. Mypy passes 598 modules; focused Ruff, format, diff and offline
+lockfile checks pass. Public activation and the full final suite remain pending.

@@ -290,7 +290,9 @@ def open_database(
     if wal.is_symlink() or shm.is_symlink():
         raise StorageFormatError("SQLite coordination files cannot follow symbolic links")
     if not sealed_archive and (not wal.is_file() or not shm.is_file()):
-        raise StorageFormatError("Active WAL coordination is missing; explicit recovery is needed")
+        raise StorageFormatError(
+            "Active WAL coordination is missing; restore a verified backup into a new directory"
+        )
     if sealed_archive and wal.exists() and wal.stat().st_size:
         raise StorageFormatError("An active WAL database cannot be opened as a sealed archive")
     readonly_options = "mode=ro&immutable=1" if sealed_archive else "mode=ro"
@@ -304,7 +306,9 @@ def open_database(
                 _preserve_wal(probe)
             identity = _validate(probe, expected)
             if not sealed_archive and probe.execute("PRAGMA journal_mode").fetchone()[0] != "wal":
-                raise StorageFormatError("Active storage requires WAL; explicit recovery is needed")
+                raise StorageFormatError(
+                    "Active storage requires WAL; restore a verified backup into a new directory"
+                )
         finally:
             probe.close()
         mode = readonly_options if read_only else "mode=rw"

@@ -28,7 +28,9 @@ Wiki 是普通 Markdown 文件，可以直接阅读，也可以把 `wiki/` 作�
 
 ## 从源码开始
 
-需要 Python **3.10–3.13** 和 [uv](https://docs.astral.sh/uv/)。
+需要 Python **3.12–3.13** 和 [uv](https://docs.astral.sh/uv/)。
+运行时还会检查实际链接的 SQLite：要求 3.51.3 及以上，或已修复 WAL 重置问题的
+3.50.7／3.44.6 分支；Python 绑定须支持保留连接关闭后的 WAL。
 仓库包含 PageIndex、ChatIndex、ConDB 和 LiteLLM 的本地源码；请使用锁文件安装，
 让它们与主程序一起加载。
 
@@ -184,6 +186,23 @@ concurrency: 5
 可选配置包括角色模型、模型容量、调用预算、重试、超时、图片处理和 OCR 连接。
 详见[配置示例](examples/configuration/README.md)、
 [文档处理规则](docs/document-processing.md)及[来源阅读](docs/source-reading.md)。
+
+## 存储维护与备份
+
+可在桌面的存储维护面板、认证 HTTP 接口或 CLI 预览并显式执行清理。
+任务核心用量、原件和已发布历史持续保留；候选放弃、恢复材料退役和孤立内容回收
+分别执行，预览不会授权后续删除。
+
+```bash
+ultrakb storage preview
+ultrakb storage backup --output /path/to/new-backup
+ultrakb storage restore /path/to/new-backup --output /path/to/new-library
+```
+
+备份通过在线数据库快照捕获已提交状态，并校验所引用的内容。
+活跃库的 `kb.sqlite`、WAL 和 SHM 必须一起保留；协调文件缺失时会拒绝打开，
+应使用已验证的备份恢复到新目录。恢复建立新的运行代次，旧 worker 回调不能写入恢复后的库。
+直接复制活跃数据库主文件无法替代备份。
 
 ## REST API
 
