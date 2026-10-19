@@ -77,13 +77,15 @@ def restore_worktrees(backup, destination, identity, manifest):
             raise ValueError("Backup paused differences do not match the database snapshot")
         # Applied receipts describe reconstructible copies, including views without a pause.
         rows = db.connection.execute(
-            "SELECT view_id, path, digest FROM ukb_projection_applied "
+            "SELECT view_id, path, digest, byte_count FROM ukb_projection_applied "
             "WHERE digest IS NOT NULL ORDER BY view_id, path"
         )
         while batch := rows.fetchmany(128):
-            for view_id, path, digest in batch:
+            for view_id, path, digest, size in batch:
                 target = ProjectionStore(destination, identity, view_id=view_id)._target(path)
                 _copy_file_atomic(blob_path(destination, digest), target)
+                if fingerprint(target) != (digest, size):
+                    raise ValueError("Restored applied copy failed digest verification")
         for item in manifest.worktrees:
             store = WikiEditStore(destination, identity, view_id=item.view_id)
             baseline = store._load(db, item.edit_id).baseline
@@ -96,7 +98,10 @@ def restore_worktrees(backup, destination, identity, manifest):
                 durable_unlink(target, missing_ok=True)
                 prune_empty_parents(target, stop=store.projection.directory)
             for change in item.changes:
+                target = store.projection._target(change.path)
                 _copy_file_atomic(
                     worktree_payload(backup, item.edit_id, change.path),
-                    store.projection._target(change.path),
+                    target,
                 )
+                if fingerprint(target) != (change.digest, change.byte_count):
+                    raise ValueError("Restored working-copy change failed digest verification")

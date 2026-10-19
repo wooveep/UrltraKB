@@ -10,7 +10,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 
-from ultrakb.locks import atomic_write_text, durable_unlink
+from ultrakb.locks import atomic_write_text, durable_unlink, file_write_lock
 from ultrakb.source_records import RecordId
 
 from .blobs import BlobRetiring, _prepare_directory, put_blob, read_bytes, retain_blob
@@ -114,8 +114,9 @@ class ReceiptStore:
                     usage=usage,
                 )
                 path = self.pending / f"{request_id}-{uuid4().hex}.json"
-                _prepare_directory(self.root, path)
-                atomic_write_text(path, packet.model_dump_json())
+                with file_write_lock(self.root / ".ultrakb/ingest.lock"):
+                    _prepare_directory(self.root, path)
+                    atomic_write_text(path, packet.model_dump_json())
                 return CapturedResponse(request_id, requires_repair=True)
         return CapturedResponse(request_id, requires_repair=False)
 
@@ -123,7 +124,10 @@ class ReceiptStore:
         if type(limit) is not int or not 1 <= limit <= 1000 or byte_limit < 1:
             raise ValueError("Receipt repair requires positive bounded limits")
         repaired = invalid = scanned = total_bytes = 0
-        with storage_stage(self.root, self.identity):
+        with (
+            storage_stage(self.root, self.identity),
+            file_write_lock(self.root / ".ultrakb/ingest.lock"),
+        ):
             if not self.pending.exists():
                 return ReceiptRepair(0, 0, 0)
             with os.scandir(self.pending) as entries:

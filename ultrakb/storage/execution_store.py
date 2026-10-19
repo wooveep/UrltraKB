@@ -140,6 +140,18 @@ class ExecutionStore:
                 raise KeyError(model_budget_id)
             return ModelBudget(*row)
 
+    def execution(self, execution_id: str) -> Execution:
+        """Read a retained execution identity; begin still validates policy and state."""
+        with storage_stage(self.root, self.identity, read_only=True) as db:
+            row = db.connection.execute(
+                "SELECT task_id, execution_id, model_budget_id FROM ukb_executions "
+                "WHERE execution_id = ?",
+                (execution_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(execution_id)
+            return Execution(*row)
+
     def status(self, execution_id: str) -> str:
         with storage_stage(self.root, self.identity, read_only=True) as db:
             row = db.connection.execute(

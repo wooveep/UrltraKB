@@ -10,7 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ultrakb.lifecycle import creation_lifecycle, read_lifecycle
-from ultrakb.locks import _fsync_directory, atomic_write_json, durable_unlink
+from ultrakb.locks import _fsync_directory, atomic_write_json, durable_unlink, file_write_lock
+from ultrakb.storage.backup_receipts import capture_pending, restore_pending
 from ultrakb.storage.backup_state import (
     BackupManifest,
     capture_configuration,
@@ -229,7 +230,10 @@ class Maintenance:
             files, configuration = capture_configuration(self.root, temporary, _copy_verified)
             # Protection begins before the online snapshot and lasts through Blob copies.
             with storage_stage(self.root, self.identity, read_only=True) as db:
-                with projection_lock(self.root):
+                with (
+                    projection_lock(self.root),
+                    file_write_lock(self.root / ".ultrakb/ingest.lock"),
+                ):
                     snapshot = sqlite3.connect(state / "kb.sqlite", isolation_level=None)
                     try:
                         db.connection.backup(snapshot)
@@ -239,6 +243,7 @@ class Maintenance:
                     finally:
                         snapshot.close()
                     worktrees = capture_worktrees(db, temporary, _copy_verified)
+                    packets = capture_pending(self.root, temporary, self.identity, _copy_verified)
                 _, refs = _verify_snapshot(
                     temporary, expected=self.identity, sealed_archive=True, verify_blobs=False
                 )
@@ -253,13 +258,16 @@ class Maintenance:
                     referenced_blobs=len(refs),
                     files=files,
                     worktrees=worktrees,
+                    pending_receipts=packets,
                     coverage={
                         "committed_database": "complete",
                         "referenced_blobs": "complete",
                         "configuration": configuration,
                         "inherited_configuration": "external",
                         "worktree": "complete",
-                        "external_receipts": "not_captured",
+                        "external_receipts": "partial"
+                        if any(packet.state == "unresolved" for packet in packets)
+                        else "complete",
                     },
                 )
                 atomic_write_json(temporary / "backup.json", manifest.model_dump(mode="json"))
@@ -308,8 +316,13 @@ class Maintenance:
                 _copy_verified(blob_path(backup, digest), blob_path(temporary, digest), digest)
             restore_configuration(backup, temporary, manifest, _copy_verified)
             restore_worktrees(backup, temporary, identity, manifest)
+            receipts = restore_pending(backup, temporary, identity, manifest, _copy_verified)
             with open_database(temporary, expected=identity) as db:
+                from .restore_state import interrupt_work, rebind_imports
+
+                interrupt_work(db)
                 generation = uuid.uuid4().hex
+                rebind_imports(db, generation)
                 with db.transaction() as connection:
                     connection.execute("UPDATE ukb_meta SET generation = ?", (generation,))
             restored = DatabaseIdentity(identity.kb_id, generation)
@@ -317,7 +330,7 @@ class Maintenance:
             with database_path(temporary).open("rb") as handle:
                 os.fsync(handle.fileno())
             _publish_directory(temporary, destination)
-            return BackupReceipt(restored, dict(manifest.coverage))
+            return BackupReceipt(restored, {**manifest.coverage, "external_receipts": receipts})
         finally:
             if temporary.exists():
                 shutil.rmtree(temporary)

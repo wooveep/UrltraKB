@@ -4,7 +4,7 @@ import hashlib
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from ultrakb.configuration_lock import configuration_lock_path, require_prepared_configuration
 from ultrakb.locks import file_write_lock
@@ -53,6 +53,23 @@ class BackupWorktree(BaseModel):
         return value
 
 
+class BackupPendingReceipt(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    name: str = Field(min_length=1)
+    digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    byte_count: int = Field(ge=0)
+    state: Literal["repairable", "unresolved"]
+
+    @field_validator("name")
+    @classmethod
+    def check_name(cls, value):
+        wiki_path(value)
+        if "/" in value:
+            raise ValueError("A pending receipt requires one filename")
+        return value
+
+
 class BackupManifest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
@@ -64,6 +81,29 @@ class BackupManifest(BaseModel):
     coverage: dict[str, Literal["complete", "absent", "partial", "not_captured", "external"]]
     files: tuple[BackupFile, ...]
     worktrees: tuple[BackupWorktree, ...] = ()
+    pending_receipts: tuple[BackupPendingReceipt, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_coverage(self) -> "BackupManifest":
+        expected = {
+            "committed_database": "complete",
+            "referenced_blobs": "complete",
+            "configuration": configuration_coverage(self.files),
+            "inherited_configuration": "external",
+            "worktree": "complete",
+            "external_receipts": "partial"
+            if any(packet.state == "unresolved" for packet in self.pending_receipts)
+            else "complete",
+        }
+        if self.coverage != expected:
+            raise ValueError("Backup coverage does not match its captured file manifest")
+        return self
+
+
+def configuration_coverage(files):
+    if any(f.path == CONFIGURATION_PATHS[0] for f in files):
+        return "complete"
+    return "partial" if files else "absent"
 
 
 def fingerprint(path: Path) -> tuple[str, int]:
@@ -99,12 +139,7 @@ def capture_configuration(root: Path, destination: Path, copy_verified):
             files.append(
                 BackupFile(path=relative, role="configuration", digest=digest, byte_count=size)
             )
-    status = (
-        "complete"
-        if any(f.path == CONFIGURATION_PATHS[0] for f in files)
-        else ("partial" if files else "absent")
-    )
-    return tuple(files), status
+    return tuple(files), configuration_coverage(files)
 
 
 def read_manifest(root: Path, identity: DatabaseIdentity) -> BackupManifest:
@@ -129,11 +164,20 @@ def read_manifest(root: Path, identity: DatabaseIdentity) -> BackupManifest:
                 change.byte_count,
             ):
                 raise ValueError("Backup working-copy change failed digest verification")
+    if len({p.name for p in manifest.pending_receipts}) != len(manifest.pending_receipts):
+        raise ValueError("Backup repeats a pending receipt")
+    for packet in manifest.pending_receipts:
+        if fingerprint(pending_payload(root, packet.name)) != (packet.digest, packet.byte_count):
+            raise ValueError("Backup pending receipt failed digest verification")
     return manifest
 
 
 def worktree_payload(root: Path, edit_id: str, path: str) -> Path:
     return state_path(root, f".ultrakb/backup-state/wiki/{edit_id}/{path}")
+
+
+def pending_payload(root: Path, name: str) -> Path:
+    return state_path(root, f".ultrakb/receipts/pending/{name}")
 
 
 def restore_configuration(backup: Path, destination: Path, manifest: BackupManifest, copy_verified):

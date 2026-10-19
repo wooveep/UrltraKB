@@ -61,6 +61,8 @@ def begin_storage_execution(root: Path, context: ExecutionContext) -> Iterator[L
             executor = context.executor
             store = ExecutionStore(root, identity)
             previous = context.storage_execution
+            if previous is None and context.resume_storage_execution_id is not None:
+                previous = store.execution(context.resume_storage_execution_id)
             deadline = (
                 store.budget(previous.model_budget_id).deadline_at
                 if previous

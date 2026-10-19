@@ -1025,3 +1025,30 @@ Four public maintenance cases and ten related storage/editor regressions pass;
 full mypy passes 508 source modules. External pending receipts and interrupted
 runtime recovery are still outside this batch's coverage, explicitly reported in
 the backup, and remain required before P7/P8 acceptance.
+
+### Backup pending receipts and restore runtime recovery
+
+Pending packet writes, explicit repair and backup now share the existing short
+KB write coordination. The online snapshot and packet capture use that
+coordination together; known packets are matched to snapshot request provenance,
+while malformed/unknown packets are copied exactly and report partial coverage.
+Restore accepts known packets against the original generation before establishing
+the new runtime generation. Unresolved packets remain present and explicitly
+incomplete. No received response is re-sent for this recovery.
+
+Restored active executions, stages, pending attempts and requests become
+interrupted without fabricated end times. Request counters are updated through
+the existing receipt merge; original request provenance and spent budgets remain.
+Import groups are rebound for new dispatches, while prior attempts retain their
+old generation. A public compiler case resumes accepted model results after
+restoring into another directory, creates a new execution with the original
+budget, publishes successfully and makes no additional provider request.
+
+Two review findings were reproduced first and repaired: coverage is validated
+against the manifest contents, and restored working-copy bytes are verified after
+the actual atomic copy before publishing the new directory. Ten public backup
+application cases now cover configuration corruption, paused edits, late payload
+changes, known/unknown packets, running tasks and restored compilation. Related
+maintenance, usage, model, pending, session, artifact, compiler and editor
+regressions pass 89 tests. Remaining P6/P7 product queries, manual retention and
+the full P8 matrix are still required.

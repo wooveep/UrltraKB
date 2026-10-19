@@ -47,7 +47,7 @@ class UsageRequest(BaseModel):
     stage: str
     started_at: str
     ended_at: str | None = None
-    state: Literal["started", "completed", "failed", "cancelled"] = "started"
+    state: Literal["started", "completed", "failed", "cancelled", "interrupted"] = "started"
     observation: Literal["call", "transport"] = "call"
     send_status: Literal["unknown", "not_sent", "sent"] = "unknown"
     business_state: Literal["completed", "failed", "cancelled"] | None = None
