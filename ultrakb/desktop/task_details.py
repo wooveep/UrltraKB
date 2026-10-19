@@ -161,4 +161,14 @@ class TaskDetailsDialog(QDialog):
 
 
 def show_task_details(task, parent):
+    from pathlib import Path
+
+    if (Path(task.kb_dir) / ".ultrakb/kb.sqlite").is_file():
+        from ultrakb.desktop.knowledge_tasks import KnowledgeTasksDialog
+
+        executions = (task.model_usage or {}).get("execution_ids", [])
+        KnowledgeTasksDialog(
+            task.kb_dir, parent, execution_id=executions[-1] if executions else None
+        ).exec()
+        return
     TaskDetailsDialog(task, parent).exec()

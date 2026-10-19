@@ -135,9 +135,9 @@ class TaskStore:
     def __init__(self, root, identity):
         self.root, self.identity = root.resolve(), identity
 
-    def list(self, *, after=0, limit=63):
+    def list(self, *, after=0, limit=63, cancelled=None):
         _page(after, limit)
-        with storage_stage(self.root, self.identity, read_only=True) as db:
+        with storage_stage(self.root, self.identity, read_only=True, cancelled=cancelled) as db:
             db.connection.execute("BEGIN")
             rows = db.connection.execute(
                 f"SELECT {_OVERVIEW} {_LATEST}WHERE t.hidden = 0 AND t.sequence > ? "
@@ -153,6 +153,16 @@ class TaskStore:
                 next_cursor=_cursor(rows, limit),
             )
 
+    def for_execution(self, execution_id, *, cancelled=None, **options):
+        TypeAdapter(RecordId).validate_python(execution_id)
+        with storage_stage(self.root, self.identity, read_only=True, cancelled=cancelled) as db:
+            row = db.connection.execute(
+                "SELECT task_id FROM ukb_executions WHERE execution_id = ?", (execution_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(execution_id)
+        return self.read(row[0], execution_id=execution_id, cancelled=cancelled, **options)
+
     def read(
         self,
         task_id,
@@ -163,13 +173,14 @@ class TaskStore:
         stages_after=0,
         requests_after=0,
         publications_after=0,
+        cancelled=None,
     ):
         TypeAdapter(RecordId).validate_python(task_id)
         if execution_id is not None:
             TypeAdapter(RecordId).validate_python(execution_id)
         for after in (executions_after, stages_after, requests_after, publications_after):
             _page(after, limit)
-        with storage_stage(self.root, self.identity, read_only=True) as db:
+        with storage_stage(self.root, self.identity, read_only=True, cancelled=cancelled) as db:
             db.connection.execute("BEGIN")
             row = db.connection.execute(
                 f"SELECT {_OVERVIEW} {_LATEST}WHERE t.task_id = ?", (task_id,)
@@ -178,10 +189,11 @@ class TaskStore:
                 raise KeyError(task_id)
             task = _overview(db, row)
             execution_id = execution_id or task.latest_execution_id
-            if not db.connection.execute(
-                "SELECT 1 FROM ukb_executions WHERE execution_id = ? AND task_id = ?",
+            selected = db.connection.execute(
+                f"SELECT {_EXECUTION} FROM ukb_executions WHERE execution_id = ? AND task_id = ?",
                 (execution_id, task_id),
-            ).fetchone():
+            ).fetchone()
+            if selected is None:
                 raise ValueError("Execution belongs to another task")
             executions = db.connection.execute(
                 f"SELECT {_EXECUTION} FROM ukb_executions WHERE task_id = ? "
@@ -223,6 +235,9 @@ class TaskStore:
                 generation=self.identity.generation,
                 task=task,
                 execution_id=execution_id,
+                execution=TaskExecution.model_validate(
+                    dict(zip(_EXECUTION_KEYS, selected[1:], strict=True))
+                ),
                 execution_usage=_usage(db, "execution", execution_id),
                 executions=tuple(
                     TaskExecution.model_validate(dict(zip(_EXECUTION_KEYS, row[1:], strict=True)))

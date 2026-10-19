@@ -1132,3 +1132,29 @@ plan when present and classify supersession before former conflicts. Two public
 import/editor application regressions prove pending-to-synced resumption and
 historical supersession after a later successful import. All 24 related task,
 editor and projection regressions pass.
+
+### Shared task pages in three adapters
+
+CLI `tasks list/show/export`, authenticated HTTP `/api/v1/tasks` detail/export,
+and a native Qt task browser now consume the same shared application schema and
+independent cursors. Main-store reads validate the exact format without depending
+on an already-published Wiki or activating the new-format creation factory. A
+worker execution resolves to its actual durable task instead of reinterpreting
+the application cache's task ID. Details include selected-execution metadata even
+when its execution-list page differs. Exports remain bounded and preserve the
+statistics time, schema, coverage and continuation cursors.
+
+Qt uses cancellable storage reads on LocalIO worker threads, binds the database
+generation once, and discards obsolete responses. Pausing refresh affects only
+subscription. An actual exclusive reclamation lease blocks a detail read while
+Qt continues delivering events; closing cancels that wait before the lease is
+released. CLI, HTTP and native Qt detail/export payloads agree after excluding
+the observation timestamp, including a separately advanced stage cursor. API
+queries retain the existing registered-alias and authentication boundaries.
+
+Fourteen focused task/entrypoint/size cases and 195 existing CLI/API/desktop/
+boundary regressions pass (five live cases deselected). Full mypy passes 519
+modules; the subsequently extended query DTO and adapters also pass targeted
+mypy. This is task presentation integration, not completion of P6/P7/P8: input
+drilldown, remaining real stage producers, archival/statistical maintenance and
+normal-format activation remain unfinished. Issue 164 remains open.

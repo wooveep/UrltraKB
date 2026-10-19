@@ -2067,6 +2067,7 @@ from ultrakb.cli_refresh import refresh
 from ultrakb.cli_source import source, retry_worksheet, reprocess, retry_source
 from ultrakb.cli_pending import pending, process as process_pending_command
 from ultrakb.cli_settings import settings
+from ultrakb.cli_tasks import tasks
 
 cli.add_command(proposals)
 cli.add_command(refresh)
@@ -2077,3 +2078,4 @@ cli.add_command(retry_source)
 cli.add_command(pending)
 cli.add_command(process_pending_command)
 cli.add_command(settings)
+cli.add_command(tasks)

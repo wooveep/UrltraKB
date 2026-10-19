@@ -91,6 +91,7 @@ class TaskDetail(TaskRecord):
     generation: str
     task: TaskOverview
     execution_id: RecordId
+    execution: TaskExecution
     execution_usage: UsageAggregate | None
     executions: tuple[TaskExecution, ...]
     stages: tuple[TaskStage, ...]
