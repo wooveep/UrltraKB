@@ -18,6 +18,8 @@ class CompileOutcome(BaseModel):
 
 def read_outcome(connection, revision_id):
     row = connection.execute(
-        "SELECT outcome_json FROM ukb_revision_import WHERE revision_id = ?", (revision_id,)
+        "SELECT outcome_json FROM ukb_revision_import WHERE revision_id = ? "
+        "UNION ALL SELECT outcome_json FROM ukb_revision_refresh WHERE revision_id = ?",
+        (revision_id, revision_id),
     ).fetchone()
     return CompileOutcome.model_validate_json(row[0]) if row else CompileOutcome()

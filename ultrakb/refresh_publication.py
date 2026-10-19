@@ -30,6 +30,8 @@ class RefreshResult:
     message: str = ""
     resources: tuple[str, ...] = ()
     unfinished: tuple[str, ...] = ()
+    publication_id: str | None = None
+    projection_pending: bool = False
 
 
 class RefreshedPage(Record):

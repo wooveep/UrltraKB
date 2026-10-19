@@ -1486,3 +1486,41 @@ compiler/question/document set passes 87 cases (two live cases deselected); the
 final validity/page-write set passes 17. Full mypy passes 543 modules and Ruff and
 format checks pass. Both review axes close the fixed-reader and legacy validity
 findings. The refresh writer and P8 activation are still unfinished.
+
+### Main-store full refresh and durable review
+
+Development schema 22 adds a catalog generation fence, immutable generated-page
+baselines and refresh claims/outcomes to sealed revisions. Catalog source/unit
+transitions advance the fence in their own transaction; publication checks one
+row before committing. Generated baselines retain their exact Blob references
+through manual edits. A full refresh rebuilds every eligible retained unit with
+the existing short/long compiler and independent main-store checkpoints, reuses
+ready shared indexes and commits one complete publication. Withdrawn inputs are
+excluded; an empty rebuild requires neither model configuration nor credentials.
+
+Manual summary/concept/entity/report/exploration and root navigation changes
+produce durable candidates and complete review diffs. Existing custom AGENTS.md
+rules remain the actual compiler input; a missing default seed is not assigned
+source evidence. Exact review versions bind the database generation and candidate.
+Source/catalog or head changes reject approval, while acceptance/replay preserve
+the exact committed result. Candidate lists read bounded metadata rather than
+building every diff. Recent compile time includes real compiler refresh receipts;
+empty refresh does not invent a new model compilation time.
+
+Actual SQLite/SDK cases prove independent accepted-summary recovery and retained
+candidate recovery after publication failure, with no paid request repeated.
+Source, new unit or withdrawal changes during model wait stop the next send.
+Lost publication acknowledgements, projection failures and later observation or
+execution-cleanup errors retain known business success. A real pending worktree
+sync can change its applied epoch after candidate preparation: retry reconstructs
+only a new candidate/plan from accepted compiler steps. Manual changes still need
+a new exact review token. Existing historical knowledge and originals remain roots.
+
+Nineteen refresh cases and three CLI/HTTP/native development-binding cases pass.
+The expanded storage/compiler/publication/backup/maintenance set passes 137 cases;
+the final refresh/validity/page-write/size/boundary set passes 45. Full mypy passes
+548 modules; Ruff, formatting and diff checks pass. Both independent review axes
+verify the custom-schema, root-navigation, timestamp and synchronization-reprepare
+fixes. Source empty confirmation, selected refresh, remaining maintenance writers,
+observation/archive/audit completion and the sole P8 normal-factory activation
+remain open work; this is not overall completion of issue 164.

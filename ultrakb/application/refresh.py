@@ -95,6 +95,10 @@ def read_refresh_proposal(
     kb_dir = kb_dir.resolve()
     if scope is not None:
         scope = resolve_scope(kb_dir, scope)
+        if scope.knowledge is not None:
+            from .storage_refresh import read_stored_refresh
+
+            return read_stored_refresh(scope, identity)
     with kb_read_lock(kb_dir / ".ultrakb"):
         proposal = refresh_candidate_view(kb_dir, identity)
         if scope and (scope.read_only or scope.view_id != proposal["view_id"]):
@@ -108,6 +112,10 @@ def list_refresh_proposals(
     kb_dir = kb_dir.resolve()
     if scope is not None:
         scope = resolve_scope(kb_dir, scope)
+        if scope.knowledge is not None:
+            from .storage_refresh import list_stored_refreshes
+
+            return list_stored_refreshes(scope)
     with kb_read_lock(kb_dir / ".ultrakb"):
         proposals = (
             read_refresh_proposal(kb_dir, p.parent.name)
@@ -126,6 +134,11 @@ def accept_refresh_proposal(
 
     kb_dir = kb_dir.resolve()
     if scope is not None:
+        scope = resolve_scope(kb_dir, scope)
+        if scope.knowledge is not None:
+            from .storage_refresh import accept_stored_refresh
+
+            return accept_stored_refresh(scope, identity, version=version, context=context)
         scope = resolve_scope(kb_dir, scope, writable=True)
     context = context or ExecutionContext()
     with kb_ingest_lock(kb_dir / ".ultrakb", cancelled=context.cancelled, on_wait=context.waiting):
@@ -203,6 +216,11 @@ async def refresh_knowledge_view(kb_dir: Path, *, scope: KnowledgeScope, context
     from ultrakb.source_catalog import list_sources
     from ultrakb.unit_publication import prepare_compile_view
 
+    scope = resolve_scope(kb_dir, scope)
+    if scope.knowledge is not None:
+        from .storage_refresh import refresh_stored_view
+
+        return await refresh_stored_view(scope, context)
     scope = resolve_scope(kb_dir, scope, writable=True)
     kb_dir = scope.kb_dir
     context = context or ExecutionContext()

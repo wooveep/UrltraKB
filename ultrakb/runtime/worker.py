@@ -239,18 +239,17 @@ def _execute(
             )
         else:
             refreshed = asyncio.run(
-                refresh_knowledge_view(
-                    root, scope=resolve_scope(root, scope, writable=True), context=context
-                )
+                refresh_knowledge_view(root, scope=resolve_scope(root, scope), context=context)
             )
         return UnitResult(
             refreshed.status
             if refreshed.status in {"completed", "failed", "stopped"}
             else "blocked",
-            resources=refreshed.resources,
+            resources=tuple(str(root / path) for path in refreshed.resources),
             error=refreshed.message or None,
             unfinished=refreshed.unfinished,
             changes=(refreshed.message,) if refreshed.message else (),
+            revision=refreshed.publication_id,
         )
 
     if isinstance(request, AcceptProposal):

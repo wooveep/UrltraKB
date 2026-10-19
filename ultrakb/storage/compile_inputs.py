@@ -118,12 +118,14 @@ def _freeze_inline_assets(db, baseline):
             baseline.normalized_pages[page] = digest
 
 
-def materialize_inputs(base, baseline, target):
+def materialize_inputs(base, baseline, target, *, page_basis=None, active_units=None):
     """Keep old page inputs distinct when a document's current target advances."""
     identities, paths, assets = {}, {}, {}
-    current = set(base.unit_revisions())
-    basis = base.page_input_revisions()
-    units = current | {target.unit_revision_id} | {u for values in basis.values() for u in values}
+    current = set(base.unit_revisions() if active_units is None else active_units)
+    basis = base.page_input_revisions() if page_basis is None else page_basis
+    target_revision = target.unit_revision_id if target is not None else None
+    units = current | ({target_revision} if target_revision else set())
+    units.update(u for values in basis.values() for u in values)
     native = {}
     attachments = _required_attachments(baseline)
     with storage_stage(base.root, base.identity, read_only=True) as db:
@@ -141,8 +143,8 @@ def materialize_inputs(base, baseline, target):
         for revision in sorted(units):
             unit = CatalogStore._unit_revision(db, revision)
             processing = CatalogStore._processing(db, unit.processing_id)
-            retained = revision != target.unit_revision_id and (
-                revision not in current or unit.unit_id == target.unit_id
+            retained = revision != target_revision and (
+                revision not in current or target is not None and unit.unit_id == target.unit_id
             )
             aliases = source_paths(unit, processing, retained=retained)
             files = {file.path: file for file in processing.files}
@@ -244,4 +246,11 @@ def prepare_compiled_revision(
         }
         | page_inputs,
         base=base,
+        generated_paths=tuple(
+            path
+            for path, value in changes.items()
+            if value is not None
+            and path.endswith(".md")
+            and hashlib.sha256(value).hexdigest() != baseline.normalized_pages.get(path)
+        ),
     )

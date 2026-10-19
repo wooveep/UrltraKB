@@ -9,6 +9,7 @@ from .execution_schema import EXECUTION_SCHEMA
 from .knowledge_inputs import PAGE_INPUT_SCHEMA
 from .projection_schema import PROJECTION_SCHEMA
 from .publication_schema import PUBLICATION_SCHEMA
+from .refresh_schema import REFRESH_SCHEMA
 from .tree_schema import TREE_SCHEMA
 
 SCHEMA = (
@@ -248,4 +249,5 @@ SCHEMA = (
     + CONVERSATION_SCHEMA
     + ARTIFACT_SCHEMA
     + COMPILE_SCHEMA
+    + REFRESH_SCHEMA
 )

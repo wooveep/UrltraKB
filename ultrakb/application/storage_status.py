@@ -28,9 +28,12 @@ def knowledge_status(scope):
         # per view. Internal row order also works when the wall clock moves back.
         compiled = db.connection.execute(
             "SELECT r.published_at FROM ukb_publication_receipts r "
-            "JOIN ukb_revision_import i ON i.revision_id = r.revision_id "
+            "LEFT JOIN ukb_revision_import i ON i.revision_id = r.revision_id "
+            "LEFT JOIN ukb_revision_refresh f ON f.revision_id = r.revision_id "
             "JOIN ukb_publications p ON p.publication_id = r.publication_id "
-            "WHERE p.view_id = ? AND r.rowid <= "
+            "WHERE p.view_id = ? AND (i.revision_id IS NOT NULL OR "
+            "(f.revision_id IS NOT NULL AND json_extract(f.outcome_json, '$.quality_known') = 1)) "
+            "AND r.rowid <= "
             "(SELECT rowid FROM ukb_publication_receipts WHERE publication_id = ?) "
             "ORDER BY r.rowid DESC LIMIT 1",
             (scope.view_id, bound.publication_id),

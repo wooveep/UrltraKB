@@ -368,8 +368,23 @@ class CompileWork:
                 self._write_record(connection, key, signature, before, encoded)
 
     def _require_current_target(self, connection):
+        from .catalog_store import CatalogConflict
         from .pending_store import _current
 
+        refresh = connection.execute(
+            "SELECT json_extract(object_json, '$.catalog_generation') "
+            "FROM ukb_compile_work WHERE work_id = ?",
+            (self.work_id,),
+        ).fetchone()
+        if (
+            refresh
+            and refresh[0] is not None
+            and connection.execute(
+                "SELECT generation FROM ukb_catalog_state WHERE singleton = 1"
+            ).fetchone()
+            != refresh
+        ):
+            raise CatalogConflict("Refresh inputs changed before the next model request")
         row = connection.execute(
             "SELECT p.source_revision_id, r.unit_revision_id FROM ukb_compile_work w "
             "JOIN ukb_unit_revisions r "

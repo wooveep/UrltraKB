@@ -219,6 +219,16 @@ class BoundKnowledge:
                 result.setdefault(path, []).append(unit)
             return {path: tuple(units) for path, units in result.items()}
 
+    def generated_baselines(self):
+        from .generated_baselines import read_baselines
+
+        with storage_stage(self.root, self.identity, read_only=True) as db:
+            self._require_publication(db)
+            return {
+                path: digest
+                for path, digest, _ in read_baselines(db.connection, self.publication.revision_id)
+            }
+
     def compile_workspace(self, *, required_attachments: tuple[str, ...] = ()):
         from .compile_workspace import materialize_baseline
 
@@ -295,6 +305,7 @@ class KnowledgeStore:
         unit_revisions: tuple[str, ...] = (),
         import_work: PendingWork | None = None,
         page_inputs: dict[str, tuple[str, ...]] | None = None,
+        generated_paths: tuple[str, ...] = (),
     ) -> PreparedRevision:
         return self._prepare_revision(
             files,
@@ -304,6 +315,7 @@ class KnowledgeStore:
             unit_revisions=unit_revisions,
             import_work=import_work,
             page_inputs=page_inputs,
+            generated_paths=generated_paths,
         )
 
     def prepare_changes(
@@ -313,6 +325,8 @@ class KnowledgeStore:
         *,
         page_inputs: dict[str, tuple[str, ...]] | None = None,
         withdrawal=None,
+        generated_paths=(),
+        refresh_generation=None,
     ) -> PreparedRevision:
         """Keep a fixed revision's inputs and reuse its verified immutable assets."""
         if base.root != self.root or base.identity != self.identity:
@@ -346,6 +360,8 @@ class KnowledgeStore:
             | (page_inputs or {}),
             base=base,
             withdrawal=withdrawal,
+            generated_paths=generated_paths,
+            refresh_generation=refresh_generation,
         )
 
     def _prepare_revision(
@@ -361,6 +377,8 @@ class KnowledgeStore:
         page_inputs: dict[str, tuple[str, ...]] | None = None,
         base: BoundKnowledge | None = None,
         withdrawal=None,
+        generated_paths=(),
+        refresh_generation=None,
     ) -> PreparedRevision:
         from .knowledge_preparation import prepare_revision
 
@@ -376,6 +394,8 @@ class KnowledgeStore:
             page_inputs=page_inputs,
             base=base,
             withdrawal=withdrawal,
+            generated_paths=generated_paths,
+            refresh_generation=refresh_generation,
         )
 
     def compilation_outcome(self, revision_id):
@@ -450,8 +470,10 @@ class KnowledgeStore:
             # The callback only checks an in-memory stop/deadline signal. Do not
             # accept late preparation after cancellation, or run I/O in this commit.
             check_cancelled()
+            from .generated_baselines import require_refresh_catalog
             from .source_withdrawal import finish_withdrawal
 
+            require_refresh_catalog(connection, prepared.revision_id)
             finish_withdrawal(connection, prepared.revision_id)
             activate_sync_plan(db, prepared.revision_id, prepared.sync_plan_id)
             connection.execute(

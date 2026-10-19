@@ -10,6 +10,7 @@ from ultrakb.source_records import RecordId
 from .blobs import Blob, put_blob, read_bytes, retain_blob
 from .compile_outcomes import CompileOutcome, read_outcome
 from .coordination import storage_stage
+from .generated_baselines import prepare_baselines, read_baselines, read_refresh_generation
 from .knowledge_inputs import navigation_inputs, prepare_page_inputs, validate_source_paths
 from .knowledge_store import BoundKnowledge, PreparedRevision, _batches, _manifest, _path
 from .navigation_store import (
@@ -39,7 +40,16 @@ def prepare_revision(
     page_inputs: dict[str, tuple[str, ...]] | None = None,
     base: BoundKnowledge | None = None,
     withdrawal=None,
+    generated_paths=(),
+    refresh_generation=None,
 ) -> PreparedRevision:
+    if refresh_generation is not None and (
+        type(refresh_generation) is not int
+        or not 0 <= refresh_generation < 2**63
+        or import_work is not None
+        or withdrawal is not None
+    ):
+        raise ValueError("Refresh requires a distinct, valid catalog generation claim")
     if withdrawal is not None:
         withdrawal = SourceWithdrawal.model_validate(withdrawal)
         if import_work is not None:
@@ -99,6 +109,7 @@ def prepare_revision(
                 retained[path] = [path, blob.digest, blob.byte_count]
         validate_file_tree(retained)
         entries = [retained[path] for path in sorted(retained)]
+        generated = prepare_baselines(db, entries, base, generated_paths)
         page_rows = prepare_page_inputs(db, entries, inputs, expected, view_id, page_inputs)
         validate_source_paths(db, entries, inputs, page_rows)
         navigation = prepare_navigation(
@@ -122,6 +133,8 @@ def prepare_revision(
                     "compile_outcome": compile_outcome.model_dump(mode="json"),
                     "page_inputs": page_rows,
                     "source_withdrawal": withdrawal.model_dump(mode="json") if withdrawal else None,
+                    "generated_baselines": generated,
+                    "refresh_generation": refresh_generation,
                 }
             ),
         )
@@ -149,6 +162,11 @@ def prepare_revision(
             )
             retain_blob(connection, "knowledge-revision", revision_id, "manifest", manifest)
             bind_navigation(connection, revision_id, navigation)
+            if refresh_generation is not None:
+                connection.execute(
+                    "INSERT INTO ukb_revision_refresh VALUES (?, ?, ?)",
+                    (revision_id, refresh_generation, encoded_outcome),
+                )
             if withdrawal is not None:
                 connection.execute(
                     "INSERT INTO ukb_revision_withdrawals VALUES (?, ?, ?, ?)",
@@ -201,6 +219,20 @@ def prepare_revision(
                         "INSERT INTO ukb_revision_page_inputs VALUES (?, ?, ?)",
                         (revision_id, path, unit),
                     )
+        for batch in _batches(generated):
+            with db.transaction() as connection:
+                for path, digest, byte_count in batch:
+                    connection.execute(
+                        "INSERT INTO ukb_revision_generated VALUES (?, ?, ?, ?)",
+                        (revision_id, path, digest, byte_count),
+                    )
+                    retain_blob(
+                        connection,
+                        "knowledge-revision",
+                        revision_id,
+                        f"generated:{path}",
+                        Blob(digest, byte_count),
+                    )
         with db.transaction() as connection:
             connection.execute(
                 "UPDATE ukb_knowledge_revisions SET state = 'sealed' "
@@ -232,6 +264,8 @@ def prepare_revision(
                 "import_claim": import_claim(db.connection, revision_id),
                 "compile_outcome": read_outcome(db.connection, revision_id).model_dump(mode="json"),
                 "source_withdrawal": withdrawal_manifest(db.connection, revision_id),
+                "generated_baselines": read_baselines(db.connection, revision_id),
+                "refresh_generation": read_refresh_generation(db.connection, revision_id),
                 "page_inputs": db.connection.execute(
                     "SELECT path, unit_revision_id FROM ukb_revision_page_inputs "
                     "WHERE revision_id = ? ORDER BY path, unit_revision_id",
