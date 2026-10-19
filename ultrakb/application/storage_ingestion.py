@@ -61,18 +61,34 @@ def import_stored_document(
     result = None
     try:
         with context.begin(root) as bundle, ExitStack() as inputs:
-            ready = (
-                prepared if prepared is not None else inputs.enter_context(prepared_input(source))
-            )
-            context.check_stop()
-            validate_source_root(source, source_root)
-            if not ready.is_current():
-                from ultrakb.inputs import InputChanged
+            input_observation = _source_observation(source)
+            with task_stage(
+                context, "import.freeze.v1", observation_input=input_observation
+            ) as progress:
+                ready = (
+                    prepared
+                    if prepared is not None
+                    else inputs.enter_context(prepared_input(source))
+                )
+                context.check_stop()
+                validate_source_root(source, source_root)
+                if not ready.is_current():
+                    from ultrakb.inputs import InputChanged
 
-                raise InputChanged("The input changed before admission")
+                    raise InputChanged("The input changed before admission")
+                if prepared is not None:
+                    progress["status"] = "reused"
             try:
-                assessment = preflight_import_text(root, ready, check_stop=context.check_stop)
-                validate_text_preflight(ready, assessment)
+                with task_stage(
+                    context,
+                    "import.preflight.v1",
+                    work_key=ready.digest,
+                    observation_input=_input_observation(
+                        ready, temporary_input_id=input_observation.temporary_input_id
+                    ),
+                ):
+                    assessment = preflight_import_text(root, ready, check_stop=context.check_stop)
+                    validate_text_preflight(ready, assessment)
             except ImportTextRejected as error:
                 result = (
                     _import_body(
@@ -83,6 +99,7 @@ def import_stored_document(
                         origin_url,
                         download_remote_assets,
                         text_assessment=error.assessment,
+                        temporary_input_id=input_observation.temporary_input_id,
                     )
                     if retainable_without_text(error.assessment)
                     else rejection_result(ready, error)
@@ -96,6 +113,7 @@ def import_stored_document(
                     origin_url,
                     download_remote_assets,
                     text_assessment=assessment,
+                    temporary_input_id=input_observation.temporary_input_id,
                 )
             context._storage_result = (
                 "completed"
@@ -152,25 +170,42 @@ def confirm_import_usage(result, context, root, identity):
     return confirm_result_usage(result, context, root, identity, source_id=result.source_id)
 
 
-def _input_observation(ready):
+def _source_observation(source, *, input_name=None, input_digest=None, temporary_input_id=None):
     from uuid import uuid4
 
     from ultrakb.stage_observations import InputObservation
 
     try:
-        size = ready.path.stat().st_size
+        size = source.stat().st_size
     except OSError:
         size = None
     return InputObservation(
-        temporary_input_id=uuid4().hex,
-        input_name=ready.source.name,
+        temporary_input_id=temporary_input_id or uuid4().hex,
+        input_name=input_name if input_name is not None else source.name,
         input_bytes=size,
+        input_digest=input_digest,
+    )
+
+
+def _input_observation(ready, *, temporary_input_id=None):
+    return _source_observation(
+        ready.path,
+        input_name=ready.source.name,
         input_digest=ready.digest,
+        temporary_input_id=temporary_input_id,
     )
 
 
 def _import_body(
-    scope, ready, context, bundle, origin_url, download_remote_assets, *, text_assessment=None
+    scope,
+    ready,
+    context,
+    bundle,
+    origin_url,
+    download_remote_assets,
+    *,
+    text_assessment=None,
+    temporary_input_id=None,
 ):
     root, identity = scope.kb_dir, scope.knowledge.identity
     catalog = CatalogStore(root, identity)
@@ -180,7 +215,7 @@ def _import_body(
             context,
             "import.admit.v1",
             work_key=ready.digest,
-            observation_input=_input_observation(ready),
+            observation_input=_input_observation(ready, temporary_input_id=temporary_input_id),
         ) as progress:
             revision = catalog.admit(
                 ready.path,

@@ -40,6 +40,8 @@ _STATES = {
     "reused": "已复用",
 }
 _STAGES = {
+    "import.freeze.v1": "固定导入输入",
+    "import.preflight.v1": "检查原文内容",
     "import.admit.v1": "接纳原件",
     "import.process.v1": "转换与解析",
     "import.reprocess.v1": "重新处理保留原件",
@@ -53,6 +55,7 @@ _STAGES = {
     "compile.persist.v1": "保存候选成果",
     "knowledge.publish.v1": "发布知识",
     "wiki.sync.v1": "同步工作副本",
+    "session.export.v1": "导出对话原文",
     "execution.cleanup.v1": "清理与收尾",
     "model_request.v1": "模型请求",
 }
@@ -205,12 +208,22 @@ def fill_stage_tree(tree, stages):
     tree.blockSignals(True)
     tree.clear()
     sources, units, parents = {}, {}, {}
+    admitted = {
+        stage.observation.input.temporary_input_id: stage.source_revision_id
+        for stage in stages
+        if stage.source_revision_id is not None
+        and stage.observation is not None
+        and stage.observation.input is not None
+        and stage.observation.input.temporary_input_id is not None
+    }
     for stage in stages:
         original = stage.input
         observed = stage.observation.input if stage.observation is not None else None
         source_key = original.source_revision_id if original else stage.source_revision_id
         if source_key is None and observed is not None and observed.temporary_input_id is not None:
-            source_key = ("temporary", observed.temporary_input_id)
+            source_key = admitted.get(
+                observed.temporary_input_id, ("temporary", observed.temporary_input_id)
+            )
         if source_key not in sources:
             sources[source_key] = QTreeWidgetItem(
                 [

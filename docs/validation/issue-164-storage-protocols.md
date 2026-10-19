@@ -2337,3 +2337,27 @@ session, worker, boundary and module-size matrix passes 63 tests. Mypy passes
 596 modules; focused Ruff, formatting and diff checks and both static readonly
 review axes pass after the naming fixes. Remaining lifecycle/performance and P8
 gates still prevent overall issue closure.
+
+### Input freezing and preflight before source admission
+
+Actual import preparation now records separate durable freezing and preflight
+stages after the top-level execution starts. Failed freezing keeps a temporary
+input identity, name and available byte count without claiming a digest.
+Preflight binds that same identity to the frozen content digest and size even
+when content rejection intentionally admits no source. A supplied prepared
+input still passes its current-input checks and records reuse. Rejection and
+retain-without-text policies are unchanged; these stages add no model sends.
+
+The temporary identity also follows the admission stage. Native task trees map
+it to the admitted original using only the current bounded stage page, so
+earlier stages stay grouped with their actual input. UI labels now describe
+freezing, preflight and explicit transcript export in user terms.
+
+An actual empty HTML import first reproduces the missing stages; missing input
+and rejected frozen-content cases retain their real failure boundaries without
+changing publication or budget. A regression first reproduces split temporary
+identities, and a real Qt tree first reproduces duplicate pre/post-admission
+input nodes. Both fixes pass the final 38-test import/task/native/boundary/size
+matrix. Mypy passes 596 modules; focused Ruff, formatting, diff checks and both
+static readonly review axes pass. Public activation remains gated by the
+outstanding maintenance, equivalence and packaging acceptance.
