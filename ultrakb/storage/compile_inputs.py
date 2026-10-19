@@ -1,11 +1,15 @@
 """Exact retained source identities and private inputs for the file compiler."""
 
+import hashlib
+import io
 import json
+import posixpath
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
 from ultrakb.agent.page_figures import split_gallery
-from ultrakb.markdown_images import ImageReference, image_references
+from ultrakb.figure_assets import asset_path
+from ultrakb.markdown_images import ImageReference, apply_image_edits, image_references
 from ultrakb.source_qualification import source_images
 
 from .blobs import Blob, materialize_private
@@ -74,6 +78,46 @@ def _input_images(processing, native):
     return {f"sources/{path.removeprefix('sources/')}" for path in paths}
 
 
+def _freeze_inline_assets(db, baseline):
+    """Keep unchanged page images independent of a newer input's mutable filename."""
+    for page in baseline.files:
+        if not page.endswith(".md") or page.startswith("sources/"):
+            continue
+        text = (baseline.directory / page).read_text("utf-8")
+        edits = []
+        for reference in image_references(text):
+            if reference.local_path is None:
+                continue
+            logical = posixpath.normpath(str(PurePosixPath(page).parent / reference.local_path))
+            if logical not in baseline.files:
+                continue
+            data = (baseline.directory / logical).read_bytes()
+            asset = asset_path(data)
+            if asset == logical:
+                continue
+            if not (baseline.directory / asset).exists():
+                materialize_private(
+                    db, Blob(baseline.files[logical], len(data)), baseline.private, asset
+                )
+            edits.append(
+                (
+                    reference.start,
+                    reference.end,
+                    reference.relocated(
+                        posixpath.relpath(asset, str(PurePosixPath(page).parent)),
+                        preserve_suffix=True,
+                    ),
+                )
+            )
+        if edits:
+            encoded = apply_image_edits(text, edits).encode("utf-8")
+            digest = hashlib.sha256(encoded).hexdigest()
+            baseline.private.copy(
+                io.BytesIO(encoded), page, digest=digest, byte_count=len(encoded), replace=True
+            )
+            baseline.normalized_pages[page] = digest
+
+
 def materialize_inputs(base, baseline, target):
     """Keep old page inputs distinct when a document's current target advances."""
     identities, paths, assets = {}, {}, {}
@@ -93,6 +137,7 @@ def materialize_inputs(base, baseline, target):
             if size is None:
                 raise FileNotFoundError(path)
             materialize_private(db, Blob(digest, size[0]), baseline.private, path)
+        _freeze_inline_assets(db, baseline)
         for revision in sorted(units):
             unit = CatalogStore._unit_revision(db, revision)
             processing = CatalogStore._processing(db, unit.processing_id)
@@ -148,8 +193,6 @@ def materialize_inputs(base, baseline, target):
 
 def prepare_compiled_revision(store, base, baseline, target, work):
     """Reuse unchanged immutable files and retain a unit's exact import claim."""
-    import hashlib
-
     changes = {}
     for path in baseline.directory.rglob("*"):
         if path.is_file():
@@ -173,7 +216,9 @@ def prepare_compiled_revision(store, base, baseline, target, work):
     page_inputs = {
         path: tuple(dict.fromkeys((*basis.get(path, ()), target.unit_revision_id)))
         for path, value in changes.items()
-        if value is not None and path.endswith(".md")
+        if value is not None
+        and path.endswith(".md")
+        and hashlib.sha256(value).hexdigest() != baseline.normalized_pages.get(path)
     }
     return store._prepare_revision(
         changes,

@@ -1,10 +1,12 @@
 """Real compiler updates retain old figure bytes and copy only needed attachments."""
 
 import hashlib
+import io
 import json
 
 import pytest
 from figure_fixtures import png_bytes, record_markdown
+from PIL import Image
 from stream_transport import StreamTransport
 from test_storage_questions import question_knowledge
 
@@ -19,27 +21,32 @@ from ultrakb.storage.knowledge_store import KnowledgeStore
 pytestmark = pytest.mark.integration
 
 
-def retained_picture(root, identity, directory, value, color):
-    picture = directory / "sources/images/figure.png"
+def retained_picture(root, identity, directory, value, color, *, extension="png", payload=None):
+    image = f"sources/images/figure.{extension}"
+    picture = directory / image
     picture.parent.mkdir(parents=True)
-    picture.write_bytes(png_bytes(color))
+    picture.write_bytes(payload if payload is not None else png_bytes(color))
     raw = record_markdown(
-        directory, "sources/fixture.md", f"The value is {value}.\n\n![Figure](images/figure.png)\n"
+        directory,
+        "sources/fixture.md",
+        f"The value is {value}.\n\n![Figure](images/figure.{extension})\n",
     )
-    raw["assets"] = {"sources/images/figure.png": hashlib.sha256(picture.read_bytes()).hexdigest()}
+    raw["assets"] = {image: hashlib.sha256(picture.read_bytes()).hexdigest()}
     unused = directory / "sources/images/unreferenced.png"
     unused.write_bytes(png_bytes("green") * 10000)
     native = directory / "sources/fixture.content.json"
     atomic_write_json(native, raw)
     body = directory / "sources/fixture.md"
     catalog = CatalogStore(root, identity)
-    source = catalog.admit(body, source_key="fixture", sidecars={"images/figure.png": picture})
+    source = catalog.admit(
+        body, source_key="fixture", sidecars={f"images/figure.{extension}": picture}
+    )
     processing = catalog.retain_processing(
         source.revision_id,
         {
             "fixture.md": body,
             "fixture.content.json": native,
-            "sources/images/figure.png": picture,
+            image: picture,
             "sources/images/unreferenced.png": unused,
         },
         body_path="fixture.md",
@@ -55,6 +62,89 @@ def retained_picture(root, identity, directory, value, color):
     picture.unlink()
     unused.unlink()
     return unit
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("extension", ["svg", "tif", "tiff", "ico"])
+async def test_recompile_preserves_every_supported_referenced_image_format(tmp_path, extension):
+    from ultrakb.agent.page_figures import split_gallery
+
+    root, identity, _ = question_knowledge(tmp_path)
+    if extension == "svg":
+        payload = (
+            b'<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">'
+            b'<rect width="10" height="10" fill="red"/></svg>'
+        )
+    else:
+        data = io.BytesIO()
+        Image.new("RGB", (32, 32), "red").save(data, "ICO" if extension == "ico" else "TIFF")
+        payload = data.getvalue()
+    unit = retained_picture(
+        root, identity, tmp_path / "original", 17, "red", extension=extension, payload=payload
+    )
+    with StreamTransport(
+        [
+            {"content": json.dumps({"description": "Fixture", "content": "The value is 17."})},
+            {"content": json.dumps({"concepts": [], "entities": []})},
+        ]
+    ) as service:
+        (root / ".env").write_text(f"LLM_API_KEY=offline-test-key\nOPENAI_API_BASE={service.url}\n")
+        result = await recompile_document(
+            root, unit.source_id, unit_id=unit.unit_id, scope=storage_scope(root, identity)
+        )
+    assert result.status == "compiled", result.message
+    bound = KnowledgeStore(root, identity).bind()
+    _, figures = split_gallery(bound.read("summaries/fixture.md").decode())
+    assert len(figures) == 1
+    assert bound.read(figures[0]["figure"]["asset_path"]) == payload
+
+
+@pytest.mark.asyncio
+async def test_an_unchanged_inline_picture_keeps_its_old_bytes_when_the_source_advances(tmp_path):
+    from ultrakb.application.reading_assets import capture_reading_assets
+
+    root, identity, _ = question_knowledge(tmp_path)
+    old = retained_picture(root, identity, tmp_path / "old", 17, "red")
+    knowledge = KnowledgeStore(root, identity)
+    original = (
+        "---\ndescription: Original\nsources: [summaries/fixture.md]\n---\n"
+        "The value was 17.\n\n![Original](../sources/images/figure.png?raw=1#original-view)\n"
+    )
+    before = knowledge.publish(
+        knowledge.prepare_revision(
+            {
+                "index.md": b"Fixture",
+                "concepts/old-value.md": original.encode(),
+                "sources/images/figure.png": png_bytes("red"),
+            },
+            expected=knowledge.bind().publication_id,
+            unit_revisions=(old.unit_revision_id,),
+            page_inputs={"concepts/old-value.md": (old.unit_revision_id,)},
+        )
+    )
+    current = retained_picture(root, identity, tmp_path / "new", 23, "blue")
+    with StreamTransport(
+        [
+            {"content": json.dumps({"description": "Fixture", "content": "The value is 23."})},
+            {"content": json.dumps({"concepts": [], "entities": []})},
+        ]
+    ) as service:
+        (root / ".env").write_text(f"LLM_API_KEY=offline-test-key\nOPENAI_API_BASE={service.url}\n")
+        result = await recompile_document(
+            root, current.source_id, unit_id=current.unit_id, scope=storage_scope(root, identity)
+        )
+    assert result.status == "compiled", result.message
+    scope = storage_scope(root, identity)
+    page = read_page(root, "concepts/old-value.md", scope=scope)
+    assets = capture_reading_assets(scope, "concepts/old-value.md", page.body)
+    assert len(assets.images) == 1
+    assert next(iter(assets.images.values())) == png_bytes("red")
+    assert "The value was 17." in page.body
+    assert "?raw=1#original-view" in page.body
+    assert knowledge.bind().page_input_revisions()["concepts/old-value.md"] == (
+        old.unit_revision_id,
+    )
+    assert knowledge.bind(before.publication_id).read("concepts/old-value.md") == original.encode()
 
 
 @pytest.mark.asyncio
@@ -178,6 +268,11 @@ async def test_shared_update_retains_each_picture_version_and_excludes_unrelated
     assert not any(path.endswith((".sqlite", ".db")) for path in copied)
     page = read_page(root, "concepts/value.md", scope=storage_scope(root, identity))
     assert "The value is 23." in page.body
+    assert set(knowledge.bind().page_input_revisions()["concepts/value.md"]) == (
+        {old.unit_revision_id, current.unit_revision_id}
+        if factual_basis
+        else {current.unit_revision_id}
+    )
     _, figures = split_gallery(page.body)
     retained = {entry["figure"]["asset_digest"] for entry in figures}
     assert hashlib.sha256(png_bytes("red")).hexdigest() in retained

@@ -1,7 +1,7 @@
 """Complete private Markdown baseline from a fixed immutable publication."""
 
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
@@ -22,6 +22,7 @@ class CompileBaseline:
     files: dict[str, str]
     bytes_copied: int
     private: PrivateMaterialization
+    normalized_pages: dict[str, str] = field(default_factory=dict)
 
 
 @contextmanager

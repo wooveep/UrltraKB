@@ -19,12 +19,18 @@ class ImageReference:
     title: str
     html: bool = False
 
-    def relocated(self, path: str) -> str:
+    def relocated(self, path: str, *, preserve_suffix: bool = False) -> str:
+        target = quote(path, safe="/")
+        if preserve_suffix:
+            source = urlsplit(self.source)
+            target += ("?" + source.query if source.query else "") + (
+                "#" + source.fragment if source.fragment else ""
+            )
         if self.html:
-            return quote(path, safe="/")
+            return target
         title = self.title.replace("\\", "\\\\").replace('"', '\\"')
         suffix = f' "{title}"' if title else ""
-        return f"![{self.alt}]({quote(path, safe='/')}{suffix})"
+        return f"![{self.alt}]({target}{suffix})"
 
     @property
     def local_path(self) -> str | None:

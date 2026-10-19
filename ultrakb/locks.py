@@ -19,7 +19,7 @@ import threading
 import time
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
-from typing import IO, Iterator
+from typing import IO, BinaryIO, Iterator
 
 import portalocker
 
@@ -523,7 +523,13 @@ class PrivateMaterialization:
         return self._active and self._owner[0] == _owner()[0] and directory == self.directory
 
     def copy(
-        self, source: Path, relative: str, *, digest: str, byte_count: int, replace: bool = False
+        self,
+        source: Path | BinaryIO,
+        relative: str,
+        *,
+        digest: str,
+        byte_count: int,
+        replace: bool = False,
     ) -> None:
         if not self._active or self._owner != _owner():
             raise RuntimeError("Private materialization is closed or owned by another execution")
@@ -547,7 +553,10 @@ class PrivateMaterialization:
         target.parent.mkdir(parents=True, exist_ok=True)
         hasher, size, created = hashlib.sha256(), 0, False
         try:
-            with source.open("rb") as reader, target.open("wb" if replace else "xb") as writer:
+            reader_context = (
+                source.open("rb") if isinstance(source, Path) else contextlib.nullcontext(source)
+            )
+            with reader_context as reader, target.open("wb" if replace else "xb") as writer:
                 created = True
                 while chunk := reader.read(1024 * 1024):
                     writer.write(chunk)

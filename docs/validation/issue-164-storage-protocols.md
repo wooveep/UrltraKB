@@ -920,3 +920,14 @@ and private index databases are not copied.
 Related compiler, usage, figure and retained-source regressions pass 41 tests
 (11 live cases deselected); mypy passes all 500 source modules. The remaining
 integration and activation gates above still apply. No live model was called.
+
+The next spec review found two attachment gaps: the shared image inventory
+omitted SVG/TIFF/ICO, and ordinary inline image paths could still change bytes
+when an input advanced under the same filename. Failing-first public compilation
+cases now cover both. Supported retained formats are included; non-source pages
+in the private fixed baseline relocate existing inline references to verified
+content-addressed assets, preserving URI query/fragment and original factual
+bases. Only a later substantive compiler edit adds the target unit to that page's
+basis. Source originals remain unchanged. This disposable normalization uses the
+branded streaming helper without file or directory fsync. Related regressions
+pass 73 tests; full mypy still passes 500 source modules.

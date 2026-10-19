@@ -48,6 +48,10 @@ def image_paths(unit, processing, *, retained=False):
             ".gif",
             ".webp",
             ".bmp",
+            ".svg",
+            ".tif",
+            ".tiff",
+            ".ico",
         }:
             result.append((f"{prefix}/{file.path.removeprefix('sources/')}", file.path))
     return tuple(result)
