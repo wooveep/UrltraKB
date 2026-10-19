@@ -169,16 +169,36 @@ def _import_body(
                     if image.path is not None
                 },
             )
-        return process_admitted(
-            scope,
-            ready,
-            context,
-            bundle,
-            download_remote_assets,
-            catalog,
-            revision,
-            text_assessment=text_assessment,
-        )
+        from ultrakb.storage.discovery_store import DiscoveryStore
+
+        from .storage_discovery import schedule_discovery
+
+        discovery = schedule_discovery(scope, revision, context)
+        from ultrakb.llm_usage import usage_context
+
+        root_import = DiscoveryStore(root, identity).import_root(revision.revision_id)
+        with usage_context(root_import_id=root_import or context.storage_execution.model_budget_id):
+            result = process_admitted(
+                scope,
+                ready,
+                context,
+                bundle,
+                download_remote_assets,
+                catalog,
+                revision,
+                text_assessment=text_assessment,
+            )
+        if discovery is not None:
+            try:
+                counts = DiscoveryStore(root, identity).counts(discovery.root_import_id)
+                result = replace(
+                    result,
+                    discovery_pending=counts["discovery_pending"],
+                    imports_pending=counts["imports_pending"],
+                )
+            except Exception:
+                result = replace(result, unfinished=(*result.unfinished, "confirm pending work"))
+        return result
     except (Exception, asyncio.CancelledError) as error:
         if revision is None:
             raise
@@ -390,6 +410,7 @@ def compile_stored_unit(scope, ready, context, catalog, revision, target, *, nam
             target.doc_name,
             version=scope.publication_id,
             knowledge_revision_id=scope.knowledge.publication.revision_id,
+            publication_id=scope.publication_id,
         )
         if reused
         else asyncio.run(

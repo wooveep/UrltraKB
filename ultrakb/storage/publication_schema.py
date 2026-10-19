@@ -69,7 +69,7 @@ PUBLICATION_SCHEMA = (
     """CREATE TRIGGER ukb_import_success_receipt BEFORE UPDATE ON ukb_pending_attempts
         WHEN NEW.status = 'completed'
         AND EXISTS (SELECT 1 FROM ukb_import_intents WHERE intent_id = NEW.intent_id
-                    AND kind = 'import')
+                    AND kind = 'import' AND unit_revision_id IS NOT NULL)
         AND NOT EXISTS (SELECT 1 FROM ukb_publication_receipts r
                         WHERE r.attempt_id = NEW.attempt_id
                         AND r.publication_id = NEW.publication_id AND r.generation = NEW.generation)
@@ -77,7 +77,7 @@ PUBLICATION_SCHEMA = (
     """CREATE TRIGGER ukb_import_success_insert BEFORE INSERT ON ukb_pending_attempts
         WHEN NEW.status = 'completed'
         AND EXISTS (SELECT 1 FROM ukb_import_intents WHERE intent_id = NEW.intent_id
-                    AND kind = 'import')
+                    AND kind = 'import' AND unit_revision_id IS NOT NULL)
         AND NOT EXISTS (SELECT 1 FROM ukb_publication_receipts r
                         WHERE r.attempt_id = NEW.attempt_id
                         AND r.publication_id = NEW.publication_id AND r.generation = NEW.generation)

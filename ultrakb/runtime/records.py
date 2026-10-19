@@ -156,6 +156,28 @@ class TaskExclusion:
 
 
 @dataclass(frozen=True)
+class PendingStop:
+    job_id: str
+    dispatch_id: str
+    generation: str | None
+    view_id: str | None
+
+    def __post_init__(self):
+        from pydantic import TypeAdapter
+
+        from ultrakb.source_records import RecordId, ViewId
+
+        TypeAdapter(RecordId).validate_python(self.job_id)
+        TypeAdapter(RecordId).validate_python(self.dispatch_id)
+        if self.view_id is not None:
+            TypeAdapter(ViewId).validate_python(self.view_id)
+        if self.generation is not None and (
+            not isinstance(self.generation, str) or not 1 <= len(self.generation) <= 256
+        ):
+            raise ValueError("Invalid pending-stop generation")
+
+
+@dataclass(frozen=True)
 class TaskView:
     id: str
     kb_dir: str
@@ -180,8 +202,13 @@ class TaskView:
     not_applicable: tuple[TaskExclusion, ...] = ()
     current_source: str | None = None
     compile_work: dict | None = None
+    pending_stops: tuple[PendingStop, ...] = ()
 
     def __post_init__(self) -> None:
+        if not isinstance(self.pending_stops, tuple) or not all(
+            isinstance(item, PendingStop) for item in self.pending_stops
+        ):
+            raise ValueError("Invalid unconfirmed stop controls")
         if self.compile_work is not None:
             from ultrakb.compilation_report import CompileWork
 
@@ -243,6 +270,7 @@ class TaskView:
         value["results"] = tuple(UnitResult.from_summary(row) for row in value["results"])
         value["activities"] = ()  # Restored summaries never claim a live activity.
         value["completed_stages"] = tuple(value.get("completed_stages", ()))
+        value["pending_stops"] = tuple(PendingStop(**row) for row in value.get("pending_stops", ()))
         value["not_applicable"] = tuple(
             TaskExclusion(**row) for row in value.get("not_applicable", ())
         )

@@ -31,8 +31,13 @@ class PendingDispatcher(QObject):
             self.roots.remove(root)
             self.roots.append(root)
             self.busy = True
+            selected_scope = getattr(self.window, "read_scope", None)
+            if selected_scope is not None and (
+                selected_scope.knowledge is None or selected_scope.kb_dir != root
+            ):
+                selected_scope = None
 
-            def ready(selected, error, root=root):
+            def ready(selected, error, root=root, selected_scope=selected_scope):
                 self.busy = False
                 if error:
                     logging.getLogger(__name__).warning("Pending dispatcher: %s", error)
@@ -40,10 +45,22 @@ class PendingDispatcher(QObject):
                     selected and not self.window._quitting and root not in self.window._deleting_kbs
                 ):
                     self.window.manager.submit(
-                        root, [RunPendingJob(selected["id"], selected["dispatch_id"])]
+                        root,
+                        [
+                            RunPendingJob(
+                                selected["id"],
+                                selected["dispatch_id"],
+                                view_id=selected_scope.view_id if selected_scope else None,
+                            )
+                        ],
                     )
 
             self.window.io.submit(
-                lambda root=root: claim_pending_job(root), ready, kb=root, exclusive=True
+                lambda root=root, selected_scope=selected_scope: claim_pending_job(
+                    root, scope=selected_scope, cancelled=lambda: self.window._quitting
+                ),
+                ready,
+                kb=None if selected_scope else root,
+                exclusive=True,
             )
             break

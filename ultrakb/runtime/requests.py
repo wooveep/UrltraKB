@@ -297,11 +297,12 @@ class RetryWorksheet(ViewSelection):
 
 
 @dataclass(frozen=True)
-class RunPendingJob:
+class RunPendingJob(ViewSelection):
     job_id: str
     dispatch_id: str
 
     def __post_init__(self):
+        super().__post_init__()
         from pydantic import TypeAdapter
 
         from ultrakb.source_records import RecordId

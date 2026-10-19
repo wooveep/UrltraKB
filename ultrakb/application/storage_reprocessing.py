@@ -7,6 +7,7 @@ from pathlib import PurePosixPath
 from ultrakb.converter import _sanitize_stem
 from ultrakb.ingest_result import IngestResult
 from ultrakb.locks import LockCancelled
+from ultrakb.pending.policies import CURRENT_POLICY, discovery_hosts
 from ultrakb.storage.catalog_store import CatalogConflict, CatalogStore
 from ultrakb.storage.knowledge_store import KnowledgeStore
 from ultrakb.storage.reprocessing_store import ReprocessingPlan, ReprocessingStore
@@ -172,7 +173,10 @@ def _preview(scope, source_id):
         "current_policy": policy,
         "range": "all_worksheets" if source_format in {"xls", "xlsx"} else "body",
         "publication_impact": {"view_id": scope.view_id, "superseded_proposals": []},
-        "discovery": {"will_schedule": False},
+        "discovery": {
+            "will_schedule": source_format in discovery_hosts(CURRENT_POLICY),
+            "policy": CURRENT_POLICY,
+        },
         "blockers": blockers,
     }
 
@@ -228,9 +232,19 @@ def reprocess_stored_source(scope, source_id, *, version, context=None, unit_id=
             ):
                 raise ReprocessingConflict("Captured processing policy differs from the preview")
             requests.bind_execution(version, context.storage_execution)
+            from ultrakb.llm_usage import usage_context
+
+            from .storage_discovery import schedule_discovery
+
+            discovery = schedule_discovery(scope, revision, context, processing_key=plan.request_id)
             with (
                 task_stage(context, "import.reprocess.v1", source_revision_id=revision.revision_id),
                 retained_input(catalog, revision) as ready,
+                usage_context(
+                    root_import_id=discovery.root_import_id
+                    if discovery
+                    else context.storage_execution.model_budget_id
+                ),
             ):
                 result = process_admitted(
                     scope,

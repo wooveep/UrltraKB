@@ -7,11 +7,15 @@ from typing import TypeVar
 T = TypeVar("T")
 
 
-async def run_blocking(operation: Callable[[], T]) -> T:
+async def run_blocking(
+    operation: Callable[[], T], *, on_cancel: Callable[[], None] | None = None
+) -> T:
     worker = asyncio.create_task(asyncio.to_thread(operation))
     try:
         return await asyncio.shield(worker)
     except asyncio.CancelledError:
+        if on_cancel is not None:
+            on_cancel()
         from ultrakb.llm_execution import active_executor
 
         if executor := active_executor():

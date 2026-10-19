@@ -37,8 +37,19 @@ def pending_result(kind, job, kb_dir):
     }
 
 
-def pending_status(kb_dir: Path) -> dict:
+def _main_scope(kb_dir, scope):
+    from ultrakb.knowledge_scope import resolve_scope
+
+    selected = resolve_scope(kb_dir, scope) if scope is not None else None
+    return selected if selected is not None and selected.knowledge is not None else None
+
+
+def pending_status(kb_dir: Path, *, scope=None, after=0, limit=63) -> dict:
     root = kb_dir.resolve()
+    if selected := _main_scope(root, scope):
+        from .storage_pending_queries import stored_pending_status
+
+        return stored_pending_status(selected, after=after, limit=limit)
     with kb_read_lock(root / ".ultrakb"):
         entries = list(jobs(root))
         groups = {job.root_import_id: group_for(root, job) for _, job in entries}
@@ -91,8 +102,25 @@ def _group_result(root, group):
     }
 
 
-def claim_pending_job(kb_dir: Path):
+def read_pending_job(kb_dir: Path, identity: str, *, scope=None, checkpoint_after=0, limit=63):
     root = kb_dir.resolve()
+    if selected := _main_scope(root, scope):
+        from .storage_pending_queries import stored_job
+
+        return stored_job(
+            selected, identity, details=True, checkpoint_after=checkpoint_after, limit=limit
+        )
+    with kb_read_lock(root / ".ultrakb"):
+        kind, job = read_job(root, identity)
+        return {**job.model_dump(mode="json"), **pending_result(kind, job, root)}
+
+
+def claim_pending_job(kb_dir: Path, *, scope=None, cancelled=None):
+    root = kb_dir.resolve()
+    if selected := _main_scope(root, scope):
+        from .storage_pending import claim_stored_job
+
+        return claim_stored_job(selected, cancelled=cancelled)
     with kb_ingest_lock(root / ".ultrakb"):
         selected = claim(root)
         if selected:
@@ -101,9 +129,27 @@ def claim_pending_job(kb_dir: Path):
     return None
 
 
-@track_import_usage
-def run_pending_job(kb_dir: Path, identity: str, dispatch_id: str, *, context=None):
+def stop_pending_job(kb_dir: Path, identity: str, dispatch_id: str, generation: str, *, scope=None):
+    from ultrakb.lifecycle import expected_generation
+
     root = kb_dir.resolve()
+    with expected_generation(root, generation):
+        if selected := _main_scope(root, scope):
+            from ultrakb.storage.pending_store import PendingStore
+
+            return PendingStore(root, selected.knowledge.identity).stop(identity, dispatch_id)
+        from ultrakb.pending.control import request_stop
+
+        return request_stop(root, identity, dispatch_id, generation)
+
+
+@track_import_usage
+def run_pending_job(kb_dir: Path, identity: str, dispatch_id: str, *, context=None, scope=None):
+    root = kb_dir.resolve()
+    if selected := _main_scope(root, scope):
+        from .storage_pending import run_stored_job
+
+        return run_stored_job(selected, identity, dispatch_id, context)
     context = context or ExecutionContext()
     with (
         read_lifecycle(root, cancelled=context.cancelled, on_wait=context.waiting),
@@ -161,9 +207,13 @@ def run_pending_job(kb_dir: Path, identity: str, dispatch_id: str, *, context=No
         return pending_result(kind, job, root)
 
 
-def process_pending(kb_dir: Path, *, max_jobs: int = 10000, context=None) -> dict:
+def process_pending(kb_dir: Path, *, max_jobs: int = 10000, context=None, scope=None) -> dict:
     if type(max_jobs) is not int or not 1 <= max_jobs <= 10000:
         raise ValueError("Choose 1–10000 jobs per drain")
+    if selected := _main_scope(kb_dir.resolve(), scope):
+        from .storage_pending import process_stored_pending
+
+        return process_stored_pending(selected, max_jobs=max_jobs, context=context)
     context = context or ExecutionContext()
     processed = 0
     outcomes = []
@@ -179,8 +229,13 @@ def process_pending(kb_dir: Path, *, max_jobs: int = 10000, context=None) -> dic
     return {"processed": processed, "outcomes": outcomes, **pending_status(kb_dir)}
 
 
-def retry_pending_job(kb_dir: Path, identity: str) -> None:
+def retry_pending_job(kb_dir: Path, identity: str, *, scope=None) -> None:
     root = kb_dir.resolve()
+    if selected := _main_scope(root, scope):
+        from ultrakb.storage.pending_store import PendingStore
+
+        PendingStore(root, selected.knowledge.identity).retry(identity)
+        return
     with kb_ingest_lock(root / ".ultrakb"):
         kind, job = read_job(root, identity)
         job = reconcile_job(root, kind, job)
@@ -203,8 +258,12 @@ def retry_pending_job(kb_dir: Path, identity: str) -> None:
         )
 
 
-def update_execution_budget(kb_dir: Path, identity: str, patch: dict) -> dict:
+def update_execution_budget(kb_dir: Path, identity: str, patch: dict, *, scope=None) -> dict:
     root = kb_dir.resolve()
+    if selected := _main_scope(root, scope):
+        from ultrakb.storage.discovery_store import DiscoveryStore
+
+        return DiscoveryStore(root, selected.knowledge.identity).update_budget(identity, patch)
     with kb_ingest_lock(root / ".ultrakb"):
         group = read_record(root, "execution-groups", identity, ExecutionGroup)
         budget = ExecutionBudget.model_validate({**group.budget.model_dump(), **patch})
@@ -234,8 +293,13 @@ def update_execution_budget(kb_dir: Path, identity: str, patch: dict) -> dict:
         return changed.model_dump(mode="json")
 
 
-def cancel_execution_group(kb_dir: Path, identity: str) -> None:
+def cancel_execution_group(kb_dir: Path, identity: str, *, scope=None) -> None:
     root = kb_dir.resolve()
+    if selected := _main_scope(root, scope):
+        from ultrakb.storage.pending_store import PendingStore
+
+        PendingStore(root, selected.knowledge.identity).cancel(identity)
+        return
     from ultrakb.pending.control import request_group_cancel
 
     # Atomic records can be read without the business lease; this signal must

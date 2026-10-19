@@ -85,6 +85,7 @@ def begin_storage_execution(root: Path, context: ExecutionContext) -> Iterator[L
                 max_calls=executor.policy.max_calls,
                 deadline_at=deadline,
                 resume=previous.execution_id if previous else None,
+                pending_attempt_id=context.storage_pending_attempt_id,
             )
             context.storage_execution = execution
             context._storage_result = "completed"
@@ -159,6 +160,7 @@ def begin_storage_operation(root: Path, context: ExecutionContext, operation: st
                 ).hexdigest(),
                 max_calls=0,
                 resume=resume,
+                pending_attempt_id=context.storage_pending_attempt_id,
             )
             context._storage_result = "failed"
             state, failure = "completed", None

@@ -1,7 +1,7 @@
 """Constant-size final checks for one unit's import and publication outcome."""
 
 from .catalog_store import CatalogConflict
-from .pending_store import PendingStore, PendingWork, _current
+from .pending_store import PendingStore, PendingWork, _current, require_running_work
 
 
 def claim_identity(identity, work: PendingWork):
@@ -23,6 +23,7 @@ def capture_import_claim(connection, identity, work: PendingWork):
     current = PendingStore._job(connection, work.intent_id)
     if current != work or current.status != "started":
         raise CatalogConflict("The import claim changed before publication")
+    require_running_work(connection, identity, work)
     attempt = connection.execute(
         "SELECT generation, status FROM ukb_pending_attempts "
         "WHERE attempt_id = ? AND intent_id = ? AND dispatch_id = ?",

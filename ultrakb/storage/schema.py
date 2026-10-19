@@ -5,6 +5,7 @@ from contextdb.core.schema import SCHEMA as CONDB_SCHEMA
 from .artifact_schema import ARTIFACT_SCHEMA
 from .compile_schema import COMPILE_SCHEMA
 from .conversation_schema import CONVERSATION_SCHEMA
+from .discovery_schema import DISCOVERY_SCHEMA
 from .execution_schema import EXECUTION_SCHEMA
 from .generation_schema import GENERATION_SCHEMA
 from .import_schema import IMPORT_CANDIDATE_SCHEMA
@@ -135,7 +136,8 @@ SCHEMA = (
         kind TEXT NOT NULL CHECK (kind IN ('import', 'discovery')),
         status TEXT NOT NULL CHECK (status IN
             ('pending', 'dispatched', 'started', 'completed', 'failed', 'blocked',
-             'interrupted', 'stopped', 'cancelled', 'stale')),
+             'interrupted', 'stopped', 'cancelled', 'stale', 'partial', 'budget_wait',
+             'not_imported')),
         dispatch_id TEXT,
         attempt_id TEXT,
         UNIQUE (root_import_id, work_key)
@@ -153,11 +155,15 @@ SCHEMA = (
         dispatch_id TEXT NOT NULL UNIQUE,
         generation TEXT NOT NULL,
         status TEXT NOT NULL CHECK (status IN
-            ('started', 'completed', 'failed', 'blocked', 'interrupted', 'stopped')),
+            ('started', 'completed', 'failed', 'blocked', 'interrupted', 'stopped', 'partial',
+             'budget_wait', 'not_imported')),
         publication_id TEXT REFERENCES ukb_publications(publication_id),
         error_code TEXT,
         started_at TEXT NOT NULL,
-        finished_at TEXT
+        finished_at TEXT,
+        message TEXT,
+        stop_requested INTEGER NOT NULL DEFAULT 0 CHECK (stop_requested IN (0, 1)),
+        execution_id TEXT REFERENCES ukb_executions(execution_id)
     )""",
         "CREATE INDEX ukb_pending_attempt_intent ON ukb_pending_attempts(intent_id, sequence)",
         """CREATE TABLE ukb_conversations (
@@ -264,4 +270,5 @@ SCHEMA = (
     + LINT_SCHEMA
     + GENERATION_SCHEMA
     + IMPORT_CANDIDATE_SCHEMA
+    + DISCOVERY_SCHEMA
 )

@@ -50,6 +50,8 @@ STAGES = {
 def task_progress(task, stage_label: str | None = None) -> str:
     from ultrakb.runtime.records import TERMINAL
 
+    if task.pending_stops:
+        return "停止信号等待确认；自动派发已暂停，可再次确认停止。"
     label = stage_label or STAGES.get(task.stage, "正在处理")
     if task.state not in TERMINAL:
         return label
@@ -98,6 +100,8 @@ def pending_item_status(task, index):
     from ultrakb.runtime.records import TERMINAL
 
     current = index == len(task.results)
+    if task.pending_stops:
+        return "停止信号等待确认；自动派发已暂停。"
     if task.state == "interrupted" and current:
         return "结果未确认；请核对保留成果，不能当作未执行。"
     if task.state in TERMINAL:
@@ -122,6 +126,8 @@ def current_source(task):
 def needs_attention(task):
     from ultrakb.runtime.records import TERMINAL
 
-    return task.state in TERMINAL and (
-        task.state != "completed" or any(r.quality or r.unfinished for r in task.results)
+    return (
+        bool(task.pending_stops)
+        or task.state in TERMINAL
+        and (task.state != "completed" or any(r.quality or r.unfinished for r in task.results))
     )

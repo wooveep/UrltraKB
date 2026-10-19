@@ -28,6 +28,19 @@ from .task_stages import task_stage
 logger = logging.getLogger(__name__)
 
 
+def _import_root(scope, context, source_revision_id):
+    from ultrakb.llm_usage import active_scope
+
+    usage = active_scope()
+    from ultrakb.storage.discovery_store import DiscoveryStore
+
+    return (
+        (usage.root_import_id if usage else None)
+        or DiscoveryStore(scope.kb_dir, scope.knowledge.identity).import_root(source_revision_id)
+        or context.storage_execution.model_budget_id
+    )
+
+
 async def recompile_stored(scope, source_id, *, unit_id, context, version, model, max_concurrency):
     base = scope.knowledge
     from .storage_recompilation import confirmation_version, confirmed_result, target_fingerprint
@@ -94,7 +107,7 @@ async def recompile_stored(scope, source_id, *, unit_id, context, version, model
                 source_revision_id=target.source_revision_id,
                 unit_id=target.unit_id,
                 unit_revision_id=target.unit_revision_id,
-                root_import_id=context.storage_execution.model_budget_id,
+                root_import_id=_import_root(scope, context, target.source_revision_id),
             ):
                 await run_blocking(lambda: worker(bundle))
     except (asyncio.CancelledError, Exception) as error:
@@ -189,7 +202,7 @@ async def _compile(scope, target, context, bundle, model, max_concurrency):
     work = pending.enqueue(
         target.source_revision_id,
         unit_revision_id=target.unit_revision_id,
-        root_import_id=execution.model_budget_id,
+        root_import_id=_import_root(scope, context, target.source_revision_id),
     )
     if work.status in {"failed", "blocked", "interrupted", "stopped"}:
         work = pending.retry(work.intent_id)
@@ -197,6 +210,8 @@ async def _compile(scope, target, context, bundle, model, max_concurrency):
         work = pending.start(pending.claim(intent_id=work.intent_id))
     if work is None or work.status not in {"started", "completed"}:
         raise RecoveryRequired("The compilation claim is no longer available")
+    if work.status == "started":
+        pending.bind_execution(work, execution)
     prepared = store.committed_import(work, view_id=scope.view_id)
     from ultrakb.storage.import_candidates import ImportCandidates
 

@@ -11,6 +11,7 @@ import threading
 import time
 import uuid
 from collections import deque
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,6 +22,7 @@ from ultrakb.locks import atomic_write_json
 from ultrakb.runtime.input_store import InputStore
 from ultrakb.runtime.records import (
     TERMINAL,
+    PendingStop,
     TaskExclusion,
     TaskView,
     UnitIdentity,
@@ -84,6 +86,7 @@ class TaskManager:
         self._pending: deque[str] = deque()
         self._active: dict[str, _Attempt] = {}
         self._clearing: set[str] = set()
+        self._stopping_controls: set[str] = set()
         self._accepting = True
         self._closing = False
         self._load_history()
@@ -224,7 +227,8 @@ class TaskManager:
         root = str(kb_dir.expanduser().resolve())
         with self._condition:
             return any(attempt.identity.kb_dir == root for attempt in self._active.values()) or any(
-                task.view.kb_dir == root and task.view.state not in TERMINAL
+                task.view.kb_dir == root
+                and (task.view.state not in TERMINAL or task.view.pending_stops)
                 for task in self._tasks.values()
             )
 
@@ -239,7 +243,11 @@ class TaskManager:
             # Historical process cleanup may remain unverified forever. Only
             # handles owned by this manager block inspection/explicit cleanup;
             # this does not claim that a previous instance reaped its children.
-            if task_id in self._active or task.view.state not in TERMINAL:
+            if (
+                task_id in self._active
+                or task.view.state not in TERMINAL
+                or task.view.pending_stops
+            ):
                 raise ValueError("请等待任务结束并完成进程回收")
             return task.view, task.requests, task.identities
 
@@ -272,33 +280,65 @@ class TaskManager:
                 )
                 self._condition.notify_all()
 
-    def stop(self, task_id: str) -> None:
+    def stop(
+        self, task_id: str, *, schedule_control: Callable[[Callable[[], None]], None] | None = None
+    ) -> None:
+        pending_stops = []
         with self._condition:
             task = self._tasks[task_id]
-            if task.view.state in TERMINAL:
+            if task_id in self._stopping_controls:
                 return
-            from ultrakb.catalog_schema import UnsupportedCatalogWriter
-            from ultrakb.lifecycle import KnowledgeBaseRemoved
-            from ultrakb.pending.control import request_stop
+            if task.view.state in TERMINAL and not task.view.pending_stops:
+                return
             from ultrakb.runtime.requests import RunPendingJob
 
             for index, request in enumerate(task.requests):
                 if isinstance(request, RunPendingJob) and index >= len(task.view.results):
-                    try:
-                        request_stop(
-                            Path(task.view.kb_dir),
+                    pending_stops.append(
+                        PendingStop(
                             request.job_id,
                             request.dispatch_id,
                             task.identities[index].generation,
+                            request.view_id,
                         )
-                    except (KnowledgeBaseRemoved, UnsupportedCatalogWriter):
-                        pass  # Never write to a replacement KB; still stop the old worker.
-            self._update(task, stop_requested=True)
+                    )
+            stops = task.view.pending_stops or tuple(pending_stops)
+            if stops:
+                self._stopping_controls.add(task_id)
+            self._update(task, stop_requested=True, pending_stops=stops)
             if attempt := self._active.get(task_id):
                 self._send_stop(task, attempt)
             if task_id not in self._active and task.view.state not in TERMINAL:
                 self._update(task, state="stopped", stage="stopped")
                 self._discard_inputs(task_id)
+        from ultrakb.runtime.pending_control import confirm_stops
+
+        def persist_controls():
+            try:
+                confirm_stops(Path(task.view.kb_dir), stops)
+            except Exception as error:
+                with self._condition:
+                    self._stopping_controls.discard(task_id)
+                    self._update(
+                        task, stage="stop-unconfirmed", error=f"Pending stop not confirmed: {error}"
+                    )
+                raise
+            with self._condition:
+                self._stopping_controls.discard(task_id)
+                self._update(
+                    task,
+                    pending_stops=(),
+                    stage=task.view.state
+                    if task.view.stage == "stop-unconfirmed" and task.view.state in TERMINAL
+                    else task.view.stage,
+                    error=None if task.view.stage == "stop-unconfirmed" else task.view.error,
+                )
+
+        if stops:
+            if schedule_control is None:
+                persist_controls()
+            else:
+                schedule_control(persist_controls)
 
     def release_input_wait(self, task_id: str) -> bool:
         """Return a never-started watch input to its bounded candidate scan.
@@ -342,15 +382,30 @@ class TaskManager:
                     raise TimeoutError(f"Task remains {view.state}; no automatic termination")
                 self._condition.wait(min(remaining, 0.1))
 
-    def shutdown(self, *, stop: bool = False) -> None:
+    def shutdown(
+        self,
+        *,
+        stop: bool = False,
+        schedule_control: Callable[[Callable[[], None]], None] | None = None,
+    ) -> None:
         with self._condition:
             self._accepting = False
             self._closing = True
-            if stop:
-                for task_id in self._tasks:
-                    if self._tasks[task_id].view.state not in TERMINAL:
-                        self.stop(task_id)
+            pending = (
+                [
+                    task.id
+                    for task in self.tasks()
+                    if task.state not in TERMINAL or task.pending_stops
+                ]
+                if stop
+                else []
+            )
             self._condition.notify_all()
+        controls: list[Callable[[], None]] = []
+        for task_id in pending:
+            self.stop(task_id, schedule_control=controls.append)
+        for control in controls:
+            control() if schedule_control is None else schedule_control(control)
 
     def join(self, timeout: float | None = None) -> bool:
         self._thread.join(timeout)

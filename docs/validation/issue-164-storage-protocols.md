@@ -1769,3 +1769,48 @@ readonly reviews verify real SQLite/CAS, SDK loopback and persistent postcommit
 database failure behavior. Embedded discovery and pending-work application flows,
 remaining generators and management connections, observation/archive/audit and
 the P8 activation remain unfinished. Issue 164 remains open.
+
+### Frozen embedded discovery and shared pending execution
+
+Schema 28 retains discovery inputs, object diagnostics, exact source bindings and
+delivered source-import results in the main database. Discovery reads the managed
+original even after its external path disappears or its parent contribution is
+withdrawn. Each accepted object commits its cursor, payload reference, child
+intent and source/byte counters together. Model work starts only after the child
+is independently admitted. Equal bytes at different container paths remain
+different sources; recursive imports share one frozen execution-group budget.
+Explicit reprocessing adds its request identity to discovery and object identity.
+
+The existing OOXML/compound recognizers and format policies are reused. Actual
+decompression and elapsed discovery work remain recorded after failures and
+budget waits. Raising a retained budget resumes the same cursor; cancellation
+does not reset accepted objects or paid work. Long ZIP object paths use bounded
+stage keys, and long recovered filenames retain their display labels while
+materialization uses bounded physical filenames. Frozen view identities are
+validated before use.
+
+Pending dispatch starts one execution for its exact token and generation. Unit
+claims bind their active execution; a retained candidate can transfer only after
+the preceding execution terminates. Stops fence the exact attempt, prevent later
+sends/publication, and retain responses and actual usage received during cleanup.
+Known source-import publications survive result-receipt and observation failures;
+explicit retry reuses accepted compiler work instead of sending it again.
+
+CLI, HTTP and the spawned native worker use the shared pending operations through
+development main-store factories. Lists and selected object diagnostics have
+separate bounded cursors. Metadata reads need neither model settings nor a Wiki
+working copy. Qt captures its read scope, exposes diagnostic tails and cancels
+storage waits when its panel closes. Native stopping sends control immediately
+and confirms persistence off the Qt thread; shutdown waits for that confirmation.
+Unconfirmed stop deliveries remain visible across restart and pause resident
+automatic dispatch until explicit confirmation. They cannot be cleared or used
+to retry model work, and repeated confirmation clicks cannot duplicate an active
+control write. HTTP cancellation waits for actual worker and provider cleanup.
+
+The expanded discovery/compiler/reprocessing/worksheet/native/adapter matrix
+passes 115 tests, with 10 live cases deselected. Full mypy passes 576 modules;
+focused Ruff, formatting, module-size and diff checks pass. Independent readonly
+reviews reproduce and close the transaction, concurrency, paging, long-name,
+budget, view and real Qt/GC stop findings. Remaining generator replacement/deck
+and management flows, observation/archive/audit work and the sole P8 activation
+are still unfinished. Issue 164 remains open.

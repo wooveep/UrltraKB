@@ -311,7 +311,7 @@ class Conversations:
 
     def stop(self):
         if self.busy():
-            self.window.manager.stop(self.active.task)
+            self.window.request_task_stop(self.active.task)
 
     def observe(self, task):
         chat = self.tasks.get(task.id)

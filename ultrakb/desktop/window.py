@@ -55,6 +55,7 @@ class Workbench(QMainWindow):
         self._first_use = first_use
         self._creation_dialog = None
         self.io = LocalIO(self)
+        self.control_io = LocalIO(self)
         self.manager = TaskManager(
             history_dir=history_dir or GLOBAL_CONFIG_DIR / "desktop/tasks",
             require_verified_connection=True,
@@ -637,9 +638,15 @@ class Workbench(QMainWindow):
     def _stop_selected(self):
         for task_id in self._selected_tasks():
             try:
-                self.manager.stop(task_id)
+                self.request_task_stop(task_id)
             except KeyError:
                 pass  # A concurrent summary cleanup can remove selected rows.
+
+    def _schedule_task_control(self, operation):
+        self.control_io.submit(operation, lambda value, error: self._error(error))
+
+    def request_task_stop(self, task_id):
+        self.manager.stop(task_id, schedule_control=self._schedule_task_control)
 
     def _poll_tasks(self):
         tasks = self.manager.tasks()
@@ -665,6 +672,7 @@ class Workbench(QMainWindow):
             if self.shutdown_complete():
                 self.timer.stop()
                 self.tray.hide()
+                self.control_io.stop()
                 QApplication.instance().quit()
 
     def shutdown_complete(self):
@@ -672,6 +680,7 @@ class Workbench(QMainWindow):
             self.manager.join(0)
             and self.watch_registry.stopped()
             and self.io.stopped()
+            and self.control_io.stopped()
             and all(view.rendering_stopped() for view in self.findChildren(MarkdownView))
         )
 
@@ -753,7 +762,7 @@ class Workbench(QMainWindow):
         self.watch_registry.stop_all()
         from ultrakb.desktop.layout import observe_shutdown
 
-        self.manager.shutdown(stop=stop)
+        self.manager.shutdown(stop=stop, schedule_control=self._schedule_task_control)
         self.io.stop()
         observe_shutdown(self)
         for view in self.findChildren(MarkdownView):

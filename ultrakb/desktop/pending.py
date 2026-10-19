@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 from ultrakb.application.pending import (
     cancel_execution_group,
     pending_status,
+    read_pending_job,
     retry_pending_job,
     update_execution_budget,
 )
@@ -27,7 +28,15 @@ class PendingDialog(ManagementPanel):
     def __init__(self, window, kb):
         super().__init__(window)
         self.window, self.kb = window, kb
+        selected = getattr(window, "read_scope", None)
+        self.scope = (
+            selected
+            if selected is not None and selected.knowledge is not None and selected.kb_dir == kb
+            else None
+        )
         self._closed, self._busy = False, False
+        self._jobs, self._detail = {}, None
+        self._next_after = None
         self.groups = {}
         self.checkpoints = []
         self.setWindowTitle("待处理工作")
@@ -76,6 +85,16 @@ class PendingDialog(ManagementPanel):
             button.clicked.connect(callback)
             buttons.addWidget(button)
         layout.addLayout(buttons)
+        paging = QHBoxLayout()
+        self.more_jobs = QPushButton("更多待办")
+        self.more_jobs.clicked.connect(self.load_more_jobs)
+        self.more_jobs.setEnabled(False)
+        paging.addWidget(self.more_jobs)
+        self.more_objects = QPushButton("更多对象记录")
+        self.more_objects.clicked.connect(self.load_more_objects)
+        self.more_objects.setEnabled(False)
+        paging.addWidget(self.more_objects)
+        layout.addLayout(paging)
         self.reload()
 
     def operate(self, function, callback=None, *, exclusive=False, control=False):
@@ -95,22 +114,55 @@ class PendingDialog(ManagementPanel):
         self.window.io.submit(
             function,
             finished,
-            kb=None if control else self.kb,
+            kb=None if control or self.scope is not None else self.kb,
             exclusive=exclusive,
             obsolete=lambda: self._closed,
         )
 
     def reload(self):
-        self.operate(lambda: pending_status(self.kb), self.render)
+        if self._busy:
+            return
+        self._jobs, self.groups = {}, {}
+        self._detail = None
+        self.operate(
+            lambda: self.read(lambda: pending_status(self.kb, scope=self.scope)), self.render
+        )
+
+    def read(self, function, *, read_only=True):
+        if self.scope is None:
+            return function()
+        from ultrakb.storage.coordination import storage_stage
+
+        with storage_stage(
+            self.kb,
+            self.scope.knowledge.identity,
+            read_only=read_only,
+            cancelled=lambda: self._closed,
+        ):
+            return function()
+
+    def load_more_jobs(self):
+        if self._next_after is not None:
+            cursor = self._next_after
+            self.operate(
+                lambda: self.read(lambda: pending_status(self.kb, scope=self.scope, after=cursor)),
+                self.render,
+            )
 
     def render(self, inventory):
         self.checkpoints = inventory.get("checkpoints", [])
-        self.groups = {group["root_import_id"]: group for group in inventory["groups"]}
+        self.groups.update({group["root_import_id"]: group for group in inventory["groups"]})
+        self._jobs.update({job["id"]: job for job in inventory["jobs"]})
+        self._next_after = inventory.get("next_after")
+        self.more_jobs.setEnabled(self._next_after is not None)
         inspected = {item["discovery_intent_id"] for item in self.checkpoints}
         rows = [
             job
-            for job in inventory["jobs"]
-            if job["kind"] == "import" or job["status"] != "completed" or job["id"] in inspected
+            for job in self._jobs.values()
+            if self.scope is not None
+            or job["kind"] == "import"
+            or job["status"] != "completed"
+            or job["id"] in inspected
         ]
         self.table.setRowCount(len(rows))
         for row, job in enumerate(rows):
@@ -164,7 +216,58 @@ class PendingDialog(ManagementPanel):
 
     def select(self):
         job = self.selected()
+        if job and self.scope is not None:
+            if self._detail and self._detail["id"] == job["id"]:
+                self.show_details(self._detail)
+                return
+            identity = job["id"]
+
+            def loaded(value):
+                current = self.selected()
+                if current and current["id"] == identity:
+                    self._detail = value
+                    self.show_details(value)
+                else:
+                    self.select()
+
+            self.operate(
+                lambda: self.read(lambda: read_pending_job(self.kb, identity, scope=self.scope)),
+                loaded,
+            )
+            return
+        self.show_details(job)
+
+    def load_more_objects(self):
+        previous = self._detail
+        if previous and previous.get("next_checkpoint_after") is not None:
+
+            def loaded(value):
+                selected = self.selected()
+                if selected and selected["id"] == previous["id"]:
+                    value["checkpoints"] = [
+                        *previous.get("checkpoints", []),
+                        *value.get("checkpoints", []),
+                    ]
+                    self._detail = value
+                    self.show_details(value)
+                else:
+                    self.select()
+
+            self.operate(
+                lambda: self.read(
+                    lambda: read_pending_job(
+                        self.kb,
+                        previous["id"],
+                        scope=self.scope,
+                        checkpoint_after=previous["next_checkpoint_after"],
+                    )
+                ),
+                loaded,
+            )
+
+    def show_details(self, job):
         if job:
+            self.more_objects.setEnabled(job.get("next_checkpoint_after") is not None)
             labels = {
                 "recovered": "已恢复完整文件",
                 "private_object": "私有对象",
@@ -179,7 +282,7 @@ class PendingDialog(ManagementPanel):
                 "\n".join(
                     f"{labels[item['outcome']]} · {item['object_key']}\n"
                     f"{item.get('diagnostic') or ''}"
-                    for item in self.checkpoints
+                    for item in job.get("checkpoints", self.checkpoints)
                     if item["discovery_intent_id"] == job["id"]
                 )
             )
@@ -213,10 +316,14 @@ class PendingDialog(ManagementPanel):
                 self.diagnostics.setPlainText("\n".join(lines))
             group = self.groups[job["root_import_id"]]
             usage = group["model_usage"]
-            self.diagnostics.appendPlainText(
-                f"\n主文与附件累计（请求集合）：已知输入 {usage['input_total']}，"
-                f"已知输出 {usage['output_total']} tokens；请求 {usage['requests']}，"
-                f"用量未知 {usage['unknown_requests']}；账本：{group['usage_ledger']}"
+            tokens = usage.get("tokens", usage)
+            self.diagnostics.setPlainText(
+                self.diagnostics.toPlainText()
+                + (
+                    f"\n主文与附件累计（请求集合）：已知输入 {tokens.get('input_total')}，"
+                    f"已知输出 {tokens.get('output_total')} tokens；请求 {usage['requests']}，"
+                    f"用量未知 {usage['unknown_requests']}；账本：{group['usage_ledger']}"
+                )
             )
             for key, entry in self.fields.items():
                 entry.setText(str(group["budget"][key]))
@@ -239,7 +346,12 @@ class PendingDialog(ManagementPanel):
                 != QMessageBox.StandardButton.Yes
             ):
                 return
-            self.operate(lambda: retry_pending_job(self.kb, job["id"]), exclusive=True)
+            self.operate(
+                lambda: self.read(
+                    lambda: retry_pending_job(self.kb, job["id"], scope=self.scope), read_only=False
+                ),
+                exclusive=True,
+            )
 
     def budget(self):
         job = self.selected()
@@ -255,7 +367,12 @@ class PendingDialog(ManagementPanel):
                 self.status.setText("请输入有效的数字预算。")
                 return
             self.operate(
-                lambda: update_execution_budget(self.kb, job["root_import_id"], patch),
+                lambda: self.read(
+                    lambda: update_execution_budget(
+                        self.kb, job["root_import_id"], patch, scope=self.scope
+                    ),
+                    read_only=False,
+                ),
                 exclusive=True,
             )
 
@@ -269,7 +386,13 @@ class PendingDialog(ManagementPanel):
             == QMessageBox.StandardButton.Yes
         ):
             self.operate(
-                lambda: cancel_execution_group(self.kb, job["root_import_id"]), control=True
+                lambda: self.read(
+                    lambda: cancel_execution_group(
+                        self.kb, job["root_import_id"], scope=self.scope
+                    ),
+                    read_only=False,
+                ),
+                control=True,
             )
 
     def done(self, result):

@@ -191,7 +191,7 @@ class TaskWorkspace(QWidget):
             values = [
                 owner,
                 OPERATIONS.get(task.operation, task.operation) + (f"\n{source}" if source else ""),
-                STATES[task.state],
+                "停止待确认" if task.pending_stops else STATES[task.state],
                 progress,
                 task_progress(task),
             ]
@@ -221,7 +221,10 @@ class TaskWorkspace(QWidget):
                 controls = self.row_controls(task.id)
                 self.table.setCellWidget(row, 5, controls)
             controls.findChild(QPushButton, "stopTask").setEnabled(
-                task.state not in TERMINAL and not task.stop_requested
+                bool(task.pending_stops) or (task.state not in TERMINAL and not task.stop_requested)
+            )
+            controls.findChild(QPushButton, "stopTask").setText(
+                "确认停止" if task.pending_stops else "停止"
             )
             controls.ensurePolished()
             self.table.setColumnWidth(5, max(176, controls.minimumSizeHint().width() + 4))
@@ -281,7 +284,14 @@ class TaskWorkspace(QWidget):
         clear = menu.addAction("清理任务摘要…", lambda: self.clear_ids((identity,)))
         task = self.tasks.get(identity)
         for action in (retry, clear):
-            action.setEnabled(bool(task and task.state in TERMINAL and not self.window._quitting))
+            action.setEnabled(
+                bool(
+                    task
+                    and task.state in TERMINAL
+                    and not task.pending_stops
+                    and not self.window._quitting
+                )
+            )
         menu.popup(button.mapToGlobal(button.rect().bottomLeft()))
         self._row_menu = menu
 
@@ -305,9 +315,12 @@ class TaskWorkspace(QWidget):
 
     def update_bulk(self):
         tasks = [self.tasks[identity] for identity in self.checked if identity in self.tasks]
-        active = sum(t.state not in TERMINAL and not t.stop_requested for t in tasks)
-        retry = sum(needs_attention(t) for t in tasks)
-        closed = sum(t.state in TERMINAL for t in tasks)
+        active = sum(
+            bool(t.pending_stops) or (t.state not in TERMINAL and not t.stop_requested)
+            for t in tasks
+        )
+        retry = sum(needs_attention(t) and not t.pending_stops for t in tasks)
+        closed = sum(t.state in TERMINAL and not t.pending_stops for t in tasks)
         self.bulk.setVisible(bool(tasks))
         self.count.setText(
             f"已选 {len(tasks)} 项 · {active} 项可停止 · {retry} 项可核对重试 · "
@@ -325,10 +338,10 @@ class TaskWorkspace(QWidget):
         for identity in sorted(identities):
             try:
                 task = self.window.manager.get(identity)
-                if task.state in TERMINAL or task.stop_requested:
+                if (task.state in TERMINAL or task.stop_requested) and not task.pending_stops:
                     skipped += 1
                     continue
-                self.window.manager.stop(identity)
+                self.window.request_task_stop(identity)
                 stopped += 1
             except KeyError:
                 skipped += 1

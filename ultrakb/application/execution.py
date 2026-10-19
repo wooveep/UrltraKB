@@ -40,6 +40,7 @@ class ExecutionContext:
     storage_identity: DatabaseIdentity | None = field(default=None, repr=False)
     credential_bundle: LlmCredentialBundle | None = field(default=None, repr=False)
     resume_storage_execution_id: str | None = None
+    storage_pending_attempt_id: str | None = None
     storage_execution: Execution | None = field(default=None, init=False)
     _storage_running: bool = field(default=False, init=False, repr=False)
     _storage_result: Literal["completed", "failed", "cancelled"] = field(

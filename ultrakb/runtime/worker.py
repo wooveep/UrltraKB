@@ -152,10 +152,15 @@ def _execute(
         )
 
     if isinstance(request, RunPendingJob):
+        from pydantic import TypeAdapter
+
         from ultrakb.application.pending import run_pending_job
+        from ultrakb.ingest_result import ImportUnitOutcome
 
         context.install_process_settings = True
-        outcome = run_pending_job(root, request.job_id, request.dispatch_id, context=context)
+        outcome = run_pending_job(
+            root, request.job_id, request.dispatch_id, context=context, scope=scope
+        )
         status = outcome["status"]
         return UnitResult(
             "skipped"
@@ -169,6 +174,10 @@ def _execute(
             quality_known=outcome.get("quality_known"),
             model_usage=outcome.get("model_usage"),
             changes=(f"Pending job: {request.job_id}; {status}",),
+            revision=outcome.get("publication_id"),
+            import_units=TypeAdapter(tuple[ImportUnitOutcome, ...]).validate_python(
+                (outcome.get("result") or {}).get("units", ())
+            ),
         )
 
     if isinstance(request, (RetrySource, RetryWorksheet, ReprocessSource)):

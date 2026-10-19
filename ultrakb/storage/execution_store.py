@@ -87,6 +87,31 @@ class ExecutionStore:
         timestamp, monotonic, clock_id = now(), time.monotonic(), _clock_id()
         task_id, budget_id, execution_id = uuid4().hex, uuid4().hex, uuid4().hex
         with storage_stage(self.root, self.identity) as db, db.transaction() as connection:
+            if pending_attempt_id is not None:
+                claim = connection.execute(
+                    "SELECT i.status, i.attempt_id, a.status, g.generation, g.cancelled, "
+                    "a.stop_requested "
+                    "FROM ukb_pending_attempts a JOIN ukb_import_intents i "
+                    "ON i.intent_id = a.intent_id JOIN ukb_import_groups g "
+                    "ON g.root_import_id = i.root_import_id WHERE a.attempt_id = ?",
+                    (pending_attempt_id,),
+                ).fetchone()
+                if (
+                    claim
+                    and claim[:4]
+                    == ("started", pending_attempt_id, "started", self.identity.generation)
+                    and any(claim[4:])
+                ):
+                    raise LockCancelled("The pending execution was stopped before starting")
+                if claim != (
+                    "started",
+                    pending_attempt_id,
+                    "started",
+                    self.identity.generation,
+                    0,
+                    0,
+                ):
+                    raise ValueError("Execution requires its exact current pending claim")
             if resume:
                 previous = connection.execute(
                     "SELECT e.task_id, e.model_budget_id, b.fingerprint, b.max_calls, "
@@ -136,6 +161,11 @@ class ExecutionStore:
                     monotonic,
                 ),
             )
+            if pending_attempt_id is not None:
+                connection.execute(
+                    "UPDATE ukb_pending_attempts SET execution_id = ? WHERE attempt_id = ?",
+                    (execution_id, pending_attempt_id),
+                )
         return Execution(task_id, execution_id, budget_id)
 
     def budget(self, model_budget_id: str) -> ModelBudget:
@@ -174,8 +204,10 @@ class ExecutionStore:
         """Explicit source retry reuses its latest observed task and paid budget."""
         with storage_stage(self.root, self.identity, read_only=True) as db:
             row = db.connection.execute(
-                "SELECT execution_id FROM ukb_stage_attempts WHERE source_revision_id = ? "
-                "ORDER BY sequence DESC LIMIT 1",
+                "SELECT s.execution_id FROM ukb_stage_attempts s JOIN ukb_executions e "
+                "ON e.execution_id = s.execution_id JOIN ukb_tasks t ON t.task_id = e.task_id "
+                "WHERE s.source_revision_id = ? AND t.operation = 'model_task' "
+                "ORDER BY s.sequence DESC LIMIT 1",
                 (source_revision_id,),
             ).fetchone()
             if row is None:
@@ -187,6 +219,17 @@ class ExecutionStore:
                 (row[0],),
             ).fetchone()
             return latest[0]
+
+    def pending_execution(self, intent_id):
+        with storage_stage(self.root, self.identity, read_only=True) as db:
+            row = db.connection.execute(
+                "SELECT e.execution_id FROM ukb_executions e JOIN ukb_pending_attempts a "
+                "ON a.attempt_id = e.pending_attempt_id JOIN ukb_tasks t ON t.task_id = e.task_id "
+                "WHERE a.intent_id = ? AND t.operation = 'model_task' "
+                "ORDER BY e.sequence DESC LIMIT 1",
+                (intent_id,),
+            ).fetchone()
+            return row[0] if row else None
 
     def start_stage(
         self,

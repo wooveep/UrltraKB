@@ -116,10 +116,14 @@ class CatalogStore:
         source_key: str,
         sidecars: dict[str, Path] | None = None,
         expected: str | None = None,
+        label: str | None = None,
     ) -> SourceRevision:
         if not source_key or not isinstance(source_key, str):
             raise ValueError("Source identity must be explicit")
-        if len(source_key.encode()) + len(path.name.encode()) > 64 * 1024:
+        label = path.name if label is None else label
+        if not isinstance(label, str) or not label:
+            raise ValueError("A source label must be nonempty text")
+        if len(source_key.encode()) + len(path.name.encode()) + len(label.encode()) > 64 * 1024:
             raise ValueError("Source metadata exceeds the storage item limit")
         inputs = {path.name: (path, "main")}
         for logical_path, source in (sidecars or {}).items():
@@ -158,7 +162,7 @@ class CatalogStore:
                 connection.execute(
                     "INSERT INTO ukb_sources (source_id, source_key, label) VALUES (?, ?, ?) "
                     "ON CONFLICT(source_key) DO NOTHING",
-                    (source_id, source_key, path.name),
+                    (source_id, source_key, label),
                 )
                 source_id = connection.execute(
                     "SELECT source_id FROM ukb_sources WHERE source_key = ?", (source_key,)
