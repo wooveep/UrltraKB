@@ -6,8 +6,10 @@ REFRESH_SCHEMA = (
     "INSERT INTO ukb_catalog_state VALUES (1, 0)",
     """CREATE TRIGGER ukb_catalog_source_insert AFTER INSERT ON ukb_sources
         BEGIN UPDATE ukb_catalog_state SET generation = generation + 1 WHERE singleton = 1; END""",
-    """CREATE TRIGGER ukb_catalog_source_change AFTER UPDATE OF state, generation ON ukb_sources
+    """CREATE TRIGGER ukb_catalog_source_change AFTER UPDATE OF
+        state, generation, contribution_empty ON ukb_sources
         WHEN NEW.state != OLD.state OR NEW.generation != OLD.generation
+        OR NEW.contribution_empty != OLD.contribution_empty
         BEGIN UPDATE ukb_catalog_state SET generation = generation + 1 WHERE singleton = 1; END""",
     """CREATE TRIGGER ukb_catalog_unit_insert AFTER INSERT ON ukb_import_units
         BEGIN UPDATE ukb_catalog_state SET generation = generation + 1 WHERE singleton = 1; END""",

@@ -56,6 +56,7 @@ class SourceTarget:
     revision_id: str
     generation: int = 0
     removed: bool = False
+    contribution_empty: bool = False
 
 
 @dataclass(frozen=True)
@@ -205,7 +206,7 @@ class CatalogStore:
                 if (latest[0] if latest else None) != captured:
                     raise CatalogConflict("The source changed while its input was being retained")
                 changed = connection.execute(
-                    "UPDATE ukb_sources SET generation = generation + 1 "
+                    "UPDATE ukb_sources SET generation = generation + 1, contribution_empty = 0 "
                     "WHERE source_id = ? AND state = 'active' AND generation = ?",
                     (source_id, source_generation),
                 ).rowcount
@@ -236,14 +237,15 @@ class CatalogStore:
         TypeAdapter(RecordId).validate_python(source_id)
         with storage_stage(self.root, self.identity, read_only=True) as db:
             row = db.connection.execute(
-                "SELECT source_key, label, generation, state FROM ukb_sources WHERE source_id = ?",
+                "SELECT source_key, label, generation, state, contribution_empty "
+                "FROM ukb_sources WHERE source_id = ?",
                 (source_id,),
             ).fetchone()
             revision = self._latest(db, source_id) if row else None
             if row is None or revision is None:
                 raise KeyError(source_id)
             return SourceTarget(
-                source_id, row[0], row[1], revision[0], row[2], row[3] == "withdrawn"
+                source_id, row[0], row[1], revision[0], row[2], row[3] == "withdrawn", bool(row[4])
             )
 
     def source_page(
@@ -262,14 +264,16 @@ class CatalogStore:
                 "SELECT s.source_id, s.source_key, s.label, "
                 "(SELECT r.revision_id FROM ukb_source_revisions r "
                 "WHERE r.source_id = s.source_id AND r.state = 'ready' "
-                "ORDER BY r.ordinal DESC LIMIT 1) AS target, s.generation, s.state = 'withdrawn' "
+                "ORDER BY r.ordinal DESC LIMIT 1) AS target, s.generation, s.state = 'withdrawn', "
+                "s.contribution_empty "
                 "FROM ukb_sources s WHERE s.source_id > ? AND target IS NOT NULL "
                 "AND (? OR s.state = 'active') "
                 "ORDER BY s.source_id LIMIT ?",
                 (after, include_removed, limit),
             ).fetchall()
             return tuple(
-                SourceTarget(row[0], row[1], row[2], row[3], row[4], bool(row[5])) for row in rows
+                SourceTarget(row[0], row[1], row[2], row[3], row[4], bool(row[5]), bool(row[6]))
+                for row in rows
             )
 
     @staticmethod
@@ -529,6 +533,7 @@ class CatalogStore:
         key: str,
         doc_name: str,
         expected_generation: int | None = None,
+        expected_source_generation: int | None = None,
     ) -> UnitTarget:
         TypeAdapter(DocName).validate_python(doc_name)
         if (
@@ -543,6 +548,11 @@ class CatalogStore:
             raise ValueError(
                 "A processing-unit generation must be nonnegative; zero requires absence"
             )
+        if expected_source_generation is not None and (
+            type(expected_source_generation) is not int
+            or not 0 <= expected_source_generation < 2**63
+        ):
+            raise ValueError("A source generation must be a nonnegative storage integer")
         with storage_stage(self.root, self.identity) as db, db.transaction() as connection:
             processing = connection.execute(
                 "SELECT p.source_revision_id, s.source_id, p.reprocessing_request_id "
@@ -559,10 +569,16 @@ class CatalogStore:
             latest = self._latest(db, processing[1])
             if not latest or latest[0] != processing[0]:
                 raise CatalogConflict("The source target changed before unit preparation")
-            if connection.execute(
-                "SELECT state FROM ukb_sources WHERE source_id = ?", (processing[1],)
-            ).fetchone() != ("active",):
+            source = connection.execute(
+                "SELECT state, generation, contribution_empty FROM ukb_sources WHERE source_id = ?",
+                (processing[1],),
+            ).fetchone()
+            if source is None or source[0] != "active":
                 raise CatalogConflict("The source was withdrawn before unit preparation")
+            if (
+                expected_source_generation is not None and source[1] != expected_source_generation
+            ) or (source[2] and processing[2] is None):
+                raise CatalogConflict("The source contribution changed before unit preparation")
             unit = connection.execute(
                 "SELECT unit_id, target_revision_id, generation, doc_name FROM ukb_import_units "
                 "WHERE source_id = ? AND unit_key = ?",
@@ -597,9 +613,17 @@ class CatalogStore:
                 (revision_id, generation, unit_id),
             )
             connection.execute(
-                "UPDATE ukb_sources SET generation = generation + 1 WHERE source_id = ?",
+                "UPDATE ukb_sources SET generation = generation + 1, contribution_empty = 0 "
+                "WHERE source_id = ?",
                 (processing[1],),
             )
+            if processing[2] is not None:
+                connection.execute(
+                    "UPDATE ukb_reprocessing_requests "
+                    "SET expected_source_generation = expected_source_generation + 1 "
+                    "WHERE request_id = ?",
+                    (processing[2],),
+                )
             return UnitTarget(
                 unit_id,
                 revision_id,

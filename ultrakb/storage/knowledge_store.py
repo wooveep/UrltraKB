@@ -324,7 +324,7 @@ class KnowledgeStore:
         changes: dict[str, bytes | None],
         *,
         page_inputs: dict[str, tuple[str, ...]] | None = None,
-        withdrawal=None,
+        source_change=None,
         generated_paths=(),
         refresh_generation=None,
     ) -> PreparedRevision:
@@ -359,7 +359,7 @@ class KnowledgeStore:
             }
             | (page_inputs or {}),
             base=base,
-            withdrawal=withdrawal,
+            source_change=source_change,
             generated_paths=generated_paths,
             refresh_generation=refresh_generation,
         )
@@ -376,7 +376,7 @@ class KnowledgeStore:
         compile_outcome=None,
         page_inputs: dict[str, tuple[str, ...]] | None = None,
         base: BoundKnowledge | None = None,
-        withdrawal=None,
+        source_change=None,
         generated_paths=(),
         refresh_generation=None,
     ) -> PreparedRevision:
@@ -393,7 +393,7 @@ class KnowledgeStore:
             compile_outcome=compile_outcome,
             page_inputs=page_inputs,
             base=base,
-            withdrawal=withdrawal,
+            source_change=source_change,
             generated_paths=generated_paths,
             refresh_generation=refresh_generation,
         )
@@ -471,10 +471,10 @@ class KnowledgeStore:
             # accept late preparation after cancellation, or run I/O in this commit.
             check_cancelled()
             from .generated_baselines import require_refresh_catalog
-            from .source_withdrawal import finish_withdrawal
+            from .source_changes import finish_source_change
 
             require_refresh_catalog(connection, prepared.revision_id)
-            finish_withdrawal(connection, prepared.revision_id)
+            finish_source_change(connection, prepared.revision_id)
             activate_sync_plan(db, prepared.revision_id, prepared.sync_plan_id)
             connection.execute(
                 "INSERT INTO ukb_publications VALUES (?, ?, ?, ?)",

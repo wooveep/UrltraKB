@@ -24,7 +24,16 @@ class RetainedContent(Record):
 
 
 def retain_unreadable_input(
-    scope, ready, context, catalog, revision, assessment, download_assets, *, reprocessing=None
+    scope,
+    ready,
+    context,
+    catalog,
+    revision,
+    assessment,
+    download_assets,
+    *,
+    source_generation,
+    reprocessing=None,
 ):
     from .storage_processing_policy import (
         POLICY_PATH,
@@ -124,9 +133,8 @@ def retain_unreadable_input(
                     processing.processing_id,
                     key="body",
                     doc_name=doc_name,
-                    expected_generation=(target.generation if target else 0)
-                    if reprocessing
-                    else None,
+                    expected_generation=target.generation if target else 0,
+                    expected_source_generation=None if reprocessing else source_generation,
                 )
     message = (
         "资料已保存，未生成知识：没有可靠的原生文字；原件及可用原图仍可阅读。已有知识尚未刷新。"

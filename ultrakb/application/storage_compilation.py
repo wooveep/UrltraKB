@@ -37,9 +37,10 @@ async def recompile_stored(scope, source_id, *, unit_id, context, version, model
         return RecompileResult("conflict", message="Knowledge changed after confirmation")
     if unit_id is None:
         return RecompileResult("blocked", message="Select an explicit retained processing unit")
-    if CatalogStore(scope.kb_dir, base.identity).source(source_id).removed:
+    source = CatalogStore(scope.kb_dir, base.identity).source(source_id)
+    if source.removed or source.contribution_empty:
         return RecompileResult(
-            "blocked", message="The source was withdrawn; historical evidence retained"
+            "blocked", message="The source contribution is excluded; historical evidence retained"
         )
     target = CatalogStore(scope.kb_dir, base.identity).unit(unit_id)
     if target.source_id != source_id:

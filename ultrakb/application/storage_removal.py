@@ -7,7 +7,7 @@ from dataclasses import replace
 from ultrakb.locks import LockCancelled
 from ultrakb.storage.catalog_store import CatalogConflict, CatalogStore
 from ultrakb.storage.knowledge_store import KnowledgeStore, PublicationConflict
-from ultrakb.storage.source_withdrawal import SourceWithdrawal, committed_withdrawal
+from ultrakb.storage.source_changes import SourceChange, committed_source_change
 
 from .execution import ExecutionContext
 from .publications import publish_knowledge_changes, sync_publication
@@ -117,7 +117,7 @@ def remove_stored_source(scope, identifier, *, version, context):
     base = scope.knowledge
     context = context or ExecutionContext()
     if context.storage_identity not in (None, base.identity):
-        raise ValueError("Source withdrawal belongs to another database generation")
+        raise ValueError("Source source_change belongs to another database generation")
     context.storage_identity = base.identity
     catalog, store = (
         CatalogStore(scope.kb_dir, base.identity),
@@ -137,7 +137,7 @@ def remove_stored_source(scope, identifier, *, version, context):
                 )
             except FileNotFoundError:
                 return RemovalOutcome("conflict", RemovalPreview("not_found"))
-        retained = committed_withdrawal(store, recovered_scope.knowledge, source.source_id)
+        retained = committed_source_change(store, recovered_scope.knowledge, source.source_id)
         if retained is not None:
             prepared, claim = retained
             snapshot = replace(source, generation=claim.source_generation, removed=False)
@@ -163,7 +163,7 @@ def remove_stored_source(scope, identifier, *, version, context):
     source = catalog.source(preview.plan.file_hash)
     if _version(scope, source) != preview.version or source.removed:
         return RemovalOutcome("conflict", preview)
-    claim = SourceWithdrawal(
+    claim = SourceChange(
         source_id=source.source_id,
         source_revision_id=source.revision_id,
         source_generation=source.generation,
@@ -181,12 +181,12 @@ def remove_stored_source(scope, identifier, *, version, context):
                     outcome = publish_knowledge_changes(
                         base,
                         {},
-                        withdrawal=claim,
+                        source_change=claim,
                         check_cancelled=context.check_stop,
                         execution_id=context.storage_execution.execution_id,
                     )
                 except Exception:
-                    retained = committed_withdrawal(store, base, source.source_id)
+                    retained = committed_source_change(store, base, source.source_id)
                     if retained is None:
                         raise
                     prepared, _ = retained

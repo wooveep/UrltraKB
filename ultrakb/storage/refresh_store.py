@@ -49,7 +49,8 @@ def refresh_targets(bound):
         for source, label, revision in db.connection.execute(
             "SELECT s.source_id, s.label, (SELECT revision_id FROM ukb_source_revisions r "
             "WHERE r.source_id = s.source_id AND r.state = 'ready' ORDER BY ordinal DESC LIMIT 1) "
-            "FROM ukb_sources s WHERE state = 'active' ORDER BY source_id"
+            "FROM ukb_sources s WHERE state = 'active' AND contribution_empty = 0 "
+            "ORDER BY source_id"
         ).fetchall():
             units = db.connection.execute(
                 "SELECT target_revision_id FROM ukb_import_units "

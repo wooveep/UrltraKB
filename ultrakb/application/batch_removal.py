@@ -1,4 +1,4 @@
-"""Aggregate Source withdrawal effects and execute reviewed per-source transactions."""
+"""Aggregate Source source_change effects and execute reviewed per-source transactions."""
 
 import hashlib
 import json
@@ -51,14 +51,14 @@ class BatchRemovalPreview:
             from pydantic import TypeAdapter
 
             from ultrakb.source_records import RecordId
-            from ultrakb.storage.source_withdrawal import SourceWithdrawal
+            from ultrakb.storage.source_changes import SourceChange
 
             if any(item.kind != "source" for item in self.identities):
                 raise ValueError("Main-store removal requires retained source identities")
             for value in (self.storage_kb_id, self.storage_generation, self.publication_id):
                 TypeAdapter(RecordId).validate_python(value)
             for source_id, revision_id, generation in self.source_versions:
-                SourceWithdrawal(
+                SourceChange(
                     source_id=source_id,
                     source_revision_id=revision_id,
                     source_generation=generation,

@@ -22,7 +22,7 @@ from .navigation_store import (
 )
 from .pending_store import PendingWork
 from .publication_guards import capture_import_claim, import_claim
-from .source_withdrawal import SourceWithdrawal, require_source, withdrawal_manifest
+from .source_changes import SourceChange, require_source, source_change_manifest
 from .wiki_paths import validate_file_tree
 from .wiki_projection import prepare_sync_plan, require_sync_plan
 
@@ -39,7 +39,7 @@ def prepare_revision(
     compile_outcome=None,
     page_inputs: dict[str, tuple[str, ...]] | None = None,
     base: BoundKnowledge | None = None,
-    withdrawal=None,
+    source_change=None,
     generated_paths=(),
     refresh_generation=None,
 ) -> PreparedRevision:
@@ -47,13 +47,13 @@ def prepare_revision(
         type(refresh_generation) is not int
         or not 0 <= refresh_generation < 2**63
         or import_work is not None
-        or withdrawal is not None
+        or source_change is not None
     ):
         raise ValueError("Refresh requires a distinct, valid catalog generation claim")
-    if withdrawal is not None:
-        withdrawal = SourceWithdrawal.model_validate(withdrawal)
+    if source_change is not None:
+        source_change = SourceChange.model_validate(source_change)
         if import_work is not None:
-            raise ValueError("An import cannot also withdraw a source")
+            raise ValueError("An import cannot also change source contribution")
     compile_outcome = CompileOutcome.model_validate(compile_outcome or {})
     encoded_outcome = compile_outcome.model_dump_json()
     if len(encoded_outcome.encode()) > 64 * 1024 or compile_outcome.unfinished:
@@ -78,8 +78,8 @@ def prepare_revision(
         TypeAdapter(RecordId).validate_python(index_id)
     revision_id, publication_id, plan_id = (uuid.uuid4().hex for _ in range(3))
     with storage_stage(store.root, store.identity) as db:
-        if withdrawal is not None:
-            require_source(db.connection, withdrawal)
+        if source_change is not None:
+            require_source(db.connection, source_change)
         claim = (
             capture_import_claim(db.connection, store.identity, import_work)
             if import_work is not None
@@ -132,7 +132,9 @@ def prepare_revision(
                     "import_claim": claim,
                     "compile_outcome": compile_outcome.model_dump(mode="json"),
                     "page_inputs": page_rows,
-                    "source_withdrawal": withdrawal.model_dump(mode="json") if withdrawal else None,
+                    "source_changes": source_change.model_dump(mode="json")
+                    if source_change
+                    else None,
                     "generated_baselines": generated,
                     "refresh_generation": refresh_generation,
                 }
@@ -167,14 +169,15 @@ def prepare_revision(
                     "INSERT INTO ukb_revision_refresh VALUES (?, ?, ?)",
                     (revision_id, refresh_generation, encoded_outcome),
                 )
-            if withdrawal is not None:
+            if source_change is not None:
                 connection.execute(
-                    "INSERT INTO ukb_revision_withdrawals VALUES (?, ?, ?, ?)",
+                    "INSERT INTO ukb_revision_source_changes VALUES (?, ?, ?, ?, ?)",
                     (
                         revision_id,
-                        withdrawal.source_id,
-                        withdrawal.source_revision_id,
-                        withdrawal.source_generation,
+                        source_change.source_id,
+                        source_change.source_revision_id,
+                        source_change.source_generation,
+                        source_change.kind,
                     ),
                 )
             if claim is not None:
@@ -263,7 +266,7 @@ def prepare_revision(
                 "sync_plan": plan_id,
                 "import_claim": import_claim(db.connection, revision_id),
                 "compile_outcome": read_outcome(db.connection, revision_id).model_dump(mode="json"),
-                "source_withdrawal": withdrawal_manifest(db.connection, revision_id),
+                "source_changes": source_change_manifest(db.connection, revision_id),
                 "generated_baselines": read_baselines(db.connection, revision_id),
                 "refresh_generation": read_refresh_generation(db.connection, revision_id),
                 "page_inputs": db.connection.execute(

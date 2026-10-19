@@ -38,7 +38,8 @@ SCHEMA = (
         source_key TEXT NOT NULL UNIQUE,
         label TEXT NOT NULL,
         state TEXT NOT NULL DEFAULT 'active' CHECK (state IN ('active', 'withdrawn')),
-        generation INTEGER NOT NULL DEFAULT 0 CHECK (generation >= 0)
+        generation INTEGER NOT NULL DEFAULT 0 CHECK (generation >= 0),
+        contribution_empty INTEGER NOT NULL DEFAULT 0 CHECK (contribution_empty IN (0, 1))
     )""",
         """CREATE TABLE ukb_source_revisions (
         revision_id TEXT PRIMARY KEY,
@@ -84,14 +85,21 @@ SCHEMA = (
         source_id TEXT NOT NULL REFERENCES ukb_sources(source_id),
         source_revision_id TEXT NOT NULL REFERENCES ukb_source_revisions(revision_id),
         payload_digest TEXT NOT NULL REFERENCES ukb_blobs(digest),
-        execution_id TEXT REFERENCES ukb_executions(execution_id)
+        execution_id TEXT REFERENCES ukb_executions(execution_id),
+        source_generation INTEGER NOT NULL CHECK (source_generation >= 0),
+        expected_source_generation INTEGER NOT NULL CHECK (
+            expected_source_generation >= source_generation)
     )""",
         "CREATE INDEX ukb_reprocessing_source "
         "ON ukb_reprocessing_requests(source_revision_id, sequence DESC)",
         """CREATE TRIGGER ukb_reprocessing_immutable BEFORE UPDATE OF
-        sequence, request_id, source_id, source_revision_id, payload_digest
+        sequence, request_id, source_id, source_revision_id, payload_digest, source_generation
         ON ukb_reprocessing_requests
         BEGIN SELECT RAISE(ABORT, 'Reprocessing plans are immutable'); END""",
+        """CREATE TRIGGER ukb_reprocessing_progress BEFORE UPDATE OF expected_source_generation
+        ON ukb_reprocessing_requests
+        WHEN NEW.expected_source_generation != OLD.expected_source_generation + 1
+        BEGIN SELECT RAISE(ABORT, 'Reprocessing source progress must advance one target'); END""",
         """CREATE TABLE ukb_import_units (
         unit_id TEXT PRIMARY KEY,
         source_id TEXT NOT NULL REFERENCES ukb_sources(source_id),

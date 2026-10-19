@@ -1524,3 +1524,37 @@ verify the custom-schema, root-navigation, timestamp and synchronization-reprepa
 fixes. Source empty confirmation, selected refresh, remaining maintenance writers,
 observation/archive/audit completion and the sole P8 normal-factory activation
 remain open work; this is not overall completion of issue 164.
+
+### Empty contribution confirmation and target fencing
+
+Development schema 23 records empty contribution and withdrawal through the same
+sealed source-change claim. Empty confirmation atomically publishes its exact
+source revision and generation, keeps originals and historical page evidence, and
+marks dependent knowledge for refresh. New effective inputs exclude the source.
+An exact generation-bound receipt recovers the same publication in a fresh
+invocation; a changed source, unit or foreign publication rejects approval.
+Confirmation and replay need no model credentials or configuration.
+
+Ordinary normalization, retained-only processing and worksheet preparation bind
+the source and unit generations captured before their work. Target advancement
+checks those generations inside its short transaction, and an ordinary late worker
+cannot erase a committed empty confirmation. Workbook planning advances its local
+expectation only for its own actual target changes. Explicit reprocessing records
+the reviewed source generation and advances its owned progress in the same
+transaction as each target. Empty confirmation invalidates an old request; only a
+fresh preview can authorize contribution restoration.
+
+Real SQLite/SDK regressions cover late normalization, fresh reviewed reprocessing,
+confirmation during model wait, stale pending work and retained paid responses.
+Transaction abort, lost acknowledgement, projection failure and later execution
+cleanup preserve the correct durable result. Development CLI, HTTP and native
+worker invocations recover one exact receipt. The desktop asynchronous review
+captures the fixed main-store reading scope even if navigation changes before
+delivery. Both independent review axes verify their earlier findings are closed.
+
+The expanded catalog/import/reprocessing/refresh/removal/application set passes
+109 cases; the final adapter and application-boundary set passes 8. Full mypy
+passes 549 modules, and Ruff, formatting and diff checks pass. Normal factories
+remain behind P8. Selected refresh, remaining maintenance writers, observation
+and archive/audit completion, and final activation remain unfinished; issue 164
+is still open.

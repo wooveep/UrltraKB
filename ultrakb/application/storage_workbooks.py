@@ -25,11 +25,22 @@ from .views import storage_scope
 from .workbook_ingestion import aggregate_units
 
 
-def _plan(scope, ready, context, bundle, catalog, revision, sheet, policy, reprocessing):
+def _plan(
+    scope,
+    ready,
+    context,
+    bundle,
+    catalog,
+    revision,
+    sheet,
+    policy,
+    reprocessing,
+    source_generation,
+):
     target = catalog.unit_for_source(revision.source_id, key=sheet.key)
     forced = reprocessing is not None and needs_reprocessing(catalog, target, reprocessing)
     if target is not None and target.source_revision_id == revision.revision_id and not forced:
-        return target
+        return target, False
     from ultrakb.converter import _sanitize_stem
 
     doc_name = (
@@ -99,12 +110,14 @@ def _plan(scope, ready, context, bundle, catalog, revision, sheet, policy, repro
                 reprocessing_request_id=reprocessing.request_id if reprocessing else None,
             )
             context.check_stop()
-            return catalog.plan_unit(
+            planned = catalog.plan_unit(
                 processing.processing_id,
                 key=sheet.key,
                 doc_name=doc_name,
-                expected_generation=(target.generation if target else 0) if reprocessing else None,
+                expected_generation=target.generation if target else 0,
+                expected_source_generation=None if reprocessing else source_generation,
             )
+            return planned, target is None or target.unit_revision_id != planned.unit_revision_id
 
 
 def _uncompiled(scope, ready, revision, target, sheet, *, error=None, status=None):
@@ -142,7 +155,16 @@ def _uncompiled(scope, ready, revision, target, sheet, *, error=None, status=Non
 
 
 def import_workbook(
-    scope, ready, context, bundle, catalog, revision, *, unit_id=None, reprocessing=None
+    scope,
+    ready,
+    context,
+    bundle,
+    catalog,
+    revision,
+    *,
+    source_generation,
+    unit_id=None,
+    reprocessing=None,
 ):
     with task_stage(
         context, "workbook.inventory.v1", source_revision_id=revision.revision_id
@@ -164,23 +186,22 @@ def import_workbook(
         )
     # Retention and target planning finish before the first model call, so a
     # failed/cancelled first worksheet cannot hide the remaining inventory.
-    targets = [
-        (
-            _plan(
-                scope,
-                ready,
-                context,
-                bundle,
-                catalog,
-                revision,
-                sheet,
-                workbook.policy,
-                reprocessing,
-            ),
+    targets = []
+    for sheet in workbook.sheets:
+        target, changed = _plan(
+            scope,
+            ready,
+            context,
+            bundle,
+            catalog,
+            revision,
             sheet,
+            workbook.policy,
+            reprocessing,
+            source_generation,
         )
-        for sheet in workbook.sheets
-    ]
+        targets.append((target, sheet))
+        source_generation += int(changed)
     if unit_id is not None and not any(target.unit_id == unit_id for target, _ in targets):
         raise ValueError("Worksheet does not belong to this source revision")
     if unit_id is not None:

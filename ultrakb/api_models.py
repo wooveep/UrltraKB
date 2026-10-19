@@ -187,6 +187,7 @@ class LintRequest(ViewRequest):
 
 class DocumentItem(BaseModel):
     removed: bool = False
+    contribution_empty: bool = False
     unit_count: int | None = None
     block_count: int | None = None
     tokens: int | None = None

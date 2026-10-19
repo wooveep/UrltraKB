@@ -1,23 +1,25 @@
 """Publication binds one immutable import claim and its durable success receipt."""
 
 PUBLICATION_SCHEMA = (
-    """CREATE TABLE ukb_revision_withdrawals (
+    """CREATE TABLE ukb_revision_source_changes (
         revision_id TEXT PRIMARY KEY REFERENCES ukb_knowledge_revisions(revision_id),
         source_id TEXT NOT NULL REFERENCES ukb_sources(source_id),
         source_revision_id TEXT NOT NULL REFERENCES ukb_source_revisions(revision_id),
-        source_generation INTEGER NOT NULL CHECK (source_generation >= 0)
+        source_generation INTEGER NOT NULL CHECK (source_generation >= 0),
+        kind TEXT NOT NULL CHECK (kind IN ('withdrawn', 'empty'))
     )""",
-    "CREATE INDEX ukb_withdrawal_source ON ukb_revision_withdrawals(source_id, source_generation)",
-    """CREATE TRIGGER ukb_withdrawal_draft BEFORE INSERT ON ukb_revision_withdrawals
+    "CREATE INDEX ukb_source_change_source ON "
+    "ukb_revision_source_changes(source_id, source_generation)",
+    """CREATE TRIGGER ukb_source_change_draft BEFORE INSERT ON ukb_revision_source_changes
         WHEN NOT EXISTS (SELECT 1 FROM ukb_knowledge_revisions
                          WHERE revision_id = NEW.revision_id AND state = 'draft')
-        BEGIN SELECT RAISE(ABORT, 'Withdrawal requires a draft revision'); END""",
-    """CREATE TRIGGER ukb_withdrawal_immutable BEFORE UPDATE ON ukb_revision_withdrawals
-        BEGIN SELECT RAISE(ABORT, 'Source withdrawal claims are immutable'); END""",
-    """CREATE TRIGGER ukb_withdrawal_retained BEFORE DELETE ON ukb_revision_withdrawals
+        BEGIN SELECT RAISE(ABORT, 'Source changes require a draft revision'); END""",
+    """CREATE TRIGGER ukb_source_change_immutable BEFORE UPDATE ON ukb_revision_source_changes
+        BEGIN SELECT RAISE(ABORT, 'Source change claims are immutable'); END""",
+    """CREATE TRIGGER ukb_source_change_retained BEFORE DELETE ON ukb_revision_source_changes
         WHEN NOT EXISTS (SELECT 1 FROM ukb_knowledge_revisions
                          WHERE revision_id = OLD.revision_id AND state = 'retiring')
-        BEGIN SELECT RAISE(ABORT, 'Only retiring revisions release withdrawal claims'); END""",
+        BEGIN SELECT RAISE(ABORT, 'Only retiring revisions release source change claims'); END""",
     """CREATE TABLE ukb_revision_import (
         revision_id TEXT PRIMARY KEY REFERENCES ukb_knowledge_revisions(revision_id),
         intent_id TEXT NOT NULL REFERENCES ukb_import_intents(intent_id),

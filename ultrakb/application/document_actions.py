@@ -170,12 +170,14 @@ def document_inventory(
                     else "旧资料需先预览重新处理。",
                 ),
                 "recompile": Eligibility(
-                    mutable and saved,
+                    mutable and saved and not doc.get("contribution_empty"),
                     "" if saved else "缺少当前目标的已保存正文或索引；请先重试或重新处理。",
                 ),
                 "reprocess": Eligibility(mutable),
                 "remove": Eligibility(mutable),
-                "empty": Eligibility(mutable and identity.kind == "source"),
+                "empty": Eligibility(
+                    mutable and identity.kind == "source" and not doc.get("contribution_empty")
+                ),
             }
             if identity.value in source_ids & legacy_ids:
                 actions["recompile"] = Eligibility(

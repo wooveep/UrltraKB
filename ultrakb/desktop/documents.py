@@ -197,8 +197,8 @@ class DocumentsDialog(ManagementPanel):
         RefreshDialog(self.window, self.kb).show()
 
     def confirm_empty(self):
+        from ultrakb.application.refresh import read_source_contribution_target
         from ultrakb.runtime.requests import ConfirmEmptySource
-        from ultrakb.source_catalog import read_source
 
         selected = self.table.selectionModel().selectedRows()
         if len(selected) != 1 or self._task:
@@ -206,6 +206,7 @@ class DocumentsDialog(ManagementPanel):
             return
         identity = self.table.item(selected[0].row(), 0).data(Qt.ItemDataRole.UserRole)
         generation = self._generation
+        contribution_scope = self.read_scope or self.scope
 
         def loaded(source, error):
             if error:
@@ -234,7 +235,7 @@ class DocumentsDialog(ManagementPanel):
             self.invalidate()
 
         self.window.io.submit(
-            lambda: read_source(self.kb, identity),
+            lambda: read_source_contribution_target(self.kb, identity, scope=contribution_scope),
             loaded,
             kb=self.kb,
             obsolete=lambda: self._closed or generation != self._generation,

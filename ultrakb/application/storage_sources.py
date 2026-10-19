@@ -161,8 +161,11 @@ def _payload(
         "source_revision_id": target.source_revision_id,
         "target_source_revision_id": source.revision_id,
         "removed": source.removed,
+        "contribution_empty": source.contribution_empty,
         "validity": "withdrawn"
         if source.removed
+        else "empty"
+        if source.contribution_empty
         else "historical"
         if retained
         else "needs_refresh"

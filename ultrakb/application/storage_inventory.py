@@ -71,9 +71,9 @@ def source_inventory(scope):
     for source in catalog_sources(catalog, include_removed=True):
         targets = catalog.source_units(source.source_id)
         units = [_unit(catalog, unit, actuals.get(unit.unit_id), scope) for unit in targets]
-        if source.removed:
+        if source.removed or source.contribution_empty:
             for unit in units:
-                unit["status"] = "retired"
+                unit["status"] = "retired" if source.removed else "empty"
         actual = next((actuals[unit.unit_id] for unit in targets if unit.unit_id in actuals), None)
         one = units[0] if len(units) == 1 else {}
         changed = (actual is not None and actual.source_revision_id != source.revision_id) or any(
@@ -99,13 +99,18 @@ def source_inventory(scope):
                 "unit_count": len(units),
                 "units": units,
                 "removed": source.removed,
+                "contribution_empty": source.contribution_empty,
                 "validity": "withdrawn"
                 if source.removed
+                else "empty"
+                if source.contribution_empty
                 else "needs_refresh"
                 if changed
                 else "current",
                 "status": "removed"
                 if source.removed
+                else "empty"
+                if source.contribution_empty
                 else source_status([SimpleNamespace(status=unit["status"]) for unit in units]),
                 "length_class": one.get("length_class"),
                 "execution_mode": one.get("execution_mode"),

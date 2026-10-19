@@ -118,6 +118,7 @@ def _preview(scope, source_id):
             generation=base.identity.generation,
             source_id=source_id,
             source_revision_id=source.revision_id,
+            source_generation=source.generation,
             view_id=scope.view_id,
             publication_id=base.publication_id,
             units={unit.unit_id: unit.unit_revision_id for unit in units},

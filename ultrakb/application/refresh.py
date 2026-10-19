@@ -1,11 +1,52 @@
 """Explicit view refresh: validity is separate from the immutable evidence shown."""
 
+from dataclasses import dataclass
 from pathlib import Path
 
-from ultrakb.knowledge_scope import KnowledgeScope, resolve_scope
+from ultrakb.knowledge_scope import KnowledgeScope, reading_scope, resolve_scope
 from ultrakb.locks import kb_read_lock
 from ultrakb.source_changes import effective_input
 from ultrakb.unit_publication import read_head
+
+
+@dataclass(frozen=True)
+class SourceContributionTarget:
+    source_id: str
+    name: str
+    source_revision_id: str
+    target_generation: int
+    removed: bool
+    contribution_empty: bool
+
+
+def read_source_contribution_target(kb_dir, source_id, *, scope=None):
+    selected = resolve_scope(kb_dir, scope)
+    if selected.historical:
+        raise ValueError("Select the current view before confirming source contribution")
+    with reading_scope(selected):
+        if selected.knowledge is not None:
+            from ultrakb.storage.catalog_store import CatalogStore
+
+            source = CatalogStore(selected.kb_dir, selected.knowledge.identity).source(source_id)
+            return SourceContributionTarget(
+                source.source_id,
+                source.label,
+                source.revision_id,
+                source.generation,
+                source.removed,
+                source.contribution_empty,
+            )
+        from ultrakb.source_catalog import read_source
+
+        legacy = read_source(selected.kb_dir, source_id)
+        return SourceContributionTarget(
+            legacy.source_id,
+            legacy.name,
+            legacy.target_revision_id,
+            legacy.target_generation,
+            legacy.removed,
+            legacy.contribution_empty,
+        )
 
 
 def list_knowledge_history(kb_dir: Path, *, scope: KnowledgeScope) -> tuple[dict, ...]:
@@ -172,6 +213,11 @@ def confirm_empty_source(
 
     kb_dir = kb_dir.resolve()
     if scope is not None:
+        scope = resolve_scope(kb_dir, scope)
+        if scope.knowledge is not None:
+            from .storage_empty_source import confirm_stored_empty
+
+            return confirm_stored_empty(scope, source_id, generation=generation, context=context)
         scope = resolve_scope(kb_dir, scope, writable=True)
     context = context or ExecutionContext()
     with kb_ingest_lock(kb_dir / ".ultrakb", cancelled=context.cancelled, on_wait=context.waiting):

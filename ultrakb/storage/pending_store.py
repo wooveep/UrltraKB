@@ -62,9 +62,9 @@ def _current(connection, source_revision_id, unit_revision_id):
     if not source:
         raise KeyError(source_revision_id)
     if connection.execute(
-        "SELECT state FROM ukb_sources WHERE source_id = ?", (source[0],)
-    ).fetchone() != ("active",):
-        raise CatalogConflict("The source was withdrawn before pending work")
+        "SELECT state, contribution_empty FROM ukb_sources WHERE source_id = ?", (source[0],)
+    ).fetchone() != ("active", 0):
+        raise CatalogConflict("The source contribution was excluded before pending work")
     latest = connection.execute(
         "SELECT revision_id FROM ukb_source_revisions WHERE source_id = ? AND state = 'ready' "
         "ORDER BY ordinal DESC LIMIT 1",

@@ -78,6 +78,7 @@ def select_retained(scope, identifier, *, all_docs, confirmation, unit_id):
             unit.unit_id,
         )
         for source, units in sources
+        if not source.contribution_empty
         for unit in units
         if (unit_id is None or unit.unit_id == unit_id)
         and (processing := catalog.processing(unit.processing_id)).content_state == "content"

@@ -20,7 +20,7 @@ from ultrakb.inputs import TEXT_SOURCE_EXTENSIONS, prepared_input, validate_sour
 from ultrakb.knowledge_scope import KnowledgeScope
 from ultrakb.locks import LockCancelled, atomic_write_json, atomic_write_text
 from ultrakb.processing_policy import classify_markdown_tokens
-from ultrakb.storage.catalog_store import CatalogStore
+from ultrakb.storage.catalog_store import CatalogConflict, CatalogStore
 from ultrakb.storage.compile_workspace import materialize_baseline
 from ultrakb.text_formats import normalize_text_document
 
@@ -214,6 +214,10 @@ def process_admitted(
         needs_reprocessing,
     )
 
+    source = catalog.source(revision.source_id)
+    if source.removed or (source.contribution_empty and reprocessing is None):
+        raise CatalogConflict("The source contribution changed; preview reprocessing first")
+    source_generation = source.generation
     workbook = ready.source.suffix.lower() in {".xlsx", ".xls"}
     target = None if workbook else catalog.unit_for_source(revision.source_id, key="body")
     forced = bool(
@@ -244,6 +248,7 @@ def process_admitted(
                     error.assessment,
                     download_remote_assets,
                     reprocessing=reprocessing,
+                    source_generation=source_generation,
                 )
             return replace(
                 rejection_result(ready, error),
@@ -262,6 +267,7 @@ def process_admitted(
             revision,
             unit_id=unit_id,
             reprocessing=reprocessing,
+            source_generation=source_generation,
         )
     root = scope.kb_dir
     if target is None or target.source_revision_id != revision.revision_id or forced:
@@ -366,9 +372,8 @@ def process_admitted(
                     processing.processing_id,
                     key="body",
                     doc_name=doc_name,
-                    expected_generation=(target.generation if target else 0)
-                    if reprocessing
-                    else None,
+                    expected_generation=target.generation if target else 0,
+                    expected_source_generation=None if reprocessing else source_generation,
                 )
     if unit_id is not None and target.unit_id != unit_id:
         raise ValueError("Processing unit does not belong to this source")

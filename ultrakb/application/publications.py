@@ -77,12 +77,12 @@ def publish_knowledge_changes(
     page_inputs: dict[str, tuple[str, ...]] | None = None,
     check_cancelled: Callable[[], None] = lambda: None,
     execution_id: str | None = None,
-    withdrawal=None,
+    source_change=None,
 ) -> PublicationOutcome:
     """Commit an explicitly based manual edit before attempting worktree I/O."""
     knowledge = KnowledgeStore(base.root, base.identity)
     prepared = knowledge.prepare_changes(
-        base, changes, page_inputs=page_inputs, withdrawal=withdrawal
+        base, changes, page_inputs=page_inputs, source_change=source_change
     )
     try:
         publication = knowledge.publish(

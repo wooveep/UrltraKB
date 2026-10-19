@@ -2,22 +2,24 @@
 
 from typing import Literal
 
-from pydantic import Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from ultrakb.compile_checkpoints import digest
-from ultrakb.source_records import Digest, Record, RecordId, ViewId
+from ultrakb.source_records import Digest, RecordId, ViewId
 
 from .blobs import put_blob, read_bytes, retain_blob
 from .catalog_store import CatalogConflict, CatalogStore
 from .coordination import storage_stage
 
 
-class ReprocessingPlan(Record):
-    schema_version: Literal[1] = 1
+class ReprocessingPlan(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+    schema_version: Literal[2] = 2
     kb_id: RecordId
     generation: str = Field(min_length=1)
     source_id: RecordId
     source_revision_id: RecordId
+    source_generation: int = Field(ge=0, lt=2**63, strict=True)
     view_id: ViewId
     publication_id: RecordId
     units: dict[RecordId, RecordId]
@@ -73,12 +75,27 @@ class ReprocessingStore:
                 ).fetchone()
                 if (latest[0] if latest else None) not in {plan.previous_request_id, request_id}:
                     raise CatalogConflict("Reprocessing target changed; refresh the preview")
+                if latest != (request_id,) and connection.execute(
+                    "SELECT state, generation FROM ukb_sources WHERE source_id = ?",
+                    (plan.source_id,),
+                ).fetchone() != ("active", plan.source_generation):
+                    raise CatalogConflict("Source contribution changed after reprocessing preview")
+                if latest == (request_id,):
+                    require_current_reprocessing(connection, plan.source_revision_id, request_id)
                 connection.execute(
                     "INSERT INTO ukb_reprocessing_requests "
-                    "(request_id, source_id, source_revision_id, payload_digest, execution_id) "
-                    "VALUES (?, ?, ?, ?, NULL) "
+                    "(request_id, source_id, source_revision_id, payload_digest, execution_id, "
+                    "source_generation, expected_source_generation) "
+                    "VALUES (?, ?, ?, ?, NULL, ?, ?) "
                     "ON CONFLICT(request_id) DO NOTHING",
-                    (request_id, plan.source_id, plan.source_revision_id, content.digest),
+                    (
+                        request_id,
+                        plan.source_id,
+                        plan.source_revision_id,
+                        content.digest,
+                        plan.source_generation,
+                        plan.source_generation,
+                    ),
                 )
                 stored = connection.execute(
                     "SELECT payload_digest FROM ukb_reprocessing_requests WHERE request_id = ?",
@@ -169,9 +186,15 @@ def require_current_reprocessing(connection, source_revision_id, request_id):
     if request_id is None:
         return
     current = connection.execute(
-        "SELECT request_id FROM ukb_reprocessing_requests WHERE source_revision_id = ? "
-        "ORDER BY sequence DESC LIMIT 1",
+        "SELECT r.request_id, r.expected_source_generation, s.generation, s.state "
+        "FROM ukb_reprocessing_requests r JOIN ukb_sources s ON s.source_id = r.source_id "
+        "WHERE r.source_revision_id = ? ORDER BY r.sequence DESC LIMIT 1",
         (source_revision_id,),
     ).fetchone()
-    if current != (request_id,):
+    if (
+        current is None
+        or current[0] != request_id
+        or current[1] != current[2]
+        or current[3] != "active"
+    ):
         raise CatalogConflict("Reprocessing target changed; refresh the preview")
