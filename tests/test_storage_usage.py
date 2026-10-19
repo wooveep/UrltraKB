@@ -76,6 +76,101 @@ def test_partial_late_usage_survives_publication_failure_and_restart(tmp_path):
     assert knowledge.bind(other.publication_id).read("index.md") == b"other"
 
 
+def test_known_unsent_retry_cannot_hide_an_earlier_unknown_paid_compile_attempt(tmp_path):
+    from ultrakb.llm_usage import UsageRequest
+    from ultrakb.mutation import RecoveryRequired
+    from ultrakb.storage.checkpoint_store import CompileCheckpointStore
+    from ultrakb.storage.database import create_database
+    from ultrakb.storage.execution_store import ExecutionStore
+    from ultrakb.storage.usage_store import UsageStore
+
+    root = tmp_path / "kb"
+    identity = create_database(root)
+    executions, usage = ExecutionStore(root, identity), UsageStore(root, identity)
+    execution = executions.begin("import", fingerprint="a" * 64, max_calls=3)
+    checkpoints = CompileCheckpointStore(root, identity).for_work(
+        execution.model_budget_id,
+        object_id={"unit": "body"},
+        conditions={"policy": "v1"},
+        execution_id=execution.execution_id,
+    )
+    checkpoints.claim_generation("short-summary", "b" * 64, stage="compile.summary")
+    logical_call = uuid4().hex
+    for sent in ("sent", "not_sent"):
+        stage = executions.start_stage(
+            execution.execution_id,
+            "model_request",
+            work_key=checkpoints.model_work_key("summary"),
+        )
+        request = UsageRequest(
+            request_attempt_id=uuid4().hex,
+            logical_call_id=logical_call,
+            execution_id=execution.execution_id,
+            model="test/model",
+            stage="compile.summary",
+            started_at="2026-10-19T00:00:00+00:00",
+        )
+        usage.begin(
+            request,
+            model_budget_id=execution.model_budget_id,
+            stage_code="model_request",
+            stage_attempt_id=stage,
+        )
+        usage.merge(request.request_attempt_id, version=1, send_status=sent, state="failed")
+        executions.finish_stage(stage, state="failed")
+    with pytest.raises(RecoveryRequired):
+        checkpoints.retained_response(
+            "short-summary",
+            "b" * 64,
+            protocol="summary-page-json",
+            sections=(),
+            stage="summary",
+        )
+    assert executions.budget(execution.model_budget_id).used == 1
+
+
+def test_late_compile_delivery_cannot_replace_a_later_execution_response(tmp_path):
+    from ultrakb.storage.checkpoint_store import CompileCheckpointStore
+    from ultrakb.storage.database import create_database
+    from ultrakb.storage.execution_store import ExecutionStore
+
+    root = tmp_path / "kb"
+    identity = create_database(root)
+    executions, checkpoints = ExecutionStore(root, identity), CompileCheckpointStore(root, identity)
+    first = executions.begin("import", fingerprint="a" * 64, max_calls=3)
+    original = checkpoints.for_work(
+        first.model_budget_id,
+        object_id={"unit": "body"},
+        conditions={"policy": "v1"},
+        execution_id=first.execution_id,
+    )
+    original.claim_generation("summary", "b" * 64, stage="compile.summary")
+    metadata = {
+        "stage": "summary",
+        "response_protocol": "summary-page-json",
+        "expected_sections": (),
+    }
+    original.record_received_response("summary", "b" * 64, "old response", **metadata)
+    executions.finish(first.execution_id, state="failed")
+    second = executions.begin(
+        "import", fingerprint="a" * 64, max_calls=3, resume=first.execution_id
+    )
+    resumed = checkpoints.for_work(
+        second.model_budget_id,
+        object_id={"unit": "body"},
+        conditions={"policy": "v1"},
+        execution_id=second.execution_id,
+    )
+    resumed.claim_generation("summary", "b" * 64, stage="compile.summary")
+    resumed.record_received_response("summary", "b" * 64, "new response", **metadata)
+    # Keep the old receipt as a fact without reviving its superseded work pointer.
+    original.record_received_response("summary", "b" * 64, "late old response", **metadata)
+    retained = resumed.retained_response(
+        "summary", "b" * 64, protocol="summary-page-json", sections=(), stage="summary"
+    )
+    assert retained[0] == "new response"
+
+
 def test_receipt_field_versions_merge_independently_and_retry_keeps_spent_budget(tmp_path):
     from ultrakb.llm_usage import UsageRequest
     from ultrakb.storage.database import create_database

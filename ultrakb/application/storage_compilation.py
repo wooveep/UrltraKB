@@ -177,7 +177,7 @@ async def _compile(scope, target, context, bundle, model, max_concurrency):
         )
         projection = sync_publication(base.root, base.identity, prepared)
         return replace(
-            accepted, unfinished=() if projection.status == "applied" else ("synchronize wiki",)
+            accepted, unfinished=() if projection.status == "synced" else ("synchronize wiki",)
         )
     except BaseException as error:
         context._storage_result = "failed"

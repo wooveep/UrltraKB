@@ -96,7 +96,7 @@ class CompileWork:
         ).fetchone() != (self.model_budget_id, self.identity.generation):
             raise ValueError("Compile callback belongs to another execution generation")
 
-    def _record(self, db, key, signature):
+    def _record_snapshot(self, db, key, signature):
         _label(key, limit=4096)
         TypeAdapter(Digest).validate_python(signature)
         row = db.connection.execute(
@@ -106,14 +106,35 @@ class CompileWork:
         ).fetchone()
         if row and row[0] != signature:
             raise PageResponseError("compile_request_changed", "The frozen compile request changed")
-        return json.loads(row[1]) if row else {}
+        return (row[1], json.loads(row[1])) if row else (None, {})
 
-    def _write_record(self, connection, key, signature, record):
-        connection.execute(
-            "INSERT INTO ukb_compile_records VALUES (?, ?, ?, ?) "
-            "ON CONFLICT(work_id, step_key) DO UPDATE SET record_json = excluded.record_json",
-            (self.work_id, key, signature, _json(record, bounded=True)),
-        )
+    def _record(self, db, key, signature):
+        return self._record_snapshot(db, key, signature)[1]
+
+    def _write_record(self, connection, key, signature, previous, encoded):
+        if previous is None:
+            changed = connection.execute(
+                "INSERT INTO ukb_compile_records VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING",
+                (self.work_id, key, signature, encoded),
+            ).rowcount
+        else:
+            changed = connection.execute(
+                "UPDATE ukb_compile_records SET record_json = ? WHERE work_id = ? "
+                "AND step_key = ? AND request_digest = ? AND record_json = ?",
+                (encoded, self.work_id, key, signature, previous),
+            ).rowcount
+        if changed != 1:
+            raise PageResponseError(
+                "compile_checkpoint_changed", "The checkpoint changed before its exact commit"
+            )
+
+    def _require_record_request(self, connection, key, signature):
+        row = connection.execute(
+            "SELECT request_digest FROM ukb_compile_records WHERE work_id = ? AND step_key = ?",
+            (self.work_id, key),
+        ).fetchone()
+        if row is not None and row != (signature,):
+            raise PageResponseError("compile_request_changed", "The frozen compile request changed")
 
     def prepare_summary_delivery(self):
         from ultrakb.llm_execution import check_model_stop
@@ -152,7 +173,7 @@ class CompileWork:
             with db.transaction() as connection:
                 self._active(connection)
                 check_model_stop()
-                self._record(db, key, request_digest)
+                self._require_record_request(connection, key, request_digest)
                 previous = connection.execute(
                     "SELECT request_digest, result_digest FROM ukb_compile_steps "
                     "WHERE work_id = ? AND step_key = ?",
@@ -233,10 +254,12 @@ class CompileWork:
 
     def record_failure(self, key, request_digest, code):
         _label(code)
-        with storage_stage(self.root, self.identity) as db, db.transaction() as connection:
-            self._provenance(connection)
-            record = self._record(db, key, request_digest)
-            self._write_record(connection, key, request_digest, {**record, "failure_code": code})
+        with storage_stage(self.root, self.identity) as db:
+            previous, record = self._record_snapshot(db, key, request_digest)
+            encoded = _json({**record, "failure_code": code}, bounded=True)
+            with db.transaction() as connection:
+                self._provenance(connection)
+                self._write_record(connection, key, request_digest, previous, encoded)
 
     def require_generation(self, key, request_digest):
         with storage_stage(self.root, self.identity, read_only=True) as db:
@@ -245,9 +268,8 @@ class CompileWork:
                     "compile_repair_exhausted", "The retained response repair was already consumed"
                 )
 
-    def _invocation(self, connection, key, signature, stage, kind):
+    def _invocation(self, connection, key, signature, stage, kind, identity):
         _label(stage, limit=1024)
-        identity = uuid4().hex
         connection.execute(
             "INSERT INTO ukb_compile_invocations(invocation_id, work_id, step_key, request_digest, "
             "execution_id, stage, kind) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -264,17 +286,21 @@ class CompileWork:
         return identity
 
     def claim_generation(self, key, request_digest, *, stage):
-        with storage_stage(self.root, self.identity) as db, db.transaction() as connection:
-            self._active(connection)
-            record = self._record(db, key, request_digest)
+        from ultrakb.llm_execution import check_model_stop
+
+        with storage_stage(self.root, self.identity) as db:
+            previous, record = self._record_snapshot(db, key, request_digest)
             if record.get("repair_used"):
                 raise PageResponseError(
                     "compile_repair_exhausted", "The retained response repair was already consumed"
                 )
-            invocation = self._invocation(connection, key, request_digest, stage, "generation")
-            self._write_record(
-                connection, key, request_digest, {**record, "latest_invocation": invocation}
-            )
+            invocation = uuid4().hex
+            encoded = _json({**record, "latest_invocation": invocation}, bounded=True)
+            with db.transaction() as connection:
+                self._active(connection)
+                check_model_stop()
+                self._invocation(connection, key, request_digest, stage, "generation", invocation)
+                self._write_record(connection, key, request_digest, previous, encoded)
 
     def claim_repair(self, key, request_digest):
         self._claim_once(key, request_digest, "repair")
@@ -283,25 +309,29 @@ class CompileWork:
         self._claim_once(key, request_digest, "conflict")
 
     def _claim_once(self, key, signature, kind):
-        with storage_stage(self.root, self.identity) as db, db.transaction() as connection:
-            self._active(connection)
-            record = self._record(db, key, signature)
+        from ultrakb.llm_execution import check_model_stop
+
+        with storage_stage(self.root, self.identity) as db:
+            before, record = self._record_snapshot(db, key, signature)
             flag = kind + "_used"
             if record.get(flag):
                 raise PageResponseError(
                     "compile_" + kind + "_exhausted", "The retained allowance was already consumed"
                 )
-            previous = connection.execute(
+            previous = db.connection.execute(
                 "SELECT stage FROM ukb_compile_invocations WHERE work_id = ? AND step_key = ? "
                 "ORDER BY sequence DESC LIMIT 1",
                 (self.work_id, key),
             ).fetchone()
-            invocation = self._invocation(
-                connection, key, signature, previous[0] if previous else key, kind
-            )
-            self._write_record(
-                connection, key, signature, {**record, flag: True, "latest_invocation": invocation}
-            )
+            invocation = uuid4().hex
+            encoded = _json({**record, flag: True, "latest_invocation": invocation}, bounded=True)
+            with db.transaction() as connection:
+                self._active(connection)
+                check_model_stop()
+                self._invocation(
+                    connection, key, signature, previous[0] if previous else key, kind, invocation
+                )
+                self._write_record(connection, key, signature, before, encoded)
 
     def model_work_key(self, stage):
         stage = stage.removeprefix("compile.").removesuffix(" (repair)")

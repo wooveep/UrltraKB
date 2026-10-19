@@ -54,6 +54,7 @@ async def test_recompile_uses_retained_input_and_publishes_actual_compiler_outpu
             root, unit.source_id, unit_id=unit.unit_id, scope=storage_scope(root, identity)
         )
     assert result.status == "compiled", result.message
+    assert not result.unfinished
     assert "17" in read_page(root, "summaries/fixture.md", scope=storage_scope(root, identity)).body
     assert service.requests
     for name in (
@@ -64,6 +65,40 @@ async def test_recompile_uses_retained_input_and_publishes_actual_compiler_outpu
         "model-tasks",
     ):
         assert not (root / ".ultrakb" / name).exists()
+
+
+@pytest.mark.asyncio
+async def test_compile_record_encoding_does_not_hold_the_sql_writer(tmp_path, monkeypatch):
+    from ultrakb.storage import checkpoint_store, compile_deliveries
+    from ultrakb.storage.database import open_database
+
+    root, identity, unit = compile_input(tmp_path)
+    encode, observed = checkpoint_store._json, []
+
+    def encoded(value, **options):
+        if isinstance(value, dict) and ("latest_invocation" in value or "latest_response" in value):
+            with open_database(root, expected=identity) as probe:
+                probe.connection.execute("PRAGMA busy_timeout = 0")
+                probe.connection.execute("BEGIN IMMEDIATE")
+                probe.connection.execute("ROLLBACK")
+            observed.append(True)
+        return encode(value, **options)
+
+    monkeypatch.setattr(checkpoint_store, "_json", encoded)
+    monkeypatch.setattr(compile_deliveries, "_json", encoded)
+    summary = json.dumps({"description": "Fixture", "content": "The value is 17."})
+    with StreamTransport(
+        [{"content": summary}, {"content": json.dumps({"concepts": [], "entities": []})}]
+    ) as service:
+        (root / ".env").write_text(f"LLM_API_KEY=offline-test-key\nOPENAI_API_BASE={service.url}\n")
+        result = await recompile_document(
+            root,
+            unit.source_id,
+            unit_id=unit.unit_id,
+            scope=storage_scope(root, identity),
+        )
+    assert result.status == "compiled", result.message
+    assert observed
 
 
 @pytest.mark.asyncio
@@ -171,6 +206,52 @@ async def test_invalid_summary_uses_one_repair_and_preserves_paid_attempts(tmp_p
             scope=storage_scope(root, identity),
         )
         assert result.status == "compiled", result.message
+        assert len(service.requests) == 3
+
+
+@pytest.mark.asyncio
+async def test_new_paid_plan_repair_is_recovered_before_older_invalid_delivery(
+    tmp_path, monkeypatch
+):
+    from ultrakb.storage.checkpoint_store import CompileWork
+
+    root, identity, unit = compile_input(tmp_path)
+    summary = json.dumps({"description": "Fixture", "content": "The value is 17."})
+    received = CompileWork.record_received_response
+
+    def interrupted(self, key, *args, **kwargs):
+        if key == "plan" and kwargs.get("attempt") == 1:
+            raise OSError("repaired plan delivery interrupted")
+        return received(self, key, *args, **kwargs)
+
+    context = ExecutionContext()
+    with StreamTransport(
+        [
+            {"content": summary},
+            {"content": "invalid plan"},
+            {"content": json.dumps({"concepts": [], "entities": []})},
+        ]
+    ) as service:
+        (root / ".env").write_text(f"LLM_API_KEY=offline-test-key\nOPENAI_API_BASE={service.url}\n")
+        with monkeypatch.context() as failure:
+            failure.setattr(CompileWork, "record_received_response", interrupted)
+            failed = await recompile_document(
+                root,
+                unit.source_id,
+                unit_id=unit.unit_id,
+                context=context,
+                scope=storage_scope(root, identity),
+            )
+        assert failed.status == "blocked"
+        assert len(service.requests) == 3
+        recovered = await recompile_document(
+            root,
+            unit.source_id,
+            unit_id=unit.unit_id,
+            context=context,
+            scope=storage_scope(root, identity),
+        )
+        assert recovered.status == "compiled", recovered.message
         assert len(service.requests) == 3
 
 
@@ -392,7 +473,10 @@ async def test_published_compilation_survives_projection_coordination_failure(
 
 
 @pytest.mark.asyncio
-async def test_shared_page_update_keeps_old_original_distinct_from_new_target(tmp_path):
+@pytest.mark.parametrize("interrupt", [False, True], ids=["normal", "delivery-interrupted"])
+async def test_shared_page_update_keeps_old_original_distinct_from_new_target(
+    tmp_path, monkeypatch, interrupt
+):
     from ultrakb.config import save_config
     from ultrakb.storage.knowledge_store import KnowledgeStore
 
@@ -449,6 +533,8 @@ async def test_shared_page_update_keeps_old_original_distinct_from_new_target(tm
         }
     )
 
+    updates = []
+
     def response(request, index):
         update = next(
             (
@@ -460,6 +546,7 @@ async def test_shared_page_update_keeps_old_original_distinct_from_new_target(tm
             None,
         )
         if update:
+            updates.append(update)
             captured, _ = json.JSONDecoder().raw_decode(update.split("\n", 1)[1])
             block = next(b["id"] for b in captured["blocks"] if "The value is 17." in b["text"])
             return {
@@ -479,17 +566,40 @@ async def test_shared_page_update_keeps_old_original_distinct_from_new_target(tm
             }
         return {"content": plan if index == 1 else summary}
 
+    context = ExecutionContext()
     with StreamTransport(response) as service:
         (root / ".env").write_text(f"LLM_API_KEY=offline-test-key\nOPENAI_API_BASE={service.url}\n")
+        if interrupt:
+            from ultrakb.storage.checkpoint_store import CompileWork
+
+            received = CompileWork.record_received_response
+
+            def interrupted(self, key, *args, **kwargs):
+                if key.startswith("page:"):
+                    raise OSError("shared page delivery interrupted")
+                return received(self, key, *args, **kwargs)
+
+            with monkeypatch.context() as failure:
+                failure.setattr(CompileWork, "record_received_response", interrupted)
+                failed = await recompile_document(
+                    root,
+                    target.source_id,
+                    unit_id=target.unit_id,
+                    context=context,
+                    scope=storage_scope(root, identity),
+                )
+            assert failed.status == "blocked"
         result = await recompile_document(
             root,
             target.source_id,
             unit_id=target.unit_id,
+            context=context,
             scope=storage_scope(root, identity),
         )
         assert result.status == "compiled", result.message
         sent = json.dumps(service.requests)
         assert f"sources/retained/{old.unit_revision_id}/fixture.md" in sent
         assert "The value is 17." in sent and "The value is 23." in sent
+        assert len(updates) == 1
     assert "23" in read_page(root, "concepts/value.md", scope=storage_scope(root, identity)).body
     assert "17" in knowledge.bind(previous.publication_id).read("concepts/value.md").decode()

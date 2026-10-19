@@ -364,6 +364,8 @@ async def generate_page_update(
                 checkpoints.require_generation(key, signature)
                 if ":conflict:" in key:
                     checkpoints.claim_conflict(key, signature)
+                else:
+                    checkpoints.claim_generation(key, signature, stage="compile." + key)
             result = await _llm_call_page_async(
                 model,
                 request,

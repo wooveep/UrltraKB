@@ -887,3 +887,13 @@ fault coverage, necessary historical figure attachments, full task observation
 and maintenance/restore workflows, remaining generators and all three adapters
 still require joint acceptance. The public factory stays unchanged and issue
 164 remains open.
+
+The two-axis review of `8ba53972` found two protocol/reporting defects and
+three request-recovery defects. Follow-up changes move record JSON work outside
+write transactions and compare the prepared prior value at commit; recognize
+the Wiki projection's `synced` result; associate normal update and partition
+sends with concrete invocations; recover a newer paid repair before an older
+invalid capture; and examine the invocation's received/uncertain attempts rather
+than treating its last known-unsent retry as proof that nothing was sent. A late
+older execution can retain a response without replacing a newer delivery pointer.
+New failing-first application and storage-window cases cover these findings.

@@ -60,6 +60,8 @@ def request_json_work(
             raise ContextCapacityError(f"Planning work {key} requires a smaller partition")
         if attempt and checkpoints:
             checkpoints.claim_repair(key, signature)
+        elif checkpoints:
+            checkpoints.claim_generation(key, signature, stage="compile." + stage)
         raw = send(request, stage)
         if checkpoints:
             checkpoints.record_received_response(
