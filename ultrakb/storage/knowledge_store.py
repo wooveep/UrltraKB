@@ -411,6 +411,7 @@ class KnowledgeStore:
         edit_id: str | None = None,
         check_cancelled: Callable[[], None] = lambda: None,
         execution_id: str | None = None,
+        review_version: str | None = None,
     ) -> Publication:
         def cancelled():
             check_cancelled()
@@ -465,6 +466,9 @@ class KnowledgeStore:
             require_import_claim(
                 connection, self.identity, prepared.revision_id, prepared.import_attempt_id
             )
+            from .import_candidates import require_import_review
+
+            require_import_review(connection, prepared.revision_id, review_version)
             if execution_id is not None:
                 require_active_execution(connection, self.identity, execution_id)
             # The callback only checks an in-memory stop/deadline signal. Do not

@@ -218,6 +218,7 @@ class RecompileResult:
     model_usage: dict | None = None
     knowledge_revision_id: str | None = None
     publication_id: str | None = None
+    proposal_id: str | None = None
 
 
 @track_import_usage

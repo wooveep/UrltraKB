@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import asdict
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from starlette.concurrency import run_in_threadpool
 
 from ultrakb.api_helpers import _resolve_kb, require_bearer_token
@@ -34,13 +34,26 @@ class ProposalAcceptRequest(ProposalRequest):
 
 @documents_router.get("/api/v1/proposals")
 async def proposals_endpoint(
-    kb: str = "default", view_id: str | None = None, _: None = Depends(require_bearer_token)
+    response: Response,
+    kb: str = "default",
+    view_id: str | None = None,
+    after: str | None = None,
+    limit: int = Query(default=63, ge=1, le=128),
+    _: None = Depends(require_bearer_token),
 ):
-    from ultrakb.application.proposals import list_proposals
+    from ultrakb.application.proposals import list_proposal_page
 
     root = await asyncio.to_thread(_resolve_kb, kb)
     scope = await resolve_api_scope(root, view_id)
-    return [asdict(view) for view in await run_in_threadpool(list_proposals, root, scope=scope)]
+    try:
+        page = await run_in_threadpool(
+            list_proposal_page, root, scope=scope, after=after, limit=limit
+        )
+    except (ValueError, FileNotFoundError) as error:
+        raise HTTPException(status_code=400, detail="Unknown proposal cursor or page") from error
+    if page.next_after is not None:
+        response.headers["X-UltraKB-Next-After"] = page.next_after
+    return [asdict(view) for view in page.proposals]
 
 
 @documents_router.post("/api/v1/proposal")

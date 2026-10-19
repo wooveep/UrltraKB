@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from ultrakb.application.proposals import list_proposals
+from ultrakb.application.proposals import list_proposal_page, read_proposal
 from ultrakb.runtime.records import TERMINAL
 from ultrakb.runtime.requests import AcceptProposal
 
@@ -21,9 +21,14 @@ class ProposalsDialog(QDialog):
     def __init__(self, window, kb):
         super().__init__(window)
         self.window, self.kb = window, kb
-        self.scope = window.scope
+        captured = getattr(window, "read_scope", None)
+        self.scope = (
+            captured if captured is not None and captured.knowledge is not None else window.scope
+        )
         self._closed, self._task = False, None
         self._generation = 0
+        self._selection = 0
+        self._reviewed, self._after = None, None
         self.setWindowTitle("待接受知识差异")
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.resize(1000, 720)
@@ -46,6 +51,10 @@ class ProposalsDialog(QDialog):
         self.accept_button.clicked.connect(self.accept_selected)
         self.accept_button.setEnabled(False)
         actions.addWidget(self.refresh_button)
+        self.more_button = QPushButton("加载更多")
+        self.more_button.clicked.connect(self.load_more)
+        self.more_button.setEnabled(False)
+        actions.addWidget(self.more_button)
         actions.addWidget(self.accept_button)
         layout.addLayout(actions)
         self.timer = QTimer(self)
@@ -55,38 +64,84 @@ class ProposalsDialog(QDialog):
 
     def reload(self):
         self._generation += 1
-        generation = self._generation
         self.list.clear()
+        self.diff.clear()
+        self._reviewed, self._after = None, None
         self.accept_button.setEnabled(False)
+        self.load_more()
 
-        def loaded(items, error):
+    def _read(self, operation, callback, obsolete):
+        if self.scope.knowledge is None:
+            self.window.io.submit(operation, callback, kb=self.kb, obsolete=obsolete)
+            return
+        from ultrakb.storage.coordination import storage_stage
+
+        def read():
+            with storage_stage(
+                self.kb, self.scope.knowledge.identity, read_only=True, cancelled=obsolete
+            ):
+                return operation()
+
+        self.window.io.submit(read, callback, obsolete=obsolete)
+
+    def load_more(self):
+        generation = self._generation
+        after = self._after
+        self.more_button.setEnabled(False)
+
+        def loaded(page, error):
             if self._closed or generation != self._generation:
                 return
             if error:
                 self.status.setText(f"无法读取建议（{type(error).__name__}）")
                 return
-            for view in items:
+            for view in page.proposals:
                 item = QListWidgetItem(f"{view.proposal_id} · {view.view_id} · {view.status}")
                 item.setData(Qt.ItemDataRole.UserRole, view)
                 self.list.addItem(item)
-            self.status.setText(f"{len(items)} 项待处理建议。接受前请阅读全部差异。")
+            self._after = page.next_after
+            self.more_button.setEnabled(self._after is not None)
+            self.status.setText(f"已载入 {self.list.count()} 项建议。选择后读取差异，再接受。")
 
-        self.window.io.submit(
-            lambda: list_proposals(self.kb, scope=self.scope),
+        self._read(
+            lambda: list_proposal_page(self.kb, scope=self.scope, after=after),
             loaded,
-            kb=self.kb,
             obsolete=lambda: self._closed or generation != self._generation,
         )
 
     def selected(self, item, previous=None):
-        self.diff.setPlainText(item.data(Qt.ItemDataRole.UserRole).diff if item else "")
-        self.accept_button.setEnabled(item is not None and self._task is None)
+        self._selection += 1
+        selected = self._selection
+        self._reviewed = None
+        self.accept_button.setEnabled(False)
+        self.diff.clear()
+        if item is None:
+            return
+        summary = item.data(Qt.ItemDataRole.UserRole)
+
+        def loaded(view, error):
+            if self._closed or selected != self._selection:
+                return
+            if error:
+                self.status.setText(f"无法读取差异（{type(error).__name__}）")
+                return
+            self._reviewed = view
+            self.diff.setPlainText(view.diff)
+            self.accept_button.setEnabled(
+                view.status == "awaiting_confirmation" and self._task is None
+            )
+
+        self._read(
+            lambda: read_proposal(self.kb, summary.proposal_id, scope=self.scope),
+            loaded,
+            obsolete=lambda: self._closed or selected != self._selection,
+        )
 
     def accept_selected(self):
         item = self.list.currentItem()
-        if item is None or self._task:
+        if item is None or self._task or self._reviewed is None:
             return
-        view = item.data(Qt.ItemDataRole.UserRole)
+        view = self._reviewed
         self._task = self.window.manager.submit(
             self.kb, [AcceptProposal(view.proposal_id, view.version, view_id=view.view_id)]
         )

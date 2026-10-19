@@ -272,6 +272,7 @@ def _execute(
         return UnitResult(
             "completed" if accepted.status == "added" else accepted.status,
             resources=accepted.resources,
+            revision=accepted.publication_id,
             error=accepted.message,
             changes=describe_ingest(accepted),
             import_units=accepted.units,

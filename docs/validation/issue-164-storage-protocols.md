@@ -1698,3 +1698,43 @@ verify all reported findings are closed. Full mypy passes 553 modules, and Ruff,
 formatting and diff checks pass. Remaining maintenance writers, desktop management
 connections, observation/archive/audit work and the sole P8 activation are still
 unfinished. Issue 164 remains open.
+
+### Retained compiler candidates and explicit import review
+
+The main-store compiler now retains complete import candidates independently of
+publication. Schema 26 owns immutable review metadata and exact candidate versions.
+Changes to human-edited generated pages require explicit review; manually deleted
+generated pages retain their original baseline marker and cannot be silently
+recreated. The publication transaction checks the reviewed version. Ordinary
+reentry returns the same pending review, and a concurrently accepted candidate
+recovers its exact committed receipt before considering old conflict metadata.
+
+Review acceptance uses no model configuration or provider requests. Per-unit
+accepted results include their knowledge revision, while the operation reports
+its exact publication and working-copy synchronization separately. Lost commit
+acknowledgement, failed projection and persistent database failure after a
+successful commit preserve the known saved result. Failed preparation remains
+recoverable from the accepted compiler outputs.
+
+When only the applied worktree baseline changes, retained files, inputs, generated
+baselines and compiler outcome prepare a fresh candidate and synchronization plan.
+Ordinary compilation resumes without another SDK send. A human review receives
+the new candidate and confirmation version; the old version cannot publish it.
+Repeated preparation reuses the same ready derivative instead of accumulating
+equivalent candidates.
+
+Proposal lists have bounded metadata pages and explicit continuation. CLI exposes
+`--after`, HTTP exposes `X-UltraKB-Next-After`, and Qt loads additional pages and
+the selected complete diff on demand. The library's complete-list operation walks
+bounded pages. Superseded entries cannot conceal older current reviews. The
+desktop captures the main-store `read_scope`, bypasses the legacy read lease and
+cancels a read waiting on reclamation when the dialog closes.
+
+The expanded compiler/proposal/lint/refresh/application matrix passes 105 cases.
+The final updated Qt paging/cancellation witness passes with the real Workbench
+scope shape. Both independent reviews confirm all reported findings are closed;
+full mypy passes 567 modules, and Ruff, formatting and diff checks pass. These are
+actual SDK loopback requests, SQLite/CAS, spawned worker and Qt/LocalIO tests.
+Embedded discovery, worksheet retirement, remaining generators and management
+connections, observation/archive/audit and the P8 activation remain unfinished.
+Issue 164 is still open.

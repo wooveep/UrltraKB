@@ -436,6 +436,8 @@ def compile_stored_unit(scope, ready, context, catalog, revision, target, *, nam
         units=(unit_outcome,),
         unfinished=result.unfinished,
         message=result.message,
+        publication_id=result.publication_id,
+        projection_pending="synchronize wiki" in result.unfinished,
     )
     return outcome, result.version
 

@@ -9,7 +9,6 @@ def prepare_baselines(db, entries, base, generated_paths):
         {
             path: (digest, size)
             for path, digest, size in read_baselines(db.connection, base.publication.revision_id)
-            if path in files
         }
         if base is not None
         else {}

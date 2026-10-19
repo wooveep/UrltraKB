@@ -50,6 +50,31 @@ class ProposalView:
     diff: str
 
 
+@dataclass(frozen=True)
+class ProposalPage:
+    proposals: tuple[ProposalView, ...]
+    next_after: str | None = None
+
+
+def list_proposal_page(kb_dir, *, scope=None, after=None, limit=63):
+    root = kb_dir.resolve()
+    scope = resolve_scope(root, scope) if scope is not None else None
+    if type(limit) is not int or not 1 <= limit <= 128:
+        raise ValueError("Proposal pages require a limit of 1..128")
+    if scope is not None and scope.knowledge is not None:
+        from .storage_proposals import page_stored_proposals
+
+        return page_stored_proposals(scope, after=after, limit=limit)
+    items = list_proposals(root, scope=scope)
+    if after is not None:
+        positions = {item.proposal_id: index for index, item in enumerate(items)}
+        if after not in positions:
+            raise FileNotFoundError("No proposal cursor in this view")
+        items = items[positions[after] + 1 :]
+    selected = items[:limit]
+    return ProposalPage(selected, selected[-1].proposal_id if len(items) > limit else None)
+
+
 def _read(kb_dir: Path, identity: str) -> tuple[Path, Proposal]:
     TypeAdapter(RecordId).validate_python(identity)
     directory = kb_dir / ".ultrakb/proposals" / identity
@@ -98,6 +123,10 @@ def read_proposal(
     root = kb_dir.resolve()
     if scope is not None:
         scope = resolve_scope(root, scope)
+        if scope.knowledge is not None:
+            from .storage_proposals import read_stored_proposal
+
+            return read_stored_proposal(scope, proposal_id)
     with kb_read_lock(root / ".ultrakb"):
         directory, proposal = _read(root, proposal_id)
         if scope and (scope.view_id != proposal.view_id or scope.read_only):
@@ -123,6 +152,10 @@ def list_proposals(
     root = kb_dir.resolve()
     if scope is not None:
         scope = resolve_scope(root, scope)
+        if scope.knowledge is not None:
+            from .storage_proposals import list_stored_proposals
+
+            return list_stored_proposals(scope)
         if scope.read_only:
             return ()
     with kb_read_lock(root / ".ultrakb"):
@@ -148,6 +181,11 @@ def accept_proposal(
 ) -> IngestResult:
     root = kb_dir.resolve()
     if scope is not None:
+        scope = resolve_scope(root, scope)
+        if scope.knowledge is not None:
+            from .storage_proposals import accept_stored_proposal
+
+            return accept_stored_proposal(scope, proposal_id, version=version, context=context)
         scope = resolve_scope(root, scope, writable=True)
     check_stop = context.check_stop if context else lambda: None
     with kb_ingest_lock(

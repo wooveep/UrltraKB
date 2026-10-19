@@ -2,7 +2,7 @@
 
 import click
 
-from ultrakb.application.proposals import accept_proposal, list_proposals, read_proposal
+from ultrakb.application.proposals import accept_proposal, list_proposal_page, read_proposal
 from ultrakb.ingest_result import describe_ingest
 
 
@@ -27,10 +27,18 @@ def proposals():
 
 
 @proposals.command("list")
+@click.option("--after", default=None, help="Continue after the cursor printed by a previous page.")
+@click.option("--limit", default=63, type=click.IntRange(1, 128))
 @click.pass_context
-def list_pending(ctx):
-    for item in list_proposals(_root(ctx), scope=_scope(ctx)):
+def list_pending(ctx, after, limit):
+    try:
+        page = list_proposal_page(_root(ctx), scope=_scope(ctx), after=after, limit=limit)
+    except (ValueError, FileNotFoundError) as error:
+        raise click.ClickException(str(error)) from error
+    for item in page.proposals:
         click.echo(f"{item.proposal_id}  source={item.source_id}  {item.status}")
+    if page.next_after:
+        click.echo(f"Next cursor: {page.next_after}; continue with --after {page.next_after}")
 
 
 @proposals.command("show")

@@ -7,6 +7,7 @@ from .compile_schema import COMPILE_SCHEMA
 from .conversation_schema import CONVERSATION_SCHEMA
 from .execution_schema import EXECUTION_SCHEMA
 from .generation_schema import GENERATION_SCHEMA
+from .import_schema import IMPORT_CANDIDATE_SCHEMA
 from .knowledge_inputs import PAGE_INPUT_SCHEMA
 from .lint_schema import LINT_SCHEMA
 from .projection_schema import PROJECTION_SCHEMA
@@ -262,4 +263,5 @@ SCHEMA = (
     + REFRESH_SCHEMA
     + LINT_SCHEMA
     + GENERATION_SCHEMA
+    + IMPORT_CANDIDATE_SCHEMA
 )

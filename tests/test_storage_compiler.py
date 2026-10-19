@@ -503,6 +503,7 @@ async def test_shared_page_update_keeps_old_original_distinct_from_new_target(
             },
             expected=knowledge.bind().publication_id,
             unit_revisions=(old.unit_revision_id,),
+            generated_paths=("summaries/fixture.md", "concepts/value.md"),
         )
     )
     catalog = CatalogStore(root, identity)

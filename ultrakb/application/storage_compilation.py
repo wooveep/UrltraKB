@@ -150,6 +150,7 @@ def _result_receipt(scope, target, decision, previous, result, context, started)
         quality=result.quality,
         message=result.message,
         unfinished=result.unfinished,
+        proposal_id=result.proposal_id,
     )
     unit = confirm_result_usage(
         unit,
@@ -197,6 +198,18 @@ async def _compile(scope, target, context, bundle, model, max_concurrency):
     if work is None or work.status not in {"started", "completed"}:
         raise RecoveryRequired("The compilation claim is no longer available")
     prepared = store.committed_import(work, view_id=scope.view_id)
+    from ultrakb.storage.import_candidates import ImportCandidates
+
+    candidates = ImportCandidates(base.root, base.identity)
+    candidate = candidates.find(work, scope.view_id) if prepared is None else None
+    if (
+        candidate is not None
+        and candidate["status"] in {"ready", "awaiting_confirmation"}
+        and not candidate["sync_ready"]
+    ):
+        candidate = candidates.reprepare_sync(candidate, execution)
+    if candidate is not None:
+        prepared = candidate["prepared"]
     accepted, report, checkpoints = None, None, None
     try:
         if prepared is None:
@@ -302,6 +315,20 @@ async def _compile(scope, target, context, bundle, model, max_concurrency):
                             quality=report.quality, unfinished=report.unfinished
                         ),
                     )
+                    candidate = candidates.retain(prepared, base, execution)
+        if (
+            candidate is not None
+            and candidate["status"] != "accepted"
+            and (candidate["conflicts"] or candidate["status"] == "superseded")
+        ):
+            context._storage_result = "completed"
+            return RecompileResult(
+                "blocked",
+                target.doc_name,
+                proposal_id=candidate["proposal_id"],
+                message="Compiled changes retained; review before replacing human content",
+                unfinished=("import_review",),
+            )
         with task_stage(context, "knowledge.publish.v1", unit_revision_id=target.unit_revision_id):
             try:
                 publication = store.publish(
@@ -348,14 +375,15 @@ async def _compile(scope, target, context, bundle, model, max_concurrency):
         context._storage_result = (
             "cancelled" if isinstance(error, (LockCancelled, asyncio.CancelledError)) else "failed"
         )
-        try:
-            pending.finish(
-                work,
-                status="stopped" if context._storage_result == "cancelled" else "failed",
-                error_code=type(error).__name__,
-            )
-        except Exception:
-            logger.warning("Could not confirm compilation failure", exc_info=True)
+        if prepared is None:
+            try:
+                pending.finish(
+                    work,
+                    status="stopped" if context._storage_result == "cancelled" else "failed",
+                    error_code=type(error).__name__,
+                )
+            except Exception:
+                logger.warning("Could not confirm compilation failure", exc_info=True)
         if isinstance(error, (CatalogConflict, PublicationConflict, ProjectionConflict)):
             return RecompileResult("conflict", target.doc_name, message=str(error))
         from ultrakb.agent.page_response import PageResponseError

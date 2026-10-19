@@ -50,6 +50,8 @@ class IngestResult:
     imports_pending: int | None = None
     message: str | None = None
     model_usage: dict | None = None
+    publication_id: str | None = None
+    projection_pending: bool = False
 
 
 def describe_ingest(result: IngestResult) -> tuple[str, ...]:
@@ -71,6 +73,10 @@ def describe_ingest(result: IngestResult) -> tuple[str, ...]:
         lines.append("Quality: " + ", ".join(result.quality))
     if result.unfinished:
         lines.append("Unfinished: " + ", ".join(result.unfinished))
+    if result.publication_id:
+        lines.append("Publication: " + result.publication_id)
+    if result.projection_pending:
+        lines.append("Wiki synchronization pending")
     from ultrakb.llm_usage import describe_model_usage
 
     return tuple(lines) + describe_model_usage(result.model_usage) + describe_units(result.units)
