@@ -200,6 +200,8 @@ SCHEMA = (
         FOREIGN KEY (session_id, policy_key, checkpoint_id)
             REFERENCES ukb_conversation_checkpoints(session_id, policy_key, checkpoint_id)
     )""",
+        "CREATE INDEX ukb_session_head_checkpoint ON ukb_session_heads(checkpoint_id)",
+        "CREATE INDEX ukb_session_projection_checkpoint ON ukb_session_projections(checkpoint_id)",
         """CREATE TABLE ukb_knowledge_revisions (
         revision_id TEXT PRIMARY KEY,
         publication_id TEXT NOT NULL UNIQUE,

@@ -82,6 +82,7 @@ class TaskPublication(TaskRecord):
     projection_status: Literal[
         "pending", "paused", "conflict", "synced", "superseded", "not_recorded"
     ]
+    projection_details: Literal["recorded", "retired"] = "recorded"
 
 
 class TaskDetail(TaskRecord):

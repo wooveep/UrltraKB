@@ -96,6 +96,8 @@ def detail_text(detail):
             "superseded": "已被后续发布取代",
             "not_recorded": "未记录同步状态",
         }[publication.projection_status]
+        if publication.projection_details == "retired":
+            status += " · 同步明细已回收"
         lines.append(f"{publication.published_at} · {status}")
     lines.extend(
         [

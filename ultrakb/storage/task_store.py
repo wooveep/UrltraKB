@@ -110,7 +110,7 @@ def _publication(row):
         else "paused"
         if row[12] and row[13] == row[9]
         else "superseded"
-        if row[8] == "superseded"
+        if row[8] in {"superseded", "retiring", "retired"}
         else "conflict"
         if row[11]
         else "pending"
@@ -128,6 +128,7 @@ def _publication(row):
         source_revision_id=row[14],
         unit_revision_id=row[15],
         projection_status=status,
+        projection_details="retired" if row[8] in {"retiring", "retired"} else "recorded",
     )
 
 
@@ -262,5 +263,8 @@ class TaskStore:
                     "stage_usage": "not_included",
                     "resource_samples": "not_recorded",
                     "pricing": "not_recorded",
+                    "projection_details": "retired"
+                    if any(row[8] in {"retiring", "retired"} for row in publications[:limit])
+                    else "recorded",
                 },
             )

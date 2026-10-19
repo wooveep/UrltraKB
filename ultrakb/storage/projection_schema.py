@@ -7,13 +7,15 @@ PROJECTION_SCHEMA = (
         view_id TEXT NOT NULL,
         base_generation INTEGER NOT NULL,
         applied_epoch INTEGER NOT NULL,
-        manifest_digest TEXT NOT NULL REFERENCES ukb_blobs(digest),
+        manifest_digest TEXT REFERENCES ukb_blobs(digest),
         item_count INTEGER NOT NULL CHECK (item_count >= 0),
         remaining_count INTEGER NOT NULL CHECK (remaining_count >= 0),
         conflict_count INTEGER NOT NULL CHECK (conflict_count >= 0),
         kind TEXT NOT NULL CHECK (kind IN ('publication', 'resumption')),
         state TEXT NOT NULL CHECK (state IN
-            ('draft', 'sealed', 'ready', 'active', 'completed', 'superseded', 'retiring'))
+            ('draft', 'sealed', 'ready', 'active', 'completed', 'superseded',
+             'retiring', 'retired')),
+        CHECK ((state = 'retired') = (manifest_digest IS NULL))
     )""",
     "CREATE INDEX ukb_sync_by_view ON ukb_sync_plans(view_id, state, base_generation, plan_id)",
     """CREATE TABLE ukb_projection_state (
@@ -69,9 +71,19 @@ PROJECTION_SCHEMA = (
         BEGIN SELECT RAISE(ABORT, 'Synchronization item targets are immutable'); END""",
     """CREATE TRIGGER ukb_sync_plan_immutable BEFORE UPDATE OF
         plan_id, revision_id, view_id, base_generation, applied_epoch,
-        manifest_digest, item_count, kind
+        item_count, kind
         ON ukb_sync_plans
         BEGIN SELECT RAISE(ABORT, 'Synchronization plan inputs are immutable'); END""",
+    """CREATE TRIGGER ukb_sync_manifest_immutable BEFORE UPDATE OF manifest_digest
+        ON ukb_sync_plans WHEN NOT (OLD.state = 'retiring' AND NEW.state = 'retired'
+        AND NEW.manifest_digest IS NULL)
+        BEGIN SELECT RAISE(ABORT, 'Only retired plans release their manifest'); END""",
+    """CREATE TRIGGER ukb_sync_retirement_guard BEFORE UPDATE OF state ON ukb_sync_plans
+        WHEN NEW.state IN ('retiring', 'retired') AND
+        (EXISTS (SELECT 1 FROM ukb_projection_state WHERE active_plan_id = NEW.plan_id)
+         OR (NEW.state = 'retired' AND EXISTS
+             (SELECT 1 FROM ukb_sync_items WHERE plan_id = NEW.plan_id)))
+        BEGIN SELECT RAISE(ABORT, 'Referenced synchronization plans cannot retire'); END""",
     """CREATE TRIGGER ukb_sync_item_delete BEFORE DELETE ON ukb_sync_items
         WHEN NOT EXISTS (SELECT 1 FROM ukb_sync_plans
                          WHERE plan_id = OLD.plan_id AND state = 'retiring')

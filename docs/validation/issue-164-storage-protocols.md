@@ -1269,3 +1269,32 @@ standards review passes 27 related cases and the spec axis verifies both final
 boundaries. Full mypy passes 527 source modules; Ruff checks pass. This batch does
 not activate the normal factory or complete the remaining compiler, maintenance,
 observation and three-entrypoint work. Issue 164 remains open.
+
+### Manual retirement of obsolete recovery roots
+
+Development schema 17 adds indexed checkpoint-root lookups and compact retired
+synchronization plans. Explicit root preview/retirement uses the existing
+exclusive reclamation protocol; real reads return busy with zero release, while
+pure model waits allow unrelated intermediate checkpoints to retire. Latest
+calculation and current retrieval checkpoints remain separate roots. Immutable
+user/assistant turns, current projections, knowledge/source history and paid
+receipts are untouched.
+
+Superseded synchronization plans remain protected while the current worktree
+target is pending, conflicted or paused. Only after the successor completes can
+bounded batches remove obsolete items and their owned Blob references. The
+formal revision keeps a compact plan binding; task queries preserve supersession
+and explicitly mark retired detail coverage. Released reference bytes are
+reported separately from physical/unique Blob bytes; normal collection still
+rechecks actual references before deleting files.
+
+Ten application regressions use actual SQLite/SDK/provider boundaries, including
+failed final ChatIndex projection and zero-send repair, predecessor replacement/
+deletion recovery, model-wait concurrency, receipt ownership, fresh-reference
+rechecks, item/manifest retirement interruptions and backup/new-generation
+restore. Maintenance and backup also accept an unpublished main store without
+model configuration. Sixty-nine related regressions pass; full mypy passes 528
+source modules, with Ruff and format checks passing. Spec review independently
+passes all ten new cases. Remaining archival/audit policy, maintenance adapters,
+compiler migration and P8 activation are separate unfinished work; issue 164
+remains open.
