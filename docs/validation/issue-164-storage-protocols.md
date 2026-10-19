@@ -1001,3 +1001,27 @@ processing decision before compilation. Explicit credentials enter the frozen
 recipe before executor creation; a mismatched already captured recipe is rejected
 before sending. All 35 targeted admission, indexing, configuration and compiler
 cases pass, and full mypy still passes 504 source modules.
+
+### Shared backup and restore: configuration and paused edits
+
+The shared maintenance use cases now return a committed backup/restore receipt
+without re-reading files after publishing the destination. Versioned backup
+manifests describe local KB configuration separately from inherited global
+settings. Configuration uses the same short settings coordination; original
+permissions, bytes and presence are preserved. Restore validates the manifest,
+file digests and reference closure before creating its destination, under the
+destination lifecycle lease.
+
+Paused worktree changes are captured under projection coordination alongside the
+online snapshot, without claiming the editor stopped or accepting any change.
+Observed concurrent external changes abort the backup. Restore reconstructs the
+actual applied files from retained Blobs, then overlays changed/new files and
+deletions while preserving the persistent pause. Subsequent explicit acceptance
+merges against the restored master. This also reconstructs applied copies for
+ordinary unpaused views. Arbitrary uncoordinated editor writes still cannot be
+promised an atomic filesystem snapshot.
+
+Four public maintenance cases and ten related storage/editor regressions pass;
+full mypy passes 508 source modules. External pending receipts and interrupted
+runtime recovery are still outside this batch's coverage, explicitly reported in
+the backup, and remain required before P7/P8 acceptance.

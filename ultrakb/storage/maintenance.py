@@ -9,7 +9,15 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
+from ultrakb.lifecycle import creation_lifecycle, read_lifecycle
 from ultrakb.locks import _fsync_directory, atomic_write_json, durable_unlink
+from ultrakb.storage.backup_state import (
+    BackupManifest,
+    capture_configuration,
+    read_manifest,
+    restore_configuration,
+)
+from ultrakb.storage.backup_worktree import capture_worktrees, restore_worktrees
 from ultrakb.storage.blobs import blob_path
 from ultrakb.storage.coordination import storage_stage, try_reclamation
 from ultrakb.storage.database import (
@@ -18,6 +26,7 @@ from ultrakb.storage.database import (
     database_path,
     open_database,
 )
+from ultrakb.storage.wiki_projection import projection_lock
 
 
 @dataclass(frozen=True)
@@ -38,6 +47,12 @@ class CollectionResult:
     deleted_bytes: int = 0
     trees_deleted: int = 0
     tree_rows_deleted: int = 0
+
+
+@dataclass(frozen=True)
+class BackupReceipt:
+    identity: DatabaseIdentity
+    coverage: dict[str, str]
 
 
 def _limits(max_items, max_bytes):
@@ -69,6 +84,8 @@ def _copy_verified(source: Path, target: Path, digest: str):
     target.parent.mkdir(parents=True, exist_ok=True)
     hasher = hashlib.sha256()
     with source.open("rb") as reader, target.open("xb") as writer:
+        if hasattr(os, "fchmod"):
+            os.fchmod(writer.fileno(), source.stat().st_mode & 0o777)
         while chunk := reader.read(1024 * 1024):
             hasher.update(chunk)
             writer.write(chunk)
@@ -194,6 +211,13 @@ class Maintenance:
             )
 
     def backup(self, destination: Path) -> DatabaseIdentity:
+        return self.backup_package(destination).identity
+
+    def backup_package(self, destination: Path) -> BackupReceipt:
+        with read_lifecycle(self.root, database_identity=self.identity):
+            return self._backup(destination)
+
+    def _backup(self, destination: Path) -> BackupReceipt:
         destination = destination.resolve()
         if destination.exists() or destination.is_relative_to(self.root):
             raise ValueError("Backup requires a new directory outside the knowledge base")
@@ -202,16 +226,19 @@ class Maintenance:
         try:
             state = temporary / ".ultrakb"
             state.mkdir()
+            files, configuration = capture_configuration(self.root, temporary, _copy_verified)
             # Protection begins before the online snapshot and lasts through Blob copies.
             with storage_stage(self.root, self.identity, read_only=True) as db:
-                snapshot = sqlite3.connect(state / "kb.sqlite", isolation_level=None)
-                try:
-                    db.connection.backup(snapshot)
-                    snapshot.execute("PRAGMA synchronous = FULL")
-                    _prune_snapshot_orphans(snapshot)
-                    snapshot.execute("PRAGMA journal_mode = DELETE")
-                finally:
-                    snapshot.close()
+                with projection_lock(self.root):
+                    snapshot = sqlite3.connect(state / "kb.sqlite", isolation_level=None)
+                    try:
+                        db.connection.backup(snapshot)
+                        snapshot.execute("PRAGMA synchronous = FULL")
+                        _prune_snapshot_orphans(snapshot)
+                        snapshot.execute("PRAGMA journal_mode = DELETE")
+                    finally:
+                        snapshot.close()
+                    worktrees = capture_worktrees(db, temporary, _copy_verified)
                 _, refs = _verify_snapshot(
                     temporary, expected=self.identity, sealed_archive=True, verify_blobs=False
                 )
@@ -220,36 +247,45 @@ class Maintenance:
                         blob_path(self.root, digest), blob_path(temporary, digest), digest
                     )
                 _verify_snapshot(temporary, expected=self.identity, sealed_archive=True)
-                atomic_write_json(
-                    temporary / "backup.json",
-                    {
-                        "format": "ultrakb.backup",
-                        "version": 1,
-                        "kb_id": self.identity.kb_id,
-                        "generation": self.identity.generation,
-                        "referenced_blobs": len(refs),
-                        # These development stores do not yet capture adapter configuration,
-                        # paused worktree diffs or external unconfirmed receipts.
-                        "coverage": {
-                            "committed_database": "complete",
-                            "referenced_blobs": "complete",
-                            "configuration": "not_captured",
-                            "worktree": "not_captured",
-                            "external_receipts": "not_captured",
-                        },
+                manifest = BackupManifest(
+                    kb_id=self.identity.kb_id,
+                    generation=self.identity.generation,
+                    referenced_blobs=len(refs),
+                    files=files,
+                    worktrees=worktrees,
+                    coverage={
+                        "committed_database": "complete",
+                        "referenced_blobs": "complete",
+                        "configuration": configuration,
+                        "inherited_configuration": "external",
+                        "worktree": "complete",
+                        "external_receipts": "not_captured",
                     },
                 )
+                atomic_write_json(temporary / "backup.json", manifest.model_dump(mode="json"))
                 with database_path(temporary).open("rb") as handle:
                     os.fsync(handle.fileno())
             _publish_directory(temporary, destination)
-            return self.identity
+            return BackupReceipt(self.identity, dict(manifest.coverage))
         finally:
             if temporary.exists():
                 shutil.rmtree(temporary)
 
     @staticmethod
     def restore(backup: Path, destination: Path) -> DatabaseIdentity:
+        return Maintenance.restore_package(backup, destination).identity
+
+    @staticmethod
+    def restore_package(backup: Path, destination: Path) -> BackupReceipt:
+        with creation_lifecycle(destination):
+            return Maintenance._restore(backup, destination)
+
+    @staticmethod
+    def _restore(backup: Path, destination: Path) -> BackupReceipt:
         identity, refs = _verify_snapshot(backup, sealed_archive=True)
+        manifest = read_manifest(backup, identity)
+        if manifest.referenced_blobs != len(refs):
+            raise ValueError("Backup manifest has different referenced Blob coverage")
         destination = destination.resolve()
         if destination.exists():
             raise FileExistsError(destination)
@@ -270,6 +306,8 @@ class Maintenance:
             _activate_database(temporary, identity)
             for digest, _ in refs:
                 _copy_verified(blob_path(backup, digest), blob_path(temporary, digest), digest)
+            restore_configuration(backup, temporary, manifest, _copy_verified)
+            restore_worktrees(backup, temporary, identity, manifest)
             with open_database(temporary, expected=identity) as db:
                 generation = uuid.uuid4().hex
                 with db.transaction() as connection:
@@ -279,7 +317,7 @@ class Maintenance:
             with database_path(temporary).open("rb") as handle:
                 os.fsync(handle.fileno())
             _publish_directory(temporary, destination)
-            return restored
+            return BackupReceipt(restored, dict(manifest.coverage))
         finally:
             if temporary.exists():
                 shutil.rmtree(temporary)

@@ -7,24 +7,20 @@ from ultrakb import config
 from ultrakb.application.settings_data import KbConfigPatchRequest, KbConfigResponse
 from ultrakb.config_snapshot import initialize_sdk_environment, read_snapshot
 from ultrakb.config_state import ConfigSnapshot, live_configuration
+from ultrakb.configuration_lock import (
+    configuration_lock_path,
+)
+from ultrakb.configuration_lock import (
+    require_prepared_configuration as _require_prepared,
+)
 from ultrakb.lifecycle import read_lifecycle
 from ultrakb.locks import file_write_lock
 from ultrakb.mutation import (
     RecoveryRequired,
     mutation_scope,
     recover_pending_journals,
-    repair_marker,
 )
 from ultrakb.storage.database import DatabaseIdentity
-
-
-def configuration_lock_path(root: Path) -> Path:
-    return root / ".ultrakb/configuration.lock"
-
-
-def _require_prepared(root: Path):
-    if repair_marker(root).exists() or any((root / ".ultrakb/journal").glob("*.json")):
-        raise RecoveryRequired("Prepare settings explicitly before capturing an execution")
 
 
 def capture_storage_config(
