@@ -37,12 +37,28 @@ def status(ctx):
 
 
 @refresh.command("run")
+@click.option(
+    "--source", "sources", multiple=True, help="Refresh these accepted source contributions."
+)
+@click.option(
+    "--page", "pages", multiple=True, help="Limit selected-source refresh to pending pages."
+)
 @click.pass_context
-def run(ctx):
-    from ultrakb.application.refresh import refresh_knowledge_view
+def run(ctx, sources, pages):
+    from ultrakb.application.refresh import refresh_knowledge_view, refresh_selected_sources
 
     root, scope = _selection(ctx)
-    _emit(asyncio.run(refresh_knowledge_view(root, scope=scope)))
+    if pages and not sources:
+        raise click.UsageError("--page requires at least one --source")
+    _emit(
+        asyncio.run(
+            refresh_selected_sources(
+                root, list(sources), scope=scope, page_paths=list(pages) if pages else None
+            )
+            if sources
+            else refresh_knowledge_view(root, scope=scope)
+        )
+    )
 
 
 @refresh.command("empty")

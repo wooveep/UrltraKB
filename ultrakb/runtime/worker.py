@@ -238,12 +238,22 @@ def _execute(
                 root, request.source_id, generation=request.generation, scope=scope, context=context
             )
         else:
+            from ultrakb.application.refresh import refresh_selected_sources
+
             refreshed = asyncio.run(
-                refresh_knowledge_view(root, scope=resolve_scope(root, scope), context=context)
+                refresh_selected_sources(
+                    root,
+                    list(request.source_ids),
+                    scope=resolve_scope(root, scope),
+                    context=context,
+                    page_paths=list(request.page_paths) if request.page_paths is not None else None,
+                )
+                if request.source_ids
+                else refresh_knowledge_view(root, scope=resolve_scope(root, scope), context=context)
             )
         return UnitResult(
             refreshed.status
-            if refreshed.status in {"completed", "failed", "stopped"}
+            if refreshed.status in {"completed", "partial", "failed", "stopped"}
             else "blocked",
             resources=tuple(str(root / path) for path in refreshed.resources),
             error=refreshed.message or None,

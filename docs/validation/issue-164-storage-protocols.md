@@ -1583,3 +1583,39 @@ reading/history/publication set passes 60 cases and the final updated set passes
 55; full mypy passes 551 modules, with Ruff, formatting and diff checks passing.
 Selected refresh and the remaining writer/observation/maintenance/P8 work are
 still pending, and normal creation remains behind the sole activation gate.
+
+### Selected-source refresh with retained compiler work
+
+Selected refresh now uses the main-store source targets, accepted unit revisions,
+page evidence and catalog fence. Independent generated summaries retain their
+exact bytes and need no model configuration or additional requests. Shared pages
+use the existing complete-original window reader, block-edit coordinator, manual
+fragment preservation and bounded recovery algorithm. Conversion, indexing,
+document summaries and planning are not rerun. Other pages and their pending
+evidence remain retained, and explicit page limits keep the root index pending
+until it is actually refreshed.
+
+Selected sources and page sets bind both checkpoint and candidate identities;
+reversing a page set cannot create new paid work. Accepted page steps and prepared
+candidates recover independently after delivery or publication failure. Human
+annotations remain protected and changed pages require exact explicit review.
+Catalog/head changes during model wait reject publication while preserving the
+paid response. Partial outcomes and remaining page identities survive review,
+acceptance and replay. CLI, HTTP and the native worker expose the same source and
+page parameters and preserve partial results.
+
+Preflight and execution share the same reconciliation eligibility. A page with
+an unselected changed contributor stays pending even if a manual frontmatter edit
+removed that association. Every selected old unit basis requires an accepted
+replacement before paid coordination; an unfinished sibling unit cannot trigger
+a late KeyError or silently lose its pending evidence. A deterministic selected
+contributor owns the reader, checkpoint binding, stage and actual request usage,
+rather than assigning cost to an unrelated contributor by random revision ID.
+
+Seventeen selected-refresh cases cover these contracts with real SQLite/CAS and
+SDK requests. The expanded selected/full refresh/history/page/adapter set passes
+65 cases; the final recovery/attribution matrix passes 6. Both independent reviews
+verify all reported findings are closed. Full mypy passes 553 modules, and Ruff,
+formatting and diff checks pass. Remaining maintenance writers, desktop management
+connections, observation/archive/audit work and the sole P8 activation are still
+unfinished. Issue 164 remains open.

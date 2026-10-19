@@ -451,6 +451,15 @@ async def refresh_selected_sources(
     from ultrakb.source_catalog import list_sources
     from ultrakb.unit_publication import copy_tree, prepare_compile_view
 
+    scope = resolve_scope(kb_dir, scope)
+    if scope.knowledge is not None:
+        from .storage_refresh import refresh_stored_view
+
+        return await refresh_stored_view(
+            scope,
+            context,
+            selection=(tuple(source_ids), tuple(page_paths) if page_paths is not None else None),
+        )
     scope = resolve_scope(kb_dir, scope, writable=True)
     kb_dir = scope.kb_dir
     context = context or ExecutionContext()

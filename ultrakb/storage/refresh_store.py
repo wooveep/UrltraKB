@@ -17,6 +17,7 @@ from .knowledge_store import PreparedRevision, PublicationConflict, _manifest
 class RefreshDetails(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
     conflicts: tuple[RelativePath, ...]
+    remaining: tuple[RelativePath, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -72,14 +73,14 @@ class RefreshStore:
     def __init__(self, root, identity):
         self.root, self.identity = root.resolve(), identity
 
-    def _work_key(self, publication_id, model_budget_id):
+    def _work_key(self, publication_id, model_budget_id, selection="full"):
         TypeAdapter(RecordId).validate_python(publication_id)
         TypeAdapter(RecordId).validate_python(model_budget_id)
         return hashlib.sha256(
-            _manifest((self.identity.generation, publication_id, model_budget_id))
+            _manifest((self.identity.generation, publication_id, model_budget_id, selection))
         ).hexdigest()
 
-    def find(self, publication_id, model_budget_id):
+    def find(self, publication_id, model_budget_id, *, selection="full"):
         with storage_stage(self.root, self.identity, read_only=True) as db:
             row = db.connection.execute(
                 "SELECT p.proposal_id FROM ukb_refresh_proposals p "
@@ -87,16 +88,22 @@ class RefreshStore:
                 "JOIN ukb_executions e ON e.execution_id = p.execution_id "
                 "WHERE p.work_key = ? AND r.expected_publication = ? AND e.model_budget_id = ? "
                 "ORDER BY p.rowid DESC LIMIT 1",
-                (self._work_key(publication_id, model_budget_id), publication_id, model_budget_id),
+                (
+                    self._work_key(publication_id, model_budget_id, selection),
+                    publication_id,
+                    model_budget_id,
+                ),
             ).fetchone()
         return self.read(row[0]) if row else None
 
-    def save(self, prepared, *, conflicts, execution):
-        details = RefreshDetails(conflicts=tuple(sorted(set(conflicts))))
+    def save(self, prepared, *, conflicts, execution, selection="full", remaining=()):
+        details = RefreshDetails(
+            conflicts=tuple(sorted(set(conflicts))), remaining=tuple(remaining)
+        )
         encoded = details.model_dump_json().encode()
         if len(encoded) > 4 * 1024 * 1024:
             raise ValueError("Refresh review metadata exceeds the storage payload limit")
-        key = self._work_key(prepared.expected_publication, execution.model_budget_id)
+        key = self._work_key(prepared.expected_publication, execution.model_budget_id, selection)
         with storage_stage(self.root, self.identity) as db:
             blob = put_blob(db, encoded)
             with db.transaction() as connection:
@@ -171,6 +178,7 @@ class RefreshStore:
                 "view_id": prepared.view_id,
                 "version": version,
                 "conflicts": details.conflicts,
+                "remaining": details.remaining,
                 "catalog_generation": row[8],
                 "prepared": prepared,
                 "content_current": current,

@@ -229,7 +229,31 @@ class GenerateGraph(ViewSelection):
 
 @dataclass(frozen=True)
 class RefreshKnowledge(ViewSelection):
-    pass
+    source_ids: tuple[str, ...] = ()
+    page_paths: tuple[str, ...] | None = None
+
+    def __post_init__(self):
+        super().__post_init__()
+        from pydantic import TypeAdapter
+
+        from ultrakb.source_records import RecordId, RelativePath
+
+        if not isinstance(self.source_ids, tuple) or len(set(self.source_ids)) != len(
+            self.source_ids
+        ):
+            raise ValueError("Select distinct source identities")
+        for source in self.source_ids:
+            TypeAdapter(RecordId).validate_python(source)
+        if self.page_paths is not None:
+            if (
+                not self.source_ids
+                or not isinstance(self.page_paths, tuple)
+                or not self.page_paths
+                or len(set(self.page_paths)) != len(self.page_paths)
+            ):
+                raise ValueError("Page selection requires distinct pending pages and sources")
+            for path in self.page_paths:
+                TypeAdapter(RelativePath).validate_python(path)
 
 
 @dataclass(frozen=True)

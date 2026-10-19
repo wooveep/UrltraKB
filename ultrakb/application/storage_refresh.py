@@ -69,13 +69,17 @@ def _publish(scope, proposal, context):
             raise
         unconfirmed = ("confirm publication observation",)
     result = RefreshResult(
-        "completed",
+        "partial" if proposal.get("remaining") else "completed",
         scope.view_id,
         publication.revision_id,
         resources=("wiki",),
         publication_id=publication.publication_id,
         projection_pending=True,
-        unfinished=("synchronize wiki", *unconfirmed),
+        unfinished=(
+            "synchronize wiki",
+            *(("refresh",) if proposal.get("remaining") else ()),
+            *unconfirmed,
+        ),
     )
     try:
         with task_stage(context, "wiki.sync.v1", root=base.root) if observed else nullcontext():
@@ -83,21 +87,40 @@ def _publish(scope, proposal, context):
     except Exception:
         return result
     if projection.status in {"synced", "obsolete"}:
-        result = replace(result, projection_pending=False, unfinished=unconfirmed)
+        result = replace(
+            result,
+            projection_pending=False,
+            unfinished=(*(("refresh",) if proposal.get("remaining") else ()), *unconfirmed),
+        )
     return result
 
 
-async def refresh_stored_view(scope, context=None):
+async def refresh_stored_view(scope, context=None, *, selection=None):
     base = scope.knowledge
     context = _context(scope, context)
     store = RefreshStore(base.root, base.identity)
+    selected_key = "full"
+    if selection is not None:
+        from ultrakb.storage.selected_refresh import selection_key
+
+        try:
+            selected_key = selection_key(*selection)
+        except ValueError as error:
+            return RefreshResult("failed", scope.view_id, message=failure_reason(error))
     if context.storage_execution is not None:
-        previous = store.find(base.publication_id, context.storage_execution.model_budget_id)
+        previous = store.find(
+            base.publication_id, context.storage_execution.model_budget_id, selection=selected_key
+        )
         if previous is not None and previous["status"] == "accepted":
             return _publish(scope, previous, context)
     try:
-        targets = refresh_targets(base)
-    except PublicationConflict as error:
+        if selection is None:
+            targets = refresh_targets(base)
+        else:
+            from ultrakb.storage.selected_refresh import selected_targets
+
+            targets = selected_targets(base, *selection)
+    except (PublicationConflict, ValueError) as error:
         return RefreshResult("conflict", scope.view_id, message=failure_reason(error))
     if targets.blocked:
         return RefreshResult(
@@ -112,7 +135,11 @@ async def refresh_stored_view(scope, context=None):
     def worker(bundle):
         async def execute():
             nonlocal result
-            previous = store.find(base.publication_id, context.storage_execution.model_budget_id)
+            previous = store.find(
+                base.publication_id,
+                context.storage_execution.model_budget_id,
+                selection=selected_key,
+            )
             if (
                 previous is not None
                 and previous["status"] != "accepted"
@@ -121,9 +148,21 @@ async def refresh_stored_view(scope, context=None):
             ):
                 previous = None  # Rebuild the plan from retained compiler steps, without resends.
             if previous is None:
-                prepared, protected = await prepare_refresh(scope, targets, context, bundle)
+                if selection is None:
+                    prepared, protected = await prepare_refresh(scope, targets, context, bundle)
+                    remaining = ()
+                else:
+                    from .storage_selected_refresh import prepare_selected_refresh
+
+                    prepared, protected, remaining = await prepare_selected_refresh(
+                        scope, targets, context, bundle
+                    )
                 previous = store.save(
-                    prepared, conflicts=protected, execution=context.storage_execution
+                    prepared,
+                    conflicts=protected,
+                    execution=context.storage_execution,
+                    selection=selected_key,
+                    remaining=remaining,
                 )
             if previous["status"] == "superseded" or previous["conflicts"]:
                 result = _review(scope, previous)
@@ -134,7 +173,7 @@ async def refresh_stored_view(scope, context=None):
                     result = _publish(scope, previous, context)
                 except (CatalogConflict, PublicationConflict, ProjectionConflict):
                     result = _review(scope, store.read(previous["proposal_id"]))
-            if result.status != "completed":
+            if result.status not in {"completed", "partial"}:
                 context._storage_result = (
                     "completed" if result.status == "awaiting_confirmation" else "failed"
                 )
@@ -142,7 +181,7 @@ async def refresh_stored_view(scope, context=None):
         asyncio.run(execute())
 
     try:
-        if targets.units:
+        if targets.units if selection is None else targets.model_required:
             with context.begin(base.root) as bundle:
                 await run_blocking(lambda: worker(bundle))
         else:

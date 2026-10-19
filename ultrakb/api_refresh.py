@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from ultrakb.api_helpers import _resolve_kb, require_bearer_token
 from ultrakb.api_views import resolve_api_scope
 from ultrakb.application import refresh as application
-from ultrakb.source_records import Digest, RecordId, ViewId
+from ultrakb.source_records import Digest, RecordId, RelativePath, ViewId
 
 refresh_router = APIRouter(dependencies=[Depends(require_bearer_token)])
 
@@ -17,6 +17,8 @@ refresh_router = APIRouter(dependencies=[Depends(require_bearer_token)])
 class RefreshRequest(BaseModel):
     kb: str = "default"
     view_id: ViewId = "legacy"
+    source_ids: list[RecordId] = Field(default_factory=list)
+    page_paths: list[RelativePath] | None = None
 
 
 class EmptyRequest(RefreshRequest):
@@ -114,7 +116,15 @@ async def references(kb: str):
 @refresh_router.post("/api/v1/refresh")
 async def refresh(request: RefreshRequest):
     root, scope = await _selected(request.kb, request.view_id)
-    return asdict(await application.refresh_knowledge_view(root, scope=scope))
+    if request.page_paths is not None and not request.source_ids:
+        raise HTTPException(status_code=400, detail="Page selection requires source identities")
+    return asdict(
+        await application.refresh_selected_sources(
+            root, request.source_ids, scope=scope, page_paths=request.page_paths
+        )
+        if request.source_ids
+        else await application.refresh_knowledge_view(root, scope=scope)
+    )
 
 
 @refresh_router.post("/api/v1/refresh/empty")

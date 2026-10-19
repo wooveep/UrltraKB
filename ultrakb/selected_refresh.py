@@ -30,15 +30,8 @@ def _full_windows(reader):
 async def _reconcile_page(
     kb_dir, view, page, identities, retained, config, bundle, readers, *, link_registry=None
 ):
-    from ultrakb.agent.compiler import _SYSTEM_TEMPLATE, _format_known_targets
-    from ultrakb.agent.page_figures import START
-    from ultrakb.agent.page_originals import PageOriginalContext
-    from ultrakb.agent.page_updates import PageUpdate, UnchangedPage
-    from ultrakb.agent.update_generation import generate_page_update
-    from ultrakb.config import DEFAULT_CONFIG, resolve_entity_types
-    from ultrakb.lint import list_existing_wiki_targets
-    from ultrakb.schema import get_agents_md
     from ultrakb.selected_refresh_evidence import retained_reader
+    from ultrakb.selected_refresh_manual import generated_refresh_baseline
 
     wiki = view.scope.wiki_dir
     evidence = []
@@ -50,6 +43,41 @@ async def _reconcile_page(
             readers[identity] = reader, _full_windows(reader)
         evidence.extend(readers[identity][1])
     reader = readers[identities[0]][0]
+    await reconcile_page(
+        wiki,
+        page,
+        reader,
+        evidence,
+        config,
+        bundle,
+        link_registry=link_registry,
+        generated_baseline=generated_refresh_baseline(kb_dir, view, page),
+    )
+    return RefreshedPage(
+        input_revisions=identities,
+        base_digest=view.base_pages[page],
+        candidate_digest=HashRegistry.hash_file(wiki / page),
+        original_files={
+            p: HashRegistry.hash_file(wiki / p)
+            for identity in identities
+            for p in retained[identity].paths
+        },
+    )
+
+
+async def reconcile_page(
+    wiki, page, reader, evidence, config, bundle, *, link_registry=None, generated_baseline=None
+):
+    """Coordinate a frozen page against complete originals under either persistence binding."""
+    from ultrakb.agent.compiler import _SYSTEM_TEMPLATE, _format_known_targets
+    from ultrakb.agent.page_figures import START
+    from ultrakb.agent.page_originals import PageOriginalContext
+    from ultrakb.agent.page_updates import PageUpdate, UnchangedPage
+    from ultrakb.agent.update_generation import generate_page_update
+    from ultrakb.config import DEFAULT_CONFIG, resolve_entity_types
+    from ultrakb.lint import list_existing_wiki_targets
+    from ultrakb.schema import get_agents_md
+
     context = PageOriginalContext(
         {
             "role": "user",
@@ -86,13 +114,12 @@ async def _reconcile_page(
     )
     from ultrakb.selected_refresh_manual import (
         editable_refresh_blocks,
-        generated_refresh_baseline,
         manual_refresh_fragments,
     )
 
-    if baseline := generated_refresh_baseline(kb_dir, view, page):
-        patch.allowed_blocks = editable_refresh_blocks(patch, baseline)
-        patch.preserved_fragments = manual_refresh_fragments(patch, baseline)
+    if generated_baseline is not None:
+        patch.allowed_blocks = editable_refresh_blocks(patch, generated_baseline)
+        patch.preserved_fragments = manual_refresh_fragments(patch, generated_baseline)
     result = await generate_page_update(
         patch=patch,
         originals=context,
@@ -125,16 +152,6 @@ async def _reconcile_page(
             if key in result:
                 metadata = frontmatter.set_line(metadata, key, result[key])
         atomic_write_text(path, metadata + result["content"])
-    return RefreshedPage(
-        input_revisions=identities,
-        base_digest=view.base_pages[page],
-        candidate_digest=HashRegistry.hash_file(path),
-        original_files={
-            p: HashRegistry.hash_file(wiki / p)
-            for identity in identities
-            for p in retained[identity].paths
-        },
-    )
 
 
 def _refresh_index(wiki):
