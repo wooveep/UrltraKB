@@ -1509,8 +1509,9 @@ def skill():
     default=False,
     help="Overwrite existing output/skills/<name>/ without prompting.",
 )
+@click.option("--json", "json_output", is_flag=True, help="Return the shared generation receipt.")
 @click.pass_context
-def skill_new(ctx, name, intent, yes_flag):
+def skill_new(ctx, name, intent, yes_flag, json_output):
     """Compile a new skill from this KB's wiki.
 
     NAME is a kebab-case slug used for the output directory and skill name.
@@ -1548,7 +1549,8 @@ def skill_new(ctx, name, intent, yes_flag):
         if not click.confirm(f"output/skills/{name}/ already exists. Overwrite?", default=False):
             click.echo("Aborted.")
             ctx.exit(1)
-    click.echo(f"Compiling skill '{name}'...")
+    if not json_output:
+        click.echo(f"Compiling skill '{name}'...")
     gen = asyncio.run(
         generate_artifact(
             kb_dir,
@@ -1556,8 +1558,14 @@ def skill_new(ctx, name, intent, yes_flag):
             scope=scope,
         )
     )
+    from ultrakb.cli_generation import present_generation
+
+    if present_generation(gen, json_output=json_output):
+        if gen.status != "completed":
+            ctx.exit(1)
+        return
     if gen.status != "completed":
-        click.echo(f"[ERROR] {gen.message}", err=True)
+        click.echo(f"[ERROR] {gen.message or gen.error_type or gen.status}", err=True)
         ctx.exit(1)
     saved_iteration = gen.archive_path
 
@@ -1949,8 +1957,9 @@ def deck():
         "a third-party skill installed under ~/.ultrakb/skills/."
     ),
 )
+@click.option("--json", "json_output", is_flag=True, help="Return the shared generation receipt.")
 @click.pass_context
-def deck_new(ctx, name, intent, yes_flag, critique_flag, skill_name):
+def deck_new(ctx, name, intent, yes_flag, critique_flag, skill_name, json_output):
     """Generate a new HTML deck from this KB's wiki.
 
     NAME is a kebab-case slug used for the output directory.
@@ -2008,7 +2017,8 @@ def deck_new(ctx, name, intent, yes_flag, critique_flag, skill_name):
             click.echo("Aborted.")
             ctx.exit(1)
     skill_label = skill_name if skill_name else f"{DEFAULT_DECK_SKILL} (default)"
-    click.echo(f"Generating deck '{name}' via skill {skill_label}...")
+    if not json_output:
+        click.echo(f"Generating deck '{name}' via skill {skill_label}...")
     gen = asyncio.run(
         generate_artifact(
             kb_dir,
@@ -2024,8 +2034,14 @@ def deck_new(ctx, name, intent, yes_flag, critique_flag, skill_name):
             scope=scope,
         )
     )
+    from ultrakb.cli_generation import present_generation
+
+    if present_generation(gen, json_output=json_output):
+        if gen.status != "completed" or gen.validation is not None and gen.validation.errors:
+            ctx.exit(1)
+        return
     if gen.status != "completed":
-        click.echo(f"[ERROR] {gen.message}", err=True)
+        click.echo(f"[ERROR] {gen.message or gen.error_type or gen.status}", err=True)
         ctx.exit(1)
 
     # Surface validation result.

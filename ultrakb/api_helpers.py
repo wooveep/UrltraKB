@@ -618,58 +618,13 @@ async def _stream_recompile(
 
 
 async def _iter_deck(
-    request: DeckRequest,
-    kb_dir: Path,
-    *,
-    bundle=None,
+    request: DeckRequest, kb_dir: Path, *, bundle=None
 ) -> AsyncIterator[dict[str, Any]]:
-    """Raw event generator for deck generation.
+    from ultrakb.api_generators import iter_generation
 
-    Yields plain dicts (``start`` / ``error`` / ``final``); both
-    ``_stream_deck`` (SSE) and ``deck_endpoint``'s non-stream branch consume
-    this directly. Mirrors ``iter_recompile``'s split so the SSE formatting
-    lives only in the thin ``_stream_deck`` wrapper, never here.
-    """
-    from ultrakb.application.generators import (
-        GenerationOptions,
-        generate_artifact,
-        preflight_generation,
-    )
-
-    yield {"event": "start", "endpoint": "deck"}
-    scope = await resolve_api_scope(kb_dir, request.view_id)
-    err = preflight_generation(kb_dir, request.name, scope=scope)
-    if err:
-        yield {"event": "error", "code": 400, "message": err}
-        return
-    try:
-        result = await generate_artifact(
-            kb_dir,
-            GenerationOptions(
-                "deck",
-                request.name,
-                request.intent,
-                overwrite="archive" if request.replace else "refuse",
-                version=request.version,
-            ),
-            scope=scope,
-            bundle=bundle,
-        )
-    except Exception as exc:
-        yield {"event": "error", "code": 500, "message": f"Deck generation failed: {exc}"}
-        return
-    if result.status != "completed":
-        yield {
-            "event": "error",
-            "code": 409
-            if result.status == "conflict"
-            else 400
-            if result.status == "invalid" and result.error_type is None
-            else 500,
-            "message": f"Deck generation failed: {result.message}",
-        }
-        return
-    yield {"event": "final", "name": request.name, "status": "done", "path": str(result.output_dir)}
+    async with aclosing(iter_generation(request, kb_dir, "deck", bundle=bundle)) as events:
+        async for event in events:
+            yield event
 
 
 async def _stream_deck(
@@ -680,69 +635,25 @@ async def _stream_deck(
     *,
     bundle=None,
 ) -> AsyncIterator[str]:
-    """SSE-formatted view of ``_iter_deck``, for the ``stream=true`` branch."""
-    # Hold the per-KB asyncio.Lock for the entire stream so concurrent
-    # same-KB deck generations are serialized (mirrors ``_stream_recompile``);
-    # ``_preflight_skill_new`` does not gate overwrite, so unlocked concurrent
-    # streams would race on the same ``output_dir`` bytes.
-    async with mutation_lock:
-        async for event in _iter_deck(request, kb_dir, bundle=bundle):
-            # Cooperative stop on client abort so the lock is released rather
-            # than held for the whole unwatched generation (see recompile).
-            if await fastapi_request.is_disconnected():
-                break
-            name = event.pop("event")
-            yield _sse(name, event)
-    yield _sse("done", {})
+    from ultrakb.api_generators import stream_generation
+
+    async with aclosing(
+        stream_generation(
+            _iter_deck(request, kb_dir, bundle=bundle), mutation_lock, fastapi_request
+        )
+    ) as frames:
+        async for frame in frames:
+            yield frame
 
 
 async def _iter_skill(
-    request: SkillRequest,
-    kb_dir: Path,
-    *,
-    bundle=None,
+    request: SkillRequest, kb_dir: Path, *, bundle=None
 ) -> AsyncIterator[dict[str, Any]]:
-    """Raw event generator for skill generation — same shape as ``_iter_deck``."""
-    from ultrakb.application.generators import (
-        GenerationOptions,
-        generate_artifact,
-        preflight_generation,
-    )
+    from ultrakb.api_generators import iter_generation
 
-    yield {"event": "start", "endpoint": "skill"}
-    scope = await resolve_api_scope(kb_dir, request.view_id)
-    err = preflight_generation(kb_dir, request.name, scope=scope)
-    if err:
-        yield {"event": "error", "code": 400, "message": err}
-        return
-    try:
-        result = await generate_artifact(
-            kb_dir,
-            GenerationOptions(
-                "skill",
-                request.name,
-                request.intent,
-                overwrite="archive" if request.replace else "refuse",
-                version=request.version,
-            ),
-            scope=scope,
-            bundle=bundle,
-        )
-    except Exception as exc:
-        yield {"event": "error", "code": 500, "message": f"Skill generation failed: {exc}"}
-        return
-    if result.status != "completed":
-        yield {
-            "event": "error",
-            "code": 409
-            if result.status == "conflict"
-            else 400
-            if result.status == "invalid" and result.error_type is None
-            else 500,
-            "message": f"Skill generation failed: {result.message}",
-        }
-        return
-    yield {"event": "final", "name": request.name, "status": "done", "path": str(result.output_dir)}
+    async with aclosing(iter_generation(request, kb_dir, "skill", bundle=bundle)) as events:
+        async for event in events:
+            yield event
 
 
 async def _stream_skill(
@@ -753,17 +664,12 @@ async def _stream_skill(
     *,
     bundle=None,
 ) -> AsyncIterator[str]:
-    """SSE-formatted view of ``_iter_skill``, for the ``stream=true`` branch."""
-    # Hold the per-KB asyncio.Lock for the entire stream so concurrent
-    # same-KB skill generations are serialized (mirrors ``_stream_recompile``);
-    # ``_preflight_skill_new`` does not gate overwrite, so unlocked concurrent
-    # streams would race on the same ``output_dir`` bytes.
-    async with mutation_lock:
-        async for event in _iter_skill(request, kb_dir, bundle=bundle):
-            # Cooperative stop on client abort so the lock is released rather
-            # than held for the whole unwatched generation (see recompile).
-            if await fastapi_request.is_disconnected():
-                break
-            name = event.pop("event")
-            yield _sse(name, event)
-    yield _sse("done", {})
+    from ultrakb.api_generators import stream_generation
+
+    async with aclosing(
+        stream_generation(
+            _iter_skill(request, kb_dir, bundle=bundle), mutation_lock, fastapi_request
+        )
+    ) as frames:
+        async for frame in frames:
+            yield frame

@@ -356,6 +356,7 @@ def _execute(
     if isinstance(request, GenerateArtifact):
         import asyncio
 
+        from ultrakb.application.generation_results import generation_receipt
         from ultrakb.application.generators import GenerationOptions, generate_artifact
 
         generated = asyncio.run(
@@ -379,6 +380,10 @@ def _execute(
             quality=generated.quality,
             unfinished=generated.unfinished,
             error=generated.message,
+            generation=generation_receipt(generated),
+            model_usage=generated.model_usage,
+            revision=generated.publication_id,
+            quality_known=generated.validation is not None,
             halt=generated.status == "blocked",
             output="\n".join([*generated.validation.errors, *generated.validation.warnings])
             if generated.validation

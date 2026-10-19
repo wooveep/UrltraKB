@@ -7,6 +7,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, model_validator
 
 from ultrakb.api_views import PublishedReadRequest, ViewRequest
+from ultrakb.application.generation_results import GenerationReceipt
 from ultrakb.application.settings_data import (
     _KB_CONFIG_WRITABLE_KEYS as _KB_CONFIG_WRITABLE_KEYS,
 )
@@ -334,6 +335,9 @@ class DeckResponse(BaseModel):
     name: str
     status: str
     path: str
+    generation: GenerationReceipt | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class DeckListResponse(BaseModel):
@@ -353,6 +357,9 @@ class SkillResponse(BaseModel):
     name: str
     status: str
     path: str
+    generation: GenerationReceipt | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class SkillListResponse(BaseModel):

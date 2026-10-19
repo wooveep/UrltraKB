@@ -41,10 +41,16 @@ class UnitResult:
     answer_outcome: str | None = None
     import_units: tuple = ()
     removal_items: tuple = ()
+    generation: dict | None = None
 
     def __post_init__(self) -> None:
         from ultrakb.application.batch_removal import BatchRemovalItem
         from ultrakb.ingest_result import ImportUnitOutcome
+
+        if self.generation is not None:
+            from ultrakb.application.generation_results import GenerationReceipt
+
+            GenerationReceipt.model_validate(self.generation)
 
         if not isinstance(self.removal_items, tuple) or not all(
             isinstance(item, BatchRemovalItem) for item in self.removal_items
@@ -129,6 +135,7 @@ class UnitResult:
             usage=value.get("usage"),
             model_usage=value.get("model_usage"),
             context=value.get("context"),
+            generation=value.get("generation"),
             quality_known=value.get("quality_known"),
             answer_outcome=value.get("answer_outcome"),
             import_units=TypeAdapter(tuple[ImportUnitOutcome, ...]).validate_python(

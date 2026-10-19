@@ -1932,3 +1932,37 @@ real Qt paging/image/export/cancellation matrix. Mypy passes 581 modules; focuse
 Ruff, formatting, module-size and diff checks pass. Generation adapter receipts,
 remaining observation/archive/audit work and the sole P8 activation are still
 unfinished. Issue 164 remains open.
+
+### Shared generation receipts and actual HTTP cleanup
+
+Skill and Deck generation now expose one validated JSON receipt with accepted
+resources, archive and candidate facts, publication identity, output epoch,
+validation, pending synchronization and independently recorded model usage.
+CLI JSON, HTTP JSON/SSE and native unit receipts retain the same schema. A failed
+note publication preserves the accepted artifact and exact candidate in every
+adapter; failed projection preserves completed business success. Native results
+also populate their ordinary usage and publication fields for existing task
+consumers. Usage reads reuse the shared confirmation boundary and cannot revoke
+already accepted business facts.
+
+CLI `skill new` and `deck new` support JSON output. Pending copies are described
+as accepted main-store results, and Deck validation errors retain the existing
+nonzero exit status in both plain and JSON modes. Legitimate scope-resolution
+failure becomes a normal SSE error followed by completion, rather than raising
+after response headers. The public view shape remains restricted to `legacy`.
+
+The existing application event/cleanup implementation now also serves generation.
+Streaming HTTP polls disconnection while awaiting the next event; cancellation
+and repeated cancellation join actual SDK and worker cleanup before releasing
+the operation lock. Real delayed provider responses retain their actual usage.
+GC can still complete during a model wait, and no unaccepted artifact is exposed.
+The non-streaming ASGI request likewise waits for actual cleanup after cancellation.
+
+The expanded generator/entrypoint/answer-stream/CLI matrix passes 102 tests with
+26 live cases deselected; the final additional non-streaming cancellation witness
+also passes. Actual spawned native workers cover both projection failure and SQL
+publication rollback. Mypy passes 584 modules; focused Ruff, formatting,
+module-size and diff checks pass. Independent readonly reviews close the native
+usage, scope-error and validation-exit findings. Remaining P6 task association and
+drilldown, P7 archive/audit/retirement and the sole P8 activation are unfinished.
+Issue 164 remains open.

@@ -181,6 +181,8 @@ class GenerationResult:
     projection_pending: bool = False
     publication_id: str | None = None
     candidate_revision_id: str | None = None
+    execution_id: str | None = None
+    model_usage: dict | None = field(default=None, compare=False, repr=False)
 
 
 def _archive(kb_dir: Path, target: Path) -> Path:
@@ -224,9 +226,12 @@ async def generate_artifact(
     scope = resolve_scope(kb_dir, scope)
     kb_dir = kb_dir.resolve()
     if scope.knowledge is not None:
+        from .generation_results import with_generation_usage
         from .storage_generators import generate_stored_artifact
 
-        return await generate_stored_artifact(scope, options, context, bundle=bundle, model=model)
+        previous = context.storage_execution
+        result = await generate_stored_artifact(scope, options, context, bundle=bundle, model=model)
+        return with_generation_usage(scope, context, result, previous)
     async with async_kb_lock(
         kb_dir / ".ultrakb",
         exclusive=True,

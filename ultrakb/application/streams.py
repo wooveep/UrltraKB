@@ -4,14 +4,21 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import suppress
-from typing import AsyncGenerator, Awaitable, Callable
+from typing import AsyncGenerator, Awaitable, Callable, Protocol, TypeVar
 
-from ultrakb.application.conversations import AnswerResult
 from ultrakb.application.execution import ExecutionContext
 
 
-async def answer_events(
-    operation: Callable[[ExecutionContext], Awaitable[AnswerResult]],
+class UsageResult(Protocol):
+    @property
+    def model_usage(self) -> dict | None: ...
+
+
+Result = TypeVar("Result", bound=UsageResult)
+
+
+async def operation_events(
+    operation: Callable[[ExecutionContext], Awaitable[Result]],
 ) -> AsyncGenerator[dict, None]:
     """Project a use case's progress and result; the use case owns all business work."""
     events: asyncio.Queue[dict] = asyncio.Queue()
@@ -66,3 +73,6 @@ async def answer_events(
             task.result()
         if cancelled:
             raise asyncio.CancelledError
+
+
+answer_events = operation_events

@@ -668,20 +668,10 @@ def create_app() -> FastAPI:
                 _stream_deck(request, kb_dir, lock, fastapi_request),
                 media_type="text/event-stream",
             )
-        error_code: int | None = None
-        error_message: str | None = None
-        result: dict = {}
+        from ultrakb.api_generators import collect_generation_response
+
         async with _kb_mutation_lock(request.kb):
-            async for event in _iter_deck(request, kb_dir):
-                name = event.get("event")
-                if name == "error":
-                    error_code = event.get("code", 500)
-                    error_message = event.get("message", "Deck generation failed.")
-                elif name == "final":
-                    result = event
-        if error_code is not None:
-            raise HTTPException(status_code=error_code, detail=error_message)
-        return DeckResponse(name=result["name"], status=result["status"], path=result["path"])
+            return await collect_generation_response(_iter_deck(request, kb_dir), DeckResponse)
 
     @app.post("/api/v1/skill", response_model=SkillResponse)
     async def skill_endpoint(
@@ -696,20 +686,10 @@ def create_app() -> FastAPI:
                 _stream_skill(request, kb_dir, lock, fastapi_request),
                 media_type="text/event-stream",
             )
-        error_code: int | None = None
-        error_message: str | None = None
-        result: dict = {}
+        from ultrakb.api_generators import collect_generation_response
+
         async with _kb_mutation_lock(request.kb):
-            async for event in _iter_skill(request, kb_dir):
-                name = event.get("event")
-                if name == "error":
-                    error_code = event.get("code", 500)
-                    error_message = event.get("message", "Skill generation failed.")
-                elif name == "final":
-                    result = event
-        if error_code is not None:
-            raise HTTPException(status_code=error_code, detail=error_message)
-        return SkillResponse(name=result["name"], status=result["status"], path=result["path"])
+            return await collect_generation_response(_iter_skill(request, kb_dir), SkillResponse)
 
     # Preserve the established JSON error shape for unknown API paths.
     @app.api_route(
