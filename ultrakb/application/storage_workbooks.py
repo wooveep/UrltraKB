@@ -20,6 +20,7 @@ from .storage_processing_policy import (
     current_processing_policy,
     needs_reprocessing,
 )
+from .storage_worksheet_retirement import missing_sheets, retire_worksheet
 from .task_stages import task_stage
 from .views import storage_scope
 from .workbook_ingestion import aggregate_units
@@ -187,7 +188,7 @@ def import_workbook(
     # Retention and target planning finish before the first model call, so a
     # failed/cancelled first worksheet cannot hide the remaining inventory.
     targets = []
-    for sheet in workbook.sheets:
+    for sheet in (*workbook.sheets, *missing_sheets(scope, catalog, revision, workbook)):
         target, changed = _plan(
             scope,
             ready,
@@ -211,16 +212,20 @@ def import_workbook(
     for index, (target, sheet) in enumerate(targets):
         try:
             context.check_stop()
-            if sheet.content_state != "content":
+            if current.publication_id != publication_id:
+                current = storage_scope(
+                    scope.kb_dir,
+                    scope.knowledge.identity,
+                    publication_id=publication_id,
+                    view_id=scope.view_id,
+                )
+            if sheet.content_state in {"empty", "withdrawn"}:
+                result, publication_id = retire_worksheet(
+                    current, ready, context, catalog, revision, target, sheet
+                )
+            elif sheet.content_state != "content":
                 result = _uncompiled(current, ready, revision, target, sheet)
             else:
-                if current.publication_id != publication_id:
-                    current = storage_scope(
-                        scope.kb_dir,
-                        scope.knowledge.identity,
-                        publication_id=publication_id,
-                        view_id=scope.view_id,
-                    )
                 result, accepted = compile_stored_unit(
                     current, ready, context, catalog, revision, target, name=sheet.name
                 )

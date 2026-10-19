@@ -62,6 +62,12 @@ def refresh_targets(bound):
                 blocked.append(label)
             for [unit] in units:
                 target = CatalogStore._unit_revision(db, unit)
+                from .source_changes import worksheet_exclusion
+
+                if target.source_revision_id == revision and worksheet_exclusion(
+                    db.connection, unit
+                ):
+                    continue
                 if target.source_revision_id != revision or unit not in active:
                     blocked.append(label)
                 else:

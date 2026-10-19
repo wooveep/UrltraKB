@@ -6,10 +6,12 @@ PUBLICATION_SCHEMA = (
         source_id TEXT NOT NULL REFERENCES ukb_sources(source_id),
         source_revision_id TEXT NOT NULL REFERENCES ukb_source_revisions(revision_id),
         source_generation INTEGER NOT NULL CHECK (source_generation >= 0),
-        kind TEXT NOT NULL CHECK (kind IN ('withdrawn', 'empty'))
+        kind TEXT NOT NULL CHECK (kind IN ('withdrawn', 'empty')),
+        unit_revision_id TEXT REFERENCES ukb_unit_revisions(unit_revision_id)
     )""",
     "CREATE INDEX ukb_source_change_source ON "
     "ukb_revision_source_changes(source_id, source_generation)",
+    "CREATE INDEX ukb_source_change_unit ON ukb_revision_source_changes(unit_revision_id)",
     """CREATE TRIGGER ukb_source_change_draft BEFORE INSERT ON ukb_revision_source_changes
         WHEN NOT EXISTS (SELECT 1 FROM ukb_knowledge_revisions
                          WHERE revision_id = NEW.revision_id AND state = 'draft')

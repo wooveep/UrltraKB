@@ -1738,3 +1738,34 @@ actual SDK loopback requests, SQLite/CAS, spawned worker and Qt/LocalIO tests.
 Embedded discovery, worksheet retirement, remaining generators and management
 connections, observation/archive/audit and the P8 activation remain unfinished.
 Issue 164 is still open.
+
+### Worksheet retirement from complete retained inventories
+
+Schema 27 binds an optional exact worksheet target to the existing immutable
+source-change claim. Complete inventories plan empty and absent worksheet targets
+before any model work. Their exclusions commit with the knowledge publication
+and receipt; source generation, latest original, exact unit target and current
+reprocessing request are checked in the final short transaction. An incomplete
+or failed inventory cannot establish absence. Whole-source exclusion remains
+separate from an individual worksheet exclusion.
+
+Retired worksheets keep their stable unit identity, managed original, processing
+history and prior knowledge basis. Source lists report empty/retired targets
+beside the actual successful revision. Refresh skips only committed exclusions
+for the latest source revision. A later source admission cannot inherit an older
+revision's retirement as a current exclusion. Full empty-workbook refresh needs
+no model settings, sends no requests, and retains old-publication readability.
+
+Repeated source and selected-worksheet retry recover the exact committed receipt
+without resending successful sheets. Publication acknowledgement loss, projection
+failure, stage-observation failure and SQL rollback are covered. A newer original
+admitted immediately before publication rejects the old retirement. Combined
+workbook results report the last publication and preserve synchronization pending
+from any accepted unit.
+
+The expanded worksheet/source/refresh/publication/application matrix passes 118
+tests; mypy passes 568 modules and focused Ruff/format/diff checks pass. Independent
+readonly reviews verify real SQLite/CAS, SDK loopback and persistent postcommit
+database failure behavior. Embedded discovery and pending-work application flows,
+remaining generators and management connections, observation/archive/audit and
+the P8 activation remain unfinished. Issue 164 remains open.

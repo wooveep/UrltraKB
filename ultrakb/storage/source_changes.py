@@ -17,6 +17,7 @@ class SourceChange(BaseModel):
     source_revision_id: RecordId
     source_generation: int = Field(ge=0, lt=2**63, strict=True)
     kind: Literal["withdrawn", "empty"] = "withdrawn"
+    unit_revision_id: RecordId | None = None
 
 
 def require_source(connection, claim):
@@ -30,22 +31,47 @@ def require_source(connection, claim):
     if (
         source is None
         or source[:3] != ("active", claim.source_generation, claim.source_revision_id)
-        or claim.kind == "empty"
+        or claim.unit_revision_id is None
+        and claim.kind == "empty"
         and source[3]
     ):
         raise CatalogConflict("The reviewed source or processing targets changed")
+    if claim.unit_revision_id is not None:
+        unit = connection.execute(
+            "SELECT u.source_id, p.source_revision_id, p.content_state, u.unit_key, "
+            "p.reprocessing_request_id "
+            "FROM ukb_import_units u JOIN ukb_unit_revisions v "
+            "ON v.unit_revision_id = u.target_revision_id "
+            "JOIN ukb_processing_versions p ON p.processing_id = v.processing_id "
+            "WHERE v.unit_revision_id = ? AND p.state = 'ready'",
+            (claim.unit_revision_id,),
+        ).fetchone()
+        if (
+            unit is None
+            or unit[:3] != (claim.source_id, claim.source_revision_id, claim.kind)
+            or unit[3] == "body"
+            or source[3]
+        ):
+            raise CatalogConflict("The reviewed worksheet target changed")
+        from .reprocessing_store import require_current_reprocessing
+
+        require_current_reprocessing(connection, claim.source_revision_id, unit[4])
 
 
 def read_source_change(connection, revision_id):
     row = connection.execute(
-        "SELECT source_id, source_revision_id, source_generation, kind "
+        "SELECT source_id, source_revision_id, source_generation, kind, unit_revision_id "
         "FROM ukb_revision_source_changes "
         "WHERE revision_id = ?",
         (revision_id,),
     ).fetchone()
     return (
         SourceChange(
-            source_id=row[0], source_revision_id=row[1], source_generation=row[2], kind=row[3]
+            source_id=row[0],
+            source_revision_id=row[1],
+            source_generation=row[2],
+            kind=row[3],
+            unit_revision_id=row[4],
         )
         if row
         else None
@@ -64,6 +90,20 @@ def finish_source_change(connection, revision_id):
     if not connection.in_transaction:
         raise ValueError("Source contribution changes belong to the publication transaction")
     require_source(connection, claim)
+    if claim.unit_revision_id is not None:
+        connection.execute(
+            "UPDATE ukb_sources SET generation = generation + 1 WHERE source_id = ?",
+            (claim.source_id,),
+        )
+        connection.execute(
+            "UPDATE ukb_reprocessing_requests "
+            "SET expected_source_generation = expected_source_generation + 1 "
+            "WHERE request_id = (SELECT p.reprocessing_request_id FROM ukb_unit_revisions v "
+            "JOIN ukb_processing_versions p ON p.processing_id = v.processing_id "
+            "WHERE v.unit_revision_id = ?)",
+            (claim.unit_revision_id,),
+        )
+        return
     connection.execute(
         "UPDATE ukb_sources SET state = ?, contribution_empty = ?, generation = generation + 1 "
         "WHERE source_id = ? AND generation = ? AND state = 'active'",
@@ -76,7 +116,9 @@ def finish_source_change(connection, revision_id):
     )
 
 
-def committed_source_change(store, base, source_id, *, kind="withdrawn", source_generation=None):
+def committed_source_change(
+    store, base, source_id, *, kind="withdrawn", source_generation=None, unit_revision_id=None
+):
     """Recover an exact publication after a lost acknowledgement, including later heads."""
     from .knowledge_store import PreparedRevision
 
@@ -92,27 +134,44 @@ def committed_source_change(store, base, source_id, *, kind="withdrawn", source_
         row = db.connection.execute(
             "SELECT r.revision_id, r.publication_id, r.view_id, r.expected_publication, "
             "r.manifest_digest, r.navigation_fingerprint, s.plan_id, c.attempt_id, "
-            "w.source_revision_id, w.source_generation, w.kind "
+            "w.source_revision_id, w.source_generation, w.kind, w.unit_revision_id "
             "FROM ukb_revision_source_changes w JOIN ukb_knowledge_revisions r "
             "ON r.revision_id = w.revision_id JOIN ukb_publication_receipts c "
             "ON c.revision_id = r.revision_id AND c.publication_id = r.publication_id "
             "JOIN ukb_revision_sync s ON s.revision_id = r.revision_id "
             "WHERE w.source_id = ? AND w.kind = ? AND (? OR r.expected_publication = ?) "
             "AND r.view_id = ? AND (? IS NULL OR w.source_generation = ?) "
+            "AND w.unit_revision_id IS ? "
             "AND c.generation = ? AND r.state = 'published'",
             (
                 source_id,
                 kind,
-                source_generation is not None,
+                source_generation is not None or unit_revision_id is not None,
                 base.publication_id,
                 base.publication.view_id,
                 source_generation,
                 source_generation,
+                unit_revision_id,
                 store.identity.generation,
             ),
         ).fetchone()
         if row is None:
             return None
         return PreparedRevision(*row[:8]), SourceChange(
-            source_id=source_id, source_revision_id=row[8], source_generation=row[9], kind=row[10]
+            source_id=source_id,
+            source_revision_id=row[8],
+            source_generation=row[9],
+            kind=row[10],
+            unit_revision_id=row[11],
         )
+
+
+def worksheet_exclusion(connection, unit_revision_id):
+    """Only a committed exact-target exclusion makes a worksheet noncontributing."""
+    row = connection.execute(
+        "SELECT c.kind, r.publication_id FROM ukb_revision_source_changes c "
+        "JOIN ukb_publication_receipts r ON r.revision_id = c.revision_id "
+        "WHERE c.unit_revision_id = ? LIMIT 1",
+        (unit_revision_id,),
+    ).fetchone()
+    return row

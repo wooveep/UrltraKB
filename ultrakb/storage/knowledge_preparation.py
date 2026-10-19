@@ -171,13 +171,14 @@ def prepare_revision(
                 )
             if source_change is not None:
                 connection.execute(
-                    "INSERT INTO ukb_revision_source_changes VALUES (?, ?, ?, ?, ?)",
+                    "INSERT INTO ukb_revision_source_changes VALUES (?, ?, ?, ?, ?, ?)",
                     (
                         revision_id,
                         source_change.source_id,
                         source_change.source_revision_id,
                         source_change.source_generation,
                         source_change.kind,
+                        source_change.unit_revision_id,
                     ),
                 )
             if claim is not None:

@@ -65,7 +65,7 @@ SCHEMA = (
         source_path TEXT NOT NULL,
         source_kind TEXT NOT NULL CHECK (source_kind IN ('markdown', 'text', 'pages')),
         content_state TEXT NOT NULL CHECK (content_state IN
-            ('content', 'empty', 'objects_only', 'parse_failed', 'unreadable')),
+            ('content', 'empty', 'withdrawn', 'objects_only', 'parse_failed', 'unreadable')),
         reprocessing_request_id TEXT REFERENCES ukb_reprocessing_requests(request_id),
         state TEXT NOT NULL CHECK (state IN ('draft', 'sealed', 'ready'))
     )""",

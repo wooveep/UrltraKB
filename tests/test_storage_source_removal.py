@@ -87,6 +87,7 @@ def retained_publication(tmp_path):
             {"index.md": b"Fixture", "summaries/fixture.md": b"The value is 17."},
             expected=store.bind().publication_id,
             unit_revisions=(unit.unit_revision_id,),
+            generated_paths=("summaries/fixture.md",),
         )
     )
     return root, identity, unit, storage_scope(root, identity)

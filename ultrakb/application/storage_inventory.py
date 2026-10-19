@@ -18,9 +18,14 @@ def _unit(catalog, target, actual, scope):
     used = catalog.processing(actual.processing_id) if actual else None
     decision = used.decision if used else None
     content_state = processing.content_state
+    exclusion = catalog.unit_exclusion(target.unit_revision_id)
     complete = actual is not None and actual.unit_revision_id == target.unit_revision_id
     status = (
-        "completed"
+        "retired"
+        if exclusion and exclusion[0] == "withdrawn"
+        else "empty"
+        if exclusion
+        else "completed"
         if complete
         else "empty"
         if content_state == "empty"

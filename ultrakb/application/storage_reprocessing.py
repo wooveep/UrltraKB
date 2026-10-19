@@ -33,16 +33,20 @@ def request_complete(scope, catalog, request, *, units=None):
         if inventory is None or inventory.error:
             return False
         keys = {sheet.key for sheet in inventory.sheets}
-        units = tuple(unit for unit in units if unit.key in keys)
-        if keys != {unit.key for unit in units}:
+        if not keys <= {unit.key for unit in units}:
             return False
     elif not units:
         return False
     active = set(scope.knowledge.unit_revisions())
     for unit in units:
         processing = catalog.processing(unit.processing_id)
-        if processing.reprocessing_request_id != request.request_id or (
-            processing.content_state == "content" and unit.unit_revision_id not in active
+        if (
+            processing.reprocessing_request_id != request.request_id
+            or (processing.content_state == "content" and unit.unit_revision_id not in active)
+            or (
+                processing.content_state in {"empty", "withdrawn"}
+                and not catalog.unit_exclusion(unit.unit_revision_id)
+            )
         ):
             return False
     return True

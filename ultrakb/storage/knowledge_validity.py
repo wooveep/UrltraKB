@@ -25,7 +25,12 @@ def _inputs(db, bound, *, page=None, native_unit=None):
         "SELECT b.unit_revision_id, u.unit_id, u.source_id, p.source_revision_id, "
         "s.state, s.generation, u.target_revision_id, "
         "(SELECT revision_id FROM ukb_source_revisions r WHERE r.source_id = s.source_id "
-        "AND r.state = 'ready' ORDER BY r.ordinal DESC LIMIT 1), s.contribution_empty "
+        "AND r.state = 'ready' ORDER BY r.ordinal DESC LIMIT 1), s.contribution_empty, "
+        "(SELECT c.kind FROM ukb_revision_source_changes c "
+        "JOIN ukb_publication_receipts receipt ON receipt.revision_id = c.revision_id "
+        "WHERE c.unit_revision_id = u.target_revision_id AND c.source_revision_id = "
+        "(SELECT revision_id FROM ukb_source_revisions r WHERE r.source_id = s.source_id "
+        "AND r.state = 'ready' ORDER BY ordinal DESC LIMIT 1) LIMIT 1) "
         "FROM basis b JOIN ukb_unit_revisions v ON v.unit_revision_id = b.unit_revision_id "
         "JOIN ukb_import_units u ON u.unit_id = v.unit_id "
         "JOIN ukb_processing_versions p ON p.processing_id = v.processing_id "
@@ -35,12 +40,25 @@ def _inputs(db, bound, *, page=None, native_unit=None):
 
 
 def _reason(row):
-    revision, unit, source, actual, state, generation, target_unit, target_source, empty = row
+    (
+        revision,
+        unit,
+        source,
+        actual,
+        state,
+        generation,
+        target_unit,
+        target_source,
+        empty,
+        excluded,
+    ) = row
     kind = (
         "withdrawn"
         if state == "withdrawn"
         else "empty"
         if empty
+        else excluded
+        if excluded
         else "updated"
         if revision != target_unit or actual != target_source
         else None

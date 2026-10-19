@@ -331,7 +331,7 @@ class CatalogStore:
             or not operation_id
             or not isinstance(decision, ProcessingDecision)
             or content_state
-            not in {"content", "empty", "objects_only", "parse_failed", "unreadable"}
+            not in {"content", "empty", "withdrawn", "objects_only", "parse_failed", "unreadable"}
         ):
             raise ValueError("Processing requires a complete body, policy and operation identity")
         for path in files:
@@ -680,3 +680,9 @@ class CatalogStore:
                 (source_id,),
             ).fetchall()
             return tuple(self._unit_revision(db, row[0]) for row in revisions)
+
+    def unit_exclusion(self, revision_id: str):
+        from .source_changes import worksheet_exclusion
+
+        with storage_stage(self.root, self.identity, read_only=True) as db:
+            return worksheet_exclusion(db.connection, revision_id)

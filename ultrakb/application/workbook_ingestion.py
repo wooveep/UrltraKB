@@ -40,6 +40,10 @@ def aggregate_units(results):
         unfinished=tuple(dict.fromkeys(stage for result in results for stage in result.unfinished)),
         message="; ".join(result.message for result in results if result.message) or None,
         model_usage=usage,
+        publication_id=next(
+            (result.publication_id for result in reversed(results) if result.publication_id), None
+        ),
+        projection_pending=any(result.projection_pending for result in results),
     )
 
 
