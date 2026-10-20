@@ -1,7 +1,8 @@
 # Issue 164: v2 storage protocol development
 
-Status on 2026-10-20: **P8 implementation is enabled; final release verification
-is in progress and issue 164 remains open.** New knowledge bases, compiler,
+Status on 2026-10-20: **P8 implementation and required validation gates are
+complete.** The final [acceptance record](issue-164-p8-acceptance.md) distinguishes
+the resumed full inventory, real-provider small sample, packaging and runtime checks. New knowledge bases, compiler,
 CLI, desktop and HTTP now use the shared SQLite/CAS application chain. Old
 formats are refused; there is no data migration, compatibility reader or dual
 write. The compiler, source readers, conversations, generators, tasks and

@@ -130,8 +130,8 @@ main store. SDK integration uses the real SDK with loopback HTTP services.
   `test_storage_native_task_budget.py`, `test_storage_indexing.py` and
   `test_checkpoint_import_paths.py`.
 
-This is a coverage migration record, not a declaration that the complete issue
-has passed its final test and release gates.
+This is a coverage migration record. Final test, packaging and runtime results
+are recorded separately in [P8 acceptance](validation/issue-164-p8-acceptance.md).
 
 ## Native acceptance commands
 

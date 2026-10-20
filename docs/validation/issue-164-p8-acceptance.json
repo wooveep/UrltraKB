@@ -1,0 +1,78 @@
+{
+  "date": "2026-10-20",
+  "implementation_commit": "98a4cee1851e9f1b3b63ef67e21b95703d675db2",
+  "branch": "dev-1.2.0",
+  "review_base": "b727b54d4478ecf0e0ffa2ffdab521868846bdbd",
+  "offline_inventory": {
+    "selected": 3862,
+    "passed": 3846,
+    "skipped": 16,
+    "live_deselected": 561,
+    "completed_across_resumed_segments": true,
+    "interrupted_prefix": {
+      "passed": 3315,
+      "skipped": 16
+    },
+    "resumed_remainder": {
+      "passed": 531,
+      "exit_code": 0,
+      "seconds": 316.25
+    },
+    "boundary_case_rechecked": true,
+    "prior_uninterrupted_run": {
+      "passed": 3845,
+      "skipped": 16,
+      "live_deselected": 561,
+      "seconds": 1553.33
+    }
+  },
+  "submitted_source_regression": {
+    "passed": 117,
+    "live_deselected": 1,
+    "unrelated_user_edits_excluded": true
+  },
+  "static_checks": {
+    "ruff": true,
+    "format": true,
+    "mypy_source_files": 570,
+    "frozen_lockfile": true,
+    "removed_references": 0
+  },
+  "review_findings": {
+    "standards": 0,
+    "spec": 0,
+    "severity_scope": [
+      "P0",
+      "P1",
+      "P2"
+    ]
+  },
+  "final_small_live_gate": {
+    "passed_tests": 1,
+    "all_attempts_actual_sends": 18,
+    "all_settled": true,
+    "returned_usage_cost_cny": 0.08579008,
+    "guarded_exposure_cny": 0.17158016,
+    "budget_cny": 2.0,
+    "provider_invoice_verified": false
+  },
+  "artifacts": {
+    "version": "1.2.3.dev203+g98a4cee1",
+    "clean_commit_archive": true,
+    "wheel_sha256": "02c1ce2e6efa7402be768527a4da6a071c215722df59dbdd9e325af786a32a3f",
+    "sdist_sha256": "b200de406bca69e72ec9b62f9fd4a118e5e38c97c000679c391ae4c4a0f687cd",
+    "application_python_files_equal": 570,
+    "removed_python_modules_absent": 42,
+    "vendor_source_files_verified": 2937
+  },
+  "installed_runtime": {
+    "sqlite": "3.53.1",
+    "pip_check": true,
+    "actual_loopback_compile_sends": 2,
+    "persisted_conversation_read": true,
+    "pyinstaller": "6.22.2",
+    "sdk_resources_collected": true,
+    "actual_linux_frozen_qt_and_worker_probe": true,
+    "complete_cross_platform_installer_release": false
+  }
+}
