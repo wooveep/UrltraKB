@@ -163,9 +163,16 @@ async def reconcile_update(
                         "source_proposal": candidate,
                         "metadata_target": metadata,
                         "instruction": "Drafts are not evidence. Integrate this source into the "
-                        "accumulated draft using only the supplied originals. Return COMPLETE "
-                        "edits for this target against the captured base, preserving earlier "
-                        "source-specific conditions unless these originals justify changing them. "
+                        "accumulated draft using only the supplied originals. "
+                        + (
+                            "Return complete metadata for this target with edits=[]; "
+                            "body edits and invented block IDs are forbidden. Preserve earlier "
+                            if metadata
+                            else "Return COMPLETE edits for this target against the captured "
+                            "base, preserving earlier "
+                        )
+                        + "source-specific conditions unless these originals justify "
+                        "changing them. "
                         "For metadata, consider all contributions read so far. "
                         "Do not generalize a local condition. Return unchanged to retain the "
                         "accumulated draft. Return only this batch's source_ranges; prior ranges "

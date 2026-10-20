@@ -41,6 +41,30 @@ def test_metadata_only_update_preserves_body_and_validates_entity_type():
         update.apply(json.dumps({**proposal, "description": "Wrong object"}), current=original)
 
 
+def test_metadata_coordination_declares_its_scope_and_keeps_body_immutable():
+    from ultrakb.agent.page_response import PageResponseError
+    from ultrakb.agent.page_updates import PageUpdate
+
+    original = "---\ndescription: Old scope\n---\n\n# Page\n\nRetained original body.\n"
+    target = PageUpdate(original, allowed_blocks=frozenset())
+    request = json.loads(target.message()["content"].split("\n", 1)[1].split("\n\n", 1)[0])
+    assert request["editing_scope"] == {"body": "read_only", "metadata": ["description", "type"]}
+    assert request["blocks"] == []
+    response = {
+        "status": "updated",
+        "base_sha256": target.digest,
+        "description": "New scope",
+        "edits": [],
+    }
+    result = target.apply(json.dumps(response), current=original)
+    assert result["content"] == target.body
+    assert result["description"] == "New scope"
+    # The observed real-provider failure cannot become an accepted body edit.
+    response["edits"] = [{"block_id": "body", "operation": "replace", "content": "Changed"}]
+    with pytest.raises(PageResponseError, match="existing block_id"):
+        target.apply(json.dumps(response), current=original)
+
+
 @pytest.mark.parametrize("returned_type", ["Work", "work", "Other"])
 def test_updates_use_the_same_type_vocabulary_as_published_frontmatter(returned_type):
     from ultrakb.agent.page_updates import PageUpdate

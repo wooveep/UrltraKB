@@ -92,6 +92,29 @@ class PageUpdate:
         }
 
     def message(self) -> dict:
+        if self.allowed_blocks is not None and not self.allowed_blocks:
+            fields = ["description", "type"] if self.allow_metadata else []
+            return {
+                "role": "user",
+                "content": "Temporary editable page blocks:\n"
+                + json.dumps(
+                    {
+                        **self.request(),
+                        "editing_scope": {"body": "read_only", "metadata": fields},
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n\nThis is a metadata-only coordination request. No body block is editable. "
+                "Return one JSON object. For a necessary metadata change use status=updated, "
+                "the supplied base_sha256, the changed description and/or type, and edits=[]. "
+                "Do not generate body text, content, block IDs or body edits. Metadata must "
+                "reflect the whole page's applicability using the supplied originals and "
+                "accumulated contributions; do not generalize a source-local condition. "
+                "When source_ranges are required, select only supplied range IDs for this "
+                "batch. To retain the accumulated draft use only status=unchanged, "
+                "base_sha256 and a nonempty reason. Unread necessary content cannot establish "
+                "unchanged. If no metadata fields are editable, return unchanged.",
+            }
         return {
             "role": "user",
             "content": "Temporary editable page blocks:\n"
