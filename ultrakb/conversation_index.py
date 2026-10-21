@@ -6,8 +6,9 @@ from ultrakb.llm_execution import CompletionExecutor, ModelRequest, active_execu
 
 
 class ChatIndexLLM:
-    def __init__(self, executor: CompletionExecutor):
+    def __init__(self, executor: CompletionExecutor, *, responses=None):
         self.executor = executor
+        self.responses = responses
 
     def complete(self, messages, *, stage, prompt_version):
         request = ModelRequest(
@@ -21,6 +22,8 @@ class ChatIndexLLM:
                 "drop_params": True,
             },
         )
+        if self.responses is not None:
+            return self.responses.complete(self.executor, request)
         return self.executor.complete("conversation_index", request).text
 
 

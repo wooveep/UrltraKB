@@ -1,8 +1,35 @@
 """Read shared-wiki snapshots and retain pre-catalog source evidence."""
 
+from collections.abc import Callable
 from pathlib import Path
+from typing import TypeVar
 
 from ultrakb.knowledge_scope import KnowledgeScope
+
+T = TypeVar("T")
+
+
+def run_scoped_operation(
+    operation: Callable[[], T],
+    *,
+    scope: KnowledgeScope | None,
+    cancelled: Callable[[], bool] | None = None,
+    read_only: bool = True,
+) -> T:
+    """Protect a local bound operation, including cancellable storage waits.
+
+    Entrypoints supply their stop signal and join their worker. The application
+    owns the generation and reclamation protection across the operation's reads.
+    No SQL snapshot or write transaction spans the callback.
+    """
+    if scope is None or scope.knowledge is None:
+        return operation()
+    from ultrakb.storage.coordination import storage_stage
+
+    with storage_stage(
+        scope.kb_dir, scope.knowledge.identity, read_only=read_only, cancelled=cancelled
+    ):
+        return operation()
 
 
 def storage_scope(

@@ -610,12 +610,14 @@ class CompletionExecutor:
     def _delay(self, retry: int) -> float:
         return min(self.policy.backoff * 2**retry, 10)
 
-    def complete(self, role: str, request: ModelRequest, *, on_response=None) -> CompletionResult:
+    def complete(
+        self, role: str, request: ModelRequest, *, on_response=None, logical_id: str | None = None
+    ) -> CompletionResult:
         self.policy.check()
         from ultrakb.request_budget import PreparedRequest
 
         prepared = PreparedRequest.capture(self._kwargs(role, request))
-        logical_id = uuid.uuid4().hex
+        logical_id = logical_id or uuid.uuid4().hex
         with ModelSlot(self, request, logical_id):
             for retry in range(self.policy.retries + 1):
                 self.policy.check()

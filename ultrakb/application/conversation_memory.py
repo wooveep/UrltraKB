@@ -49,6 +49,8 @@ class ConversationMemory:
 
     @classmethod
     def from_executor(cls, store, session_id, executor):
+        from ultrakb.storage.session_responses import ConversationResponses
+
         conversation = store.load(session_id)
         endpoint = executor.bindings.credentials().base_url or "provider-default"
         policy = {
@@ -68,7 +70,9 @@ class ConversationMemory:
             session_id,
             policy_key=policy_key,
             model=executor.bindings.model("conversation_index"),
-            llm=ChatIndexLLM(executor),
+            llm=ChatIndexLLM(
+                executor, responses=ConversationResponses(store, session_id, policy_key)
+            ),
             check_cancelled=executor.policy.check,
         )
 

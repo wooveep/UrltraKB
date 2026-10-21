@@ -129,17 +129,14 @@ class PendingDialog(ManagementPanel):
         )
 
     def read(self, function, *, read_only=True):
-        if self.scope is None:
-            return function()
-        from ultrakb.storage.coordination import storage_stage
+        from ultrakb.application.views import run_scoped_operation
 
-        with storage_stage(
-            self.kb,
-            self.scope.knowledge.identity,
+        return run_scoped_operation(
+            function,
+            scope=self.scope,
             read_only=read_only,
             cancelled=lambda: self._closed,
-        ):
-            return function()
+        )
 
     def load_more_jobs(self):
         if self._next_after is not None:

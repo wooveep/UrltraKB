@@ -124,26 +124,25 @@ def refresh(window):
             or window.view_id != view_id
             or window._open_request_id != request_id
             or window._knowledge_request_id != sequence
-            or window._page_request_id != page_sequence
             or root in window._deleting_kbs
         )
 
-    def loaded(knowledge, error):
-        nonlocal page_sequence
+    def page_obsolete():
+        return obsolete() or window._page_request_id != page_sequence
 
-        if obsolete() or window._error(error):
+    def loaded(knowledge, error):
+        if page_obsolete() or window._error(error):
             return
         apply_knowledge(
             window, knowledge, on_ready=lambda: load_details(window, knowledge.scope, obsolete)
         )
-        page_sequence = window._page_request_id
 
     window.io.submit(
         lambda: read_knowledge_context(root, requested_path, view_id=view_id or "legacy"),
         loaded,
         kb=root,
         snapshot=True,
-        obsolete=obsolete,
+        obsolete=page_obsolete,
     )
     load_sessions(window, root, view_id, obsolete)
 

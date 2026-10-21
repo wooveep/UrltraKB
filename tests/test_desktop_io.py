@@ -216,3 +216,54 @@ def _check_atomic_refresh(window, app, kb):
     finally:
         release.set()
         reader.render_markdown = render
+
+
+@pytest.mark.parametrize("page_change", ["refresh", "navigation"])
+def test_refresh_keeps_session_catalog_independent_of_page_changes(
+    kb_dir, monkeypatch, page_change
+):
+    from types import SimpleNamespace
+
+    from ultrakb.desktop import knowledge_loading
+
+    requests, applied, catalogs = [], [], []
+    window = SimpleNamespace(
+        kb=kb_dir,
+        view_id=None,
+        page=None,
+        _open_request_id=1,
+        _page_request_id=1,
+        _knowledge_request_id=0,
+        _deleting_kbs=set(),
+        _error=lambda error: bool(error),
+        io=SimpleNamespace(
+            submit=lambda operation, callback, **options: requests.append(
+                (operation, callback, options)
+            )
+        ),
+        conversations=SimpleNamespace(catalog_loaded=catalogs.append),
+    )
+
+    def apply_refresh(window, knowledge, **options):
+        applied.append(knowledge)
+        window._page_request_id += 1
+        # A worker can check cancellation before apply_knowledge returns.
+        assert not requests[1][2]["obsolete"]()
+
+    monkeypatch.setattr(knowledge_loading, "apply_knowledge", apply_refresh)
+    knowledge_loading.refresh(window)
+    read_knowledge, knowledge_loaded, knowledge_options = requests[0]
+    read_sessions, sessions_loaded, session_options = requests[1]
+    knowledge = read_knowledge()
+    if page_change == "navigation":
+        window._page_request_id += 1
+    knowledge_loaded(knowledge, None)
+    assert applied == ([knowledge] if page_change == "refresh" else [])
+    assert knowledge_options["obsolete"]()
+    assert not session_options["obsolete"]()
+    sessions_loaded(read_sessions(), None)
+    assert catalogs == [[]]
+    window._open_request_id += 1
+    assert session_options["obsolete"]()
+    sessions_loaded([], None)
+    assert catalogs == [[]]

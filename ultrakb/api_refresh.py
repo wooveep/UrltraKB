@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from ultrakb.api_helpers import _resolve_kb, require_bearer_token
 from ultrakb.api_views import resolve_api_scope
 from ultrakb.application import refresh as application
+from ultrakb.application.views import run_scoped_operation
 from ultrakb.context.workers import run_blocking
 from ultrakb.source_records import Digest, RecordId, RelativePath, ViewId
 
@@ -44,20 +45,15 @@ async def _selected(kb, view_id):
 
 async def _history_read(operation, *args, **kwargs):
     stopped = Event()
-    scope = kwargs.get("scope")
-
-    def read():
-        if scope is not None and scope.knowledge is not None:
-            from ultrakb.storage.coordination import storage_stage
-
-            with storage_stage(
-                scope.kb_dir, scope.knowledge.identity, read_only=True, cancelled=stopped.is_set
-            ):
-                return operation(*args, **kwargs)
-        return operation(*args, **kwargs)
-
     try:
-        return await run_blocking(read, on_cancel=stopped.set)
+        return await run_blocking(
+            lambda: run_scoped_operation(
+                lambda: operation(*args, **kwargs),
+                scope=kwargs.get("scope"),
+                cancelled=stopped.is_set,
+            ),
+            on_cancel=stopped.set,
+        )
     except FileNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:

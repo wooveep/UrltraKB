@@ -222,16 +222,14 @@ class ArtifactsDialog(ManagementPanel):
         if scope is None or scope.knowledge is None:
             self.window.io.submit(operation, callback, kb=self.kb, obsolete=obsolete)
             return
-        from ultrakb.storage.coordination import storage_stage
+        from ultrakb.application.views import run_scoped_operation
 
         def read():
-            with storage_stage(
-                self.kb,
-                scope.knowledge.identity,
-                read_only=True,
+            return run_scoped_operation(
+                operation,
+                scope=scope,
                 cancelled=lambda: obsolete() or self.window.io.stopping(),
-            ):
-                return operation()
+            )
 
         self.window.io.submit(read, callback, obsolete=obsolete)
 
